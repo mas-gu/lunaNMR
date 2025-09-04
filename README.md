@@ -1,4 +1,4 @@
-# 🌙 LunaNMR v0.9
+# LunaNMR v0.9
 
 **Advanced NMR Peak Analysis and Integration Suite**
 
@@ -38,7 +38,7 @@ LunaNMR is a professional-grade software suite for Nuclear Magnetic Resonance (N
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### **Installation**
 
@@ -111,7 +111,7 @@ LunaNMR implements professional-grade Voigt profile fitting, combining Gaussian 
 
 ---
 
-## 🖥️ Graphical Interface
+##  Graphical Interface
 
 ### **Application Selector**
 
@@ -137,7 +137,7 @@ Launch `python3 launch_lunaNMR.py` to access the unified launcher:
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 ### **Complete Documentation**
 
