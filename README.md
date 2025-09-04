@@ -62,34 +62,6 @@ python3 lunaNMR/validation/verify_installation.py
 ```bash
 python3 launch_lunaNMR.py
 ```
-
-### **5-Minute Quick Start**
-
-```python
-from lunaNMR.core import CoreIntegrator, EnhancedVoigtFitter
-from lunaNMR.utils import ConfigManager
-
-# Initialize components
-config = ConfigManager()
-integrator = CoreIntegrator(config=config)
-fitter = EnhancedVoigtFitter(config=config)
-
-# Load your data
-integrator.load_data('peak_list.csv', 'spectrum.ft2')
-
-# Detect and fit peaks
-results = fitter.fit_peaks_enhanced(
-    integrator.ppm_1h,
-    integrator.intensities,
-    fitting_method='voigt'
-)
-
-# View results
-for i, result in enumerate(results):
-    if result['success']:
-        print(f"Peak {i+1}: {result['center']:.3f} ppm (R² = {result['r_squared']:.3f})")
-```
-
 ---
 
 ## 📦 Package Structure
