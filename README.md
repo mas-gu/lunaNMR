@@ -10,7 +10,7 @@ LunaNMR is a professional-grade software suite for Nuclear Magnetic Resonance (N
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 ###  **Advanced Peak Analysis**
 - **Advanced Voigt Fitting**: Multi-peak deconvolution with Gaussian and Lorentzian components
@@ -64,7 +64,7 @@ python3 launch_lunaNMR.py
 ```
 ---
 
-## 📦 Package Structure
+## Package Structure
 
 ```
 lunaNMR_v0o9/
@@ -141,14 +141,14 @@ Launch `python3 launch_lunaNMR.py` to access the unified launcher:
 
 ### **Complete Documentation**
 
-- **📋 [Installation Guide](docs/INSTALLATION.md)** - Comprehensive setup instructions
-- **🚀 [Quick Start](docs/QUICKSTART.md)** - 5-minute tutorial
-- **🏗️ [Architecture](docs/ARCHITECTURE.md)** - Technical architecture overview
-- **📦 [Package Structure](docs/PACKAGE_STRUCTURE.md)** - Detailed package organization
-- **📖 [API Reference](docs/API_REFERENCE.md)** - Complete API documentation
-- **📂 [File Formats](docs/FILE_FORMATS.md)** - Supported data formats
+- **[Installation Guide](docs/INSTALLATION.md)** - Comprehensive setup instructions
+- **[Quick Start](docs/QUICKSTART.md)** - 5-minute tutorial
+- **[Architecture](docs/ARCHITECTURE.md)** - Technical architecture overview
+- **[Package Structure](docs/PACKAGE_STRUCTURE.md)** - Detailed package organization
+- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
+- **[File Formats](docs/FILE_FORMATS.md)** - Supported data formats
 
-## 🧪 Supported File Formats
+## Supported File Formats
 
 ### **Input Formats**
 
@@ -167,7 +167,7 @@ Launch `python3 launch_lunaNMR.py` to access the unified launcher:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions from the NMR community! Please see our contributing guidelines:
 
@@ -229,7 +229,7 @@ python -m pytest tests/
 
 ---
 
-## 🏆 Citation
+## Citation
 
 If you use LunaNMR in your research, please cite:
 
@@ -246,6 +246,6 @@ If you use LunaNMR in your research, please cite:
 
 ---
 
-## 📜 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
