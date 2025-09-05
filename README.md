@@ -1,4 +1,4 @@
-# 🌙 LunaNMR v0.9
+# LunaNMR v0.9
 
 **Advanced NMR Peak Analysis and Integration Suite**
 
@@ -10,7 +10,7 @@ LunaNMR is a professional-grade software suite for Nuclear Magnetic Resonance (N
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 ###  **Advanced Peak Analysis**
 - **Advanced Voigt Fitting**: Multi-peak deconvolution with Gaussian and Lorentzian components
@@ -38,7 +38,7 @@ LunaNMR is a professional-grade software suite for Nuclear Magnetic Resonance (N
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### **Installation**
 
@@ -62,37 +62,9 @@ python3 lunaNMR/validation/verify_installation.py
 ```bash
 python3 launch_lunaNMR.py
 ```
-
-### **5-Minute Quick Start**
-
-```python
-from lunaNMR.core import CoreIntegrator, EnhancedVoigtFitter
-from lunaNMR.utils import ConfigManager
-
-# Initialize components
-config = ConfigManager()
-integrator = CoreIntegrator(config=config)
-fitter = EnhancedVoigtFitter(config=config)
-
-# Load your data
-integrator.load_data('peak_list.csv', 'spectrum.ft2')
-
-# Detect and fit peaks
-results = fitter.fit_peaks_enhanced(
-    integrator.ppm_1h,
-    integrator.intensities,
-    fitting_method='voigt'
-)
-
-# View results
-for i, result in enumerate(results):
-    if result['success']:
-        print(f"Peak {i+1}: {result['center']:.3f} ppm (R² = {result['r_squared']:.3f})")
-```
-
 ---
 
-## 📦 Package Structure
+## Package Structure
 
 ```
 lunaNMR_v0o9/
@@ -139,7 +111,7 @@ LunaNMR implements professional-grade Voigt profile fitting, combining Gaussian 
 
 ---
 
-## 🖥️ Graphical Interface
+##  Graphical Interface
 
 ### **Application Selector**
 
@@ -165,18 +137,18 @@ Launch `python3 launch_lunaNMR.py` to access the unified launcher:
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 ### **Complete Documentation**
 
-- **📋 [Installation Guide](docs/INSTALLATION.md)** - Comprehensive setup instructions
-- **🚀 [Quick Start](docs/QUICKSTART.md)** - 5-minute tutorial
-- **🏗️ [Architecture](docs/ARCHITECTURE.md)** - Technical architecture overview
-- **📦 [Package Structure](docs/PACKAGE_STRUCTURE.md)** - Detailed package organization
-- **📖 [API Reference](docs/API_REFERENCE.md)** - Complete API documentation
-- **📂 [File Formats](docs/FILE_FORMATS.md)** - Supported data formats
+- **[Installation Guide](docs/INSTALLATION.md)** - Comprehensive setup instructions
+- **[Quick Start](docs/QUICKSTART.md)** - 5-minute tutorial
+- **[Architecture](docs/ARCHITECTURE.md)** - Technical architecture overview
+- **[Package Structure](docs/PACKAGE_STRUCTURE.md)** - Detailed package organization
+- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
+- **[File Formats](docs/FILE_FORMATS.md)** - Supported data formats
 
-## 🧪 Supported File Formats
+## Supported File Formats
 
 ### **Input Formats**
 
@@ -195,7 +167,7 @@ Launch `python3 launch_lunaNMR.py` to access the unified launcher:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions from the NMR community! Please see our contributing guidelines:
 
@@ -257,7 +229,7 @@ python -m pytest tests/
 
 ---
 
-## 🏆 Citation
+## Citation
 
 If you use LunaNMR in your research, please cite:
 
@@ -274,6 +246,6 @@ If you use LunaNMR in your research, please cite:
 
 ---
 
-## 📜 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
