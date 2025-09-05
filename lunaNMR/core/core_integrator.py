@@ -137,6 +137,7 @@ class VoigtIntegrator(BaseIntegrator):
         # Initialize enhanced fitter if available
         if ENHANCED_FITTING_AVAILABLE:
             self.enhanced_fitter = EnhancedVoigtFitter()
+            self.enhanced_fitter.parent = self  # Set parent reference for parallel processing
             print("✅ Enhanced Voigt fitter initialized")
         else:
             self.enhanced_fitter = None
@@ -993,14 +994,51 @@ class VoigtIntegrator(BaseIntegrator):
         """
         print(f"Fitting Voigt profiles for peak {assignment} at ({peak_x_ppm:.3f}, {peak_y_ppm:.1f}) ppm")
 
-        # Extract peak regions
-        regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
-        if regions is None:
-            return None
-
         # === DYNAMIC OPTIMIZATION OR STANDARD FITTING ===
         if use_dynamic_optimization and self.enhanced_fitter is not None:
             print(f"   🔄 Using dynamic optimization for {assignment}")
+            
+            # ENHANCEMENT: Pass GUI parameters to enhanced fitter for consistent display
+            if hasattr(self.enhanced_fitter, 'set_gui_parameters'):
+                self.enhanced_fitter.set_gui_parameters(self.fitting_parameters)
+                print(f"   📊 GUI parameters synchronized to enhanced fitter")
+
+            # NEW: Dynamic window optimization
+            window_optimization = None
+            if hasattr(self, 'optimize_window_dynamically'):
+                window_optimization = self.optimize_window_dynamically(
+                    peak_x_ppm, peak_y_ppm, assignment,
+                    max_iterations=3,  # Limit iterations for performance
+                    r2_improvement_threshold=0.03  # Accept modest improvements
+                )
+                
+                if window_optimization.get('success') and window_optimization.get('improvement', 0) > 0.03:
+                    # Use optimized windows for this peak
+                    optimized_x_window = window_optimization['optimized_x_window'] 
+                    optimized_y_window = window_optimization['optimized_y_window']
+                    
+                    print(f"   🎯 Window optimization successful:")
+                    print(f"      GUI → Optimized: X={self.fitting_parameters['fitting_window_x']:.3f}→{optimized_x_window:.3f} ppm")
+                    print(f"      GUI → Optimized: Y={self.fitting_parameters['fitting_window_y']:.1f}→{optimized_y_window:.1f} ppm") 
+                    print(f"      R² improvement: {window_optimization['improvement']:.3f}")
+                    
+                    # Extract regions with optimized windows
+                    regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm,
+                                                     optimized_x_window, optimized_y_window)
+                else:
+                    print(f"   📊 Using GUI windows (optimization showed no significant improvement)")
+                    regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
+            else:
+                regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
+                
+            # ENSURE REGIONS VARIABLE EXISTS for existing code flow:
+            if 'regions' not in locals() or regions is None:
+                regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
+                
+            # Final check that regions extraction succeeded
+            if regions is None:
+                print(f"   ❌ Failed to extract peak regions for {assignment}")
+                return None
 
             try:
                 # Prepare context for global parameter estimation
@@ -1059,6 +1097,11 @@ class VoigtIntegrator(BaseIntegrator):
                 print(f"   📈 Using standard fitting for {assignment}")
             else:
                 print(f"   📈 Using standard fitting for {assignment} (no enhanced fitter available)")
+
+            # Extract peak regions for standard fitting
+            regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
+            if regions is None:
+                return None
 
             # Enhanced initial guess calculation with improved parameter estimation
             peak_intensity = self.nmr_data[regions['peak_indices'][1], regions['peak_indices'][0]]
@@ -1145,7 +1188,11 @@ class VoigtIntegrator(BaseIntegrator):
                 # Include quality metrics for local/global assessment
                 'quality_metrics': x_fit.get('quality_metrics', {}),
                 'r_squared_local': x_fit.get('quality_metrics', {}).get('r_squared_local', x_fit['r_squared']),
-                'r_squared_global': x_fit.get('quality_metrics', {}).get('r_squared_global', x_fit['r_squared'])
+                'r_squared_global': x_fit.get('quality_metrics', {}).get('r_squared_global', x_fit['r_squared']),
+                # Add window size metadata for display
+                'window_size': abs(regions['x_ppm_scale'][-1] - regions['x_ppm_scale'][0]) if len(regions['x_ppm_scale']) > 1 else 'unknown',
+                'gui_based': True,
+                'gui_window_param': self.fitting_parameters.get('fitting_window_x', 'unknown')
             },
             'y_fit': {
                 'ppm_scale': regions['y_ppm_scale'],
@@ -1160,13 +1207,21 @@ class VoigtIntegrator(BaseIntegrator):
                 # Include quality metrics for local/global assessment
                 'quality_metrics': y_fit.get('quality_metrics', {}),
                 'r_squared_local': y_fit.get('quality_metrics', {}).get('r_squared_local', y_fit['r_squared']),
-                'r_squared_global': y_fit.get('quality_metrics', {}).get('r_squared_global', y_fit['r_squared'])
+                'r_squared_global': y_fit.get('quality_metrics', {}).get('r_squared_global', y_fit['r_squared']),
+                # Add window size metadata for display
+                'window_size': abs(regions['y_ppm_scale'][-1] - regions['y_ppm_scale'][0]) if len(regions['y_ppm_scale']) > 1 else 'unknown',
+                'gui_based': True,
+                'gui_window_param': self.fitting_parameters.get('fitting_window_y', 'unknown')
             },
             'fitting_quality': quality,
             'avg_r_squared': avg_r_squared,
             'avg_r_squared_local': (x_r_squared + y_r_squared) / 2,
             'avg_r_squared_global': (x_fit.get('quality_metrics', {}).get('r_squared_global', x_fit['r_squared']) +
                                    y_fit.get('quality_metrics', {}).get('r_squared_global', y_fit['r_squared'])) / 2,
+            'gui_window_x': self.fitting_parameters.get('fitting_window_x', 'unknown'),
+            'gui_window_y': self.fitting_parameters.get('fitting_window_y', 'unknown'),
+            'window_source': window_optimization.get('optimization_type', 'gui_parameters') if window_optimization else 'gui_parameters',
+            'window_optimization': window_optimization,
             'timestamp': pd.Timestamp.now()
         }
 
@@ -1175,6 +1230,345 @@ class VoigtIntegrator(BaseIntegrator):
 
         print(f"Voigt fitting completed: {quality} (R² = {avg_r_squared:.3f})")
         return result
+
+    def optimize_window_dynamically(self, peak_x_ppm, peak_y_ppm, assignment, 
+                                   initial_x_window=None, initial_y_window=None,
+                                   max_iterations=5, r2_improvement_threshold=0.05):
+        """
+        Intelligent window size optimization starting from GUI parameters.
+        
+        Uses iterative refinement to find optimal window size balancing:
+        - Statistical precision (more data points)
+        - Peak isolation (avoiding interference)  
+        - Fitting quality (maximizing R²)
+        
+        Parameters:
+        -----------
+        peak_x_ppm, peak_y_ppm : float
+            Peak position for optimization
+        assignment : str
+            Peak identifier for logging
+        initial_x_window, initial_y_window : float, optional
+            Starting window sizes (defaults to GUI parameters)
+        max_iterations : int
+            Maximum optimization rounds
+        r2_improvement_threshold : float
+            Minimum R² improvement required to accept new window size
+            
+        Returns:
+        --------
+        dict : Optimized window parameters and quality metrics
+        """
+        import numpy as np
+        
+        # Phase 1: Initialize with GUI parameters
+        base_x_window = initial_x_window or self.fitting_parameters['fitting_window_x']
+        base_y_window = initial_y_window or self.fitting_parameters['fitting_window_y']
+        
+        print(f"🔄 Dynamic window optimization for {assignment}")
+        print(f"   Starting windows: X={base_x_window:.3f} ppm, Y={base_y_window:.1f} ppm")
+        
+        # Phase 2: Baseline quality assessment
+        baseline_regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm, 
+                                                   base_x_window, base_y_window)
+        if not baseline_regions:
+            return {'success': False, 'reason': 'baseline_extraction_failed'}
+        
+        # Perform baseline fit to establish reference quality
+        baseline_x_fit = self.adaptive_fit_1d(baseline_regions['x_ppm_scale'], 
+                                             baseline_regions['x_cross_section'],
+                                             peak_x_ppm, dimension='x')
+        baseline_y_fit = self.adaptive_fit_1d(baseline_regions['y_ppm_scale'], 
+                                             baseline_regions['y_cross_section'],
+                                             peak_y_ppm, dimension='y')
+        
+        if not (baseline_x_fit.get('success') and baseline_y_fit.get('success')):
+            return {'success': False, 'reason': 'baseline_fitting_failed'}
+            
+        # Extract baseline quality metrics
+        baseline_x_r2 = baseline_x_fit.get('quality_metrics', {}).get('r_squared_local', 
+                                                                     baseline_x_fit.get('r_squared', 0))
+        baseline_y_r2 = baseline_y_fit.get('quality_metrics', {}).get('r_squared_local', 
+                                                                     baseline_y_fit.get('r_squared', 0))
+        baseline_avg_r2 = (baseline_x_r2 + baseline_y_r2) / 2
+        
+        print(f"   Baseline quality: R²={baseline_avg_r2:.3f} (X={baseline_x_r2:.3f}, Y={baseline_y_r2:.3f})")
+        
+        # Phase 3: Analyze spectral crowding
+        interference_analysis = self._analyze_peak_interference(peak_x_ppm, peak_y_ppm, 
+                                                              base_x_window, base_y_window)
+        
+        # Phase 4: Determine optimization strategy
+        if interference_analysis['isolation_level'] == 'isolated':
+            # Strategy: Expand windows for better statistics
+            optimization_result = self._optimize_isolated_peak_windows(
+                peak_x_ppm, peak_y_ppm, assignment,
+                base_x_window, base_y_window,
+                baseline_avg_r2, max_iterations, r2_improvement_threshold
+            )
+        else:
+            # Strategy: Contract windows to avoid interference
+            optimization_result = self._optimize_crowded_peak_windows(
+                peak_x_ppm, peak_y_ppm, assignment,
+                base_x_window, base_y_window,
+                baseline_avg_r2, max_iterations, r2_improvement_threshold,
+                interference_analysis
+            )
+        
+        return optimization_result
+
+    def _analyze_peak_interference(self, peak_x_ppm, peak_y_ppm, x_window, y_window):
+        """
+        Analyze spectral crowding around target peak.
+        
+        Returns:
+        --------
+        dict : Interference analysis with isolation classification
+        """
+        import numpy as np
+        
+        # Extract larger region for neighbor analysis (3x current window)
+        analysis_x_window = x_window * 3
+        analysis_y_window = y_window * 3
+        
+        analysis_regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm,
+                                                   analysis_x_window, analysis_y_window)
+        
+        if not analysis_regions:
+            return {'isolation_level': 'unknown', 'nearby_peaks': []}
+        
+        # CORRECTED: detect_peaks_1d returns a LIST, not a dict
+        try:
+            x_peaks_list = self.detect_peaks_1d(analysis_regions['x_ppm_scale'], 
+                                              analysis_regions['x_cross_section'],
+                                              target_position=peak_x_ppm)
+            y_peaks_list = self.detect_peaks_1d(analysis_regions['y_ppm_scale'], 
+                                              analysis_regions['y_cross_section'],
+                                              target_position=peak_y_ppm)
+            
+            # Extract positions from peak detection results
+            x_peak_positions = []
+            y_peak_positions = []
+            
+            # Handle list of peak dictionaries (actual return format)
+            if isinstance(x_peaks_list, list):
+                x_peak_positions = [peak.get('position', peak.get('center', 0)) for peak in x_peaks_list 
+                                   if isinstance(peak, dict)]
+            
+            if isinstance(y_peaks_list, list):
+                y_peak_positions = [peak.get('position', peak.get('center', 0)) for peak in y_peaks_list 
+                                   if isinstance(peak, dict)]
+            
+        except Exception as e:
+            print(f"   Warning: Peak detection failed during interference analysis: {e}")
+            x_peak_positions = []
+            y_peak_positions = []
+        
+        # Count peaks within current window boundaries
+        x_window_half = x_window / 2
+        y_window_half = y_window / 2
+        
+        x_interferers = [pos for pos in x_peak_positions 
+                         if abs(pos - peak_x_ppm) < x_window_half and abs(pos - peak_x_ppm) > 0.005]
+        y_interferers = [pos for pos in y_peak_positions 
+                         if abs(pos - peak_y_ppm) < y_window_half and abs(pos - peak_y_ppm) > 0.1]
+        
+        # Classify isolation level
+        total_interferers = len(x_interferers) + len(y_interferers)
+        
+        if total_interferers == 0:
+            isolation_level = 'isolated'
+        elif total_interferers <= 2:
+            isolation_level = 'moderate_interference'  
+        else:
+            isolation_level = 'heavy_interference'
+        
+        return {
+            'isolation_level': isolation_level,
+            'x_interferers': x_interferers,
+            'y_interferers': y_interferers,
+            'total_interferers': total_interferers,
+            'x_peaks_detected': len(x_peak_positions),
+            'y_peaks_detected': len(y_peak_positions)
+        }
+
+    def _optimize_isolated_peak_windows(self, peak_x_ppm, peak_y_ppm, assignment,
+                                       base_x_window, base_y_window, baseline_r2,
+                                       max_iterations, r2_threshold):
+        """
+        Optimize windows for isolated peaks by progressive expansion.
+        """
+        import numpy as np
+        
+        print(f"   Strategy: Expanding windows for isolated peak {assignment}")
+        
+        best_x_window = base_x_window
+        best_y_window = base_y_window
+        best_r2 = baseline_r2
+        iteration_data = []
+        
+        # Test progressive window expansions
+        expansion_factors = [1.0, 1.5, 2.0, 2.5, 3.0]  # Start with GUI size
+        
+        for iteration, factor in enumerate(expansion_factors):
+            if iteration >= max_iterations:
+                break
+                
+            test_x_window = base_x_window * factor
+            test_y_window = base_y_window * factor
+            
+            # Test this window size
+            test_regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm,
+                                                   test_x_window, test_y_window)
+            
+            if not test_regions:
+                continue
+                
+            # Fit with test windows
+            x_fit = self.adaptive_fit_1d(test_regions['x_ppm_scale'], 
+                                       test_regions['x_cross_section'],
+                                       peak_x_ppm, dimension='x')
+            y_fit = self.adaptive_fit_1d(test_regions['y_ppm_scale'], 
+                                       test_regions['y_cross_section'],
+                                       peak_y_ppm, dimension='y')
+            
+            if not (x_fit.get('success') and y_fit.get('success')):
+                continue
+                
+            # Calculate quality metrics
+            x_r2 = x_fit.get('quality_metrics', {}).get('r_squared_local', x_fit.get('r_squared', 0))
+            y_r2 = y_fit.get('quality_metrics', {}).get('r_squared_local', y_fit.get('r_squared', 0))
+            avg_r2 = (x_r2 + y_r2) / 2
+            
+            iteration_data.append({
+                'factor': factor,
+                'x_window': test_x_window,
+                'y_window': test_y_window,
+                'r2': avg_r2,
+                'x_points': len(test_regions['x_cross_section']),
+                'y_points': len(test_regions['y_cross_section'])
+            })
+            
+            print(f"   Test {iteration+1}: Factor={factor:.1f}x, R²={avg_r2:.3f}, "
+                  f"Points=({len(test_regions['x_cross_section'])}, {len(test_regions['y_cross_section'])})")
+            
+            # Check for improvement
+            if avg_r2 > best_r2 + r2_threshold:
+                best_x_window = test_x_window
+                best_y_window = test_y_window
+                best_r2 = avg_r2
+                print(f"   ✅ Improvement: R²={avg_r2:.3f} (Δ={avg_r2-baseline_r2:.3f})")
+            else:
+                # No significant improvement, stop expansion
+                print(f"   ⏹ No improvement: R²={avg_r2:.3f}, stopping expansion")
+                break
+        
+        optimization_improvement = best_r2 - baseline_r2
+        
+        return {
+            'success': True,
+            'optimization_type': 'isolated_expansion',
+            'optimized_x_window': best_x_window,
+            'optimized_y_window': best_y_window,
+            'optimized_r2': best_r2,
+            'baseline_r2': baseline_r2,
+            'improvement': optimization_improvement,
+            'iterations_tested': len(iteration_data),
+            'iteration_data': iteration_data,
+            'recommendation': 'expanded' if optimization_improvement > r2_threshold else 'keep_gui'
+        }
+
+    def _optimize_crowded_peak_windows(self, peak_x_ppm, peak_y_ppm, assignment,
+                                      base_x_window, base_y_window, baseline_r2,
+                                      max_iterations, r2_threshold, interference_analysis):
+        """
+        Optimize windows for crowded peaks by progressive contraction.
+        """
+        import numpy as np
+        
+        interferer_count = interference_analysis['total_interferers']
+        print(f"   Strategy: Contracting windows for crowded peak {assignment} ({interferer_count} interferers)")
+        
+        best_x_window = base_x_window
+        best_y_window = base_y_window
+        best_r2 = baseline_r2
+        iteration_data = []
+        
+        # Test progressive window contractions  
+        contraction_factors = [1.0, 0.8, 0.6, 0.5, 0.4]  # Start with GUI size
+        
+        for iteration, factor in enumerate(contraction_factors):
+            if iteration >= max_iterations:
+                break
+                
+            test_x_window = base_x_window * factor
+            test_y_window = base_y_window * factor
+            
+            # Don't contract below minimum reasonable size
+            if test_x_window < 0.015 or test_y_window < 0.5:  # Minimum thresholds
+                print(f"   ⏹ Minimum window size reached")
+                break
+                
+            test_regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm,
+                                                   test_x_window, test_y_window)
+            
+            if not test_regions:
+                continue
+                
+            # Check if we still have enough data points for reliable fitting
+            if len(test_regions['x_cross_section']) < 10 or len(test_regions['y_cross_section']) < 10:
+                print(f"   ⏹ Insufficient data points for reliable fitting")
+                continue
+                
+            # Fit with contracted windows
+            x_fit = self.adaptive_fit_1d(test_regions['x_ppm_scale'], 
+                                       test_regions['x_cross_section'],
+                                       peak_x_ppm, dimension='x')
+            y_fit = self.adaptive_fit_1d(test_regions['y_ppm_scale'], 
+                                       test_regions['y_cross_section'],
+                                       peak_y_ppm, dimension='y')
+            
+            if not (x_fit.get('success') and y_fit.get('success')):
+                continue
+                
+            x_r2 = x_fit.get('quality_metrics', {}).get('r_squared_local', x_fit.get('r_squared', 0))
+            y_r2 = y_fit.get('quality_metrics', {}).get('r_squared_local', y_fit.get('r_squared', 0))
+            avg_r2 = (x_r2 + y_r2) / 2
+            
+            iteration_data.append({
+                'factor': factor,
+                'x_window': test_x_window,
+                'y_window': test_y_window,
+                'r2': avg_r2,
+                'x_points': len(test_regions['x_cross_section']),
+                'y_points': len(test_regions['y_cross_section'])
+            })
+            
+            print(f"   Test {iteration+1}: Factor={factor:.1f}x, R²={avg_r2:.3f}, "
+                  f"Points=({len(test_regions['x_cross_section'])}, {len(test_regions['y_cross_section'])})")
+            
+            # Check for improvement (interference removal should increase R²)
+            if avg_r2 > best_r2 + r2_threshold:
+                best_x_window = test_x_window
+                best_y_window = test_y_window
+                best_r2 = avg_r2
+                print(f"   ✅ Improvement by interference removal: R²={avg_r2:.3f} (Δ={avg_r2-baseline_r2:.3f})")
+            
+        optimization_improvement = best_r2 - baseline_r2
+        
+        return {
+            'success': True,
+            'optimization_type': 'crowded_contraction',
+            'optimized_x_window': best_x_window,
+            'optimized_y_window': best_y_window,
+            'optimized_r2': best_r2,
+            'baseline_r2': baseline_r2,
+            'improvement': optimization_improvement,
+            'interference_removed': interference_analysis,
+            'iterations_tested': len(iteration_data),
+            'iteration_data': iteration_data,
+            'recommendation': 'contracted' if optimization_improvement > r2_threshold else 'keep_gui'
+        }
 
     def extract_peak_region(self, peak_x_ppm, peak_y_ppm, fitting_window_x=None, fitting_window_y=None):
         """

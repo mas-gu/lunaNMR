@@ -29,10 +29,10 @@ class NMRParameterManager:
             'noise_threshold': {'default': 0.1, 'min': 0.01, 'max': 10.0, 'type': float},
 
             # Fitting Parameters
-            'fitting_window_x': {'default': 0.05, 'min': 0.01, 'max': 0.5, 'type': float},
+            'fitting_window_x': {'default': 0.15, 'min': 0.01, 'max': 0.5, 'type': float},  # Increased from 0.05 to ensure adequate data points
             'fitting_window_y': {'default': 2, 'min': 0.01, 'max': 10.0, 'type': float},
-            'min_r_squared': {'default': 0.85, 'min': 0.0, 'max': 1.0, 'type': float},
-            'max_iterations': {'default': 100, 'min': 10, 'max': 1000, 'type': int},
+            'min_r_squared': {'default': 0.7, 'min': 0.0, 'max': 1.0, 'type': float},  # Lowered from 0.85 to be less restrictive
+            'max_iterations': {'default': 1000, 'min': 10, 'max': 1000, 'type': int},  # Increased from 100 to ensure convergence
 
             # Peak Detection Parameters
             'height_threshold': {'default': 0.1, 'min': 0.01, 'max': 1.0, 'type': float},
@@ -40,7 +40,7 @@ class NMRParameterManager:
             'prominence_threshold': {'default': 0.05, 'min': 0.01, 'max': 0.5, 'type': float},
             'smoothing_sigma': {'default': 1.0, 'min': 0.1, 'max': 5.0, 'type': float},
             'max_peaks_fit': {'default': 50, 'min': 1, 'max': 200, 'type': int},
-            'max_optimization_iterations': {'default': 10, 'min': 1, 'max': 50, 'type': int},
+            'max_optimization_iterations': {'default': 50, 'min': 1, 'max': 100, 'type': int},  # Increased from 10 to 50, max raised to 100
 
             # Processing Options (boolean parameters)
             'use_parallel_processing': {'default': True, 'type': bool},

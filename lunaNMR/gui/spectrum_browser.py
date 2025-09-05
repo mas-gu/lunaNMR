@@ -2089,6 +2089,17 @@ Line Width: {peak_data.get('Line_Width', 'N/A')}
             # Allow Voigt window to be independent for better interaction
             # voigt_window.transient(self.window)
 
+            # ENHANCEMENT: Ensure enhanced fitter has current GUI parameters for consistent display
+            if (hasattr(self.main_gui, 'integrator') and 
+                hasattr(self.main_gui.integrator, 'enhanced_fitter') and
+                hasattr(self.main_gui.integrator.enhanced_fitter, 'set_gui_parameters')):
+                
+                if hasattr(self.main_gui.integrator, 'fitting_parameters'):
+                    self.main_gui.integrator.enhanced_fitter.set_gui_parameters(
+                        self.main_gui.integrator.fitting_parameters
+                    )
+                    print(f"   📊 Spectrum browser: GUI parameters synchronized for Voigt analysis display")
+
             # Create notebook with tabs (same as main window)
             notebook = ttk.Notebook(voigt_window)
             notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)

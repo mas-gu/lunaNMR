@@ -197,70 +197,83 @@ class SingleSpectrumProcessor:
         return fitted_results
 
     def _process_with_parallel_fitting(self, peak_list: pd.DataFrame) -> List[Dict]:
-        """Process peaks using parallel processing"""
-
+        """Enhanced parallel processing using complete Voigt fitting pipeline"""
+        
+        print(f"🚀 Starting enhanced parallel processing of {len(peak_list)} peaks")
+        
+        # Check if enhanced parallel fitting is available
+        if (hasattr(self.integrator, 'enhanced_fitter') and 
+            hasattr(self.integrator.enhanced_fitter, 'enhanced_peak_fitting_parallel')):
+            
+            print("✨ Using enhanced parallel Voigt fitting")
+            
+            # Define progress callback for parallel processing  
+            def parallel_progress_callback(progress, status, current_item):
+                if self.progress_callback and self.processing_active:
+                    self.progress_callback(progress, status, current_item)
+            
+            try:
+                # Use new complete parallel implementation
+                fitted_results = self.integrator.enhanced_fitter.enhanced_peak_fitting_parallel(
+                    peak_list, 
+                    use_parallel=True,
+                    progress_callback=parallel_progress_callback
+                )
+                
+                # Ensure results is a list
+                if not isinstance(fitted_results, list):
+                    fitted_results = [fitted_results] if fitted_results else []
+                
+                # Add metadata to results
+                for i, result in enumerate(fitted_results):
+                    if result:
+                        result['processing_mode'] = 'enhanced_parallel'
+                        if 'peak_number' not in result:
+                            result['peak_number'] = i + 1
+                
+                print(f"✅ Enhanced parallel processing completed: {len(fitted_results)} results")
+                return fitted_results
+                
+            except Exception as e:
+                print(f"⚠️ Enhanced parallel processing failed: {e}")
+                print("🔄 Falling back to original parallel implementation")
+                # Fall through to existing parallel implementation
+        
+        # Fallback to existing ParallelPeakFitter (unchanged)
         try:
             from lunaNMR.processors.parallel_fitting import ParallelPeakFitter
-
-            print(f"🚀 Starting parallel fitting of {len(peak_list)} peaks")
-
+            
+            print(f"🔄 Using original parallel fitting for {len(peak_list)} peaks")
+            
             # Create parallel fitter
             parallel_fitter = ParallelPeakFitter(self.integrator)
-
-            # Define progress callback for parallel processing
-            def parallel_progress_callback(completed, total, current_assignment):
+            
+            # Define progress callback for original parallel processing
+            def original_parallel_progress_callback(completed, total, current_assignment):
                 if self.progress_callback and self.processing_active:
                     progress = (completed / total) * 100
                     self.progress_callback(
                         progress,
-                        f"Parallel fitting: {completed}/{total} completed",
+                        f"Original parallel fitting: {completed}/{total} completed",
                         f"Processing peaks in parallel"
                     )
-
-            # Run parallel fitting
-            fitted_results = parallel_fitter.fit_peaks_parallel(peak_list, parallel_progress_callback)
-
+            
+            # Run original parallel fitting
+            fitted_results = parallel_fitter.fit_peaks_parallel(peak_list, original_parallel_progress_callback)
+            
             # Add metadata to results
             for i, result in enumerate(fitted_results):
                 if result:
-                    result['processing_mode'] = 'parallel'
+                    result['processing_mode'] = 'original_parallel'
                     if 'peak_number' not in result:
                         result['peak_number'] = i + 1
-
-            success_rate = (len(fitted_results) / len(peak_list) * 100) if len(peak_list) > 0 else 0
-            print(f"✅ Parallel fitting complete: {len(fitted_results)}/{len(peak_list)} successful ({success_rate:.1f}%)")
-
+            
             return fitted_results
-
-#        except ImportError as e:
-#            print(f"⚠️ Parallel processing not available: {e}")
-#            print("🔄 Falling back to sequential processing")
-#            return self._process_with_sequential_fitting(peak_list)
-
-#        except Exception as e:
-#            print(f"❌ Parallel processing failed: {e}")
-#            print("🔄 Falling back to sequential processing")
-#            return self._process_with_sequential_fitting(peak_list)
-
-## gm added
-        except ImportError as e:
-            print(f"⚠️ Parallel processing not available: {e}")
-            print("🔄 Falling back to sequential processing")
-            return self._process_with_sequential_fitting(peak_list)
-        except (TypeError, AttributeError) as e:
-            # Handle mock objects and other non-picklable objects in tests
-            if "pickle" in str(e) or "Mock" in str(e):
-                  print(f"🧪 Test environment detected (mock objects), using sequential  processing")
-            else:
-                  print(f"❌ Parallel processing failed: {e}")
-            print("🔄 Falling back to sequential processing")
-            return self._process_with_sequential_fitting(peak_list)
+            
         except Exception as e:
-            print(f"❌ Parallel processing failed: {e}")
+            print(f"❌ Original parallel fitting also failed: {e}")
             print("🔄 Falling back to sequential processing")
             return self._process_with_sequential_fitting(peak_list)
-
-## gm added
 
     def _process_with_global_optimization(self, peak_list: pd.DataFrame) -> List[Dict]:
         """Process peaks using global optimization"""

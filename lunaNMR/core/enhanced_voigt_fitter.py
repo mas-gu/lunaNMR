@@ -78,6 +78,105 @@ class EnhancedVoigtFitter:
         if self.level2_params['robust_estimation_enabled']:
             self.parameter_estimator = RobustParameterEstimator(self)
 
+    def set_gui_parameters(self, gui_fitting_params):
+        """
+        Store GUI fitting parameters for consistent window sizing in analysis displays.
+        
+        This method allows the enhanced fitter to access GUI-defined window parameters
+        for analysis and visualization, ensuring consistency between fitting and display.
+        
+        Parameters:
+        -----------
+        gui_fitting_params : dict
+            Dictionary containing GUI fitting parameters:
+            - fitting_window_x: float, GUI X-window size in ppm (1H dimension)
+            - fitting_window_y: float, GUI Y-window size in ppm (15N/13C dimension)
+            - min_r_squared: float, quality threshold
+            - max_iterations: int, fitting iterations
+        
+        Notes:
+        ------
+        - This method is called automatically by core_integrator.py
+        - Parameters are stored as instance variables for use in analysis methods
+        - Backward compatibility: If not called, falls back to hardcoded defaults
+        """
+        self.gui_fitting_params = gui_fitting_params.copy() if gui_fitting_params else {}
+        self.has_gui_params = bool(gui_fitting_params)
+        
+        # Extract frequently used parameters
+        self.gui_window_x = self.gui_fitting_params.get('fitting_window_x', 0.2)  # default fallback
+        self.gui_window_y = self.gui_fitting_params.get('fitting_window_y', 2.0)  # default fallback
+        
+        # CRITICAL FIX: Update actual fitting parameters used by curve_fit
+        if 'max_iterations' in self.gui_fitting_params:
+            self.fitting_parameters['max_iterations'] = self.gui_fitting_params['max_iterations']
+            print(f"   🎛️ Updated curve_fit max_iterations to {self.fitting_parameters['max_iterations']}")
+        
+        if 'min_r_squared' in self.gui_fitting_params:
+            self.fitting_parameters['min_r_squared'] = self.gui_fitting_params['min_r_squared']
+        
+        if self.has_gui_params:
+            print(f"   📊 Enhanced fitter configured with GUI parameters: X={self.gui_window_x:.3f} ppm, Y={self.gui_window_y:.1f} ppm")
+
+    def _calculate_gui_based_multiplier(self, nucleus_type, ppm_range, data_length, fitted_width=None):
+        """
+        Calculate window multiplier based on GUI parameters instead of hardcoded values.
+        
+        This converts GUI ppm window settings into equivalent multipliers for the
+        existing window calculation logic, ensuring display consistency.
+        
+        Parameters:
+        -----------
+        nucleus_type : str
+            '1H', '15N', or '13C' - determines which GUI parameter to use
+        ppm_range : float
+            Total ppm range of the data
+        data_length : int
+            Number of data points in the spectrum dimension
+        fitted_width : float, optional
+            Fitted peak linewidth for reference
+        
+        Returns:
+        --------
+        float : Calculated multiplier equivalent to GUI window size
+        
+        Notes:
+        ------
+        - For 1H: uses gui_window_x
+        - For 15N/13C: uses gui_window_y
+        - Falls back to traditional hardcoded multipliers if no GUI params
+        """
+        if not hasattr(self, 'has_gui_params') or not self.has_gui_params:
+            # Backward compatibility: use original hardcoded values
+            return 6.0
+        
+        # Select appropriate GUI window based on nucleus type
+        if nucleus_type == '1H':
+            gui_window_ppm = self.gui_window_x
+            typical_linewidth = 0.01  # typical 1H linewidth in ppm
+        else:  # 15N or 13C
+            gui_window_ppm = self.gui_window_y
+            typical_linewidth = 0.5   # typical 15N linewidth in ppm
+        
+        # Method 1: Direct ppm-based calculation (RECOMMENDED)
+        # Calculate how many data points the GUI window represents
+        points_per_ppm = data_length / ppm_range if ppm_range > 0 else 1
+        gui_window_points = gui_window_ppm * points_per_ppm
+        
+        # Convert to multiplier relative to fitted width
+        if fitted_width and fitted_width > 0:
+            fitted_width_points = fitted_width * points_per_ppm
+            multiplier = gui_window_points / fitted_width_points
+        else:
+            # Fallback: use typical linewidth
+            typical_width_points = typical_linewidth * points_per_ppm
+            multiplier = gui_window_points / typical_width_points if typical_width_points > 0 else 6.0
+        
+        # Safety bounds: ensure reasonable multiplier values
+        multiplier = max(1.0, min(multiplier, 20.0))  # between 1× and 20× linewidth
+        
+        return multiplier
+
     @staticmethod
     def voigt_profile_1d(x, amplitude, center, sigma, gamma, baseline=0):
         """
@@ -1816,30 +1915,44 @@ class EnhancedVoigtFitter:
             }
 
     def extract_local_peak_region(self, x_data, y_data, peak_center, fitted_width=None,
-                                  nucleus_type=None, window_multiplier=6.0): #added GM was 3.0
+                                  nucleus_type=None, window_multiplier=None):
         """
         Extract local region around peak for quality assessment
-
+        
+        ENHANCED: Now supports GUI-based window sizing for consistent display
+        
         This limits quality evaluation to the peak itself within reasonable range
         of its linewidth, excluding distant peaks that shouldn't affect local fit quality.
-
+        
         Parameters:
         - x_data: full x-axis data
-        - y_data: full intensity data
+        - y_data: full intensity data  
         - peak_center: fitted peak center
         - fitted_width: fitted peak width (sigma + gamma), or None for estimation
         - nucleus_type: nucleus type for typical width fallback
-        - window_multiplier: how many widths to include on each side
-
+        - window_multiplier: how many widths to include on each side (None = use GUI params)
+        
         Returns:
         - Dictionary with local region data and indices
+        
+        BACKWARD COMPATIBILITY: 
+        - If window_multiplier is provided: uses that value (original behavior)
+        - If window_multiplier is None: calculates from GUI parameters (new behavior)
         """
         try:
             if fitted_width is None:
                 # Estimate width from data if not provided
                 fitted_width = self.adaptive_width_estimation(x_data, y_data, peak_center, nucleus_type)
+            
+            # ENHANCED: Calculate window multiplier from GUI parameters if not provided
+            if window_multiplier is None:
+                ppm_range = abs(x_data[-1] - x_data[0]) if len(x_data) > 1 else 1.0
+                window_multiplier = self._calculate_gui_based_multiplier(
+                    nucleus_type, ppm_range, len(x_data), fitted_width
+                )
+                print(f"   🎯 Using GUI-based window multiplier: {window_multiplier:.2f}× (was hardcoded 6.0×)")
 
-            # Define local window around peak (typically 3-5 linewidths on each side)
+            # Define local window around peak (now using GUI-based multiplier)
             half_window = fitted_width * window_multiplier
 
             # Find indices for local region
@@ -1859,14 +1972,21 @@ class EnhancedVoigtFitter:
             # Extract local data
             x_local = x_data[local_indices]
             y_local = y_data[local_indices]
+            
+            # Validation warning
+            if len(local_indices) < 3:
+                print(f"   ⚠️ Warning: Very small local region ({len(local_indices)} points) for peak at {peak_center:.3f}")
 
             return {
-                'x_local': x_local,
-                'y_local': y_local,
-                'local_indices': local_indices,
-                'local_mask': local_mask,
-                'window_width': half_window * 2,
-                'n_points': len(local_indices)
+                'x_data': x_local,
+                'y_data': y_local,
+                'indices': local_indices,
+                'peak_center': peak_center,
+                'window_size': half_window * 2,  # total window size
+                'n_points': len(local_indices),
+                'ppm_range': x_local[-1] - x_local[0] if len(x_local) > 1 else 0,
+                'multiplier_used': window_multiplier,
+                'gui_based': window_multiplier != 6.0  # flag for logging/debugging
             }
 
         except Exception as e:
@@ -3297,16 +3417,39 @@ class EnhancedVoigtFitter:
         }
 
     def get_isolated_peak_window(self, x_data, y_data, peak_center, overlapping_peaks=None,
-                                window_multiplier=5): ## added GM was 2.5
+                                window_multiplier=None):
         """
         Get window around peak that excludes overlapping peaks for quality assessment
-
-        This creates a focused window that isolates the peak of interest from nearby peaks
-        that could bias the quality assessment.
+        
+        ENHANCED: Now supports GUI-based window sizing for consistent display
+        
+        Parameters:
+        -----------
+        x_data, y_data : array
+            Spectral data
+        peak_center : float
+            Peak center position in ppm
+        overlapping_peaks : list, optional
+            List of overlapping peak positions
+        window_multiplier : float, optional
+            Window size multiplier (None = use GUI params, maintains backward compatibility)
+        
+        Returns:
+        --------
+        dict : Local region data with GUI-consistent window size
         """
         try:
             if overlapping_peaks is None:
                 overlapping_peaks = self.detect_overlapping_peaks(x_data, y_data)
+            
+            # ENHANCED: Use GUI parameters if window_multiplier not explicitly provided
+            if window_multiplier is None:
+                ppm_range = abs(x_data[-1] - x_data[0]) if len(x_data) > 1 else 1.0
+                nucleus_type = self.detect_nucleus_type([x_data[0], x_data[-1]])
+                window_multiplier = self._calculate_gui_based_multiplier(
+                    nucleus_type, ppm_range, len(x_data)
+                )
+                print(f"   🎯 Isolated window using GUI-based multiplier: {window_multiplier:.2f}× (was hardcoded 5.0×)")
 
             # Find the peak of interest
             target_peak = None
@@ -3386,6 +3529,128 @@ class EnhancedVoigtFitter:
             typical_width = self.nmr_ranges.get(nucleus_type, self.nmr_ranges['1H'])['typical_width']
             return self.extract_local_peak_region(x_data, y_data, peak_center,
                                                 typical_width, nucleus_type, window_multiplier)
+
+    def enhanced_peak_fitting_parallel(self, peak_list, use_parallel=True, progress_callback=None, parent_integrator=None):
+        """
+        New parallel entry point that maintains complete compatibility with existing interface.
+        
+        Args:
+            peak_list: DataFrame with peak information or single peak coordinates
+            use_parallel: Enable parallel processing (default: True)  
+            progress_callback: Progress update callback function
+            parent_integrator: Parent integrator with nmr_data (auto-detected if None)
+            
+        Returns:
+            Same format as existing enhanced_peak_fitting methods
+        """
+        import pandas as pd
+        
+        # Handle single peak input (maintain compatibility)
+        if not isinstance(peak_list, pd.DataFrame):
+            # Assume single peak with (peak_x, peak_y, assignment) format
+            if isinstance(peak_list, (list, tuple)) and len(peak_list) >= 2:
+                peak_x, peak_y = peak_list[0], peak_list[1]
+                assignment = peak_list[2] if len(peak_list) > 2 else 'Single_Peak'
+                
+                # Create single-row DataFrame
+                peak_list = pd.DataFrame({
+                    'Position_X': [peak_x],
+                    'Position_Y': [peak_y], 
+                    'Assignment': [assignment]
+                })
+            else:
+                raise ValueError("Invalid peak_list format. Expected DataFrame or (peak_x, peak_y, assignment) tuple")
+        
+        # Auto-detect parent integrator if not provided
+        if parent_integrator is None:
+            parent_integrator = getattr(self, 'parent', None)
+        
+        # Determine processing method
+        if use_parallel and len(peak_list) > 2:  # Parallel threshold
+            try:
+                # Ensure we have the necessary data context
+                if parent_integrator is None:
+                    # Look for integrator in common places
+                    import inspect
+                    frame = inspect.currentframe()
+                    try:
+                        # Check calling context for integrator
+                        while frame:
+                            frame_locals = frame.f_locals
+                            if 'self' in frame_locals:
+                                candidate = frame_locals['self']
+                                if hasattr(candidate, 'nmr_data') and hasattr(candidate, 'enhanced_fitter'):
+                                    if candidate.enhanced_fitter is self:
+                                        parent_integrator = candidate
+                                        break
+                            frame = frame.f_back
+                    finally:
+                        del frame
+                
+                if parent_integrator is None or not hasattr(parent_integrator, 'nmr_data'):
+                    raise ValueError("No parent integrator with nmr_data found - cannot run parallel processing")
+                
+                # Thread-safe setup of data context
+                import threading
+                with threading.Lock():
+                    self.nmr_data = parent_integrator.nmr_data
+                    self.ppm_x_axis = parent_integrator.ppm_x_axis  
+                    self.ppm_y_axis = parent_integrator.ppm_y_axis
+                
+                # Use new parallel implementation
+                from lunaNMR.core.parallel_voigt_processor import ParallelVoigtProcessor
+                
+                print(f"🚀 Using parallel Voigt fitting for {len(peak_list)} peaks")
+                parallel_processor = ParallelVoigtProcessor(self)
+                results = parallel_processor.fit_all_peaks_parallel(peak_list, progress_callback)
+                
+                # Return single result if single peak input
+                if len(results) == 1 and len(peak_list) == 1:
+                    return results[0]
+                else:
+                    return results
+                    
+            except Exception as e:
+                print(f"⚠️ Parallel processing failed: {e}")
+                print("🔄 Falling back to sequential processing")
+        
+        # Fallback to sequential processing
+        print(f"🔄 Using sequential Voigt fitting for {len(peak_list)} peaks")
+        return self._enhanced_peak_fitting_sequential(peak_list, progress_callback, parent_integrator)
+
+    def _enhanced_peak_fitting_sequential(self, peak_list, progress_callback=None, parent_integrator=None):
+        """
+        Sequential processing fallback that calls existing enhanced_peak_fitting
+        method for each peak individually.
+        """
+        results = []
+        
+        for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
+            peak_x = float(peak_row['Position_X'])
+            peak_y = float(peak_row['Position_Y'])
+            assignment = peak_row.get('Assignment', f'Peak_{i+1}')
+            
+            try:
+                # Call existing fit_peak_enhanced method (unchanged)
+                result = self.fit_peak_enhanced(peak_x, peak_y, assignment)
+                if result:
+                    result['processing_mode'] = 'sequential'
+                    result['peak_number'] = i + 1
+                    results.append(result)
+                    
+                if progress_callback:
+                    progress = ((i + 1) / len(peak_list)) * 100
+                    progress_callback(progress, f"Sequential: {i+1}/{len(peak_list)}", assignment)
+                    
+            except Exception as e:
+                print(f"❌ Sequential processing failed for peak {i+1} ({assignment}): {e}")
+        
+        # Return single result if single peak input
+        if len(results) == 1 and len(peak_list) == 1:
+            return results[0]
+        else:
+            return results
+
 
     def get_fitting_diagnostics(self):
         """Return detailed diagnostics from last fit"""
@@ -4202,6 +4467,98 @@ class RobustParameterEstimator:
                 'success': False,
                 'parameters': [1000, peak_center, 0.01, 0.01, 0]
             }
+
+    def enhanced_peak_fitting_parallel(self, peak_list, use_parallel=True, progress_callback=None):
+        """
+        New parallel entry point that maintains complete compatibility with existing interface.
+        
+        Args:
+            peak_list: DataFrame with peak information or single peak coordinates
+            use_parallel: Enable parallel processing (default: True)  
+            progress_callback: Progress update callback function
+            
+        Returns:
+            Same format as existing enhanced_peak_fitting methods
+        """
+        
+        # Handle single peak input (maintain compatibility)
+        if not isinstance(peak_list, pd.DataFrame):
+            # Assume single peak with (peak_x, peak_y, assignment) format
+            if isinstance(peak_list, (list, tuple)) and len(peak_list) >= 2:
+                peak_x, peak_y = peak_list[0], peak_list[1]
+                assignment = peak_list[2] if len(peak_list) > 2 else 'Single_Peak'
+                
+                # Create single-row DataFrame
+                peak_list = pd.DataFrame({
+                    'Position_X': [peak_x],
+                    'Position_Y': [peak_y], 
+                    'Assignment': [assignment]
+                })
+            else:
+                raise ValueError("Invalid peak_list format. Expected DataFrame or (peak_x, peak_y, assignment) tuple")
+        
+        # Determine processing method
+        if use_parallel and len(peak_list) > 2:  # Parallel threshold
+            try:
+                # Use new parallel implementation
+                from lunaNMR.core.parallel_voigt_processor import ParallelVoigtProcessor
+                
+                print(f"🚀 Using parallel Voigt fitting for {len(peak_list)} peaks")
+                parallel_processor = ParallelVoigtProcessor(self)
+                results = parallel_processor.fit_all_peaks_parallel(peak_list, progress_callback)
+                
+                # Return single result if single peak input
+                if len(results) == 1 and len(peak_list) == 1:
+                    return results[0]
+                else:
+                    return results
+                    
+            except ImportError as e:
+                print(f"⚠️ Parallel processing not available: {e}")
+                print("🔄 Falling back to sequential processing")
+                use_parallel = False
+            except Exception as e:
+                print(f"⚠️ Parallel processing failed: {e}")  
+                print("🔄 Falling back to sequential processing")
+                use_parallel = False
+        
+        # Fallback to sequential processing
+        if not use_parallel or len(peak_list) <= 2:
+            print(f"🔄 Using sequential Voigt fitting for {len(peak_list)} peaks")
+            return self._enhanced_peak_fitting_sequential(peak_list, progress_callback)
+
+    def _enhanced_peak_fitting_sequential(self, peak_list, progress_callback=None, parent_integrator=None):
+        """
+        Sequential processing fallback that calls existing enhanced_peak_fitting
+        method for each peak individually.
+        """
+        results = []
+        
+        for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
+            peak_x = float(peak_row['Position_X'])
+            peak_y = float(peak_row['Position_Y'])
+            assignment = peak_row.get('Assignment', f'Peak_{i+1}')
+            
+            try:
+                # Call existing fit_peak_enhanced method (unchanged)
+                result = self.fit_peak_enhanced(peak_x, peak_y, assignment)
+                if result:
+                    result['processing_mode'] = 'sequential'
+                    result['peak_number'] = i + 1
+                    results.append(result)
+                    
+                if progress_callback:
+                    progress = ((i + 1) / len(peak_list)) * 100
+                    progress_callback(progress, f"Sequential: {i+1}/{len(peak_list)}", assignment)
+                    
+            except Exception as e:
+                print(f"❌ Sequential processing failed for peak {i+1} ({assignment}): {e}")
+        
+        # Return single result if single peak input
+        if len(results) == 1 and len(peak_list) == 1:
+            return results[0]
+        else:
+            return results
 
 
 if __name__ == "__main__":

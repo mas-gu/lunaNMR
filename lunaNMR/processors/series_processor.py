@@ -168,6 +168,8 @@ class SeriesProcessor:
         # Voigt fitting options for series integration
         self.use_voigt_fitting = True
         self.use_parallel_processing = True  # Default enabled
+        self.enhanced_parallel_voigt = True  # Enable enhanced parallel Voigt fitting
+        self.parallel_voigt_threshold = 3    # Minimum peaks for parallel processing
         self.use_global_optimization = False
         self.num_integrations = 3  # Default number of integrations per peak
 
