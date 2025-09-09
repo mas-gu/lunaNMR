@@ -34,8 +34,17 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.extend([current_dir, parent_dir])
 
+# CRITICAL: Set matplotlib backend BEFORE any matplotlib imports anywhere in the application
+# This fixes NavigationToolbar2Tk rendering issues on Linux systems that default to Qt backend
+import matplotlib
+if matplotlib.get_backend() != 'TkAgg':
+    matplotlib.use('TkAgg', force=True)
+    print(f"🖼️ Matplotlib backend forced to TkAgg in main_gui.py: {matplotlib.get_backend()}")
+
 
 from lunaNMR.utils.parameter_manager import NMRParameterManager
+from lunaNMR.utils.font_config import get_display_text, configure_emoji_support
+
 from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
 from lunaNMR.processors.multi_spectrum_processor import MultiSpectrumProcessor
 
@@ -57,13 +66,16 @@ try:
     from lunaNMR.gui.visualization import SpectrumPlotter, VoigtAnalysisPlotter, SeriesPlotter, PlotManager
     from lunaNMR.utils.config_manager import ConfigurationManager, UserPreferences, ProcessingParameters
 
-    # Matplotlib setup
+    # Matplotlib setup - Force TkAgg backend for proper NavigationToolbar2Tk rendering
+    import matplotlib
+    matplotlib.use('TkAgg')  # Must be called before importing pyplot or backends
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
     import numpy as np
     import pandas as pd
 
     print("✅ All modules imported successfully")
+    print(f"🖼️ Matplotlib backend: {matplotlib.get_backend()}")
 
 except ImportError as e:
     print(f"❌ Import error: {e}")
@@ -486,7 +498,7 @@ class NMRPeaksSeriesGUI:
         #self.mode_selection_frame.pack(fill=tk.X, pady=(0, 10))
 
         # =================== FILE MANAGEMENT SECTION ===================
-        file_frame = ttk.LabelFrame(parent, text="📁 Enhanced Data Management", padding=10)
+        file_frame = ttk.LabelFrame(parent, text=get_display_text("📁 Enhanced Data Management"), padding=10)
         file_frame.pack(fill=tk.X, pady=(0, 10))
 
         # Create enhanced file selection panels with responsive grid
@@ -952,13 +964,13 @@ class NMRPeaksSeriesGUI:
         params_grid.pack(fill=tk.X)
 
         ttk.Label(params_grid, text="X-Window:").grid(row=0, column=0, sticky=tk.W)
-        fit_x_spin = tk.Spinbox(params_grid, from_=0.01, to=0.2, increment=0.01, width=4,
+        fit_x_spin = tk.Spinbox(params_grid, from_=0.01, to=0.5, increment=0.01, width=4,
                                textvariable=self.fitting_window_x, #format="%.1f",
                                command=self.on_parameter_change)
         fit_x_spin.grid(row=0, column=1, sticky=tk.W, padx=(5,15))
 
         ttk.Label(params_grid, text="Y-Window:").grid(row=0, column=2, sticky=tk.W)
-        fit_y_spin = tk.Spinbox(params_grid, from_=0.01, to=1.0, increment=0.05, width=4,
+        fit_y_spin = tk.Spinbox(params_grid, from_=0.05, to=5.0, increment=0.05, width=4,
                                textvariable=self.fitting_window_y, #format="%.1f",
                                command=self.on_parameter_change)
         fit_y_spin.grid(row=0, column=3, sticky=tk.W, padx=5)
@@ -970,7 +982,7 @@ class NMRPeaksSeriesGUI:
         r2_spin.grid(row=1, column=1, sticky=tk.W, padx=(5,15))
 
         ttk.Label(params_grid, text="Max Iter:").grid(row=1, column=2, sticky=tk.W)
-        iter_spin = tk.Spinbox(params_grid, from_=10, to=1000, increment=50, width=4,
+        iter_spin = tk.Spinbox(params_grid, from_=10, to=5000, increment=50, width=4,
                               textvariable=self.max_iterations,
                               command=self.on_parameter_change)
         iter_spin.grid(row=1, column=3, sticky=tk.W, padx=5)
@@ -1025,7 +1037,7 @@ class NMRPeaksSeriesGUI:
         max_peaks_spin.grid(row=6, column=1, sticky=tk.W, padx=(5,15))
 
         ttk.Label(params_grid, text="Max Iter:").grid(row=6, column=2, sticky=tk.W)
-        max_iter_spin = tk.Spinbox(params_grid, from_=10, to=200, increment=10, width=4,
+        max_iter_spin = tk.Spinbox(params_grid, from_=10, to=500, increment=50, width=4,
                                  textvariable=self.max_optimization_iterations,
                                  command=self.on_parameter_change)
         max_iter_spin.grid(row=6, column=3, sticky=tk.W, padx=5)
@@ -1469,6 +1481,11 @@ class NMRPeaksSeriesGUI:
         self.viz_notebook = ttk.Notebook(parent)
         self.viz_notebook.pack(fill=tk.BOTH, expand=True)
 
+        # Bind tab change event to refresh toolbars on Linux
+        import platform
+        if platform.system() == "Linux":
+            self.viz_notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
         # Tab 1: Main spectrum
         main_tab = ttk.Frame(self.viz_notebook)
         self.viz_notebook.add(main_tab, text="📊 Main Spectrum")
@@ -1478,8 +1495,23 @@ class NMRPeaksSeriesGUI:
         self.fig_main.tight_layout()
         self.canvas_main = FigureCanvasTkAgg(self.fig_main, main_tab)
         self.canvas_main.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        toolbar_main = NavigationToolbar2Tk(self.canvas_main, main_tab)
+
+        # WORKING PATTERN FROM SPECTRUM_BROWSER.PY:
+        # Create dedicated toolbar frame (this is what makes it work!)
+        toolbar_frame_main = ttk.Frame(main_tab)
+        toolbar_frame_main.pack(fill=tk.X, pady=(2, 0))
+
+        # Create toolbar in dedicated frame (like spectrum_browser.py)
+        toolbar_main = NavigationToolbar2Tk(self.canvas_main, toolbar_frame_main)
+        toolbar_main.pack(side=tk.TOP, fill=tk.X)
         toolbar_main.update()
+
+        # Force toolbar visibility (from working spectrum_browser.py)
+        toolbar_frame_main.update_idletasks()
+        if not toolbar_main.winfo_ismapped():
+            toolbar_main.pack_configure(side=tk.TOP, fill=tk.X)
+            toolbar_frame_main.after(10, lambda: toolbar_frame_main.update_idletasks())
+
 
         # Tab 2: Voigt analysis (enhanced 2x2 layout)
         voigt_tab = ttk.Frame(self.viz_notebook)
@@ -1506,8 +1538,18 @@ class NMRPeaksSeriesGUI:
         #self.axes_voigt = axes
         self.canvas_voigt = FigureCanvasTkAgg(self.fig_voigt, voigt_tab)
         self.canvas_voigt.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        toolbar_voigt = NavigationToolbar2Tk(self.canvas_voigt, voigt_tab)
+
+        # Create toolbar with dedicated frame
+        toolbar_frame_voigt = ttk.Frame(voigt_tab)
+        toolbar_frame_voigt.pack(fill=tk.X, pady=(2, 0))
+
+        toolbar_voigt = NavigationToolbar2Tk(self.canvas_voigt, toolbar_frame_voigt)
+        toolbar_voigt.pack(side=tk.TOP, fill=tk.X)
         toolbar_voigt.update()
+        toolbar_frame_voigt.update_idletasks()
+        if not toolbar_voigt.winfo_ismapped():
+            toolbar_voigt.pack_configure(side=tk.TOP, fill=tk.X)
+            toolbar_frame_voigt.after(10, lambda: toolbar_frame_voigt.update_idletasks())
 
         # Tab 3: Series overview
         series_tab = ttk.Frame(self.viz_notebook)
@@ -1518,8 +1560,18 @@ class NMRPeaksSeriesGUI:
         self.fig_series.tight_layout()
         self.canvas_series = FigureCanvasTkAgg(self.fig_series, series_tab)
         self.canvas_series.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        toolbar_series = NavigationToolbar2Tk(self.canvas_series, series_tab)
+
+        # Create toolbar with dedicated frame
+        toolbar_frame_series = ttk.Frame(series_tab)
+        toolbar_frame_series.pack(fill=tk.X, pady=(2, 0))
+
+        toolbar_series = NavigationToolbar2Tk(self.canvas_series, toolbar_frame_series)
+        toolbar_series.pack(side=tk.TOP, fill=tk.X)
         toolbar_series.update()
+        toolbar_frame_series.update_idletasks()
+        if not toolbar_series.winfo_ismapped():
+            toolbar_series.pack_configure(side=tk.TOP, fill=tk.X)
+            toolbar_frame_series.after(10, lambda: toolbar_frame_series.update_idletasks())
 
         # Tab 4: Statistics and Quality Assessment
         stats_tab = ttk.Frame(self.viz_notebook)
@@ -1531,8 +1583,18 @@ class NMRPeaksSeriesGUI:
         self.fig_stats.tight_layout()
         self.canvas_stats = FigureCanvasTkAgg(self.fig_stats, stats_tab)
         self.canvas_stats.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        toolbar_stats = NavigationToolbar2Tk(self.canvas_stats, stats_tab)
+
+        # Create toolbar with dedicated frame
+        toolbar_frame_stats = ttk.Frame(stats_tab)
+        toolbar_frame_stats.pack(fill=tk.X, pady=(2, 0))
+
+        toolbar_stats = NavigationToolbar2Tk(self.canvas_stats, toolbar_frame_stats)
+        toolbar_stats.pack(side=tk.TOP, fill=tk.X)
         toolbar_stats.update()
+        toolbar_frame_stats.update_idletasks()
+        if not toolbar_stats.winfo_ismapped():
+            toolbar_stats.pack_configure(side=tk.TOP, fill=tk.X)
+            toolbar_frame_stats.after(10, lambda: toolbar_frame_stats.update_idletasks())
 
         # Tab 5: Integration Diagnostics
         diagnostics_tab = ttk.Frame(self.viz_notebook)
@@ -1550,8 +1612,18 @@ class NMRPeaksSeriesGUI:
                               (self.ax_diag_aic, self.ax_diag_timing)) = plt.subplots(2, 2, figsize=(10, 8))
         self.canvas_diagnostics = FigureCanvasTkAgg(self.fig_diagnostics, plots_frame)
         self.canvas_diagnostics.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        toolbar_diagnostics = NavigationToolbar2Tk(self.canvas_diagnostics, plots_frame)
+
+        # Create toolbar with dedicated frame
+        toolbar_frame_diagnostics = ttk.Frame(plots_frame)
+        toolbar_frame_diagnostics.pack(fill=tk.X, pady=(2, 0))
+
+        toolbar_diagnostics = NavigationToolbar2Tk(self.canvas_diagnostics, toolbar_frame_diagnostics)
+        toolbar_diagnostics.pack(side=tk.TOP, fill=tk.X)
         toolbar_diagnostics.update()
+        toolbar_frame_diagnostics.update_idletasks()
+        if not toolbar_diagnostics.winfo_ismapped():
+            toolbar_diagnostics.pack_configure(side=tk.TOP, fill=tk.X)
+            toolbar_frame_diagnostics.after(10, lambda: toolbar_frame_diagnostics.update_idletasks())
 
         # Right panel: Diagnostic information
         info_frame = ttk.Frame(diagnostics_paned)
@@ -5551,8 +5623,8 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
 
         # Populate with data
         for spectrum_name, result in self.batch_results.results.items():
-            status_icon = "✅" if result.get('status') == 'success' else "❌"
-            type_indicator = "📍 REF" if result.get('is_reference', False) else "📄"
+            status_icon = get_display_text("✅" if result.get('status') == 'success' else "❌")
+            type_indicator = get_display_text("📍 REF" if result.get('is_reference', False) else "📄")
 
             tree.insert('', tk.END, values=(
                 spectrum_name,
@@ -6322,13 +6394,26 @@ Configuration: {self.config_manager.config_file}
                 return
 
         # Save current window state
-        self.user_prefs.save_from_window(self.root)
+        try:
+            self.user_prefs.save_from_window(self.root)
+        except Exception:
+            pass  # Continue even if preferences can't be saved
 
         # Save configuration
-        self.config_manager.save_config()
+        try:
+            self.config_manager.save_config()
+        except Exception:
+            pass  # Continue even if config can't be saved
 
         # Destroy window
-        self.root.destroy()
+        try:
+            self.root.destroy()
+        except Exception:
+            pass  # Continue even if destroy fails
+        
+        # Force immediate process termination
+        import os
+        os._exit(0)
 
     # =================== ZOOM AND CONTOUR METHODS ===================
 
@@ -6360,7 +6445,8 @@ Configuration: {self.config_manager.config_file}
 
     def reset_zoom(self):
         """Reset zoom to show full spectrum"""
-        if not hasattr(self.integrator, 'ppm_x_axis') or not hasattr(self.integrator, 'ppm_y_axis'):
+        if (not hasattr(self.integrator, 'ppm_x_axis') or not hasattr(self.integrator, 'ppm_y_axis') or
+            self.integrator.ppm_x_axis is None or self.integrator.ppm_y_axis is None):
             print("No spectrum data loaded for zoom reset")
             return
 
@@ -6694,6 +6780,32 @@ Configuration: {self.config_manager.config_file}
             # Fallback to manual reset if auto-adjustment fails
             self.reset_zoom()
 
+    def _on_tab_changed(self, event):
+        """Handle notebook tab change events to refresh toolbars on Linux."""
+        try:
+            # Force update on tab change to help with toolbar visibility
+            self.root.update_idletasks()
+        except Exception as e:
+            print(f"Warning: Failed to refresh toolbars on tab change: {e}")
+
+    def _cleanup_threads(self):
+        """Clean up any running threads and resources."""
+        try:
+            # Stop any matplotlib animations or background processes
+            import matplotlib.pyplot as plt
+            plt.close('all')
+
+            # Clean up any threading resources
+            import threading
+            for thread in threading.enumerate():
+                if thread != threading.current_thread() and thread.is_alive():
+                    if hasattr(thread, '_stop'):
+                        thread._stop()
+
+            print("🧹 Thread cleanup completed")
+        except Exception as e:
+            print(f"⚠️ Thread cleanup warning: {e}")
+
 def main():
     """Main application entry point"""
     # Create root window
@@ -6718,6 +6830,7 @@ def main():
     # Make window resizable
     root.resizable(True, True)
 
+
     # Set window icon (if available)
     try:
         icon_path = os.path.join(os.path.dirname(__file__), "icon.ico")
@@ -6735,8 +6848,10 @@ def main():
     style.configure('Active.TButton', foreground='red', background='lightgreen')
 
     # Create and run application
+    app = None
     try:
         app = NMRPeaksSeriesGUI(root)
+
         print("🚀 Starting NMR Peaks Series GUI application")
         root.mainloop()
         print("👋 NMR Peaks Series GUI application closed")
@@ -6749,6 +6864,45 @@ def main():
             f"A critical error occurred:\n{str(e)}\n\nThe application will close.")
         import traceback
         traceback.print_exc()
+    finally:
+        # Ensure proper cleanup, especially on Ubuntu
+        try:
+            if app:
+                # Stop any running threads
+                if hasattr(app, '_cleanup_threads'):
+                    app._cleanup_threads()
+
+            # Force close all matplotlib figures
+            import matplotlib.pyplot as plt
+            plt.close('all')
+
+            # Ensure root window is destroyed
+            try:
+                if root and root.winfo_exists():
+                    root.quit()
+                    root.destroy()
+            except:
+                pass  # Window already destroyed
+
+            # Force garbage collection
+            import gc
+            gc.collect()
+
+            print("🧹 Application cleanup completed")
+        except Exception as cleanup_error:
+            print(f"⚠️ Cleanup warning: {cleanup_error}")
+
+        # Platform-specific: Ensure clean exit
+        import platform
+        import os
+        
+        if platform.system() in ["Linux", "Darwin"]:  # Linux and macOS need forced exit
+            # Use os._exit(0) which cannot be caught by exception handlers
+            os._exit(0)
+        else:
+            # Windows and other platforms - use normal exit
+            import sys
+            sys.exit(0)
 
 if __name__ == "__main__":
     main()
