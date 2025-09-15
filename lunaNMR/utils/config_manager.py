@@ -54,7 +54,13 @@ class ConfigurationManager:
                 "min_r_squared": 0.7,
                 "max_iterations": 1000,
                 "use_reference_detection": True,
-                "processing_mode": "full_detection"
+                "processing_mode": "full_detection",
+                # Multi-peak detection parameters
+                "multi_peak_r2_threshold": 0.7,
+                "multi_peak_improvement_threshold": 0.1,
+                "peak_detection_sensitivity": 1.5,
+                "overlap_detection_factor": 0.8,
+                "residual_analysis_threshold": 1.5
             },
             "display_options": {
                 "show_detected": True,
@@ -326,7 +332,13 @@ class ProcessingParameters:
             'fitting_window_x': self.config_manager.get("processing_parameters.fitting_window_x", 0.3),
             'fitting_window_y': self.config_manager.get("processing_parameters.fitting_window_y", 8.0),
             'min_r_squared': self.config_manager.get("processing_parameters.min_r_squared", 0.7),
-            'max_iterations': self.config_manager.get("processing_parameters.max_iterations", 1000)
+            'max_iterations': self.config_manager.get("processing_parameters.max_iterations", 1000),
+            # Multi-peak detection parameters
+            'multi_peak_r2_threshold': self.config_manager.get("processing_parameters.multi_peak_r2_threshold", 0.7),
+            'multi_peak_improvement_threshold': self.config_manager.get("processing_parameters.multi_peak_improvement_threshold", 0.1),
+            'peak_detection_sensitivity': self.config_manager.get("processing_parameters.peak_detection_sensitivity", 1.5),
+            'overlap_detection_factor': self.config_manager.get("processing_parameters.overlap_detection_factor", 0.8),
+            'residual_analysis_threshold': self.config_manager.get("processing_parameters.residual_analysis_threshold", 1.5)
         }
 
     def set_fitting_params(self, **params):

@@ -28,9 +28,18 @@ try:
 except ImportError:
     pass
 
+try:
+    from .font_config import FontManager, get_font_manager, configure_emoji_support, get_display_text
+except ImportError:
+    pass
+
 __all__ = [
     'ConfigManager',
     'FileManager',
     'ParameterManager',
-    'GlobalOptimizationManager'
+    'GlobalOptimizationManager',
+    'FontManager',
+    'get_font_manager',
+    'configure_emoji_support',
+    'get_display_text'
 ]

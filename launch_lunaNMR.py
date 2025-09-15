@@ -11,6 +11,13 @@ This script handles environment setup, application selection, and graceful error
 
 import sys
 import os
+
+# CRITICAL: Set matplotlib backend BEFORE any matplotlib imports anywhere in the application
+# This ensures NavigationToolbar2Tk renders properly on Linux systems
+import matplotlib
+matplotlib.use('TkAgg', force=True)
+print(f"🖼️ Matplotlib backend forced to: {matplotlib.get_backend()}")
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -99,7 +106,7 @@ def show_application_selector():
 
     if dynamixs_available:
         dynamixs_radio.pack(anchor=tk.W)
-        ttk.Label(dynamixs_frame, text="Dynamic Analysis", 
+        ttk.Label(dynamixs_frame, text="Dynamic Analysis",
                  foreground="gray").pack(anchor=tk.W, padx=(20, 0))
     else:
         dynamixs_radio.configure(state=tk.DISABLED)
@@ -200,6 +207,8 @@ def main():
 
         if success:
             print("Application closed normally")
+        else:
+            print("Application closed with errors")
 
         return success
 
@@ -222,10 +231,34 @@ def main():
 if __name__ == "__main__":
     try:
         success = main()
-        sys.exit(0 if success else 1)
+        print(f"🏁 Launch completed with {'success' if success else 'errors'}")
     except KeyboardInterrupt:
-        #print("\n⏹️ Launch interrupted by user")
-        sys.exit(0)
+        print("\n⏹️ Launch interrupted by user")
+        success = True  # User interrupt is not an error
     except Exception as e:
-        #print(f"💥 Critical launcher error: {e}")
-        sys.exit(1)
+        print(f"💥 Critical launcher error: {e}")
+        import traceback
+        traceback.print_exc()
+        success = False
+    finally:
+        # Ensure clean exit on Ubuntu
+        import platform
+
+        success = locals().get('success', True)  # Default to success if undefined
+        if platform.system() == "Linux":
+           import os
+           # Force clean exit
+           os._exit(0 if success else 1)
+        elif platform.system() == "Darwin":  # Add macOS support
+           import os
+           # Force clean exit on macOS too
+           os._exit(0 if success else 1)
+        else:
+           sys.exit(0 if success else 1)
+
+        #if platform.system() == "Linux":
+        #    import os
+        #    # Force clean exit
+        #    os._exit(0 if success else 1)
+        #else:
+        #    sys.exit(0 if success else 1)

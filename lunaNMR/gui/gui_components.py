@@ -23,6 +23,16 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# Import font configuration for emoji support
+try:
+    from lunaNMR.utils.font_config import get_display_text, configure_emoji_support
+except ImportError:
+    # Fallback if font_config is not available
+    def get_display_text(text):
+        return text
+    def configure_emoji_support(widget):
+        pass
+
 class ScrollableFrame(ttk.Frame):
     """Enhanced scrollable frame widget for control panels"""
     def __init__(self, container, *args, **kwargs):
@@ -69,7 +79,7 @@ class EnhancedFileListFrame(ttk.Frame):
         self.file_metadata = {}
 
         # Title with icon
-        self.title_label = ttk.Label(self, text=f"📁 {title}", font=('TkDefaultFont', 10, 'bold'))
+        self.title_label = ttk.Label(self, text=get_display_text(f"📁 {title}"), font=('TkDefaultFont', 10, 'bold'))
         self.title_label.pack(anchor=tk.W, pady=(0, 5))
 
         # Enhanced folder selection
@@ -139,7 +149,7 @@ class EnhancedFileListFrame(ttk.Frame):
         """Enhanced folder selection with validation"""
         initial_dir = self.current_folder if self.current_folder else os.getcwd()
         folder = filedialog.askdirectory(
-            title=f"Select {self.title_label['text'].replace('📁 ', '')} Folder",
+            title=f"Select {self.title_label['text'].replace(get_display_text('📁 '), '')} Folder",
             initialdir=initial_dir
         )
 
@@ -243,7 +253,7 @@ class EnhancedFileListFrame(ttk.Frame):
         self.preview_text.delete(1.0, tk.END)
 
         preview_info = (
-            f"📁 Path: {metadata['path']}\n"
+            f"{get_display_text('📁')} Path: {metadata['path']}\n"
             f"📏 Size: {metadata['size_mb']:.2f} MB\n"
             f"📅 Modified: {metadata['modified'].strftime('%Y-%m-%d %H:%M:%S')}"
         )
@@ -360,10 +370,10 @@ class AdvancedProgressDialog:
         self.pause_button = ttk.Button(button_frame, text="⏸️ Pause", command=self.toggle_pause)
         self.pause_button.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.cancel_button = ttk.Button(button_frame, text="❌ Cancel", command=self.cancel)
+        self.cancel_button = ttk.Button(button_frame, text=get_display_text("❌ Cancel"), command=self.cancel)
         self.cancel_button.pack(side=tk.LEFT)
 
-        self.close_button = ttk.Button(button_frame, text="✅ Close", command=self.close, state='disabled')
+        self.close_button = ttk.Button(button_frame, text=get_display_text("✅ Close"), command=self.close, state='disabled')
         self.close_button.pack(side=tk.RIGHT)
 
         self.details_button = ttk.Button(button_frame, text="💾 Save Log", command=self.save_log, state='disabled')
@@ -390,14 +400,14 @@ class AdvancedProgressDialog:
 
             stats_text = (
                 f"⏱️  Elapsed: {elapsed_str} | 🔮 ETA: {eta_str}\n"
-                f"✅ Completed: {self.completed_tasks} | ❌ Failed: {self.failed_tasks}"
+                + get_display_text(f"✅ Completed: {self.completed_tasks} | ❌ Failed: {self.failed_tasks}")
             )
             self.stats_label.config(text=stats_text)
 
             # Update log
             if log_message and self.log_text:
                 timestamp = datetime.now().strftime('%H:%M:%S')
-                status_icon = "❌" if failed else "✅"
+                status_icon = get_display_text("❌" if failed else "✅")
                 log_entry = f"[{timestamp}] {status_icon} {log_message}\n"
 
                 self.log_text.insert(tk.END, log_entry)

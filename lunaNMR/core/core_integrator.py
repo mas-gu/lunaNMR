@@ -516,7 +516,7 @@ class VoigtIntegrator(BaseIntegrator):
 
         # Adaptive parameters for overlapping peak detection
         min_height = max(signal_max * height_threshold, noise_level * 3)
-        min_distance = max(2, int(len(y_smooth) / distance_factor))
+        min_distance = max(1, int(len(y_smooth) / distance_factor))  # Ensure distance ≥ 1 for scipy
         min_prominence = max(signal_max * prominence_threshold, noise_level * 2)
 
         # Primary peak detection with relaxed criteria

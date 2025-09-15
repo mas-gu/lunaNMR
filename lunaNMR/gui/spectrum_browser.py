@@ -27,6 +27,9 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
 try:
+    # Force TkAgg backend for proper NavigationToolbar2Tk rendering
+    import matplotlib
+    matplotlib.use('TkAgg')  # Must be called before importing pyplot or backends
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
     from matplotlib.figure import Figure

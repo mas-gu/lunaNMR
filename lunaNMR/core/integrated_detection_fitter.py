@@ -1549,7 +1549,7 @@ class IterativeDetectionFitter:
 
         # FIXED: Use much lower absolute thresholds based on noise, not signal max
         min_height = noise_level * 3  # 3x noise level (much more reasonable)
-        min_distance = max(2, int(len(y_data) / params['distance_factor']))
+        min_distance = max(1, int(len(y_data) / params['distance_factor']))  # Ensure distance ≥ 1 for scipy
         min_prominence = noise_level * 1.5  # 1.5x noise level for prominence
 
         # DEBUG: Add detailed logging

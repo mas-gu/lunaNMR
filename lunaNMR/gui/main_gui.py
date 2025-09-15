@@ -159,13 +159,20 @@ class NMRPeaksSeriesGUI:
         self.min_r_squared = tk.DoubleVar(value=fitting_params['min_r_squared'])
         self.max_iterations = tk.IntVar(value=fitting_params['max_iterations'])
 
+        # Multi-peak detection parameters 
+        self.multi_peak_r2_threshold = tk.DoubleVar(value=fitting_params['multi_peak_r2_threshold'])
+        self.multi_peak_improvement_threshold = tk.DoubleVar(value=fitting_params['multi_peak_improvement_threshold'])
+        self.peak_detection_sensitivity = tk.DoubleVar(value=fitting_params['peak_detection_sensitivity'])
+        self.overlap_detection_factor = tk.DoubleVar(value=fitting_params['overlap_detection_factor'])
+        self.residual_analysis_threshold = tk.DoubleVar(value=fitting_params['residual_analysis_threshold'])
+
         # Peak detection parameters (for multi-peak fitting)
         self.peak_height_threshold = tk.DoubleVar(value=0.02)    # 2% of max intensity
         self.peak_distance_factor = tk.DoubleVar(value=50.0)     # 1/50 = 2% of spectrum
         self.peak_prominence_threshold = tk.DoubleVar(value=0.01) # 1% of max intensity
         self.smoothing_sigma = tk.DoubleVar(value=0.5)           # Gaussian smoothing
         self.max_peaks_fit = tk.IntVar(value=4)                  # Maximum peaks to fit simultaneously
-        self.max_optimization_iterations = tk.IntVar(value=50)   # Maximum iterative optimization attempts
+        self.max_optimization_iterations = tk.IntVar(value=100)   # Maximum iterative optimization attempts
         self.use_parallel_processing = tk.BooleanVar(value=True) # Enable parallel processing
 
         # Peak Centroid Detection parameters (optional post-processing enhancement)
@@ -346,7 +353,13 @@ class NMRPeaksSeriesGUI:
             fitting_window_x=self.fitting_window_x.get(),
             fitting_window_y=self.fitting_window_y.get(),
             min_r_squared=self.min_r_squared.get(),
-            max_iterations=self.max_iterations.get()
+            max_iterations=self.max_iterations.get(),
+            # Multi-peak detection parameters
+            multi_peak_r2_threshold=self.multi_peak_r2_threshold.get(),
+            multi_peak_improvement_threshold=self.multi_peak_improvement_threshold.get(),
+            peak_detection_sensitivity=self.peak_detection_sensitivity.get(),
+            overlap_detection_factor=self.overlap_detection_factor.get(),
+            residual_analysis_threshold=self.residual_analysis_threshold.get()
         )
 
     def update_integrator_params(self):
@@ -994,59 +1007,94 @@ class NMRPeaksSeriesGUI:
                                          state="disabled")
         global_opt_check.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10,0))
 
+        # Multi-Peak Detection Parameters
+        ttk.Label(params_grid, text="🔀 Multi-Peak Detection", font=('TkDefaultFont', 9, 'bold')).grid(
+            row=3, column=0, columnspan=4, sticky=tk.W, pady=(15,5))
+        
+        # Row 4: R² Threshold and Min Improvement
+        ttk.Label(params_grid, text="R² Trigger:").grid(row=4, column=0, sticky=tk.W)
+        r2_thresh_spin = tk.Spinbox(params_grid, from_=0.1, to=1.0, increment=0.05, width=4,
+                                   textvariable=self.multi_peak_r2_threshold,
+                                   command=self.on_parameter_change)
+        r2_thresh_spin.grid(row=4, column=1, sticky=tk.W, padx=(5,15))
+        ttk.Label(params_grid, text="Min Improv:").grid(row=4, column=2, sticky=tk.W)
+        improv_spin = tk.Spinbox(params_grid, from_=0.05, to=0.5, increment=0.05, width=4,
+                                textvariable=self.multi_peak_improvement_threshold,
+                                command=self.on_parameter_change)
+        improv_spin.grid(row=4, column=3, sticky=tk.W, padx=5)
+        
+        # Row 5: Peak Sensitivity and Overlap Factor
+        ttk.Label(params_grid, text="Sensitivity:").grid(row=5, column=0, sticky=tk.W)
+        sens_spin = tk.Spinbox(params_grid, from_=0.5, to=5.0, increment=0.1, width=4,
+                              textvariable=self.peak_detection_sensitivity,
+                              command=self.on_parameter_change)
+        sens_spin.grid(row=5, column=1, sticky=tk.W, padx=(5,15))
+        ttk.Label(params_grid, text="Overlap:").grid(row=5, column=2, sticky=tk.W)
+        overlap_spin = tk.Spinbox(params_grid, from_=0.3, to=1.5, increment=0.1, width=4,
+                                 textvariable=self.overlap_detection_factor,
+                                 command=self.on_parameter_change)
+        overlap_spin.grid(row=5, column=3, sticky=tk.W, padx=5)
+        
+        # Row 6: Residual Threshold
+        ttk.Label(params_grid, text="Residual:").grid(row=6, column=0, sticky=tk.W)
+        residual_spin = tk.Spinbox(params_grid, from_=0.5, to=3.0, increment=0.1, width=4,
+                                  textvariable=self.residual_analysis_threshold,
+                                  command=self.on_parameter_change)
+        residual_spin.grid(row=6, column=1, sticky=tk.W, padx=(5,15))
+
         # Peak Detection Parameters (Multi-Peak Fitting)
         ttk.Label(params_grid, text="🔍 Peak Detection Parameters", font=('TkDefaultFont', 9, 'bold')).grid(
-            row=3, column=0, columnspan=4, sticky=tk.W, pady=(15,5))
+            row=7, column=0, columnspan=4, sticky=tk.W, pady=(15,5))
 
-        # Row 4: Height threshold and Distance factor
-        ttk.Label(params_grid, text="Height %:").grid(row=4, column=0, sticky=tk.W)
+        # Row 8: Height threshold and Distance factor
+        ttk.Label(params_grid, text="Height %:").grid(row=8, column=0, sticky=tk.W)
         height_spin = tk.Spinbox(params_grid, from_=0.005, to=0.2, increment=0.005, width=4,
                                textvariable=self.peak_height_threshold, #format="%.3f",
                                command=self.on_parameter_change)
-        height_spin.grid(row=4, column=1, sticky=tk.W, padx=(5,15))
+        height_spin.grid(row=8, column=1, sticky=tk.W, padx=(5,15))
 
-        ttk.Label(params_grid, text="Distance:").grid(row=4, column=2, sticky=tk.W)
+        ttk.Label(params_grid, text="Distance:").grid(row=8, column=2, sticky=tk.W)
         distance_spin = tk.Spinbox(params_grid, from_=10, to=200, increment=10, width=4,
                                  textvariable=self.peak_distance_factor,
                                  command=self.on_parameter_change)
-        distance_spin.grid(row=4, column=3, sticky=tk.W, padx=5)
+        distance_spin.grid(row=8, column=3, sticky=tk.W, padx=5)
 
         # Add ppm conversion display
         self.distance_ppm_label = ttk.Label(params_grid, text="(≈0.00 ppm)",
                                            font=('TkDefaultFont', 8), foreground='gray')
-        self.distance_ppm_label.grid(row=4, column=4, sticky=tk.W, padx=(2,0))
+        self.distance_ppm_label.grid(row=8, column=4, sticky=tk.W, padx=(2,0))
 
-        # Row 5: Prominence and Smoothing
-        ttk.Label(params_grid, text="Prominence:").grid(row=5, column=0, sticky=tk.W)
+        # Row 9: Prominence and Smoothing
+        ttk.Label(params_grid, text="Prominence:").grid(row=9, column=0, sticky=tk.W)
         prom_spin = tk.Spinbox(params_grid, from_=0.001, to=0.1, increment=0.001, width=4,
                              textvariable=self.peak_prominence_threshold, #format="%.3f",
                              command=self.on_parameter_change)
-        prom_spin.grid(row=5, column=1, sticky=tk.W, padx=(5,15))
+        prom_spin.grid(row=9, column=1, sticky=tk.W, padx=(5,15))
 
-        ttk.Label(params_grid, text="Smoothing:").grid(row=5, column=2, sticky=tk.W)
+        ttk.Label(params_grid, text="Smoothing:").grid(row=9, column=2, sticky=tk.W)
         smooth_spin = tk.Spinbox(params_grid, from_=0.1, to=2.0, increment=0.1, width=4,
                                textvariable=self.smoothing_sigma, format="%.1f",
                                command=self.on_parameter_change)
-        smooth_spin.grid(row=5, column=3, sticky=tk.W, padx=5)
+        smooth_spin.grid(row=9, column=3, sticky=tk.W, padx=5)
 
-        # Row 6: Max peaks to fit and Max iterations
-        ttk.Label(params_grid, text="Max Peaks:").grid(row=6, column=0, sticky=tk.W)
+        # Row 10: Max peaks to fit and Max iterations
+        ttk.Label(params_grid, text="Max Peaks:").grid(row=10, column=0, sticky=tk.W)
         max_peaks_spin = tk.Spinbox(params_grid, from_=2, to=8, increment=1, width=4,
                                   textvariable=self.max_peaks_fit,
                                   command=self.on_parameter_change)
-        max_peaks_spin.grid(row=6, column=1, sticky=tk.W, padx=(5,15))
+        max_peaks_spin.grid(row=10, column=1, sticky=tk.W, padx=(5,15))
 
-        ttk.Label(params_grid, text="Max Iter:").grid(row=6, column=2, sticky=tk.W)
+        ttk.Label(params_grid, text="Max Iter:").grid(row=10, column=2, sticky=tk.W)
         max_iter_spin = tk.Spinbox(params_grid, from_=10, to=500, increment=50, width=4,
                                  textvariable=self.max_optimization_iterations,
                                  command=self.on_parameter_change)
-        max_iter_spin.grid(row=6, column=3, sticky=tk.W, padx=5)
+        max_iter_spin.grid(row=10, column=3, sticky=tk.W, padx=5)
 
-        # Row 7: Parallel processing toggle
+        # Row 11: Parallel processing toggle
         parallel_check = ttk.Checkbutton(params_grid, text="🚀 Use Parallel Processing (75% cores)",
                                        variable=self.use_parallel_processing,
                                        command=self.on_parameter_change)
-        parallel_check.grid(row=7, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
+        parallel_check.grid(row=11, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
 
 
         # Voigt buttons

@@ -16,6 +16,9 @@ Author: Guillaume Mas
 Date: 2025
 """
 
+# Force TkAgg backend for GUI consistency
+import matplotlib
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import Rectangle, Circle
@@ -524,7 +527,15 @@ class VoigtAnalysisPlotter:
 
         ax.set_xlabel(xlabel)
         ax.set_ylabel('Intensity')
-        ax.set_title(f'{title} (R² = {r_squared:.3f})')
+        # ENHANCEMENT: Show window size information in title if available
+        window_info = ""
+        if 'window_size' in fit_data:
+            window_size = fit_data['window_size']
+            gui_based = fit_data.get('gui_based', False)
+            window_source = "GUI" if gui_based else "Auto"
+            window_info = f", Window: ±{window_size/2:.3f} ppm ({window_source})"
+
+        ax.set_title(f'{title} (R² = {r_squared:.3f}{window_info})')
         ax.legend()
         ax.grid(True, alpha=0.3)
 
