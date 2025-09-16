@@ -502,11 +502,16 @@ class SeriesProcessor:
 
         return DummyProgressDialog()
 
-    def process_single_spectrum(self, nmr_file):
-        """Process a single NMR spectrum using SAME workflow as single spectrum GUI"""
+    def process_single_spectrum(self, nmr_file, peak_list_path=None):
+        """Process a single NMR spectrum with optional peak list (BACKWARD COMPATIBLE)"""
         spectrum_name = os.path.basename(nmr_file)
         is_reference = (self.reference_spectrum_path and
                       os.path.abspath(nmr_file) == os.path.abspath(self.reference_spectrum_path))
+
+        # Check workflow mode if GUI is available
+        workflow_mode = "peak_list"  # Default
+        if hasattr(self, 'main_gui') and self.main_gui is not None:
+            workflow_mode = getattr(self.main_gui, 'workflow_mode', tk.StringVar(value="peak_list")).get()
 
         # CRITICAL: Use main GUI - it has the perfect working workflow including detect_peaks() method
         if not hasattr(self, 'main_gui') or self.main_gui is None:
@@ -514,7 +519,7 @@ class SeriesProcessor:
                 'status': 'failed',
                 'error': 'Main GUI not available - cannot use gold standard workflow',
                 'detected_peaks': 0,
-                'total_peaks': len(self.reference_peaks),
+                'total_peaks': len(self.reference_peaks) if hasattr(self, 'reference_peaks') and self.reference_peaks is not None else 0,
                 'detection_rate': 0.0
             }
 
@@ -529,12 +534,41 @@ class SeriesProcessor:
                     'status': 'failed',
                     'error': 'Failed to load NMR data',
                     'detected_peaks': 0,
-                    'total_peaks': len(self.reference_peaks),
+                    'total_peaks': len(self.reference_peaks) if hasattr(self, 'reference_peaks') and self.reference_peaks is not None else 0,
                     'detection_rate': 0.0
                 }
 
-            # Set reference peaks in GUI integrator (same as single spectrum)
-            gui_integrator.peak_list = self.reference_peaks.copy()
+            if workflow_mode == "peak_list":
+                # EXISTING WORKFLOW - PRESERVED
+                if not hasattr(self, 'reference_peaks') or self.reference_peaks is None:
+                    return {
+                        'status': 'failed',
+                        'error': 'No reference peaks available for peak list mode',
+                        'detected_peaks': 0,
+                        'total_peaks': 0,
+                        'detection_rate': 0.0
+                    }
+
+                print("📋 Series processing in Peak List mode")
+                # Set reference peaks in GUI integrator (same as single spectrum)
+                gui_integrator.peak_list = self.reference_peaks.copy()
+
+            else:
+                # NEW S/N WORKFLOW
+                print("🎯 Series processing in S/N Threshold mode")
+                gui_integrator.peak_list = None
+
+                # Get S/N parameters from main GUI
+                sn_threshold = getattr(main_gui, 'sn_threshold', tk.DoubleVar(value=3.0)).get()
+                expected_count = getattr(main_gui, 'expected_peak_count', tk.IntVar(value=50)).get()
+
+                # Set S/N parameters
+                gui_integrator.sn_threshold = sn_threshold
+                gui_integrator.expected_peak_count = expected_count
+                gui_integrator.set_processing_mode('sn_native')
+
+                print(f"   S/N Threshold: {sn_threshold}")
+                print(f"   Expected Peak Count: {expected_count}")
 
             # CRITICAL: Apply detailed Voigt parameters to GUI integrator
             if hasattr(self, 'voigt_params') and self.voigt_params:

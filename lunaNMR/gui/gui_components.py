@@ -717,7 +717,7 @@ class PeakNavigator(ttk.Frame):
         self.peak_type_var = tk.StringVar(value="Reference Peaks")
         self.type_combo = ttk.Combobox(selector_frame, textvariable=self.peak_type_var,
                                       values=["Reference Peaks", "Detected Peaks"],
-                                      state="disabled", width=15) #readonly to "disabled"
+                                      state="readonly", width=15)
         self.type_combo.pack(side=tk.LEFT, padx=(5, 0))
         self.type_combo.bind("<<ComboboxSelected>>", self.on_peak_type_changed)
 
@@ -769,6 +769,29 @@ class PeakNavigator(ttk.Frame):
                                       command=self.analyze_selected_peak, width=12)
         self.analysis_btn.pack(side=tk.LEFT)
 
+        # Interactive editing frame for detected peaks
+        self.edit_frame = ttk.Frame(self)
+        self.edit_frame.pack(fill=tk.X, pady=(5, 0))
+
+        self.edit_btn = ttk.Button(self.edit_frame, text="✏️ Edit Peak",
+                                  command=self.edit_selected_peak, width=12)
+        self.edit_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.delete_btn = ttk.Button(self.edit_frame, text="🗑️ Delete",
+                                    command=self.delete_selected_peak, width=12)
+        self.delete_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.add_btn = ttk.Button(self.edit_frame, text="➕ Add Peak",
+                                 command=self.add_new_peak, width=12)
+        self.add_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.save_btn = ttk.Button(self.edit_frame, text="💾 Save",
+                                  command=self.save_peak_changes, width=12)
+        self.save_btn.pack(side=tk.LEFT)
+
+        # Initialize button states
+        self.update_edit_buttons_state()
+
     def set_spectrum_controller(self, controller):
         """Set reference to main GUI for spectrum control"""
         self.spectrum_controller = controller
@@ -816,6 +839,9 @@ class PeakNavigator(ttk.Frame):
                 # Notify spectrum controller for coordination
                 if hasattr(self.spectrum_controller, 'set_selected_peak'):
                     self.spectrum_controller.set_selected_peak(peak_index, self.selected_peak_type, source="navigator")
+
+                # Update edit button states
+                self.update_edit_buttons_state()
 
             except (ValueError, IndexError) as e:
                 print(f"Error processing peak selection: {e}")
@@ -871,7 +897,8 @@ class PeakNavigator(ttk.Frame):
             import traceback
             traceback.print_exc()
 
-        # Refresh display if currently showing reference peaks
+        # Update dropdown state and refresh display if currently showing reference peaks
+        self.update_dropdown_state()
         if self.selected_peak_type == "reference":
             self.refresh_peak_list()
 
@@ -904,6 +931,15 @@ class PeakNavigator(ttk.Frame):
                     if x_coord != 0 and y_coord != 0:
                         self.detected_peaks.append([assignment, x_coord, y_coord])
 
+            # Handle list of dictionaries (S/N detection format)
+            elif isinstance(fitted_peaks, (list, tuple)) and fitted_peaks and isinstance(fitted_peaks[0], dict):
+                for i, peak in enumerate(fitted_peaks):
+                    assignment = peak.get('assignment', peak.get('Assignment', f"Det{i+1}"))
+                    x_coord = float(peak.get('ppm_x', peak.get('Position_X', 0)))
+                    y_coord = float(peak.get('ppm_y', peak.get('Position_Y', 0)))
+                    if x_coord != 0 and y_coord != 0:
+                        self.detected_peaks.append([assignment, x_coord, y_coord])
+
             # Handle numpy array or list of lists
             elif isinstance(fitted_peaks, (list, tuple)) and fitted_peaks:
                 for i, peak in enumerate(fitted_peaks):
@@ -923,8 +959,16 @@ class PeakNavigator(ttk.Frame):
             import traceback
             traceback.print_exc()
 
-        # Refresh display if currently showing detected peaks
-        if self.selected_peak_type == "detected":
+        # Update dropdown state and automatically switch to detected peaks if they were loaded
+        self.update_dropdown_state()
+
+        # Auto-switch to detected peaks if we have them and they're new
+        if len(self.detected_peaks) > 0:
+            print(f"Peak Navigator: Auto-switching to detected peaks ({len(self.detected_peaks)} peaks loaded)")
+            self.peak_type_var.set("Detected Peaks")
+            self.selected_peak_type = "detected"
+            self.refresh_peak_list()
+        elif self.selected_peak_type == "detected":
             self.refresh_peak_list()
 
     def refresh_peak_list(self):
@@ -957,6 +1001,21 @@ class PeakNavigator(ttk.Frame):
         count = len(peaks)
         self.status_label.config(text=f"{peak_type_name}: {count} peak{'s' if count != 1 else ''}")
         print(f"Peak Navigator: Updated status: {count} peaks")
+
+        # Update edit button states
+        self.update_edit_buttons_state()
+
+    def update_dropdown_state(self):
+        """Update dropdown state based on available peak data"""
+        has_reference = len(self.reference_peaks) > 0
+        has_detected = len(self.detected_peaks) > 0
+
+        if has_reference or has_detected:
+            self.type_combo.config(state="readonly")
+            print(f"Peak Navigator: Dropdown enabled - Ref: {len(self.reference_peaks)}, Det: {len(self.detected_peaks)}")
+        else:
+            self.type_combo.config(state="disabled")
+            print("Peak Navigator: Dropdown disabled - no peaks available")
 
     def update_selection(self, peak_index, peak_type):
         """Update navigator selection from external source"""
@@ -1005,3 +1064,249 @@ class PeakNavigator(ttk.Frame):
             print(f"Peak Navigator: Analysis error: {e}")
             import traceback
             traceback.print_exc()
+
+    def update_edit_buttons_state(self):
+        """Update edit buttons based on current peak type and selection"""
+        # Only enable editing for detected peaks
+        is_detected = (self.selected_peak_type == "detected")
+        has_selection = bool(self.tree.selection())
+
+        self.edit_btn.config(state="normal" if is_detected and has_selection else "disabled")
+        self.delete_btn.config(state="normal" if is_detected and has_selection else "disabled")
+        self.add_btn.config(state="normal" if is_detected else "disabled")
+        self.save_btn.config(state="normal" if is_detected else "disabled")
+
+    def edit_selected_peak(self):
+        """Edit the selected peak assignment and coordinates"""
+        from tkinter import messagebox, simpledialog
+
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select a peak to edit.")
+            return
+
+        if self.selected_peak_type != "detected":
+            messagebox.showinfo("Cannot Edit", "You can only edit detected peaks, not reference peaks.")
+            return
+
+        try:
+            # Get current values
+            item = self.tree.item(selection[0])
+            values = item['values']
+            current_assignment = values[0]
+            current_x = float(values[1])
+            current_y = float(values[2])
+
+            # Get peak index
+            children = self.tree.get_children()
+            peak_index = children.index(selection[0])
+
+            # Create edit dialog
+            dialog = PeakEditDialog(self, current_assignment, current_x, current_y)
+            if dialog.result:
+                new_assignment, new_x, new_y = dialog.result
+
+                # Update detected peaks list
+                if 0 <= peak_index < len(self.detected_peaks):
+                    self.detected_peaks[peak_index] = [new_assignment, new_x, new_y]
+
+                    # Update tree display
+                    self.tree.item(selection[0], values=(new_assignment, f"{new_x:.3f}", f"{new_y:.1f}"))
+
+                    print(f"Peak Navigator: Edited peak {peak_index}: {new_assignment} ({new_x:.3f}, {new_y:.1f})")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to edit peak: {str(e)}")
+
+    def delete_selected_peak(self):
+        """Delete the selected peak from the detected peaks list"""
+        from tkinter import messagebox
+
+        selection = self.tree.selection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select a peak to delete.")
+            return
+
+        if self.selected_peak_type != "detected":
+            messagebox.showinfo("Cannot Delete", "You can only delete detected peaks, not reference peaks.")
+            return
+
+        try:
+            # Get peak info for confirmation
+            item = self.tree.item(selection[0])
+            values = item['values']
+            assignment = values[0]
+
+            # Confirm deletion
+            result = messagebox.askyesno("Confirm Deletion",
+                                       f"Are you sure you want to delete peak '{assignment}'?")
+            if not result:
+                return
+
+            # Get peak index
+            children = self.tree.get_children()
+            peak_index = children.index(selection[0])
+
+            # Remove from detected peaks list
+            if 0 <= peak_index < len(self.detected_peaks):
+                del self.detected_peaks[peak_index]
+
+                # Remove from tree
+                self.tree.delete(selection[0])
+
+                # Update status
+                count = len(self.detected_peaks)
+                self.status_label.config(text=f"Detected Peaks: {count} peak{'s' if count != 1 else ''}")
+
+                print(f"Peak Navigator: Deleted peak '{assignment}' at index {peak_index}")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to delete peak: {str(e)}")
+
+    def add_new_peak(self):
+        """Add a new peak to the detected peaks list"""
+        from tkinter import messagebox
+
+        if self.selected_peak_type != "detected":
+            messagebox.showinfo("Cannot Add", "You can only add peaks to detected peaks list.")
+            return
+
+        try:
+            # Create add dialog
+            dialog = PeakEditDialog(self, f"Det{len(self.detected_peaks)+1}", 8.0, 120.0)
+            if dialog.result:
+                new_assignment, new_x, new_y = dialog.result
+
+                # Add to detected peaks list
+                self.detected_peaks.append([new_assignment, new_x, new_y])
+
+                # Add to tree
+                self.tree.insert("", "end", values=(new_assignment, f"{new_x:.3f}", f"{new_y:.1f}"))
+
+                # Update status
+                count = len(self.detected_peaks)
+                self.status_label.config(text=f"Detected Peaks: {count} peak{'s' if count != 1 else ''}")
+
+                print(f"Peak Navigator: Added new peak: {new_assignment} ({new_x:.3f}, {new_y:.1f})")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to add peak: {str(e)}")
+
+    def save_peak_changes(self):
+        """Save changes back to the integrator"""
+        from tkinter import messagebox
+
+        if self.selected_peak_type != "detected":
+            messagebox.showinfo("Nothing to Save", "Only detected peaks can be saved.")
+            return
+
+        try:
+            if hasattr(self, 'spectrum_controller') and self.spectrum_controller:
+                # Convert detected peaks back to dictionary format
+                updated_peaks = []
+                for i, peak in enumerate(self.detected_peaks):
+                    assignment, x_coord, y_coord = peak
+                    peak_dict = {
+                        'assignment': assignment,
+                        'ppm_x': x_coord,
+                        'ppm_y': y_coord,
+                        'intensity': 1000,  # Default value
+                        'snr': 3.0,  # Default value
+                        'detected': True,
+                        'detection_quality': 'Manual'
+                    }
+                    updated_peaks.append(peak_dict)
+
+                # Update integrator fitted_peaks
+                if hasattr(self.spectrum_controller, 'integrator'):
+                    self.spectrum_controller.integrator.fitted_peaks = updated_peaks
+                    print(f"Peak Navigator: Saved {len(updated_peaks)} peaks to integrator")
+
+                    # Trigger plot update
+                    if hasattr(self.spectrum_controller, 'update_main_plot'):
+                        self.spectrum_controller.update_main_plot()
+
+                    # Update statistics
+                    if hasattr(self.spectrum_controller, 'update_statistics'):
+                        self.spectrum_controller.update_statistics()
+
+                    messagebox.showinfo("Success", f"Saved {len(updated_peaks)} peaks to integrator.")
+                else:
+                    messagebox.showerror("Error", "No integrator available to save peaks.")
+            else:
+                messagebox.showerror("Error", "No connection to main GUI controller.")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save peaks: {str(e)}")
+
+
+class PeakEditDialog:
+    """Dialog for editing peak properties"""
+
+    def __init__(self, parent, assignment="", x_coord=0.0, y_coord=0.0):
+        import tkinter as tk
+        from tkinter import ttk
+
+        self.result = None
+
+        # Create dialog window
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("Edit Peak")
+        self.dialog.geometry("300x200")
+        self.dialog.resizable(False, False)
+        self.dialog.grab_set()  # Make modal
+
+        # Center the dialog
+        self.dialog.transient(parent)
+        parent.update_idletasks()
+        x = (parent.winfo_screenwidth() // 2) - (300 // 2)
+        y = (parent.winfo_screenheight() // 2) - (200 // 2)
+        self.dialog.geometry(f"300x200+{x}+{y}")
+
+        # Create form
+        frame = ttk.Frame(self.dialog, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Assignment
+        ttk.Label(frame, text="Assignment:").grid(row=0, column=0, sticky="w", pady=5)
+        self.assignment_var = tk.StringVar(value=assignment)
+        ttk.Entry(frame, textvariable=self.assignment_var, width=20).grid(row=0, column=1, pady=5)
+
+        # X coordinate
+        ttk.Label(frame, text="X (1H ppm):").grid(row=1, column=0, sticky="w", pady=5)
+        self.x_var = tk.DoubleVar(value=x_coord)
+        ttk.Entry(frame, textvariable=self.x_var, width=20).grid(row=1, column=1, pady=5)
+
+        # Y coordinate
+        ttk.Label(frame, text="Y (15N/13C ppm):").grid(row=2, column=0, sticky="w", pady=5)
+        self.y_var = tk.DoubleVar(value=y_coord)
+        ttk.Entry(frame, textvariable=self.y_var, width=20).grid(row=2, column=1, pady=5)
+
+        # Buttons
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=3, column=0, columnspan=2, pady=20)
+
+        ttk.Button(button_frame, text="OK", command=self.ok_clicked).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=self.cancel_clicked).pack(side=tk.LEFT, padx=5)
+
+        # Wait for dialog to close
+        self.dialog.wait_window()
+
+    def ok_clicked(self):
+        try:
+            assignment = self.assignment_var.get().strip()
+            x_coord = self.x_var.get()
+            y_coord = self.y_var.get()
+
+            if not assignment:
+                assignment = "Peak"
+
+            self.result = (assignment, x_coord, y_coord)
+            self.dialog.destroy()
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Invalid Input", f"Please check your input values: {e}")
+
+    def cancel_clicked(self):
+        self.result = None
+        self.dialog.destroy()

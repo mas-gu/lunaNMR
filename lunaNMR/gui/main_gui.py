@@ -123,6 +123,11 @@ class NMRPeaksSeriesGUI:
         self.integration_paused = False
         self.integration_start_time = None
 
+        # Initialize workflow mode variables FIRST (before config)
+        self.workflow_mode = tk.StringVar(value="peak_list")  # Default to existing workflow
+        self.sn_threshold = tk.DoubleVar(value=3.0)          # Default S/N threshold
+        self.expected_peak_count = tk.IntVar(value=50)        # Default expected count
+
         # Initialize GUI variables from config
         self.init_variables_from_config()
 
@@ -327,6 +332,33 @@ class NMRPeaksSeriesGUI:
         self.integrator.fitting_parameters.update(integrator_params['fitting_params'])
         self.integrator.gui_params = integrator_params['gui_params']
 
+        # SOLUTION 4: Enhanced parameter synchronization for S/N workflow
+        # Sync S/N threshold and expected peak count to ensure GUI values are used
+        if hasattr(self, 'sn_threshold') and hasattr(self, 'expected_peak_count'):
+            try:
+                # Sync S/N threshold from GUI
+                sn_threshold_value = float(self.sn_threshold.get())
+                self.integrator.sn_threshold = sn_threshold_value
+
+                # Sync expected peak count from GUI
+                expected_count_value = int(self.expected_peak_count.get())
+                self.integrator.expected_peak_count = expected_count_value
+
+                # Also sync workflow mode for proper detection routing
+                if hasattr(self, 'workflow_mode'):
+                    workflow_mode = self.workflow_mode.get()
+                    if workflow_mode == "sn_threshold":
+                        self.integrator.set_processing_mode('sn_native')
+                    elif workflow_mode == "peak_list":
+                        self.integrator.set_processing_mode('peak_list')
+                    else:
+                        self.integrator.set_processing_mode('full_detection')
+
+                print(f"✅ S/N workflow parameters synced: threshold={sn_threshold_value}, expected_count={expected_count_value}")
+
+            except (ValueError, AttributeError) as e:
+                print(f"⚠️ S/N parameter sync warning: {e}")
+
         print(f"✅ Parameters synchronized: {len(updated_params)} parameters updated via parameter manager")
 
 
@@ -411,6 +443,7 @@ class NMRPeaksSeriesGUI:
         self.setup_status_bar()
 
         # Setup components
+        self.setup_workflow_selection(self.scrollable_controls.scrollable_frame)  # NEW: Add workflow selection first
         self.setup_enhanced_controls(self.scrollable_controls.scrollable_frame)
         self.setup_enhanced_visualization(center_panel)
         self.setup_peak_navigator()
@@ -502,6 +535,77 @@ class NMRPeaksSeriesGUI:
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="User Guide", command=self.show_help)
         help_menu.add_command(label="About", command=self.show_about)
+
+    def setup_workflow_selection(self, parent):
+        """Setup workflow selection frame"""
+        workflow_frame = ttk.LabelFrame(parent, text="🎯 Peak Detection Workflow", padding="10")
+        workflow_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Workflow radio buttons
+        ttk.Radiobutton(workflow_frame, text="📋 With Peak List (Standard)",
+                       variable=self.workflow_mode, value="peak_list",
+                       command=self.on_workflow_change).pack(anchor=tk.W, padx=10, pady=2)
+
+        ttk.Radiobutton(workflow_frame, text="🎯 S/N Threshold (Native Detection)",
+                       variable=self.workflow_mode, value="sn_threshold",
+                       command=self.on_workflow_change).pack(anchor=tk.W, padx=10, pady=2)
+
+        # S/N Parameters frame (initially hidden)
+        self.sn_params_frame = ttk.Frame(workflow_frame)
+        self.sn_params_frame.pack(fill=tk.X, pady=5)
+
+        # S/N parameters grid
+        sn_grid = ttk.Frame(self.sn_params_frame)
+        sn_grid.pack(fill=tk.X, padx=10)
+
+        ttk.Label(sn_grid, text="S/N Threshold:").grid(row=0, column=0, sticky="w", padx=5)
+        ttk.Spinbox(sn_grid, from_=1.0, to=10.0, increment=0.5,
+                   textvariable=self.sn_threshold, width=8, format="%.1f").grid(row=0, column=1, padx=5)
+
+        ttk.Label(sn_grid, text="Expected Peak Count:").grid(row=1, column=0, sticky="w", padx=5)
+        ttk.Spinbox(sn_grid, from_=1, to=500, increment=10,
+                   textvariable=self.expected_peak_count, width=8).grid(row=1, column=1, padx=5)
+
+        # Initially hide S/N parameters
+        self.sn_params_frame.pack_forget()
+
+    def on_workflow_change(self):
+        """Handle workflow mode changes"""
+        mode = self.workflow_mode.get()
+
+        if mode == "sn_threshold":
+            # Show S/N parameters
+            self.sn_params_frame.pack(fill=tk.X, pady=5)
+            # Hide peak list file selection if it exists
+            if hasattr(self, 'peak_file_list'):
+                # Update file list to show only NMR files are required
+                self.update_file_requirements()
+        else:
+            # Hide S/N parameters
+            self.sn_params_frame.pack_forget()
+            # Show peak list file selection
+            if hasattr(self, 'peak_file_list'):
+                self.update_file_requirements()
+
+        print(f"🔄 Workflow mode changed to: {mode}")
+        self.update_current_status()
+
+    def update_file_requirements(self):
+        """Update UI to reflect file requirements based on workflow mode"""
+        mode = self.workflow_mode.get()
+
+        if mode == "sn_threshold":
+            # Update labels to indicate peak list is optional
+            if hasattr(self, 'current_status'):
+                if not self.current_nmr_file:
+                    self.current_status.config(text="📋 S/N Mode: Load NMR spectrum to begin")
+                elif not self.current_peak_file:
+                    self.current_status.config(text="📋 S/N Mode: Ready for native detection")
+        else:
+            # Standard mode - both files required
+            if hasattr(self, 'current_status'):
+                if not self.current_nmr_file or not self.current_peak_file:
+                    self.current_status.config(text="📋 Peak List Mode: Load both files")
 
     def setup_enhanced_controls(self, parent):
         """Setup enhanced control panel with all advanced features"""
@@ -951,6 +1055,16 @@ class NMRPeaksSeriesGUI:
                                       variable=self.edit_detected_peaks,
                                       command=self.update_edit_mode_status)
         det_checkbox.pack(side=tk.LEFT)
+
+        # Peak deletion mode
+        deletion_frame = ttk.Frame(edit_frame)
+        deletion_frame.pack(fill=tk.X, pady=(5, 2))
+
+        self.peak_deletion_mode = tk.BooleanVar(value=False)
+        deletion_checkbox = ttk.Checkbutton(deletion_frame, text="🗑️ Enable Peak Deletion (Left-click to delete)",
+                                          variable=self.peak_deletion_mode,
+                                          command=self.update_edit_mode_status)
+        deletion_checkbox.pack(side=tk.LEFT, padx=(20, 0))
 
         # Instructions
         #instructions_label = ttk.Label(edit_frame,
@@ -2489,10 +2603,19 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
         self.update_current_status()
         self.validate_current_files()
 
-        if self.current_peak_file:
-            self.load_current_data()
+        # Load data based on workflow mode
+        mode = getattr(self, 'workflow_mode', tk.StringVar(value="peak_list")).get()
+
+        if mode == "peak_list":
+            # Standard mode: need both files
+            if self.current_peak_file:
+                self.load_current_data()
+            else:
+                self.update_status(f"NMR file selected: {filename}. Please select a peak list.")
         else:
-            self.update_status(f"NMR file selected: {filename}. Please select a peak list.")
+            # S/N mode: spectrum only is sufficient
+            self.load_current_data()
+            self.update_status(f"🎯 S/N Mode: Spectrum loaded - Ready for native detection")
 
     def on_peak_file_select(self, file_path, filename):
         """Handle peak list file selection"""
@@ -2508,29 +2631,44 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             self.update_status(f"Peak list selected: {filename}. Please select an NMR spectrum.")
 
     def load_current_data(self):
-        """Load currently selected files"""
-        if not self.current_nmr_file or not self.current_peak_file:
+        """Load currently selected files with workflow-aware logic"""
+        if not self.current_nmr_file:
             return
+
+        # Check workflow mode
+        mode = getattr(self, 'workflow_mode', tk.StringVar(value="peak_list")).get()
 
         try:
             self.update_status("Loading data...")
             self.root.config(cursor="watch")
             self.root.update()
 
-            # Load peak list
-            peak_df = self.file_manager.load_peak_list(self.current_peak_file)
+            if mode == "peak_list":
+                # EXISTING WORKFLOW - PRESERVED
+                if not self.current_peak_file:
+                    return
 
-            # Validate and fix peak list
-            issues = self.validator.validate_peak_list_integrity(peak_df)
-            if issues:
-                fixed_df, fixes = self.validator.auto_fix_peak_list(peak_df)
-                peak_df = fixed_df
-                self.update_status(f"Fixed peak list issues: {', '.join(fixes)}")
+                print("📋 Loading in Peak List mode (existing workflow)")
 
-            # Load into integrator
-            self.integrator.peak_list = peak_df
+                # Load peak list (existing code)
+                peak_df = self.file_manager.load_peak_list(self.current_peak_file)
 
-            # Load NMR data
+                # Validate and fix peak list
+                issues = self.validator.validate_peak_list_integrity(peak_df)
+                if issues:
+                    fixed_df, fixes = self.validator.auto_fix_peak_list(peak_df)
+                    peak_df = fixed_df
+                    self.update_status(f"Fixed peak list issues: {', '.join(fixes)}")
+
+                # Load into integrator
+                self.integrator.peak_list = peak_df
+
+            else:  # S/N threshold mode
+                # NEW WORKFLOW - SPECTRUM ONLY
+                print("🎯 Loading in S/N Threshold mode (spectrum only)")
+                self.integrator.peak_list = None
+
+            # Load NMR data (common to both workflows)
             success = self.integrator.load_nmr_file(self.current_nmr_file)
 
             if success:
@@ -2559,31 +2697,51 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             self.root.config(cursor="")
 
     def update_current_status(self):
-        """Update current file status display"""
-        if self.current_nmr_file and self.current_peak_file:
-            nmr_name = os.path.basename(self.current_nmr_file)
-            peak_name = os.path.basename(self.current_peak_file)
-            self.current_status.config(
-                text=f"📊 Spectrum: {nmr_name} | 📋 Peaks: {peak_name}",
-                foreground='green'
-            )
-        elif self.current_nmr_file:
-            nmr_name = os.path.basename(self.current_nmr_file)
-            self.current_status.config(
-                text=f"📊 Spectrum: {nmr_name} | 📋 Peak list: Not selected",
-                foreground='orange'
-            )
-        elif self.current_peak_file:
-            peak_name = os.path.basename(self.current_peak_file)
-            self.current_status.config(
-                text=f"📊 Spectrum: Not selected | 📋 Peaks: {peak_name}",
-                foreground='orange'
-            )
+        """Update current file status display with workflow awareness"""
+        mode = getattr(self, 'workflow_mode', tk.StringVar(value="peak_list")).get()
+
+        if mode == "peak_list":
+            # Peak list mode: both files required for green status
+            if self.current_nmr_file and self.current_peak_file:
+                nmr_name = os.path.basename(self.current_nmr_file)
+                peak_name = os.path.basename(self.current_peak_file)
+                self.current_status.config(
+                    text=f"📊 Spectrum: {nmr_name} | 📋 Peaks: {peak_name}",
+                    foreground='green'
+                )
+            elif self.current_nmr_file:
+                nmr_name = os.path.basename(self.current_nmr_file)
+                self.current_status.config(
+                    text=f"📊 Spectrum: {nmr_name} | 📋 Peak list: Not selected",
+                    foreground='orange'
+                )
+            elif self.current_peak_file:
+                peak_name = os.path.basename(self.current_peak_file)
+                self.current_status.config(
+                    text=f"📊 Spectrum: Not selected | 📋 Peaks: {peak_name}",
+                    foreground='orange'
+                )
+            else:
+                self.current_status.config(
+                    text="📋 Peak List Mode: Load spectrum and peak list",
+                    foreground='gray'
+                )
         else:
-            self.current_status.config(
-                text="📋 No files loaded",
-                foreground='gray'
-            )
+            # S/N mode: spectrum only sufficient for green status
+            if self.current_nmr_file:
+                nmr_name = os.path.basename(self.current_nmr_file)
+                sn_threshold = getattr(self, 'sn_threshold', tk.DoubleVar(value=3.0)).get()
+                expected_count = getattr(self, 'expected_peak_count', tk.IntVar(value=50)).get()
+
+                self.current_status.config(
+                    text=f"🎯 S/N Mode: {nmr_name} | Threshold: {sn_threshold} | Count: {expected_count}",
+                    foreground='green'
+                )
+            else:
+                self.current_status.config(
+                    text="🎯 S/N Mode: Load NMR spectrum to begin",
+                    foreground='gray'
+                )
 
     # =================== PEAK COORDINATE ADJUSTMENT METHODS ===================
 
@@ -2724,15 +2882,20 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             return
 
         try:
-            # Check integration mode
-            integration_mode = self.integration_mode.get()
-
-            if integration_mode in ['integrated', 'adaptive']:
-                # Use integrated detection-fitting
-                self._detect_peaks_integrated()
+            # Check workflow mode first (S/N vs Peak List)
+            if hasattr(self, 'workflow_mode') and self.workflow_mode.get() == "sn_threshold":
+                # Use S/N native detection workflow
+                self._detect_peaks_sn_native()
             else:
-                # Use standard detection (legacy)
-               self._detect_peaks_standard()
+                # Check integration mode for traditional workflows
+                integration_mode = self.integration_mode.get()
+
+                if integration_mode in ['integrated', 'adaptive']:
+                    # Use integrated detection-fitting
+                    self._detect_peaks_integrated()
+                else:
+                    # Use standard detection (legacy)
+                   self._detect_peaks_standard()
 
         except Exception as e:
             self.update_status(f"❌ Detection failed: {str(e)}")
@@ -3117,6 +3280,40 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
         else:
             self.update_status("❌ No peaks detected - Check parameters")
+
+    def _detect_peaks_sn_native(self):
+        """S/N native detection method (no peak list required)"""
+        self.update_status("Detecting peaks using S/N threshold...")
+        self.root.config(cursor="watch")
+
+        try:
+            # Sync parameters from GUI
+            self.on_parameter_change()
+
+            # Perform S/N native detection
+            detected_peaks = self.integrator.detect_peaks_sn_native()
+
+            if detected_peaks and len(detected_peaks) > 0:
+                # Get statistics from integrator (should be updated by native detection)
+                stats = self.integrator.get_detection_statistics()
+                self.update_status(f"✅ S/N Detection: {stats['detected_peaks']} peaks found ({stats['detection_rate']:.1f}% detection rate)")
+
+                # Update plots and statistics
+                self.update_main_plot()
+                self.update_statistics()
+
+                # Load detected peaks into navigator
+                if hasattr(self, 'peak_navigator'):
+                    self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
+            else:
+                self.update_status("❌ S/N Detection: No peaks detected - Check threshold")
+
+        except Exception as e:
+            self.update_status(f"❌ S/N Detection failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self.root.config(cursor="")
 
     def _detect_peaks_integrated(self):
         """Integrated detection-fitting method"""
@@ -3617,16 +3814,100 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             self.root.config(cursor="")
 
     def fit_all_peaks(self):
-        """Fit Voigt profiles to all peaks using new Single Spectrum Processor"""
+        """Fit Voigt profiles with workflow-aware logic"""
 
-        # Validate peak list
-        if (not hasattr(self.integrator, 'peak_list') or
-            self.integrator.peak_list is None or
-            (hasattr(self.integrator.peak_list, 'empty') and self.integrator.peak_list.empty)):
-            messagebox.showerror("Error", "Please load a peak list first")
-            return
+        # Check workflow mode
+        mode = getattr(self, 'workflow_mode', tk.StringVar(value="peak_list")).get()
 
-        print("🚀 Starting Fit All Peaks using Single Spectrum Processor")
+        if mode == "peak_list":
+            # EXISTING VALIDATION - PRESERVED
+            if (not hasattr(self.integrator, 'peak_list') or
+                self.integrator.peak_list is None or
+                (hasattr(self.integrator.peak_list, 'empty') and self.integrator.peak_list.empty)):
+                messagebox.showerror("Error", "Please load a peak list first")
+                return
+
+            print("🚀 Starting Fit All Peaks using Peak List mode")
+
+        else:  # S/N threshold mode
+            # NEW S/N VALIDATION
+            if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
+                messagebox.showerror("Error", "Please load an NMR spectrum first")
+                return
+
+            print("🎯 Starting S/N Native Peak Detection and Fitting")
+
+            # Get S/N parameters
+            sn_threshold = getattr(self, 'sn_threshold', tk.DoubleVar(value=3.0)).get()
+            expected_count = getattr(self, 'expected_peak_count', tk.IntVar(value=50)).get()
+
+            print(f"   S/N Threshold: {sn_threshold}")
+            print(f"   Expected Peak Count: {expected_count}")
+
+            # Set S/N parameters in integrator
+            self.integrator.sn_threshold = sn_threshold
+            self.integrator.expected_peak_count = expected_count
+            self.integrator.set_processing_mode('sn_native')
+
+            # Detect peaks first, then fit
+            try:
+                self.update_status("🎯 Detecting peaks using S/N threshold...")
+                detected_peaks = self.integrator.detect_peaks_sn_native()
+
+                if not detected_peaks:
+                    messagebox.showwarning("Warning",
+                        f"No peaks detected with S/N threshold {sn_threshold}. Try lowering the threshold.")
+                    return
+
+                print(f"✅ Detected {len(detected_peaks)} peaks for fitting")
+
+                # Convert to peak list format for compatibility with existing fitting code
+                import pandas as pd
+                peak_list_data = []
+                for peak in detected_peaks:
+                    peak_list_data.append({
+                        'Assignment': peak['assignment'],
+                        'Position_X': peak['ppm_x'],  # Use Position_X instead of X_PPM
+                        'Position_Y': peak['ppm_y'],  # Use Position_Y instead of Y_PPM
+                        'X_HZ': 0,  # Placeholder
+                        'Y_HZ': 0   # Placeholder
+                    })
+
+                # Create temporary peak list for fitting compatibility
+                self.integrator.peak_list = pd.DataFrame(peak_list_data)
+                print(f"   Created temporary peak list with {len(detected_peaks)} detected peaks")
+
+                # Note: fitted_peaks is already populated by detect_peaks_sn_native()
+                print(f"   GUI fitted_peaks populated with {len(self.integrator.fitted_peaks)} peaks")
+
+            except Exception as e:
+                messagebox.showerror("Error", f"S/N detection failed: {str(e)}")
+                print(f"❌ S/N detection error: {e}")
+                return
+
+        # FOR S/N MODE: Detection complete, now proceed with fitting pipeline
+        if mode == "sn_threshold":
+            print("🎯 S/N Detection completed - proceeding with fitting pipeline...")
+            print(f"   Detected {len(detected_peaks)} peaks to be fitted using Voigt profiles")
+            print(f"   Using S/N Threshold: {self.integrator.sn_threshold} (from GUI, NOT noise threshold multiplier)")
+
+            # Update GUI immediately after detection
+            self.update_main_plot()
+            self.update_statistics()
+
+            # Load detected peaks into navigator
+            if hasattr(self, 'peak_navigator'):
+                self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
+
+            # Update status with proper statistics and mark S/N workflow complete
+            detected_count = len(detected_peaks)
+            self.update_status(f"✅ S/N Detection: {detected_count} peaks found (100.0% detection rate)")
+
+            # Switch back to fitting mode for Voigt profile fitting
+            self.integrator.set_processing_mode('full_detection')
+            print(f"   Switched to fitting mode: {self.integrator.processing_mode}")
+            print(f"   Note: S/N threshold ({self.integrator.sn_threshold}) differs from detection noise threshold ({self.noise_threshold.get()})")
+            # Continue to fitting pipeline - do not return here
 
         # LOG VOIGT FITTING PARAMETERS
         print("\n" + "="*60)
@@ -4743,14 +5024,22 @@ Total Peaks Processed: {total_peaks}
             self.canvas_main.draw()
 
     def update_statistics(self):
-        """Update statistics display"""
+        """Update statistics display - SOLUTION 1: Add delayed update for timing fix"""
+        # Schedule delayed update to ensure fitted_peaks is fully populated
+        if hasattr(self, 'root'):
+            self.root.after(50, self._delayed_update_statistics)
+        else:
+            self._delayed_update_statistics()
+
+    def _delayed_update_statistics(self):
+        """Delayed statistics update to ensure fitted_peaks is properly populated"""
         stats = {}
 
         # Detection statistics
         if hasattr(self.integrator, 'fitted_peaks') and (
             self.integrator.fitted_peaks is not None and
-            (not hasattr(self.integrator.fitted_peaks, 'empty') or not self.integrator.fitted_peaks.empty) and
-            len(self.integrator.fitted_peaks) > 0
+            len(self.integrator.fitted_peaks) > 0 and
+            (not hasattr(self.integrator.fitted_peaks, 'empty') or not self.integrator.fitted_peaks.empty)
         ):
             detected_count = sum(1 for p in self.integrator.fitted_peaks if p.get('detected', False))
             total_count = len(self.integrator.fitted_peaks)
@@ -4760,6 +5049,13 @@ Total Peaks Processed: {total_peaks}
                 'total_peaks': total_count,
                 'detection_rate': (detected_count / total_count * 100) if total_count > 0 else 0
             }
+        else:
+            # Debug logging for statistics timing issue
+            if hasattr(self.integrator, 'fitted_peaks'):
+                fitted_peaks = self.integrator.fitted_peaks
+                print(f"📊 Statistics debug: fitted_peaks={type(fitted_peaks)}, "
+                      f"is_none={fitted_peaks is None}, "
+                      f"len={len(fitted_peaks) if fitted_peaks else 'N/A'}")
 
         # Integration statistics
         if hasattr(self.integrator, 'integration_results') and (
@@ -4942,18 +5238,28 @@ Total Peaks Processed: {total_peaks}
         ref_enabled = self.edit_reference_peaks.get()
         det_enabled = self.edit_detected_peaks.get()
 
+        # Check if deletion mode is enabled
+        deletion_enabled = self.peak_deletion_mode.get()
+
+        if deletion_enabled:
+            deletion_suffix = " [DELETE MODE]"
+            status_color = 'red'
+        else:
+            deletion_suffix = " [MOVE MODE]"
+            status_color = 'blue'
+
         if ref_enabled and det_enabled:
-            status_text = "Mode: EDIT (Ref + Det)"
+            status_text = f"Mode: EDIT (Ref + Det){deletion_suffix}"
         elif ref_enabled:
-            status_text = "Mode: EDIT (Ref only)"
+            status_text = f"Mode: EDIT (Ref only){deletion_suffix}"
         elif det_enabled:
-            status_text = "Mode: EDIT (Det only)"
+            status_text = f"Mode: EDIT (Det only){deletion_suffix}"
         else:
             status_text = "Mode: EDIT (None selected!)"
             self.edit_mode_status_label.config(text=status_text, foreground='orange')
             return
 
-        self.edit_mode_status_label.config(text=status_text, foreground='red')
+        self.edit_mode_status_label.config(text=status_text, foreground=status_color)
 
     def on_peak_edit_click(self, event):
         """Handle mouse clicks in peak edit mode"""
@@ -4962,6 +5268,15 @@ Total Peaks Processed: {total_peaks}
 
         click_x, click_y = event.xdata, event.ydata
 
+        # Check if deletion mode is enabled
+        if self.peak_deletion_mode.get():
+            # Deletion mode: find and delete peak immediately
+            peak_info = self.find_nearest_peak(click_x, click_y)
+            if peak_info:
+                self.delete_selected_peak(peak_info)
+            return
+
+        # Regular editing mode (move peaks)
         if self.selected_peak_info is None:
             # First click: select peak
             peak_info = self.find_nearest_peak(click_x, click_y)
@@ -5025,8 +5340,13 @@ Total Peaks Processed: {total_peaks}
         """Update display to show selected peak info"""
         if self.selected_peak_info:
             peak_info = self.selected_peak_info
+            if self.peak_deletion_mode.get():
+                instruction_text = "In DELETE mode - click will delete this peak"
+            else:
+                instruction_text = "Click new position to move"
+
             self.selected_peak_label.config(
-                text=f"Selected: {peak_info['type']} peak '{peak_info['assignment']}' at ({peak_info['x']:.3f}, {peak_info['y']:.1f}) - Click new position to move"
+                text=f"Selected: {peak_info['type']} peak '{peak_info['assignment']}' at ({peak_info['x']:.3f}, {peak_info['y']:.1f}) - {instruction_text}"
             )
 
     def move_selected_peak(self, new_x, new_y):
@@ -5063,6 +5383,69 @@ Total Peaks Processed: {total_peaks}
         self.update_main_plot()
 
         print(f"✅ Peak position updated successfully")
+
+    def delete_selected_peak(self, peak_info):
+        """Delete the selected peak from the appropriate peak list"""
+        from tkinter import messagebox
+
+        # Confirm deletion
+        assignment = peak_info['assignment']
+        peak_type = peak_info['type']
+
+        result = messagebox.askyesno("Confirm Peak Deletion",
+                                   f"Are you sure you want to delete {peak_type} peak '{assignment}'?\n\n"
+                                   f"Position: ({peak_info['x']:.3f}, {peak_info['y']:.1f})\n"
+                                   f"This action cannot be undone.")
+
+        if not result:
+            return
+
+        try:
+            if peak_info['type'] == 'reference':
+                # Delete from DataFrame
+                peak_idx = peak_info['index']
+
+                # Remove the row from the DataFrame
+                self.integrator.peak_list = self.integrator.peak_list.drop(index=peak_idx).reset_index(drop=True)
+
+                print(f"✅ Deleted reference peak '{assignment}' at index {peak_idx}")
+
+                # Update peak navigator if showing reference peaks
+                if hasattr(self, 'peak_navigator') and hasattr(self.peak_navigator, 'selected_peak_type') and self.peak_navigator.selected_peak_type == 'reference':
+                    self.peak_navigator.load_reference_peaks(self.integrator.peak_list)
+
+            elif peak_info['type'] == 'detected':
+                # Delete from list of dictionaries
+                peak_idx = peak_info['index']
+
+                # Remove the peak from the list
+                if 0 <= peak_idx < len(self.integrator.fitted_peaks):
+                    del self.integrator.fitted_peaks[peak_idx]
+
+                    print(f"✅ Deleted detected peak '{assignment}' at index {peak_idx}")
+
+                    # Update peak navigator if showing detected peaks
+                    if hasattr(self, 'peak_navigator') and hasattr(self.peak_navigator, 'selected_peak_type') and self.peak_navigator.selected_peak_type == 'detected':
+                        self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
+                else:
+                    print(f"❌ Invalid peak index: {peak_idx}")
+                    return
+
+            # Clear selected peak
+            self.selected_peak_info = None
+            self.selected_peak_label.config(text=f"Deleted {peak_type} peak '{assignment}'")
+
+            # Refresh the main plot
+            self.update_main_plot()
+
+            # Update statistics
+            self.update_statistics()
+
+            print(f"✅ Peak deletion completed successfully")
+
+        except Exception as e:
+            messagebox.showerror("Deletion Error", f"Failed to delete peak: {str(e)}")
+            print(f"❌ Peak deletion failed: {e}")
 
     # =================== FILE OPERATIONS ===================
 
@@ -5276,8 +5659,9 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
     # =================== UTILITY METHODS ===================
 
     def validate_current_files(self):
-        """Validate currently loaded files"""
+        """Validate currently loaded files with workflow awareness"""
         validation_messages = []
+        mode = getattr(self, 'workflow_mode', tk.StringVar(value="peak_list")).get()
 
         if self.current_nmr_file:
             valid, message = self.file_manager.validate_nmr_file(self.current_nmr_file)
@@ -5286,12 +5670,20 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
             else:
                 validation_messages.append(f"❌ NMR: {message}")
 
-        if self.current_peak_file:
-            valid, message = self.file_manager.validate_peak_file(self.current_peak_file)
-            if valid:
-                validation_messages.append(f"✅ Peaks: {message}")
-            else:
-                validation_messages.append(f"❌ Peaks: {message}")
+        if mode == "peak_list":
+            # Peak list mode: validate peak file if present
+            if self.current_peak_file:
+                valid, message = self.file_manager.validate_peak_file(self.current_peak_file)
+                if valid:
+                    validation_messages.append(f"✅ Peaks: {message}")
+                else:
+                    validation_messages.append(f"❌ Peaks: {message}")
+        else:
+            # S/N mode: peak file not required, add S/N status if spectrum loaded
+            if self.current_nmr_file:
+                sn_threshold = getattr(self, 'sn_threshold', tk.DoubleVar(value=3.0)).get()
+                expected_count = getattr(self, 'expected_peak_count', tk.IntVar(value=50)).get()
+                validation_messages.append(f"🎯 S/N: {sn_threshold}, Count: {expected_count}")
 
         if validation_messages:
             self.file_validation_label.config(text=" | ".join(validation_messages))

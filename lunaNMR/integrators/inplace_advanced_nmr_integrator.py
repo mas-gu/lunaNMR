@@ -309,6 +309,15 @@ class InPlaceAdvancedNMRIntegrator:
 
         print("Performing reference-based peak detection with Y-consolidation...")
 
+        # Ensure threshold is set
+        if self.threshold is None:
+            print("No threshold set - estimating noise level...")
+            self._estimate_noise_level()
+            if self.threshold is None:
+                # Fallback threshold
+                self.threshold = np.std(self.nmr_data) * 3.0
+                print(f"Using fallback threshold: {self.threshold:.2f}")
+
         detected_peaks = []
         reference_retained = 0
 
@@ -464,8 +473,14 @@ class InPlaceAdvancedNMRIntegrator:
         # Select best candidate (highest quality score)
         best_candidate = max(candidates, key=lambda x: x['quality_score'])
 
-        # Validate minimum SNR
-        if best_candidate['snr'] < MINIMUM_SNR:
+        # Validate minimum SNR - use GUI S/N threshold if available
+        effective_snr_threshold = MINIMUM_SNR  # Default fallback
+        if hasattr(self, 'sn_threshold') and self.sn_threshold:
+            effective_snr_threshold = self.sn_threshold
+        elif hasattr(self, 'sn_detection_params') and 'min_snr' in self.sn_detection_params:
+            effective_snr_threshold = self.sn_detection_params['min_snr']
+
+        if best_candidate['snr'] < effective_snr_threshold:
             return self._create_failed_detection(ref_x_ppm, ref_y_ppm, assignment, f"SNR too low: {best_candidate['snr']:.1f}")
 
         # Create successful detection
@@ -762,8 +777,14 @@ class InPlaceAdvancedNMRIntegrator:
                 ppm_x, ppm_y = self.point_to_ppm(global_y, global_x)
                 snr = abs(intensity) / self.noise_level if self.noise_level > 0 else 0
 
-                # Validate minimum SNR
-                if snr >= MINIMUM_SNR:
+                # Validate minimum SNR - use GUI S/N threshold if available
+                effective_snr_threshold = MINIMUM_SNR  # Default fallback
+                if hasattr(self, 'sn_threshold') and self.sn_threshold:
+                    effective_snr_threshold = self.sn_threshold
+                elif hasattr(self, 'sn_detection_params') and 'min_snr' in self.sn_detection_params:
+                    effective_snr_threshold = self.sn_detection_params['min_snr']
+
+                if snr >= effective_snr_threshold:
                     candidates.append({
                         'ppm_x': ppm_x,
                         'ppm_y': ppm_y,
@@ -789,6 +810,15 @@ class InPlaceAdvancedNMRIntegrator:
     def detect_peaks_traditional(self):
         """Traditional peak detection using threshold and local maxima (fallback)"""
         print("Detecting peaks using traditional methods...")
+
+        # Ensure threshold is set
+        if self.threshold is None:
+            print("No threshold set - estimating noise level...")
+            self._estimate_noise_level()
+            if self.threshold is None:
+                # Fallback threshold
+                self.threshold = np.std(self.nmr_data) * 3.0
+                print(f"Using fallback threshold: {self.threshold:.2f}")
 
         # Find all points above threshold
         mask = np.abs(self.nmr_data) > self.threshold
@@ -818,7 +848,15 @@ class InPlaceAdvancedNMRIntegrator:
                 ppm_x, ppm_y = self.point_to_ppm(y, x)
                 snr = np.abs(intensity) / self.noise_level
 
-                if snr >= MINIMUM_SNR:
+                # SOLUTION 2: Use GUI S/N threshold instead of hardcoded MINIMUM_SNR
+                # Check for GUI-provided S/N threshold first, fallback to MINIMUM_SNR
+                effective_snr_threshold = MINIMUM_SNR  # Default fallback
+                if hasattr(self, 'sn_threshold') and self.sn_threshold:
+                    effective_snr_threshold = self.sn_threshold
+                elif hasattr(self, 'sn_detection_params') and 'min_snr' in self.sn_detection_params:
+                    effective_snr_threshold = self.sn_detection_params['min_snr']
+
+                if snr >= effective_snr_threshold:
                     detected.append({
                         'y_point': y,
                         'x_point': x,
@@ -833,6 +871,13 @@ class InPlaceAdvancedNMRIntegrator:
         # Sort by intensity
         detected.sort(key=lambda x: abs(x['intensity']), reverse=True)
 
+        # SOLUTION 3: Apply expected peak count limiting to traditional detection
+        # Limit number of peaks if expected_peak_count is set from GUI
+        if hasattr(self, 'expected_peak_count') and self.expected_peak_count and len(detected) > self.expected_peak_count:
+            original_count = len(detected)
+            detected = detected[:self.expected_peak_count]
+            print(f"Applied expected peak count limit: {original_count} → {len(detected)} peaks (limit: {self.expected_peak_count})")
+
         # Apply Peak Centroid Refinement (always enabled for enhanced accuracy)
         gui_params = getattr(self, 'gui_params', {})
         detected = self._refine_peaks_with_centroids(detected, gui_params)
@@ -840,7 +885,17 @@ class InPlaceAdvancedNMRIntegrator:
         # Store refined peaks (not original unrefined peaks)
         self.detected_peaks = detected
 
-        print(f"Detected {len(detected)} peaks above threshold")
+        # CRITICAL FIX: Also populate fitted_peaks for GUI compatibility
+        # This ensures statistics and Peak Navigator work correctly
+        if not self.peak_list or len(self.peak_list) == 0:
+            # No peak list available - use detected peaks directly as fitted peaks
+            # This is the case for S/N native detection mode
+            self.fitted_peaks = detected
+            print(f"Detected {len(detected)} peaks above threshold (no peak list - using as fitted peaks)")
+        else:
+            # Peak list available - detected peaks will be matched later
+            print(f"Detected {len(detected)} peaks above threshold (will be matched to peak list)")
+
         return detected
 
     def match_peaks_to_list(self):
@@ -861,9 +916,27 @@ class InPlaceAdvancedNMRIntegrator:
             len(self.detected_peaks) > 0
         )
 
-        if not detected_peaks_available or self.peak_list is None:
-            print("No detected peaks or peak list available for matching")
+        if not detected_peaks_available:
+            print("No detected peaks available for matching")
             return []
+
+        if self.peak_list is None or len(self.peak_list) == 0:
+            print("No peak list available for matching - returning detected peaks as-is")
+            # Return detected peaks in the fitted format for consistency
+            fitted_format_peaks = []
+            for detected in self.detected_peaks:
+                fitted_format_peaks.append({
+                    'assignment': detected.get('assignment', f"Det_{len(fitted_format_peaks)+1:03d}"),
+                    'ppm_x': detected['ppm_x'],
+                    'ppm_y': detected['ppm_y'],
+                    'x_point': detected.get('x_point', -1),
+                    'y_point': detected.get('y_point', -1),
+                    'intensity': detected['intensity'],
+                    'snr': detected['snr'],
+                    'detected': True,
+                    'detection_quality': detected.get('detection_quality', 'Traditional')
+                })
+            return fitted_format_peaks
 
         matched_peaks = []
 
