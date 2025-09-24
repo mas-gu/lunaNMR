@@ -146,20 +146,60 @@ class EnhancedPeakPicker:
             print(f"Noise estimation failed: {e}")
             return np.std(data_2d) * 0.1  # Fallback
 
-    def preprocess_data_for_detection(self, data_2d, sigma=None):
+    def preprocess_data_for_detection(self, data_2d, sigma=None, adaptive_smoothing=True):
         """
-        Preprocess 2D data for better peak detection
+        Preprocess 2D data for better peak detection with adaptive smoothing
         """
         if sigma is None:
-            sigma = self.detection_parameters['smoothing_sigma']
+            if adaptive_smoothing:
+                sigma = self.get_adaptive_smoothing_parameter(data_2d)
+            else:
+                sigma = self.detection_parameters['smoothing_sigma']
 
-        # Light Gaussian smoothing to reduce noise
+        # Adaptive Gaussian smoothing based on data characteristics
         if sigma > 0:
             smoothed = gaussian_filter(data_2d, sigma=sigma)
         else:
             smoothed = data_2d
 
         return smoothed
+
+    def get_adaptive_smoothing_parameter(self, data_2d):
+        """
+        Calculate adaptive smoothing parameter based on data noise and complexity
+        """
+        # Estimate noise level
+        noise_level = self.estimate_noise_level(data_2d)
+        data_max = np.max(data_2d)
+        data_range = data_max - np.min(data_2d)
+
+        # Calculate SNR estimate
+        snr_estimate = data_max / (noise_level + 1e-10)
+
+        # Adaptive smoothing based on data quality
+        base_sigma = self.detection_parameters['smoothing_sigma']
+
+        if snr_estimate > 50:  # High quality data
+            adaptive_sigma = base_sigma * 0.5  # Less smoothing for clean data
+        elif snr_estimate > 20:  # Good quality data
+            adaptive_sigma = base_sigma * 0.8  # Moderate smoothing
+        elif snr_estimate > 10:  # Fair quality data
+            adaptive_sigma = base_sigma * 1.0  # Standard smoothing
+        elif snr_estimate > 5:   # Poor quality data
+            adaptive_sigma = base_sigma * 1.5  # More smoothing for noisy data
+        else:  # Very noisy data
+            adaptive_sigma = base_sigma * 2.0  # Heavy smoothing
+
+        # Additional scaling based on data complexity
+        data_complexity = np.std(np.diff(data_2d.flatten())) / (noise_level + 1e-10)
+        complexity_factor = min(1.5, max(0.5, 1.0 + 0.1 * np.log10(max(data_complexity, 0.1))))
+
+        adaptive_sigma *= complexity_factor
+
+        # Ensure reasonable bounds
+        adaptive_sigma = max(0.3, min(3.0, adaptive_sigma))
+
+        return adaptive_sigma
 
     def detect_peaks_2d_initial(self, data_2d, ppm_x_axis, ppm_y_axis, nucleus_type=None):
         """
@@ -177,12 +217,14 @@ class EnhancedPeakPicker:
         # Estimate noise level
         noise_level = self.estimate_noise_level(data_2d)
 
-        # Calculate dynamic thresholds
+        # Calculate adaptive dynamic thresholds
         min_snr = nmr_params['min_snr']
         height_threshold = noise_level * min_snr
 
-        # Additional threshold based on data percentiles
-        percentile_threshold = np.percentile(smoothed_data, 95)  # Top 5% of intensities
+        # Adaptive percentile threshold based on data quality
+        data_snr = np.max(smoothed_data) / (noise_level + 1e-10)
+        adaptive_percentile = self.get_adaptive_percentile_threshold(data_snr)
+        percentile_threshold = np.percentile(smoothed_data, adaptive_percentile)
 
         # Use the higher of SNR-based and percentile-based thresholds
         final_threshold = max(height_threshold, percentile_threshold * 0.1)
@@ -191,8 +233,17 @@ class EnhancedPeakPicker:
         neighborhood_size = max(3, min(data_2d.shape) // 50)  # Adaptive neighborhood
         local_max_mask = (smoothed_data == maximum_filter(smoothed_data, size=neighborhood_size))
 
-        # Apply intensity threshold
-        peak_candidates = local_max_mask & (smoothed_data > final_threshold)
+        # Apply adaptive intensity and prominence thresholds
+        intensity_mask = smoothed_data > final_threshold
+
+        # Calculate adaptive prominence threshold
+        adaptive_prominence = self.get_adaptive_prominence_threshold(smoothed_data, noise_level)
+
+        # Apply prominence filtering to local maxima
+        prominence_mask = self.apply_adaptive_prominence_filter(smoothed_data, local_max_mask, adaptive_prominence)
+
+        # Combine all filters
+        peak_candidates = local_max_mask & intensity_mask & prominence_mask
 
         # Extract peak positions
         peak_indices = np.where(peak_candidates)
@@ -340,16 +391,17 @@ class EnhancedPeakPicker:
     def comprehensive_peak_detection(self, data_2d, ppm_x_axis, ppm_y_axis,
                                    nucleus_type=None, validate_fits=True):
         """
-        Comprehensive peak detection with all enhancements
+        Hierarchical peak detection with enhanced multi-peak handling
 
-        Steps:
+        Enhanced Steps:
         1. Initial peak detection using local maxima
-        2. SNR-based filtering
-        3. Overlapping peak detection
-        4. Optional fit-based validation
-        5. Final quality assessment
+        2. Hierarchical intensity-based detection (dominant → medium → small)
+        3. SNR-based filtering with adaptive thresholds
+        4. Overlapping peak detection and refinement
+        5. Optional fit-based validation
+        6. Final quality assessment
         """
-        print(f"🔍 Starting comprehensive peak detection...")
+        print(f"🔍 Starting hierarchical peak detection...")
 
         # Step 1: Initial detection
         initial_peaks = self.detect_peaks_2d_initial(data_2d, ppm_x_axis, ppm_y_axis, nucleus_type)
@@ -358,34 +410,38 @@ class EnhancedPeakPicker:
         if len(initial_peaks) == 0:
             return []
 
-        # Step 2: SNR filtering
-        snr_filtered = self.filter_peaks_by_snr(initial_peaks)
+        # Step 2: Hierarchical intensity-based detection
+        hierarchical_peaks = self.hierarchical_peak_refinement(initial_peaks, data_2d)
+        print(f"   Hierarchical refinement: {len(initial_peaks)} → {len(hierarchical_peaks)} peaks")
 
-        # Step 3: Overlapping peak detection
-        overlap_analyzed = self.detect_overlapping_peaks(snr_filtered)
+        # Step 3: Enhanced SNR filtering with adaptive thresholds
+        snr_filtered = self.filter_peaks_by_snr_adaptive(hierarchical_peaks, data_2d)
 
-        # Step 4: Optional fit validation
+        # Step 4: Enhanced overlapping peak detection
+        overlap_analyzed = self.detect_overlapping_peaks_enhanced(snr_filtered, data_2d)
+
+        # Step 5: Optional fit validation with enhanced criteria
         if validate_fits and len(overlap_analyzed) > 0:
-            print(f"   Validating peaks by Voigt fitting...")
+            print(f"   Validating peaks by enhanced Voigt fitting...")
             validated_peaks = []
 
             for i, peak in enumerate(overlap_analyzed):
                 if i % max(1, len(overlap_analyzed) // 10) == 0:  # Progress indicator
                     print(f"   Validating peak {i+1}/{len(overlap_analyzed)}")
 
-                validated_peak = self.validate_peak_by_fitting(data_2d, ppm_x_axis, ppm_y_axis, peak)
+                validated_peak = self.validate_peak_by_fitting_enhanced(data_2d, ppm_x_axis, ppm_y_axis, peak)
 
-                # Only keep peaks that pass fit validation
-                min_fit_quality = self.detection_parameters['validation_fit_threshold']
+                # Enhanced validation criteria for small and overlapping peaks
+                min_fit_quality = self.get_adaptive_fit_threshold(peak, overlap_analyzed)
                 if validated_peak.get('fit_quality', 0) >= min_fit_quality:
                     validated_peaks.append(validated_peak)
 
             final_peaks = validated_peaks
-            print(f"   Fit validation: {len(overlap_analyzed)} → {len(final_peaks)} peaks")
+            print(f"   Enhanced validation: {len(overlap_analyzed)} → {len(final_peaks)} peaks")
         else:
             final_peaks = overlap_analyzed
 
-        # Step 5: Final quality assessment and sorting
+        # Step 6: Final quality assessment and sorting
         for peak in final_peaks:
             # Calculate composite quality score
             snr_score = min(peak.get('snr', 0) / 10, 1.0)  # Normalize to 0-1
@@ -413,6 +469,349 @@ class EnhancedPeakPicker:
     def get_detection_stats(self):
         """Return statistics from last detection"""
         return self.last_detection_stats.copy()
+
+    def hierarchical_peak_refinement(self, initial_peaks, data_2d):
+        """
+        Hierarchical peak detection strategy for complex overlapping scenarios
+
+        Strategy stages:
+        1. Dominant peaks (>50% max intensity)
+        2. Medium peaks (10-50% max intensity)
+        3. Small peaks (<10% max intensity)
+        4. Global refinement
+        """
+        if not initial_peaks:
+            return initial_peaks
+
+        # Sort peaks by intensity
+        sorted_peaks = sorted(initial_peaks, key=lambda p: p.get('intensity', 0), reverse=True)
+        max_intensity = sorted_peaks[0].get('intensity', 1.0)
+
+        refined_peaks = []
+
+        # Stage 1: Dominant peaks (>50% max intensity)
+        dominant_threshold = max_intensity * 0.5
+        dominant_peaks = [p for p in sorted_peaks if p.get('intensity', 0) >= dominant_threshold]
+        refined_peaks.extend(dominant_peaks)
+
+        # Stage 2: Medium peaks (10-50% max intensity)
+        medium_threshold = max_intensity * 0.1
+        medium_peaks = [p for p in sorted_peaks if medium_threshold <= p.get('intensity', 0) < dominant_threshold]
+
+        # Enhanced detection for medium peaks near dominant ones with adaptive distance
+        nucleus_type = self.detect_nucleus_type([max_intensity, max_intensity])  # Rough estimate
+        data_complexity = len(sorted_peaks) / 10.0  # Simple complexity estimate
+        adaptive_shadow_distance = self.get_adaptive_distance_threshold(nucleus_type, data_complexity)
+
+        for peak in medium_peaks:
+            # Check if this medium peak is in the shadow of a dominant peak
+            is_in_shadow = False
+            for dom_peak in dominant_peaks:
+                distance = np.sqrt((peak['x_ppm'] - dom_peak['x_ppm'])**2 +
+                                 (peak['y_ppm'] - dom_peak['y_ppm'])**2)
+                if distance < adaptive_shadow_distance:  # Adaptive shadow detection
+                    is_in_shadow = True
+                    break
+
+            if not is_in_shadow:
+                refined_peaks.append(peak)
+            else:
+                # Mark as potentially overlapping for special handling
+                peak['shadow_peak'] = True
+                refined_peaks.append(peak)
+
+        # Stage 3: Small peaks (<10% max intensity) with enhanced sensitivity
+        small_peaks = [p for p in sorted_peaks if p.get('intensity', 0) < medium_threshold]
+
+        # Use lower SNR threshold for small peaks
+        original_min_snr = self.detection_parameters['min_snr']
+        self.detection_parameters['min_snr'] = max(2.0, original_min_snr * 0.6)  # Reduced threshold
+
+        for peak in small_peaks:
+            # Enhanced validation for small peaks
+            local_noise = self.estimate_local_noise_around_peak(data_2d, peak)
+            peak_snr = peak.get('intensity', 0) / (local_noise + 1e-10)
+
+            if peak_snr >= self.detection_parameters['min_snr']:
+                peak['small_peak'] = True
+                refined_peaks.append(peak)
+
+        # Restore original SNR threshold
+        self.detection_parameters['min_snr'] = original_min_snr
+
+        return refined_peaks
+
+    def filter_peaks_by_snr_adaptive(self, peaks, data_2d):
+        """Enhanced SNR filtering with adaptive thresholds based on peak characteristics"""
+        filtered_peaks = []
+
+        for peak in peaks:
+            # Adaptive SNR threshold based on peak type
+            if peak.get('small_peak', False):
+                min_snr_threshold = max(2.0, self.detection_parameters['min_snr'] * 0.6)
+            elif peak.get('shadow_peak', False):
+                min_snr_threshold = max(2.5, self.detection_parameters['min_snr'] * 0.8)
+            else:
+                min_snr_threshold = self.detection_parameters['min_snr']
+
+            # Calculate local SNR
+            local_noise = self.estimate_local_noise_around_peak(data_2d, peak)
+            peak_snr = peak.get('intensity', 0) / (local_noise + 1e-10)
+
+            if peak_snr >= min_snr_threshold:
+                peak['adaptive_snr'] = peak_snr
+                filtered_peaks.append(peak)
+
+        return filtered_peaks
+
+    def detect_overlapping_peaks_enhanced(self, peaks, data_2d):
+        """Enhanced overlapping peak detection with better handling of complex scenarios"""
+        if len(peaks) < 2:
+            return peaks
+
+        # Enhanced overlap detection using multiple criteria
+        enhanced_peaks = []
+
+        for i, peak in enumerate(peaks):
+            peak_enhanced = peak.copy()
+
+            # Check for nearby peaks with multiple distance thresholds
+            nearby_peaks = []
+            for j, other_peak in enumerate(peaks):
+                if i != j:
+                    distance = np.sqrt((peak['x_ppm'] - other_peak['x_ppm'])**2 +
+                                     (peak['y_ppm'] - other_peak['y_ppm'])**2)
+
+                    # Adaptive overlap threshold based on peak intensities and nucleus type
+                    intensity_ratio = min(peak.get('intensity', 1), other_peak.get('intensity', 1)) / \
+                                    max(peak.get('intensity', 1), other_peak.get('intensity', 1))
+
+                    # Get nucleus-specific distance threshold
+                    nucleus_type = peak.get('nucleus_type', '1H')
+                    nucleus_distance_factor = self.get_nucleus_distance_factor(nucleus_type)
+
+                    # Combined adaptive threshold
+                    base_threshold = self.detection_parameters['overlap_threshold']
+                    intensity_adjustment = (0.5 + 0.5 * intensity_ratio)
+                    adaptive_threshold = base_threshold * intensity_adjustment * nucleus_distance_factor
+
+                    if distance < adaptive_threshold:
+                        nearby_peaks.append({'peak': other_peak, 'distance': distance, 'intensity_ratio': intensity_ratio})
+
+            # Enhanced overlap classification
+            if nearby_peaks:
+                peak_enhanced['overlapping'] = True
+                peak_enhanced['overlap_complexity'] = len(nearby_peaks)
+                peak_enhanced['min_neighbor_distance'] = min(p['distance'] for p in nearby_peaks)
+                peak_enhanced['intensity_variation'] = max(p['intensity_ratio'] for p in nearby_peaks)
+            else:
+                peak_enhanced['overlapping'] = False
+                peak_enhanced['overlap_complexity'] = 0
+
+            enhanced_peaks.append(peak_enhanced)
+
+        return enhanced_peaks
+
+    def get_adaptive_percentile_threshold(self, data_snr):
+        """
+        Calculate adaptive percentile threshold based on data quality
+        """
+        base_percentile = 95  # Default top 5%
+
+        if data_snr > 50:  # High quality data
+            return base_percentile + 2  # Top 3% (97th percentile)
+        elif data_snr > 20:  # Good quality data
+            return base_percentile + 1  # Top 4% (96th percentile)
+        elif data_snr > 10:  # Fair quality data
+            return base_percentile      # Top 5% (95th percentile)
+        elif data_snr > 5:   # Poor quality data
+            return base_percentile - 5  # Top 10% (90th percentile)
+        else:  # Very noisy data
+            return base_percentile - 15 # Top 20% (80th percentile)
+
+    def get_adaptive_prominence_threshold(self, data, noise_level):
+        """
+        Calculate adaptive prominence threshold based on data characteristics
+        """
+        data_max = np.max(data)
+        data_snr = data_max / (noise_level + 1e-10)
+
+        # Base prominence factor from detection parameters
+        base_prominence = self.detection_parameters['min_prominence_factor']
+
+        # Adaptive prominence based on SNR
+        if data_snr > 50:  # High SNR - can detect smaller prominences
+            prominence_factor = base_prominence * 0.5
+        elif data_snr > 20:  # Good SNR
+            prominence_factor = base_prominence * 0.7
+        elif data_snr > 10:  # Fair SNR
+            prominence_factor = base_prominence * 1.0
+        elif data_snr > 5:   # Poor SNR - need higher prominence
+            prominence_factor = base_prominence * 1.5
+        else:  # Very poor SNR
+            prominence_factor = base_prominence * 2.0
+
+        # Additional scaling based on data dynamic range
+        data_range = np.max(data) - np.min(data)
+        range_factor = max(0.5, min(2.0, data_range / (noise_level * 10)))
+
+        adaptive_prominence = prominence_factor * range_factor
+
+        # Ensure reasonable bounds
+        adaptive_prominence = max(0.02, min(0.5, adaptive_prominence))  # 2% to 50%
+
+        return adaptive_prominence
+
+    def apply_adaptive_prominence_filter(self, data, local_max_mask, prominence_threshold):
+        """
+        Apply adaptive prominence filtering to local maxima
+        """
+        # Get coordinates of local maxima
+        max_coords = np.where(local_max_mask)
+
+        if len(max_coords[0]) == 0:
+            return local_max_mask
+
+        # Calculate prominence for each local maximum
+        prominence_mask = np.zeros_like(data, dtype=bool)
+
+        for i, (y, x) in enumerate(zip(max_coords[0], max_coords[1])):
+            peak_value = data[y, x]
+
+            # Define local neighborhood for prominence calculation
+            neighborhood_size = 5
+            y_start = max(0, y - neighborhood_size)
+            y_end = min(data.shape[0], y + neighborhood_size + 1)
+            x_start = max(0, x - neighborhood_size)
+            x_end = min(data.shape[1], x + neighborhood_size + 1)
+
+            local_region = data[y_start:y_end, x_start:x_end]
+
+            # Calculate prominence as difference from local minimum
+            local_min = np.min(local_region)
+            prominence = peak_value - local_min
+
+            # Calculate relative prominence
+            relative_prominence = prominence / peak_value if peak_value > 0 else 0
+
+            # Apply adaptive threshold
+            if relative_prominence >= prominence_threshold:
+                prominence_mask[y, x] = True
+
+        return prominence_mask
+
+    def get_adaptive_distance_threshold(self, nucleus_type, data_complexity=1.0):
+        """
+        Calculate adaptive distance threshold for shadow peak detection
+        """
+        # Get nucleus-specific parameters
+        nmr_params = self.nmr_ranges.get(nucleus_type, self.nmr_ranges['1H'])
+        typical_width = nmr_params['typical_width']
+
+        # Base distance threshold
+        base_distance = 0.1  # Default 0.1 ppm
+
+        # Nucleus-specific scaling
+        if nucleus_type == '1H':
+            nucleus_factor = 0.5    # Tighter for 1H due to narrow range
+        elif nucleus_type == '15N':
+            nucleus_factor = 2.0    # Wider for 15N due to broader range
+        elif nucleus_type == '13C':
+            nucleus_factor = 1.5    # Medium for 13C
+        else:
+            nucleus_factor = 1.0
+
+        # Complexity-based adjustment
+        complexity_factor = max(0.5, min(2.0, data_complexity))
+
+        # Calculate adaptive distance
+        adaptive_distance = base_distance * nucleus_factor * complexity_factor
+        adaptive_distance = max(typical_width * 0.5, min(typical_width * 5.0, adaptive_distance))
+
+        return adaptive_distance
+
+    def get_nucleus_distance_factor(self, nucleus_type):
+        """
+        Get nucleus-specific distance scaling factor for overlap detection
+        """
+        if nucleus_type == '1H':
+            return 0.5  # Tighter overlap detection for 1H (narrow chemical shift range)
+        elif nucleus_type == '15N':
+            return 2.0  # Wider overlap detection for 15N (broader range)
+        elif nucleus_type == '13C':
+            return 1.5  # Medium overlap detection for 13C
+        else:
+            return 1.0  # Default factor
+
+    def validate_peak_by_fitting_enhanced(self, data_2d, ppm_x_axis, ppm_y_axis, peak):
+        """Enhanced peak validation with improved criteria for complex scenarios"""
+        # Use the existing validation but with enhanced parameters
+        validated_peak = self.validate_peak_by_fitting(data_2d, ppm_x_axis, ppm_y_axis, peak)
+
+        # Enhanced validation criteria
+        if validated_peak.get('fit_quality', 0) > 0:
+            # Adjust quality score based on peak characteristics
+            base_quality = validated_peak['fit_quality']
+
+            # Bonus for successfully fitting small peaks
+            if peak.get('small_peak', False) and base_quality > 0.3:
+                validated_peak['fit_quality'] = min(1.0, base_quality * 1.2)
+
+            # Bonus for resolving overlapping peaks
+            if peak.get('overlapping', False) and base_quality > 0.5:
+                validated_peak['fit_quality'] = min(1.0, base_quality * 1.1)
+
+            # Penalty for very complex overlaps that may be fitting artifacts
+            if peak.get('overlap_complexity', 0) > 3 and base_quality < 0.7:
+                validated_peak['fit_quality'] = base_quality * 0.9
+
+        return validated_peak
+
+    def get_adaptive_fit_threshold(self, peak, all_peaks):
+        """Get adaptive fit quality threshold based on peak characteristics"""
+        base_threshold = self.detection_parameters['validation_fit_threshold']
+
+        # Lower threshold for small peaks (easier to accept)
+        if peak.get('small_peak', False):
+            return max(0.3, base_threshold * 0.6)
+
+        # Lower threshold for overlapping peaks (more challenging to fit)
+        if peak.get('overlapping', False):
+            complexity = peak.get('overlap_complexity', 1)
+            reduction_factor = max(0.5, 1.0 - 0.1 * complexity)
+            return max(0.4, base_threshold * reduction_factor)
+
+        return base_threshold
+
+    def estimate_local_noise_around_peak(self, data_2d, peak):
+        """Estimate noise level in the local region around a peak"""
+        try:
+            # Extract small region around peak for local noise estimation
+            x_idx = peak.get('x_idx', 0)
+            y_idx = peak.get('y_idx', 0)
+
+            # Define local region (e.g., 10x10 pixels around peak)
+            region_size = 10
+            x_start = max(0, x_idx - region_size//2)
+            x_end = min(data_2d.shape[1], x_idx + region_size//2)
+            y_start = max(0, y_idx - region_size//2)
+            y_end = min(data_2d.shape[0], y_idx + region_size//2)
+
+            local_region = data_2d[y_start:y_end, x_start:x_end]
+
+            # Estimate noise using robust statistics (excluding the peak itself)
+            peak_mask = np.ones_like(local_region, dtype=bool)
+            center_x, center_y = local_region.shape[1]//2, local_region.shape[0]//2
+            peak_mask[center_y-2:center_y+3, center_x-2:center_x+3] = False  # Exclude peak center
+
+            background_values = local_region[peak_mask]
+            if len(background_values) > 5:
+                return np.std(background_values)
+            else:
+                return np.std(local_region) * 0.5  # Conservative estimate
+        except:
+            # Fallback to global noise estimate
+            return np.std(data_2d) * 0.1
 
     def export_peaks_to_dataframe(self, peaks):
         """Export peak list to pandas DataFrame for analysis"""

@@ -160,6 +160,10 @@ class VoigtIntegrator(BaseIntegrator):
         else:
             self.enhanced_fitter = None
 
+        # Initialize with nucleus-specific windows (will be overridden by GUI if provided)
+        self.detected_nucleus_type = None
+        self.gui_window_override = {'x': None, 'y': None}  # Track GUI overrides
+
     def load_nmr_data(self, data_2d, ppm_x_axis, ppm_y_axis):
         """
         TESTING SUPPORT: Load NMR data directly from arrays
@@ -184,6 +188,184 @@ class VoigtIntegrator(BaseIntegrator):
         self.nmr_dict = {'dummy': 'for_testing'}
 
         return True
+
+    def detect_nucleus_type(self, ppm_range):
+        """Detect nucleus type based on ppm range"""
+        ppm_span = abs(ppm_range[1] - ppm_range[0])
+        center_ppm = (ppm_range[0] + ppm_range[1]) / 2
+
+        # Check ¹H range (5.5-12 ppm)
+        if 5.0 <= center_ppm <= 13.0 and ppm_span < 20:
+            return '1H'
+        # Check ¹⁵N range (100-140 ppm)
+        elif 90 <= center_ppm <= 150 and ppm_span < 100:
+            return '15N'
+        # Check ¹³C range (0-220 ppm)
+        elif 0 <= center_ppm <= 230 and ppm_span > 50:
+            return '13C'
+        return '1H'  # Default
+
+    def update_fitting_parameters_from_gui(self, gui_params):
+        """
+        Update fitting parameters from GUI with proper priority handling
+
+        Priority: GUI > Nucleus-specific > Global defaults
+        """
+        if not gui_params:
+            return
+
+        # Store GUI overrides
+        if 'fitting_window_x' in gui_params:
+            self.gui_window_override['x'] = gui_params['fitting_window_x']
+            self.fitting_parameters['fitting_window_x'] = gui_params['fitting_window_x']
+            print(f"   🎛️  GUI window X override: {gui_params['fitting_window_x']:.3f} ppm")
+
+        if 'fitting_window_y' in gui_params:
+            self.gui_window_override['y'] = gui_params['fitting_window_y']
+            self.fitting_parameters['fitting_window_y'] = gui_params['fitting_window_y']
+            print(f"   🎛️  GUI window Y override: {gui_params['fitting_window_y']:.1f} ppm")
+
+        # Update other parameters normally
+        for key, value in gui_params.items():
+            if key not in ['fitting_window_x', 'fitting_window_y']:
+                self.fitting_parameters[key] = value
+
+    def get_adaptive_window_parameters(self, nucleus_type=None):
+        """
+        Get window parameters with proper priority: GUI > Nucleus-specific > Defaults
+        """
+        if nucleus_type is None:
+            nucleus_type = self.detected_nucleus_type or 'default'
+
+        # Start with nucleus-specific defaults
+        nucleus_windows = self.nucleus_default_windows.get(nucleus_type,
+                                                          self.nucleus_default_windows['default'])
+
+        # Apply GUI overrides if they exist
+        window_x = self.gui_window_override['x'] if self.gui_window_override['x'] is not None else nucleus_windows['x']
+        window_y = self.gui_window_override['y'] if self.gui_window_override['y'] is not None else nucleus_windows['y']
+
+        # Update fitting parameters
+        self.fitting_parameters['fitting_window_x'] = window_x
+        self.fitting_parameters['fitting_window_y'] = window_y
+
+        return window_x, window_y
+
+    def fit_peak_with_adaptive_windows(self, peak_x_ppm, peak_y_ppm, assignment="Unknown"):
+        """
+        Fit peak with failure-based window expansion
+
+        Priority: GUI > Nucleus-specific > Failure-based expansion
+        """
+        # Detect nucleus type if not already done
+        if self.detected_nucleus_type is None:
+            self.detected_nucleus_type = self.detect_nucleus_type([self.ppm_y_axis[0], self.ppm_y_axis[-1]])
+
+        # Get initial window parameters
+        window_x, window_y = self.get_adaptive_window_parameters(self.detected_nucleus_type)
+
+        # Track window source for diagnostics
+        window_source = "GUI" if (self.gui_window_override['x'] is not None or
+                                 self.gui_window_override['y'] is not None) else f"{self.detected_nucleus_type}-specific"
+
+        print(f"   🎯 Attempting peak fit: {assignment}")
+        print(f"   📊 Initial windows: X={window_x:.3f} ppm, Y={window_y:.1f} ppm ({window_source})")
+
+        # Attempt fitting with progressive window expansion
+        for attempt in range(self.fitting_parameters['max_expansion_attempts']):
+            try:
+                # Extract peak region with current windows
+                regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm, window_x, window_y)
+
+                # Attempt fitting using enhanced fitter if available
+                if self.enhanced_fitter is not None:
+                    # X-dimension fit
+                    x_result = self.enhanced_fitter.fit_single_peak_1d(
+                        regions['x_ppm_scale'], regions['x_cross_section'],
+                        peak_x_ppm, nucleus_type=self.detected_nucleus_type
+                    )
+
+                    # Y-dimension fit
+                    y_result = self.enhanced_fitter.fit_single_peak_1d(
+                        regions['y_ppm_scale'], regions['y_cross_section'],
+                        peak_y_ppm, nucleus_type=self.detected_nucleus_type
+                    )
+
+                    # Evaluate fit quality
+                    x_r_squared = x_result.get('r_squared', 0)
+                    y_r_squared = y_result.get('r_squared', 0)
+                    avg_r_squared = (x_r_squared + y_r_squared) / 2
+
+                    print(f"   📈 Attempt {attempt + 1}: R²_X={x_r_squared:.3f}, R²_Y={y_r_squared:.3f}, Avg={avg_r_squared:.3f}")
+
+                    # Check if fit is acceptable
+                    if avg_r_squared >= self.fitting_parameters['min_r_squared']:
+                        print(f"   ✅ Successful fit with windows: X={window_x:.3f}, Y={window_y:.1f} ppm")
+                        return {
+                            'success': True,
+                            'x_result': x_result,
+                            'y_result': y_result,
+                            'r_squared': avg_r_squared,
+                            'window_x_used': window_x,
+                            'window_y_used': window_y,
+                            'expansion_attempts': attempt + 1,
+                            'window_source': window_source
+                        }
+
+                    # If fit quality is poor and we have expansion attempts left
+                    elif attempt < self.fitting_parameters['max_expansion_attempts'] - 1:
+                        # Only expand if not GUI-constrained
+                        if self.gui_window_override['x'] is None:
+                            window_x *= self.fitting_parameters['failure_expansion_factor']
+                        if self.gui_window_override['y'] is None:
+                            window_y *= self.fitting_parameters['failure_expansion_factor']
+
+                        print(f"   ⚠️  Poor fit (R²={avg_r_squared:.3f}), expanding windows to X={window_x:.3f}, Y={window_y:.1f} ppm")
+                        continue
+
+                    else:
+                        print(f"   ❌ Failed after {self.fitting_parameters['max_expansion_attempts']} attempts")
+                        return {
+                            'success': False,
+                            'x_result': x_result,
+                            'y_result': y_result,
+                            'r_squared': avg_r_squared,
+                            'window_x_used': window_x,
+                            'window_y_used': window_y,
+                            'expansion_attempts': attempt + 1,
+                            'window_source': window_source,
+                            'failure_reason': 'max_expansions_reached'
+                        }
+                else:
+                    # Fallback to basic fitting without enhanced fitter
+                    print(f"   ⚠️  Enhanced fitter not available, using basic fitting")
+                    return {
+                        'success': False,
+                        'failure_reason': 'no_enhanced_fitter',
+                        'window_x_used': window_x,
+                        'window_y_used': window_y,
+                        'expansion_attempts': 1,
+                        'window_source': window_source
+                    }
+
+            except Exception as e:
+                print(f"   ❌ Fitting error on attempt {attempt + 1}: {str(e)}")
+                if attempt < self.fitting_parameters['max_expansion_attempts'] - 1:
+                    # Expand windows and try again
+                    if self.gui_window_override['x'] is None:
+                        window_x *= self.fitting_parameters['failure_expansion_factor']
+                    if self.gui_window_override['y'] is None:
+                        window_y *= self.fitting_parameters['failure_expansion_factor']
+                    continue
+                else:
+                    return {
+                        'success': False,
+                        'failure_reason': f'fitting_exception: {str(e)}',
+                        'window_x_used': window_x,
+                        'window_y_used': window_y,
+                        'expansion_attempts': attempt + 1,
+                        'window_source': window_source
+                    }
 
     def set_processing_mode(self, mode):
         """Set processing mode: 'full_detection', 'in_place', or 'sn_native'"""
@@ -316,9 +498,13 @@ class VoigtIntegrator(BaseIntegrator):
             if profile_type == 'voigt':
                 # Voigt: amplitude, center, sigma, gamma, baseline
                 if bounds is not None:
-                    popt, pcov = curve_fit(self.voigt_profile_1d, x_data, y_data,
-                                         p0=initial_guess, bounds=bounds,
-                                         maxfev=self.fitting_parameters['max_iterations'])
+                    lower_bounds, upper_bounds = bounds
+                    initial_guess = _clamp_guess_to_bounds(initial_guess, lower_bounds, upper_bounds)
+                    popt, pcov = curve_fit(
+                        self.voigt_profile_1d, x_data, y_data,
+                        p0=initial_guess, bounds=(lower_bounds, upper_bounds),
+                        maxfev=self.fitting_parameters['max_iterations']
+                    )
                 else:
                     popt, pcov = curve_fit(self.voigt_profile_1d, x_data, y_data, p0=initial_guess,
                                          maxfev=self.fitting_parameters['max_iterations'])
@@ -647,10 +833,13 @@ class VoigtIntegrator(BaseIntegrator):
         bounds_upper.append(baseline_est + abs(baseline_est))
 
         try:
-            popt, pcov = curve_fit(multi_voigt, x_data, y_data,
-                                 p0=initial_guess,
-                                 bounds=(bounds_lower, bounds_upper),
-                                 maxfev=1000)  # Reduced to prevent timeout
+            initial_guess = _clamp_guess_to_bounds(initial_guess, bounds_lower, bounds_upper)
+            popt, pcov = curve_fit(
+                multi_voigt, x_data, y_data,
+                p0=initial_guess,
+                bounds=(bounds_lower, bounds_upper),
+                maxfev=1000  # Reduced to prevent timeout
+            )
 
             # Calculate fit quality
             y_pred = multi_voigt(x_data, *popt)
@@ -1028,8 +1217,8 @@ class VoigtIntegrator(BaseIntegrator):
             if hasattr(self, 'optimize_window_dynamically'):
                 window_optimization = self.optimize_window_dynamically(
                     peak_x_ppm, peak_y_ppm, assignment,
-                    max_iterations=3,  # Limit iterations for performance
-                    r2_improvement_threshold=0.03  # Accept modest improvements
+                    max_iterations=50,  # Enhanced: Up to 50 tests for comprehensive exploration
+                    r2_improvement_threshold=0.01  # More sensitive to improvements
                 )
                 
                 if window_optimization.get('success') and window_optimization.get('improvement', 0) > 0.03:
@@ -1163,13 +1352,11 @@ class VoigtIntegrator(BaseIntegrator):
             print(f"   🔍 Analyzing X-dimension for {assignment}")
             x_fit = self.adaptive_fit_1d(regions['x_ppm_scale'], regions['x_cross_section'],
                                         peak_x_ppm, dimension='x', gui_params=gui_params)
-            print(f"   DEBUG: X-fit success={x_fit.get('success', False) if x_fit else False}")
 
             # Fit Y-dimension with adaptive strategy (single vs multi-peak)
             print(f"   🔍 Analyzing Y-dimension for {assignment}")
             y_fit = self.adaptive_fit_1d(regions['y_ppm_scale'], regions['y_cross_section'],
                                         peak_y_ppm, dimension='y', gui_params=gui_params)
-            print(f"   DEBUG: Y-fit success={y_fit.get('success', False) if y_fit else False}")
 
         # Check fitting quality
         if not (x_fit.get('success', False) and y_fit.get('success', False)):
@@ -1318,24 +1505,297 @@ class VoigtIntegrator(BaseIntegrator):
         interference_analysis = self._analyze_peak_interference(peak_x_ppm, peak_y_ppm, 
                                                               base_x_window, base_y_window)
         
-        # Phase 4: Determine optimization strategy
-        if interference_analysis['isolation_level'] == 'isolated':
-            # Strategy: Expand windows for better statistics
-            optimization_result = self._optimize_isolated_peak_windows(
-                peak_x_ppm, peak_y_ppm, assignment,
-                base_x_window, base_y_window,
-                baseline_avg_r2, max_iterations, r2_improvement_threshold
-            )
-        else:
-            # Strategy: Contract windows to avoid interference
-            optimization_result = self._optimize_crowded_peak_windows(
-                peak_x_ppm, peak_y_ppm, assignment,
-                base_x_window, base_y_window,
-                baseline_avg_r2, max_iterations, r2_improvement_threshold,
-                interference_analysis
-            )
+        # Phase 4: Enhanced comprehensive optimization strategy
+        print(f"   Peak interference: {interference_analysis['isolation_level']}")
+
+        # Use enhanced bidirectional optimization for all cases
+        optimization_result = self._enhanced_window_optimization(
+            peak_x_ppm, peak_y_ppm, assignment,
+            base_x_window, base_y_window,
+            baseline_avg_r2, max_iterations, r2_improvement_threshold
+        )
+
+        # Add interference analysis to results
+        optimization_result['interference_analysis'] = interference_analysis
         
         return optimization_result
+
+    def _enhanced_window_optimization(self, peak_x_ppm, peak_y_ppm, assignment,
+                                     base_x_window, base_y_window, baseline_r2,
+                                     max_iterations=50, r2_threshold=0.01):
+        """
+        ENHANCED WINDOW OPTIMIZATION: Bidirectional, Independent X/Y, R²-driven
+
+        Implements comprehensive window optimization with:
+        1. Bidirectional exploration (expansion + contraction)
+        2. Independent X and Y window optimization
+        3. R²-driven adaptive search algorithm
+        4. Increment-based exploration (0.1 step size)
+        5. Direction reversal when R² degrades
+        6. Best-value tracking and restart mechanism
+
+        Args:
+            peak_x_ppm, peak_y_ppm: Peak position
+            assignment: Peak identifier
+            base_x_window, base_y_window: Starting window sizes (user values)
+            baseline_r2: Reference R² for comparison
+            max_iterations: Maximum optimization tests (default 50)
+            r2_threshold: Minimum R² improvement threshold
+
+        Returns:
+            dict: Comprehensive optimization results
+        """
+        import numpy as np
+
+        print(f"   🚀 Enhanced window optimization for {assignment}")
+        print(f"   Starting: X={base_x_window:.3f}, Y={base_y_window:.3f}, R²={baseline_r2:.3f}")
+
+        # Search parameters
+        step_size = 0.1
+        x_bounds = (0.1, 1.0)  # Reasonable X window bounds
+        y_bounds = (0.5, 5.0)  # Reasonable Y window bounds
+        degradation_threshold = 0.05  # Stop if R² drops by this much
+
+        # Optimization state
+        current_x = base_x_window
+        current_y = base_y_window
+        best_x = base_x_window
+        best_y = base_y_window
+        best_r2 = baseline_r2
+
+        iteration_history = []
+        tests_performed = 0
+
+        # Phase 1: Initial exploration around starting point
+        print(f"   📊 Phase 1: Initial exploration (±{step_size})")
+
+        initial_tests = [
+            # Test X variations (Y constant)
+            (current_x + step_size, current_y, "X+0.1"),
+            (current_x - step_size, current_y, "X-0.1"),
+            # Test Y variations (X constant)
+            (current_x, current_y + step_size, "Y+0.1"),
+            (current_x, current_y - step_size, "Y-0.1"),
+            # Test diagonal combinations
+            (current_x + step_size, current_y + step_size, "X+0.1,Y+0.1"),
+            (current_x - step_size, current_y - step_size, "X-0.1,Y-0.1")
+        ]
+
+        for test_x, test_y, direction in initial_tests:
+            if tests_performed >= max_iterations:
+                break
+
+            # Bounds checking
+            if not (x_bounds[0] <= test_x <= x_bounds[1] and y_bounds[0] <= test_y <= y_bounds[1]):
+                continue
+
+            test_r2 = self._evaluate_window_quality(peak_x_ppm, peak_y_ppm, test_x, test_y)
+            tests_performed += 1
+
+            iteration_history.append({
+                'test': tests_performed,
+                'x_window': test_x,
+                'y_window': test_y,
+                'r2': test_r2,
+                'direction': direction,
+                'phase': 'initial_exploration'
+            })
+
+            print(f"     Test {tests_performed}: {direction} → X={test_x:.3f}, Y={test_y:.3f}, R²={test_r2:.3f}")
+
+            if test_r2 > best_r2 + r2_threshold:
+                best_x, best_y, best_r2 = test_x, test_y, test_r2
+                print(f"       ✓ New best: R²={best_r2:.3f} (Δ={test_r2-baseline_r2:.3f})")
+
+        # Phase 2: Adaptive directional search from best point
+        print(f"   🎯 Phase 2: Adaptive search from best point (X={best_x:.3f}, Y={best_y:.3f})")
+
+        current_x, current_y = best_x, best_y
+
+        # Determine promising directions from initial exploration
+        x_improvements = [h for h in iteration_history if 'X+' in h['direction'] and h['r2'] > baseline_r2]
+        y_improvements = [h for h in iteration_history if 'Y+' in h['direction'] and h['r2'] > baseline_r2]
+
+        x_direction = 1 if x_improvements else -1  # Prefer expansion if it helped
+        y_direction = 1 if y_improvements else -1
+
+        # Separate X and Y optimization
+        for dimension, direction, current_val, bounds_tuple in [
+            ('X', x_direction, current_x, x_bounds),
+            ('Y', y_direction, current_y, y_bounds)
+        ]:
+            if tests_performed >= max_iterations:
+                break
+
+            print(f"     Optimizing {dimension} dimension (direction: {'+' if direction > 0 else '-'})")
+
+            consecutive_degradations = 0
+            search_val = current_val
+
+            while consecutive_degradations < 3 and tests_performed < max_iterations:
+                search_val += direction * step_size
+
+                # Bounds check
+                if not (bounds_tuple[0] <= search_val <= bounds_tuple[1]):
+                    break
+
+                # Test with other dimension at current best
+                test_x = search_val if dimension == 'X' else best_x
+                test_y = search_val if dimension == 'Y' else best_y
+
+                test_r2 = self._evaluate_window_quality(peak_x_ppm, peak_y_ppm, test_x, test_y)
+                tests_performed += 1
+
+                iteration_history.append({
+                    'test': tests_performed,
+                    'x_window': test_x,
+                    'y_window': test_y,
+                    'r2': test_r2,
+                    'direction': f"{dimension}{'+' if direction > 0 else '-'}{step_size}",
+                    'phase': f'{dimension}_optimization'
+                })
+
+                trend_emoji = '✅' if test_r2 > best_r2 + r2_threshold else '⚠️' if test_r2 < best_r2 - degradation_threshold else '➡️'
+                print(f"       🧪 Test {tests_performed}: {dimension}={search_val:.3f} → R²={test_r2:.3f} {trend_emoji}")
+
+                if test_r2 > best_r2 + r2_threshold:
+                    best_x, best_y, best_r2 = test_x, test_y, test_r2
+                    consecutive_degradations = 0
+                    print(f"         ✅ New optimum: R²={best_r2:.3f} (Δ={test_r2-baseline_r2:.3f})")
+                elif test_r2 < best_r2 - degradation_threshold:
+                    consecutive_degradations += 1
+                    print(f"         ⚠️ Degradation {consecutive_degradations}/3: R²={test_r2:.3f}")
+                else:
+                    consecutive_degradations += 1
+                    print(f"         ➡️ Minimal change: R²={test_r2:.3f}")
+
+            # If search failed in this direction, try opposite direction
+            if consecutive_degradations >= 3 and tests_performed < max_iterations:
+                print(f"     🔄 Reversing {dimension} direction")
+                direction *= -1
+                search_val = current_val if dimension == 'X' else current_y
+                consecutive_degradations = 0
+
+                for _ in range(5):  # Limited reverse exploration
+                    if tests_performed >= max_iterations:
+                        break
+
+                    search_val += direction * step_size
+
+                    if not (bounds_tuple[0] <= search_val <= bounds_tuple[1]):
+                        break
+
+                    test_x = search_val if dimension == 'X' else best_x
+                    test_y = search_val if dimension == 'Y' else best_y
+
+                    test_r2 = self._evaluate_window_quality(peak_x_ppm, peak_y_ppm, test_x, test_y)
+                    tests_performed += 1
+
+                    iteration_history.append({
+                        'test': tests_performed,
+                        'x_window': test_x,
+                        'y_window': test_y,
+                        'r2': test_r2,
+                        'direction': f"{dimension}_reverse{'+' if direction > 0 else '-'}{step_size}",
+                        'phase': f'{dimension}_reverse'
+                    })
+
+                    print(f"         🔄 Reverse test: {dimension}={search_val:.3f} → R²={test_r2:.3f}")
+
+                    if test_r2 > best_r2 + r2_threshold:
+                        best_x, best_y, best_r2 = test_x, test_y, test_r2
+                        print(f"         ✅ Reverse breakthrough: R²={best_r2:.3f}")
+
+        # Phase 3: Final convergence around best point
+        if tests_performed < max_iterations and best_r2 > baseline_r2 + r2_threshold:
+            print(f"   🎯 Phase 3: Fine-tuning around optimal point")
+
+            fine_tune_tests = [
+                (best_x + step_size/2, best_y, "fine_X+"),
+                (best_x - step_size/2, best_y, "fine_X-"),
+                (best_x, best_y + step_size/2, "fine_Y+"),
+                (best_x, best_y - step_size/2, "fine_Y-")
+            ]
+
+            for test_x, test_y, direction in fine_tune_tests:
+                if tests_performed >= max_iterations:
+                    break
+                if not (x_bounds[0] <= test_x <= x_bounds[1] and y_bounds[0] <= test_y <= y_bounds[1]):
+                    continue
+
+                test_r2 = self._evaluate_window_quality(peak_x_ppm, peak_y_ppm, test_x, test_y)
+                tests_performed += 1
+
+                print(f"       🎯 Fine-tune: {direction}, R²={test_r2:.3f}")
+
+                if test_r2 > best_r2:
+                    best_x, best_y, best_r2 = test_x, test_y, test_r2
+                    print(f"         ✅ Fine-tune improved: R²={best_r2:.3f}")
+
+        # Calculate final results
+        total_improvement = best_r2 - baseline_r2
+
+        print(f"   🎯 Enhanced optimization complete:")
+        print(f"     Final: X={best_x:.3f}, Y={best_y:.3f}, R²={best_r2:.3f}")
+        print(f"     Improvement: Δ={total_improvement:.3f} ({tests_performed} tests)")
+
+        return {
+            'success': True,
+            'optimization_type': 'enhanced_bidirectional',
+            'optimized_x_window': best_x,
+            'optimized_y_window': best_y,
+            'optimized_r2': best_r2,
+            'baseline_r2': baseline_r2,
+            'improvement': total_improvement,
+            'tests_performed': tests_performed,
+            'iteration_history': iteration_history,
+            'recommendation': 'enhanced_optimal' if total_improvement > r2_threshold else 'keep_gui',
+            'search_statistics': {
+                'x_range_explored': (min(h['x_window'] for h in iteration_history),
+                                   max(h['x_window'] for h in iteration_history)),
+                'y_range_explored': (min(h['y_window'] for h in iteration_history),
+                                   max(h['y_window'] for h in iteration_history)),
+                'best_improvement_test': max(iteration_history, key=lambda x: x['r2'])['test']
+            }
+        }
+
+    def _evaluate_window_quality(self, peak_x_ppm, peak_y_ppm, x_window, y_window):
+        """
+        Evaluate R² quality for given window sizes.
+
+        Args:
+            peak_x_ppm, peak_y_ppm: Peak position
+            x_window, y_window: Window sizes to test
+
+        Returns:
+            float: Average R² value for this window configuration
+        """
+        try:
+            # Extract regions with test window sizes
+            test_regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm, x_window, y_window)
+            if not test_regions:
+                return 0.0
+
+            # Perform fits
+            x_fit = self.adaptive_fit_1d(test_regions['x_ppm_scale'],
+                                       test_regions['x_cross_section'],
+                                       peak_x_ppm, dimension='x')
+            y_fit = self.adaptive_fit_1d(test_regions['y_ppm_scale'],
+                                       test_regions['y_cross_section'],
+                                       peak_y_ppm, dimension='y')
+
+            if not (x_fit.get('success') and y_fit.get('success')):
+                return 0.0
+
+            # Extract R² values
+            x_r2 = x_fit.get('quality_metrics', {}).get('r_squared_local', x_fit.get('r_squared', 0))
+            y_r2 = y_fit.get('quality_metrics', {}).get('r_squared_local', y_fit.get('r_squared', 0))
+
+            return (x_r2 + y_r2) / 2
+
+        except Exception as e:
+            print(f"     ⚠ Window evaluation failed: {e}")
+            return 0.0
 
     def _analyze_peak_interference(self, peak_x_ppm, peak_y_ppm, x_window, y_window):
         """
@@ -1420,8 +1880,9 @@ class VoigtIntegrator(BaseIntegrator):
         """
         import numpy as np
         
-        print(f"   Strategy: Expanding windows for isolated peak {assignment}")
-        
+        print(f"   🔍 Strategy: Expanding windows for isolated peak {assignment}")
+        print(f"   📊 Baseline: X={base_x_window:.2f}, Y={base_y_window:.2f}, R²={baseline_r2:.3f}")
+
         best_x_window = base_x_window
         best_y_window = base_y_window
         best_r2 = baseline_r2
@@ -1469,9 +1930,9 @@ class VoigtIntegrator(BaseIntegrator):
                 'y_points': len(test_regions['y_cross_section'])
             })
             
-            print(f"   Test {iteration+1}: Factor={factor:.1f}x, R²={avg_r2:.3f}, "
-                  f"Points=({len(test_regions['x_cross_section'])}, {len(test_regions['y_cross_section'])})")
-            
+            print(f"   🧪 Test {iteration+1}: Factor={factor:.1f}x, Windows=({test_x_window:.2f}, {test_y_window:.2f}), "
+                  f"R²={avg_r2:.3f}, Points=({len(test_regions['x_cross_section'])}, {len(test_regions['y_cross_section'])})")
+
             # Check for improvement
             if avg_r2 > best_r2 + r2_threshold:
                 best_x_window = test_x_window
@@ -1507,8 +1968,9 @@ class VoigtIntegrator(BaseIntegrator):
         import numpy as np
         
         interferer_count = interference_analysis['total_interferers']
-        print(f"   Strategy: Contracting windows for crowded peak {assignment} ({interferer_count} interferers)")
-        
+        print(f"   🔍 Strategy: Contracting windows for crowded peak {assignment} ({interferer_count} interferers)")
+        print(f"   📊 Baseline: X={base_x_window:.2f}, Y={base_y_window:.2f}, R²={baseline_r2:.3f}")
+
         best_x_window = base_x_window
         best_y_window = base_y_window
         best_r2 = baseline_r2
@@ -1564,9 +2026,9 @@ class VoigtIntegrator(BaseIntegrator):
                 'y_points': len(test_regions['y_cross_section'])
             })
             
-            print(f"   Test {iteration+1}: Factor={factor:.1f}x, R²={avg_r2:.3f}, "
-                  f"Points=({len(test_regions['x_cross_section'])}, {len(test_regions['y_cross_section'])})")
-            
+            print(f"   🧪 Test {iteration+1}: Factor={factor:.1f}x, Windows=({test_x_window:.2f}, {test_y_window:.2f}), "
+                  f"R²={avg_r2:.3f}, Points=({len(test_regions['x_cross_section'])}, {len(test_regions['y_cross_section'])})")
+
             # Check for improvement (interference removal should increase R²)
             if avg_r2 > best_r2 + r2_threshold:
                 best_x_window = test_x_window
@@ -1801,6 +2263,79 @@ class VoigtIntegrator(BaseIntegrator):
         }
         print(f"   Updated detection statistics: {detected_count} peaks (100% detection rate)")
 
+        # Collect training data for ML development (individual peaks)
+        if hasattr(self, 'ml_data_collector') and self.ml_data_collector and standardized_peaks:
+            try:
+                for i, peak_data in enumerate(standardized_peaks):
+                    # Extract local region around each peak for training
+                    peak_x = peak_data['ppm_x']
+                    peak_y = peak_data['ppm_y']
+
+                    # Find indices for a local region around this peak
+                    x_indices = np.where((self.ppm_x_axis >= peak_x - 0.05) & (self.ppm_x_axis <= peak_x + 0.05))[0]
+                    y_indices = np.where((self.ppm_y_axis >= peak_y - 2.0) & (self.ppm_y_axis <= peak_y + 2.0))[0]
+
+                    if len(x_indices) > 5 and len(y_indices) > 5:
+                        # Extract local region data
+                        local_x = self.ppm_x_axis[x_indices]
+                        local_spectrum = self.nmr_data[np.ix_(y_indices, x_indices)]
+                        local_y = np.max(local_spectrum, axis=0)  # Project to 1D
+
+                        # Create fit result format for ML collection
+                        ml_fit_result = {
+                            'success': True,
+                            'amplitude': peak_data['intensity'],
+                            'center': peak_data['ppm_x'],
+                            'sigma': 0.01,  # Estimated from S/N detection
+                            'gamma': 0.005,  # Estimated from S/N detection
+                            'baseline': np.min(local_y),
+                            'r_squared': 0.9,  # Assume high quality for S/N detected peaks
+                            'method': 'sn_native_detection'
+                        }
+
+                        # Enhanced ML data collection v2.0 for S/N detection
+                        optimization_info = {
+                            'method': 'sn_native_detection',
+                            'iterations': 1,  # S/N detection is single-step
+                            'converged': True,  # S/N detection always "converges"
+                            'final_cost': 0.1,  # Assume good quality
+                            'initial_cost': 1.0,  # Before detection
+                            'detection_algorithm': 'signal_to_noise_ratio',
+                            'sn_threshold': getattr(self, 'sn_threshold', 2.5),
+                            'peak_detection_method': 'native_sn'
+                        }
+
+                        initial_params = {
+                            'amplitude': peak_data['intensity'],
+                            'center': peak_data['ppm_x'],
+                            'sigma': 0.01,  # S/N detection estimate
+                            'gamma': 0.005,  # S/N detection estimate
+                            'baseline': np.min(local_y)
+                        }
+
+                        self.ml_data_collector.collect_training_sample(
+                            x_data=local_x,
+                            y_data=local_y,
+                            fit_result=ml_fit_result,
+                            context={
+                                'detection_confidence': 0.8,  # High for S/N detection
+                                'estimated_amplitude': peak_data['intensity'],
+                                'estimated_width': 0.015,
+                                'overlapping_peaks': [],
+                                'peak_complexity': 'simple',  # S/N detection finds simple peaks
+                                'sn_threshold': getattr(self, 'sn_threshold', 2.5),
+                                'detection_method': 'native_sn',
+                                'baseline_stability': 1.0  # S/N detection assumes stable baseline
+                            },
+                            nucleus_type='15N',  # Default for S/N detection
+                            initial_params=initial_params,
+                            optimization_info=optimization_info,
+                            alternative_results=[]  # S/N detection doesn't test alternatives
+                        )
+            except Exception as e:
+                # Silent error handling - never break S/N detection workflow
+                pass
+
         return standardized_peaks
 
     def get_detection_statistics(self):
@@ -1933,6 +2468,15 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             print("🚀 Integrated detection-fitting system initialized")
         else:
             self.integrated_fitter = None
+
+        # ML ENHANCEMENT: Initialize ML training data collector (Phase 1: Data Collection)
+        try:
+            from lunaNMR.ml.training_data_collector import MLTrainingDataCollector
+            self.ml_data_collector = MLTrainingDataCollector()
+            print("🤖 ML training data collection enabled")
+        except ImportError:
+            self.ml_data_collector = None
+            # Silently continue without ML data collection
 
         # Integration parameters
         self.integration_mode = 'standard'  # 'standard', 'integrated', 'adaptive'
@@ -2102,3 +2646,21 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
         print(f"   Optimization rounds: {optimization_report['optimization_summary']['total_rounds']}")
 
         return optimization_report
+def _clamp_guess_to_bounds(vector, lower_bounds, upper_bounds, margin=1e-6):
+    """Clamp parameter vector to be safely inside the provided bounds."""
+    clamped = []
+
+    for value, lower, upper in zip(vector, lower_bounds, upper_bounds):
+        lower_adj = lower + margin
+        upper_adj = upper - margin if np.isfinite(upper) else upper
+
+        if np.isfinite(upper_adj) and upper_adj <= lower_adj:
+            lower_adj = lower
+            upper_adj = upper
+
+        if np.isfinite(upper_adj):
+            clamped.append(min(max(value, lower_adj), upper_adj))
+        else:
+            clamped.append(max(value, lower_adj))
+
+    return clamped

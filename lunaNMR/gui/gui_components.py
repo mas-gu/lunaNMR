@@ -693,6 +693,10 @@ class PeakNavigator(ttk.Frame):
         self.reference_peaks = []
         self.detected_peaks = []
 
+        # Navigation state for new Previous/Next functionality
+        self.navigation_enabled = False
+        self.current_navigation_index = None
+
         # Setup UI
         self.setup_ui()
 
@@ -765,9 +769,26 @@ class PeakNavigator(ttk.Frame):
                                      command=self.refresh_peak_list, width=12)
         self.refresh_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.analysis_btn = ttk.Button(button_frame, text="🔬 Analyze",
-                                      command=self.analyze_selected_peak, width=12)
+        # Navigation sub-frame for Previous/Analyze/Next buttons
+        nav_frame = ttk.Frame(button_frame)
+        nav_frame.pack(side=tk.LEFT)
+
+        # Previous peak button (small)
+        self.prev_btn = ttk.Button(nav_frame, text="◀", width=3,
+                                  command=self.navigate_to_previous_peak,
+                                  state='disabled')
+        self.prev_btn.pack(side=tk.LEFT, padx=(0, 2))
+
+        # Main analyze button (unchanged functionality)
+        self.analysis_btn = ttk.Button(nav_frame, text="🔬 Analyze",
+                                      command=self.analyze_selected_peak, width=10)
         self.analysis_btn.pack(side=tk.LEFT)
+
+        # Next peak button (small)
+        self.next_btn = ttk.Button(nav_frame, text="▶", width=3,
+                                  command=self.navigate_to_next_peak,
+                                  state='disabled')
+        self.next_btn.pack(side=tk.LEFT, padx=(2, 0))
 
         # Interactive editing frame for detected peaks
         self.edit_frame = ttk.Frame(self)
@@ -902,6 +923,9 @@ class PeakNavigator(ttk.Frame):
         if self.selected_peak_type == "reference":
             self.refresh_peak_list()
 
+        # Update navigation button states (NEW)
+        self.update_navigation_button_states()
+
     def load_detected_peaks(self, fitted_peaks):
         """Load detected peaks data"""
         self.detected_peaks = []
@@ -970,6 +994,9 @@ class PeakNavigator(ttk.Frame):
             self.refresh_peak_list()
         elif self.selected_peak_type == "detected":
             self.refresh_peak_list()
+
+        # Update navigation button states (NEW)
+        self.update_navigation_button_states()
 
     def refresh_peak_list(self):
         """Refresh the peak list display"""
@@ -1075,6 +1102,113 @@ class PeakNavigator(ttk.Frame):
         self.delete_btn.config(state="normal" if is_detected and has_selection else "disabled")
         self.add_btn.config(state="normal" if is_detected else "disabled")
         self.save_btn.config(state="normal" if is_detected else "disabled")
+
+    def navigate_to_previous_peak(self):
+        """Navigate to previous peak in the list - NEW FUNCTIONALITY"""
+        try:
+            if not self.navigation_enabled:
+                return
+
+            current_peaks = self.get_current_peak_list()
+            if not current_peaks or len(current_peaks) <= 1:
+                return
+
+            # Get current index, default to first peak if none selected
+            current_index = self.current_navigation_index
+            if current_index is None:
+                current_index = self.selected_peak_index if self.selected_peak_index is not None else 0
+
+            # Navigate to previous (wrap to last if at beginning)
+            new_index = (current_index - 1) % len(current_peaks)
+
+            # Update selection and trigger analysis
+            self.navigate_to_peak_index(new_index)
+
+        except Exception as e:
+            print(f"Error navigating to previous peak: {e}")
+
+    def navigate_to_next_peak(self):
+        """Navigate to next peak in the list - NEW FUNCTIONALITY"""
+        try:
+            if not self.navigation_enabled:
+                return
+
+            current_peaks = self.get_current_peak_list()
+            if not current_peaks or len(current_peaks) <= 1:
+                return
+
+            # Get current index, default to first peak if none selected
+            current_index = self.current_navigation_index
+            if current_index is None:
+                current_index = self.selected_peak_index if self.selected_peak_index is not None else 0
+
+            # Navigate to next (wrap to first if at end)
+            new_index = (current_index + 1) % len(current_peaks)
+
+            # Update selection and trigger analysis
+            self.navigate_to_peak_index(new_index)
+
+        except Exception as e:
+            print(f"Error navigating to next peak: {e}")
+
+    def navigate_to_peak_index(self, peak_index):
+        """Navigate to specific peak index and trigger analysis - NEW FUNCTIONALITY"""
+        try:
+            current_peaks = self.get_current_peak_list()
+            if not current_peaks or peak_index < 0 or peak_index >= len(current_peaks):
+                return
+
+            # Update navigation state
+            self.current_navigation_index = peak_index
+
+            # Select the peak in the tree (same as existing click behavior)
+            tree_items = self.tree.get_children()
+            if peak_index < len(tree_items):
+                item_id = tree_items[peak_index]
+                self.tree.selection_set(item_id)
+                self.tree.focus(item_id)
+                self.tree.see(item_id)
+
+                # Update selected peak index (existing state)
+                self.selected_peak_index = peak_index
+
+                # Trigger analysis automatically (reuse existing method)
+                self.analyze_selected_peak()
+
+            # Update navigation button states
+            self.update_navigation_button_states()
+
+        except Exception as e:
+            print(f"Error navigating to peak index {peak_index}: {e}")
+
+    def get_current_peak_list(self):
+        """Get the currently active peak list - HELPER METHOD"""
+        if self.selected_peak_type == "reference":
+            return self.reference_peaks
+        else:
+            return self.detected_peaks
+
+    def update_navigation_button_states(self):
+        """Update Previous/Next button states based on current selection - NEW FUNCTIONALITY"""
+        try:
+            current_peaks = self.get_current_peak_list()
+            has_multiple_peaks = len(current_peaks) > 1
+
+            # Enable navigation only if we have multiple peaks
+            self.navigation_enabled = has_multiple_peaks
+
+            if has_multiple_peaks:
+                self.prev_btn.config(state='normal')
+                self.next_btn.config(state='normal')
+            else:
+                self.prev_btn.config(state='disabled')
+                self.next_btn.config(state='disabled')
+
+        except Exception as e:
+            print(f"Error updating navigation button states: {e}")
+            # Fallback: disable buttons on error
+            self.prev_btn.config(state='disabled')
+            self.next_btn.config(state='disabled')
 
     def edit_selected_peak(self):
         """Edit the selected peak assignment and coordinates"""

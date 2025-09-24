@@ -164,7 +164,7 @@ class NMRPeaksSeriesGUI:
         self.min_r_squared = tk.DoubleVar(value=fitting_params['min_r_squared'])
         self.max_iterations = tk.IntVar(value=fitting_params['max_iterations'])
 
-        # Multi-peak detection parameters 
+        # Multi-peak detection parameters
         self.multi_peak_r2_threshold = tk.DoubleVar(value=fitting_params['multi_peak_r2_threshold'])
         self.multi_peak_improvement_threshold = tk.DoubleVar(value=fitting_params['multi_peak_improvement_threshold'])
         self.peak_detection_sensitivity = tk.DoubleVar(value=fitting_params['peak_detection_sensitivity'])
@@ -1124,7 +1124,7 @@ class NMRPeaksSeriesGUI:
         # Multi-Peak Detection Parameters
         ttk.Label(params_grid, text="🔀 Multi-Peak Detection", font=('TkDefaultFont', 9, 'bold')).grid(
             row=3, column=0, columnspan=4, sticky=tk.W, pady=(15,5))
-        
+
         # Row 4: R² Threshold and Min Improvement
         ttk.Label(params_grid, text="R² Trigger:").grid(row=4, column=0, sticky=tk.W)
         r2_thresh_spin = tk.Spinbox(params_grid, from_=0.1, to=1.0, increment=0.05, width=4,
@@ -1136,7 +1136,7 @@ class NMRPeaksSeriesGUI:
                                 textvariable=self.multi_peak_improvement_threshold,
                                 command=self.on_parameter_change)
         improv_spin.grid(row=4, column=3, sticky=tk.W, padx=5)
-        
+
         # Row 5: Peak Sensitivity and Overlap Factor
         ttk.Label(params_grid, text="Sensitivity:").grid(row=5, column=0, sticky=tk.W)
         sens_spin = tk.Spinbox(params_grid, from_=0.5, to=5.0, increment=0.1, width=4,
@@ -1148,7 +1148,7 @@ class NMRPeaksSeriesGUI:
                                  textvariable=self.overlap_detection_factor,
                                  command=self.on_parameter_change)
         overlap_spin.grid(row=5, column=3, sticky=tk.W, padx=5)
-        
+
         # Row 6: Residual Threshold
         ttk.Label(params_grid, text="Residual:").grid(row=6, column=0, sticky=tk.W)
         residual_spin = tk.Spinbox(params_grid, from_=0.5, to=3.0, increment=0.1, width=4,
@@ -5453,7 +5453,7 @@ Total Peaks Processed: {total_peaks}
         """Load NMR file via dialog"""
         filename = filedialog.askopenfilename(
             title="Select NMR Spectrum",
-            filetypes=[("NMR files", "*.ft *.fid"), ("All files", "*.*")]
+            filetypes=[("NMR files", "*.ft"), ("NMR files2", "*.pipe"),  ("NMR files3", "*.ft2"), ("All files", "*.*")]
         )
         if filename:
             self.on_nmr_file_select(filename, os.path.basename(filename))
@@ -6850,7 +6850,7 @@ Configuration: {self.config_manager.config_file}
             self.root.destroy()
         except Exception:
             pass  # Continue even if destroy fails
-        
+
         # Force immediate process termination
         import os
         os._exit(0)
@@ -7335,7 +7335,7 @@ def main():
         # Platform-specific: Ensure clean exit
         import platform
         import os
-        
+
         if platform.system() in ["Linux", "Darwin"]:  # Linux and macOS need forced exit
             # Use os._exit(0) which cannot be caught by exception handlers
             os._exit(0)

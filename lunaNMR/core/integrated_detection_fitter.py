@@ -1172,59 +1172,30 @@ class IterativeDetectionFitter:
             # Traditional 1D approach
             intensity_data = y_data
 
-        # UPDATED: Apply GUI parameters to integration settings
+        # Apply GUI parameters to integration settings
         if gui_params:
-            print(f"   🎛️ Using GUI parameters:")
             if 'aic_threshold' in gui_params:
                 self.integration_params['aic_threshold'] = gui_params['aic_threshold']
-                print(f"      AIC threshold: {gui_params['aic_threshold']}")
             if 'detection_confidence_threshold' in gui_params:
                 self.integration_params['min_peak_confidence'] = gui_params['detection_confidence_threshold']
-                print(f"      Detection confidence: {gui_params['detection_confidence_threshold']}")
             if 'max_integration_iterations' in gui_params:
                 self.integration_params['max_iterations'] = gui_params['max_integration_iterations']
-                print(f"      Max iterations: {gui_params['max_integration_iterations']}")
-            # SOLUTION 2: Make advanced features configurable via GUI
             if 'adaptive_thresholds_enabled' in gui_params:
                 self.integration_params['adaptive_thresholds_enabled'] = gui_params['adaptive_thresholds_enabled']
-                print(f"      Adaptive thresholds: {gui_params['adaptive_thresholds_enabled']}")
             if 'multi_resolution_enabled' in gui_params:
                 self.integration_params['multi_resolution_enabled'] = gui_params['multi_resolution_enabled']
-                print(f"      Multi-resolution: {gui_params['multi_resolution_enabled']}")
-            # SOLUTION 4: Make fit likelihood threshold configurable
             if 'fit_likelihood_threshold' in gui_params:
                 self.integration_params['fit_likelihood_threshold'] = gui_params['fit_likelihood_threshold']
-                print(f"      Fit likelihood threshold: {gui_params['fit_likelihood_threshold']}")
-            # SOLUTION 5: Make physics constraints and convergence threshold configurable
             if 'physics_constraints_enabled' in gui_params:
                 self.integration_params['physics_constraints_enabled'] = gui_params['physics_constraints_enabled']
-                print(f"      Physics constraints: {gui_params['physics_constraints_enabled']}")
             if 'convergence_threshold' in gui_params:
                 self.integration_params['convergence_threshold'] = gui_params['convergence_threshold']
-                print(f"      Convergence threshold: {gui_params['convergence_threshold']}")
-            # Core detection parameters from GUI
-            if 'height_threshold' in gui_params:
-                print(f"      Height threshold: {gui_params['height_threshold']}")
-            if 'distance_factor' in gui_params:
-                print(f"      Distance factor: {gui_params['distance_factor']}")
-            if 'prominence_threshold' in gui_params:
-                print(f"      Prominence threshold: {gui_params['prominence_threshold']}")
-            if 'max_peaks_fit' in gui_params:
-                print(f"      Max peaks fit: {gui_params['max_peaks_fit']}")
-            if 'max_optimization_iterations' in gui_params:
-                print(f"      Max optimization iterations: {gui_params['max_optimization_iterations']}")
-            if 'smoothing_sigma' in gui_params:
-                print(f"      Smoothing sigma: {gui_params['smoothing_sigma']}")
-            # 1D Refinement parameters from GUI (NEW)
             if 'enable_1d_refinement' in gui_params:
                 self.integration_params['enable_1d_refinement'] = gui_params['enable_1d_refinement']
-                print(f"      1D refinement enabled: {gui_params['enable_1d_refinement']}")
             if 'refinement_quality_threshold' in gui_params:
                 self.integration_params['refinement_quality_threshold'] = gui_params['refinement_quality_threshold']
-                print(f"      Refinement R² threshold: {gui_params['refinement_quality_threshold']}")
             if 'refinement_coordinate_threshold' in gui_params:
                 self.integration_params['refinement_coordinate_threshold'] = gui_params['refinement_coordinate_threshold']
-                print(f"      Refinement coordinate threshold: {gui_params['refinement_coordinate_threshold']}")
 
         # Check for in-place mode with peak list constraints
         if in_place_mode and peak_list is not None:
@@ -1415,7 +1386,6 @@ class IterativeDetectionFitter:
                                     fitting_result['refinement_quality'] = refinement_result['refinement_quality']
 
                                     print(f"      ✅ 1D refinement applied: {refinement_result['statistics']['peaks_refined']}/{refinement_result['statistics']['peaks_processed']} peaks refined")
-                                    print(f"      📊 Average coordinate shift: {refinement_result['statistics']['avg_coordinate_shift']:.4f} ppm")
                                 else:
                                     print(f"      ⚠️ 1D refinement: failed to convert refined peaks back")
                             else:
@@ -1646,7 +1616,6 @@ class IterativeDetectionFitter:
             return peak_info
 
         print(f"         🔧 Peak Ridge Consolidation: {len(peak_info)} peaks before consolidation")
-        print(f"         📏 Tolerances: X={x_tolerance:.3f} ppm, Y={y_tolerance:.1f} ppm")
 
         # Group peaks by similar X-coordinates (1H dimension)
         x_groups = []
@@ -1682,7 +1651,6 @@ class IterativeDetectionFitter:
                 continue
 
             # Multiple peaks in same X-region - need consolidation
-            print(f"         🔍 Group {group_idx+1}: {len(group)} peaks at similar X-coordinates")
 
             # Sort peaks in group by Y-coordinate
             group_sorted = sorted(group, key=lambda p: p.get('position_y', 0))
@@ -1718,13 +1686,10 @@ class IterativeDetectionFitter:
                 if len(subgroup) > 1:
                     intensities = [p.get('intensity', 0) for p in subgroup]
                     y_positions = [p.get('position_y', 0) for p in subgroup]
-                    print(f"           🎯 Consolidated {len(subgroup)} Y-fragments: Y={y_positions}, I={intensities}")
-                    print(f"           ✅ Kept strongest: Y={strongest_peak.get('position_y', 0):.2f}, I={strongest_peak.get('intensity', 0):.1f}")
 
                 consolidated_peaks.append(strongest_peak)
 
         print(f"         ✅ Peak Ridge Consolidation: {len(consolidated_peaks)} peaks after consolidation")
-        print(f"         📉 Eliminated {len(peak_info) - len(consolidated_peaks)} Y-dimension fragments")
 
         return consolidated_peaks
 
@@ -1862,7 +1827,6 @@ class IterativeDetectionFitter:
         if successful_refinements > 0:
             avg_shift_x = np.mean([p.get('centroid_shift_x', 0) for p in refined_peaks if p.get('centroid_refined', False)])
             avg_shift_y = np.mean([p.get('centroid_shift_y', 0) for p in refined_peaks if p.get('centroid_refined', False)])
-            print(f"         📏 Average coordinate shifts: X={avg_shift_x:.4f} ppm, Y={avg_shift_y:.4f} ppm")
 
         return refined_peaks
 
@@ -1876,7 +1840,6 @@ class IterativeDetectionFitter:
 
         print(f"         2D Matrix: {nmr_2d_matrix.shape}, noise: {noise_level:.3f}, threshold: {intensity_threshold:.3f}")
         print(f"         Axes: 1H={len(x_axis_1h)} points, 15N={len(y_axis_15n)} points")
-        print(f"         Data stats: mean={np.mean(nmr_2d_matrix):.1f}, std={np.std(nmr_2d_matrix):.1f}, max={np.max(nmr_2d_matrix):.1f}")
 
         # Find local maxima in 2D
         # Use anisotropic neighborhood sizes for different dimensions
@@ -1899,20 +1862,16 @@ class IterativeDetectionFitter:
         # DEBUG: Show diagnostic information
         if len(x_indices) > 0:
             intensities = [nmr_2d_matrix[y_indices[i], x_indices[i]] for i in range(min(5, len(x_indices)))]
-            print(f"         Sample peak intensities (first 5): {[f'{x:.1f}' for x in intensities]}")
             peak_intensities = [nmr_2d_matrix[y_indices[i], x_indices[i]] for i in range(len(x_indices))]
-            print(f"         Peak intensity range: [{np.min(peak_intensities):.1f}, {np.max(peak_intensities):.1f}]")
 
             # Check if we might be detecting too many peaks
             if len(x_indices) > 50:
                 print(f"         ⚠️ WARNING: {len(x_indices)} peaks detected - might be excessive!")
-                print(f"         Current threshold: {intensity_threshold:.1f} ({intensity_threshold/noise_level:.1f}x noise)")
 
                 # Count how many points are above different thresholds
                 above_3x = np.sum(nmr_2d_matrix > noise_level * 3)
                 above_6x = np.sum(nmr_2d_matrix > noise_level * 6)
                 above_10x = np.sum(nmr_2d_matrix > noise_level * 10)
-                print(f"         Points above: 3x noise={above_3x}, 6x noise={above_6x}, 10x noise={above_10x}")
 
         if len(x_indices) == 0:
             print(f"         ❌ No peaks found - threshold might be too high: {intensity_threshold:.1f}")
@@ -3316,13 +3275,6 @@ class EnhancedPeakDetectionIntegrated:
         detected_graph.identify_geometric_patterns()
         print(f"   🔗 Detected graph: {len(detected_graph.nodes)} nodes, {len(detected_graph.patterns)} patterns")
 
-        # DEBUG: Print graph node coordinates
-        print(f"   🔶 DEBUG: Detected graph nodes:")
-        for i, node in enumerate(detected_graph.nodes[:5]):  # Show first 5
-            props = node.get('properties', {})
-            x_pos = props.get('position_x', 'None')
-            y_pos = props.get('position_y', 'None')
-            print(f"      Node {i+1}: X={x_pos}, Y={y_pos}, pos={node['position']}")
 
         # Step 4: Build network graph for imported peaks
         imported_graph = self._build_imported_peak_graph(peak_list)
@@ -3448,8 +3400,7 @@ class EnhancedPeakDetectionIntegrated:
 
         #print(f"   🔍 DEBUG: matching_results has {len(matching_results['assignments'])} assignments")
         if len(matching_results['assignments']) > 0:
-            print(f"   🔍 DEBUG: First assignment: {matching_results['assignments'][0]}")
-        final_peaks = self._create_final_assignments(matching_results, peak_list)
+            final_peaks = self._create_final_assignments(matching_results, peak_list)
         #print(f"   🔍 DEBUG: _create_final_assignments returned {len(final_peaks)} peaks")
 
         return {
@@ -3626,7 +3577,6 @@ class EnhancedPeakDetectionIntegrated:
             else:
                 intensity_excluded.append(peak)
 
-        print(f"         📉 After intensity filter ({min_intensity_fraction:.3f}× max): {len(intensity_filtered)} peaks")
 
         # Step 2: Limit to maximum number of peaks (keep strongest)
         if len(intensity_filtered) > max_peaks:
@@ -3648,17 +3598,15 @@ class EnhancedPeakDetectionIntegrated:
             setattr(self, '_included_peaks_after_limit_debug', final_peaks)
 
         if final_peaks:
-            print(f"         🔍 DEBUG: Stored {len(final_peaks)} included peaks after limit filtering")
+            # Also store excluded peaks for debugging purposes if needed
+            all_excluded = intensity_excluded + excluded_after_limit
+            if hasattr(self, '_excluded_peaks_debug'):
+                self._excluded_peaks_debug = all_excluded
+            else:
+                setattr(self, '_excluded_peaks_debug', all_excluded)
 
-        # Also store excluded peaks for debugging purposes if needed
-        all_excluded = intensity_excluded + excluded_after_limit
-        if hasattr(self, '_excluded_peaks_debug'):
-            self._excluded_peaks_debug = all_excluded
-        else:
-            setattr(self, '_excluded_peaks_debug', all_excluded)
-
-        if all_excluded:
-            print(f"         🔍 DEBUG: Also stored {len(all_excluded)} excluded peaks ({len(intensity_excluded)} intensity, {len(excluded_after_limit)} limit)")
+            if all_excluded:
+                pass  # Store for debugging if needed
 
         return final_peaks
 
@@ -3901,7 +3849,6 @@ class EnhancedPeakDetectionIntegrated:
         # Override debug data with correct final assignments
         if hasattr(self, '_included_peaks_after_limit_debug'):
             self._included_peaks_after_limit_debug = debug_peaks_corrected
-            print(f"   🔍 CORRECTED debug: {len(debug_peaks_corrected)} peaks with detected coordinates")
 
         # DEBUG: Print final peak coordinates to trace corruption
         #print(f"   🔶 DEBUG: Final peak coordinates:")
