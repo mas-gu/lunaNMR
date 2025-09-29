@@ -479,6 +479,106 @@ class SeriesProcessor:
 
         return self.batch_results
 
+    def _extract_direct_intensities_for_series(self, gui_integrator, is_reference=False):
+        """Extract direct intensities from spectrum data without Voigt fitting"""
+        integration_results = []
+
+        if not hasattr(gui_integrator, 'nmr_data') or gui_integrator.nmr_data is None:
+            if is_reference:
+                print("   ⚠️ No NMR data available in integrator")
+            return integration_results
+
+        nmr_data = gui_integrator.nmr_data
+
+        # Process each reference peak
+        for idx, peak_row in self.reference_peaks.iterrows():
+            try:
+                # Get peak position from reference peaks
+                ppm_x = peak_row.get('Position_X', 0.0)
+                ppm_y = peak_row.get('Position_Y', 0.0)
+                assignment = peak_row.get('Assignment', f'Peak_{idx+1}')
+
+                # Convert PPM to array indices (similar to main_gui._extract_direct_intensities)
+                if hasattr(gui_integrator, 'ppm_scale_x') and hasattr(gui_integrator, 'ppm_scale_y'):
+                    # Find closest indices
+                    x_idx = np.argmin(np.abs(gui_integrator.ppm_scale_x - ppm_x))
+                    y_idx = np.argmin(np.abs(gui_integrator.ppm_scale_y - ppm_y))
+
+                    # Extract intensity directly from spectrum
+                    if 0 <= y_idx < nmr_data.shape[0] and 0 <= x_idx < nmr_data.shape[1]:
+                        intensity = float(nmr_data[y_idx, x_idx])
+
+                        # Create integration result in expected format
+                        result = {
+                            'assignment': assignment,
+                            'ppm_x': ppm_x,
+                            'ppm_y': ppm_y,
+                            'height': intensity,
+                            'volume': intensity * 0.1,  # Approximate volume as height * small factor
+                            'snr': intensity / (np.std(nmr_data) + 1e-10),  # Simple SNR calculation
+                            'position_x': ppm_x,
+                            'position_y': ppm_y,
+                            'intensity': intensity,
+                            'method': 'direct_extraction'
+                        }
+                        integration_results.append(result)
+
+                        if is_reference and idx < 3:  # Show first few for debugging
+                            print(f"   Peak {assignment}: PPM({ppm_x:.3f}, {ppm_y:.3f}) -> Intensity: {intensity:.2e}")
+                    else:
+                        if is_reference:
+                            print(f"   ⚠️ Peak {assignment}: indices out of bounds (x:{x_idx}, y:{y_idx})")
+                        # Still add a zero result to maintain peak count
+                        result = {
+                            'assignment': assignment,
+                            'ppm_x': ppm_x,
+                            'ppm_y': ppm_y,
+                            'height': 0.0,
+                            'volume': 0.0,
+                            'snr': 0.0,
+                            'position_x': ppm_x,
+                            'position_y': ppm_y,
+                            'intensity': 0.0,
+                            'method': 'direct_extraction'
+                        }
+                        integration_results.append(result)
+                else:
+                    if is_reference:
+                        print(f"   ⚠️ No PPM scales available in integrator")
+                    result = {
+                        'assignment': assignment,
+                        'ppm_x': ppm_x,
+                        'ppm_y': ppm_y,
+                        'height': 0.0,
+                        'volume': 0.0,
+                        'snr': 0.0,
+                        'position_x': ppm_x,
+                        'position_y': ppm_y,
+                        'intensity': 0.0,
+                        'method': 'direct_extraction'
+                    }
+                    integration_results.append(result)
+
+            except Exception as e:
+                if is_reference:
+                    print(f"   ❌ Error extracting peak {assignment}: {e}")
+                # Add failed result
+                result = {
+                    'assignment': peak_row.get('Assignment', f'Peak_{idx+1}'),
+                    'ppm_x': peak_row.get('Position_X', 0.0),
+                    'ppm_y': peak_row.get('Position_Y', 0.0),
+                    'height': 0.0,
+                    'volume': 0.0,
+                    'snr': 0.0,
+                    'position_x': peak_row.get('Position_X', 0.0),
+                    'position_y': peak_row.get('Position_Y', 0.0),
+                    'intensity': 0.0,
+                    'method': 'direct_extraction'
+                }
+                integration_results.append(result)
+
+        return integration_results
+
     def _create_dummy_progress_dialog(self):
         """Create a dummy progress dialog to avoid GUI threading issues"""
         class DummyProgressDialog:
@@ -602,14 +702,20 @@ class SeriesProcessor:
                 if is_reference:
                     print(f"   ✅ Applied {len(self.voigt_params)} Voigt parameters to GUI integrator")
 
-            # Apply global optimization and parallel processing settings to GUI
+            # Apply global optimization, parallel processing, and Voigt fitting settings to GUI
             if hasattr(self, 'use_global_optimization'):
                 main_gui.use_global_optimization.set(self.use_global_optimization)
             if hasattr(self, 'use_parallel_processing'):
                 main_gui.use_parallel_processing.set(self.use_parallel_processing)
+            # CRITICAL FIX: Apply Voigt fitting toggle to BOTH GUI toggles
+            if hasattr(self, 'use_voigt_fitting'):
+                # Sync both single spectrum and series integration Voigt toggles
+                main_gui.use_voigt_fitting.set(self.use_voigt_fitting)
+                if hasattr(main_gui, 'series_use_voigt_fitting'):
+                    main_gui.series_use_voigt_fitting.set(self.use_voigt_fitting)
 
             if is_reference:
-                print(f"   ✅ Applied global opt: {getattr(self, 'use_global_optimization', False)}, parallel: {getattr(self, 'use_parallel_processing', True)}")
+                print(f"   ✅ Applied settings - Voigt: {getattr(self, 'use_voigt_fitting', True)}, Global opt: {getattr(self, 'use_global_optimization', False)}, Parallel: {getattr(self, 'use_parallel_processing', True)}")
 
             # STEP 1: Use EXACT same detection method from GUI (same as single spectrum)
             # Call the GUI's detect_peaks() method which handles all modes perfectly
@@ -637,48 +743,69 @@ class SeriesProcessor:
                     'detection_rate': 0.0
                 }
 
-            # STEP 2: Use gold standard fitting method from GUI (same as single spectrum)
+            # STEP 2: Process peaks based on Voigt fitting setting
             if self.use_voigt_fitting:
                 if is_reference:
-                    print(f"🔍 Using GUI core fitting logic for {spectrum_name}")
+                    print(f"🔬 Using Voigt profile fitting for {spectrum_name}")
 
-                # CRITICAL FIX: Call the core fitting logic directly (bypass GUI threading)
-                # This uses the exact same fitting algorithms as GUI but without threading issues
-                peak_list = gui_integrator.peak_list
-                total_count = len(peak_list)
+                # Perform Voigt fitting using the integrator's enhanced fitter
+                try:
+                    fitted_results = []
 
-                # Create a dummy progress dialog to avoid threading issues
-                dummy_progress = self._create_dummy_progress_dialog()
+                    # Process each peak in the reference list
+                    for idx, peak_row in self.reference_peaks.iterrows():
+                        try:
+                            # Get peak position
+                            ppm_x = peak_row.get('Position_X', 0.0)
+                            ppm_y = peak_row.get('Position_Y', 0.0)
+                            assignment = peak_row.get('Assignment', f'Peak_{idx+1}')
 
-                # Use the same logic as GUI's _run_batch_fitting method
-                if main_gui.use_global_optimization.get():
-                    if is_reference:
-                        print(f"   Using global optimization workflow")
-                    fitted_results = main_gui._run_global_optimization(dummy_progress, peak_list)
-                else:
-                    if is_reference:
-                        print(f"   Using linear fitting workflow")
-                    fitted_results = main_gui._run_linear_fitting(dummy_progress, peak_list, total_count)
+                            if is_reference and idx == 0:
+                                print(f"   Fitting Voigt profiles for peak {assignment} at ({ppm_x:.3f}, {ppm_y:.3f}) ppm")
 
-                # Update GUI integrator with results (same as GUI does)
-                if fitted_results:
-                    gui_integrator.fitted_peaks = fitted_results
-                    if is_reference:
-                        print(f"   ✅ Core fitting complete: {len(fitted_results)} results")
+                            # Call the integrator's Voigt fitting method
+                            if hasattr(gui_integrator, 'enhanced_fitter') and gui_integrator.enhanced_fitter:
+                                result = gui_integrator.enhanced_fitter.fit_voigt_profile(
+                                    gui_integrator.nmr_data,
+                                    ppm_x, ppm_y,
+                                    gui_integrator.ppm_scale_x,
+                                    gui_integrator.ppm_scale_y,
+                                    assignment=assignment
+                                )
+                                fitted_results.append(result)
+                            else:
+                                # Fallback to basic fitting
+                                result = {
+                                    'assignment': assignment,
+                                    'ppm_x': ppm_x,
+                                    'ppm_y': ppm_y,
+                                    'success': False,
+                                    'error': 'Enhanced fitter not available'
+                                }
+                                fitted_results.append(result)
 
-                # Get results from GUI integrator
-                if hasattr(gui_integrator, 'fitted_peaks') and gui_integrator.fitted_peaks is not None:
-                    fitted_results = gui_integrator.fitted_peaks
+                        except Exception as e:
+                            if is_reference:
+                                print(f"   ⚠️ Failed to fit peak {assignment}: {e}")
+                            result = {
+                                'assignment': peak_row.get('Assignment', f'Peak_{idx+1}'),
+                                'ppm_x': peak_row.get('Position_X', 0.0),
+                                'ppm_y': peak_row.get('Position_Y', 0.0),
+                                'success': False,
+                                'error': str(e)
+                            }
+                            fitted_results.append(result)
+
+                    # Process results
                     successful_fits = len([r for r in fitted_results if r and r.get('success', True)])
                     total_peaks = len(self.reference_peaks)
                     detection_rate = (successful_fits / total_peaks * 100) if total_peaks > 0 else 0
 
-                    # CRITICAL: Convert to integration format for spectrum browser compatibility
+                    # Convert to integration format for compatibility
                     integration_results = self._convert_voigt_to_integration_format(fitted_results, is_reference)
 
                     if is_reference:
-                        print(f"   ✅ GUI gold standard complete: {successful_fits}/{total_peaks} peaks ({detection_rate:.1f}%)")
-                        print(f"   📊 Converted {len(fitted_results)} fitted_results to {len(integration_results)} integration_results")
+                        print(f"   ✅ Voigt fitting complete: {successful_fits}/{total_peaks} peaks ({detection_rate:.1f}%)")
 
                     return {
                         'status': 'success' if successful_fits > 0 else 'failed',
@@ -686,54 +813,48 @@ class SeriesProcessor:
                         'detected_peaks': successful_fits,
                         'total_peaks': total_peaks,
                         'detection_rate': detection_rate,
-                        # CRITICAL: Provide both formats for spectrum browser compatibility
-                        'fitted_peaks': self._convert_voigt_to_visualization_format(fitted_results),  # Spectrum browser expects this key name
-                        'integration_results': integration_results,  # Spectrum browser expects this format
-                        'processing_method': 'gui_gold_standard_workflow'
+                        'fitted_peaks': self._convert_voigt_to_visualization_format(fitted_results),
+                        'integration_results': integration_results,
+                        'processing_method': 'voigt_profile_fitting'
                     }
-                else:
+
+                except Exception as e:
+                    if is_reference:
+                        print(f"   ❌ Error during Voigt fitting: {e}")
                     return {
                         'status': 'failed',
-                        'error': 'GUI fit_all_peaks() did not produce results',
+                        'error': f'Voigt fitting failed: {str(e)}',
                         'detected_peaks': 0,
                         'total_peaks': len(self.reference_peaks),
                         'detection_rate': 0.0
                     }
             else:
-                # Original integration-only workflow (legacy - using GUI integrator)
-                integration_results = gui_integrator.integrate_peaks()
-
-                # DEBUG: Check integration results structure
-                if is_reference and integration_results:
-                    print(f"🔍 DEBUG: Integration result sample:")
-                    if len(integration_results) > 0:
-                        sample = integration_results[0]
-                        print(f"   Sample keys: {list(sample.keys()) if isinstance(sample, dict) else 'Not a dict'}")
-                        if isinstance(sample, dict):
-                            for key, value in sample.items():
-                                print(f"   {key}: {value} ({type(value)})")
-
-                # Calculate statistics from GUI integrator
+                # Direct intensity extraction without Voigt fitting
                 if is_reference:
-                    print(f"🔍 DEBUG: Calculating detection statistics...")
-                stats = gui_integrator.get_detection_statistics()
+                    print(f"🔍 Using direct intensity extraction for {spectrum_name} (Voigt fitting OFF)")
+
+                # Extract direct intensities from the spectrum data
+                integration_results = self._extract_direct_intensities_for_series(gui_integrator, is_reference)
+
+                # Calculate statistics
+                successful_extractions = len([r for r in integration_results if r.get('height', 0) > 0])
+                total_peaks = len(self.reference_peaks)
+                detection_rate = (successful_extractions / total_peaks * 100) if total_peaks > 0 else 0
 
                 if is_reference:
-                    print(f"🔍 DEBUG: Integration completed successfully")
-                    print(f"   detected_peaks: {stats.get('detected_peaks', 0)}")
-                    print(f"   total_peaks: {stats.get('total_peaks', 0)}")
-                    print(f"   detection_rate: {stats.get('detection_rate', 0.0)}")
-                    print(f"   integration_results count: {len(integration_results) if integration_results else 0}")
+                    print(f"🔍 Direct extraction completed: {successful_extractions}/{total_peaks} peaks ({detection_rate:.1f}%)")
+                    print(f"   Integration results count: {len(integration_results)}")
 
                 return {
                     'status': 'success',
-                    'detected_peaks': stats.get('detected_peaks', 0),
-                    'total_peaks': stats.get('total_peaks', 0),
-                    'detection_rate': stats.get('detection_rate', 0.0),
-                    'noise_level': getattr(gui_integrator, 'threshold', 0.0),
+                    'detected_peaks': successful_extractions,
+                    'total_peaks': total_peaks,
+                    'detection_rate': detection_rate,
+                    'noise_level': 0.0,  # No noise calculation for direct extraction
                     'integration_results': integration_results,
-                    'fitted_peaks': gui_integrator.fitted_peaks,  # CRITICAL: Fixed variable name
-                    'voigt_fits': getattr(gui_integrator, 'voigt_fits', [])
+                    'fitted_peaks': [],  # No fitted peaks for direct extraction
+                    'voigt_fits': [],
+                    'processing_method': 'direct_intensity_extraction'
                 }
 
         except Exception as e:

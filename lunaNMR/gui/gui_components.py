@@ -730,17 +730,19 @@ class PeakNavigator(ttk.Frame):
         table_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         # Create treeview with scrollbar
-        columns = ("assignment", "x_coord", "y_coord")
+        columns = ("assignment", "x_coord", "y_coord", "height")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=20)
 
         # Configure columns
         self.tree.heading("assignment", text="Assignment", anchor="center")
         self.tree.heading("x_coord", text="X (1H)", anchor="center")
         self.tree.heading("y_coord", text="Y (15N/13C)", anchor="center")
+        self.tree.heading("height", text="Height", anchor="center")
 
-        self.tree.column("assignment", width=90, anchor="center", minwidth=70)
-        self.tree.column("x_coord", width=90, anchor="center", minwidth=70)
-        self.tree.column("y_coord", width=90, anchor="center", minwidth=70)
+        self.tree.column("assignment", width=80, anchor="center", minwidth=60)
+        self.tree.column("x_coord", width=80, anchor="center", minwidth=60)
+        self.tree.column("y_coord", width=80, anchor="center", minwidth=60)
+        self.tree.column("height", width=80, anchor="center", minwidth=60)
 
         # Scrollbar for table
         tree_scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
@@ -890,7 +892,9 @@ class PeakNavigator(ttk.Frame):
                     assignment = row.get('Assignment', f"Ref{i+1}")
                     x_coord = float(row.get('Position_X', 0))
                     y_coord = float(row.get('Position_Y', 0))
-                    self.reference_peaks.append([assignment, x_coord, y_coord])
+                    # Reference peaks don't have heights initially
+                    height = ""
+                    self.reference_peaks.append([assignment, x_coord, y_coord, height])
 
             # Handle numpy array format
             elif hasattr(peak_data, 'shape') and len(peak_data.shape) == 2:
@@ -899,7 +903,8 @@ class PeakNavigator(ttk.Frame):
                         assignment = f"Ref{i+1}"  # Default assignment
                         x_coord = float(peak[0])
                         y_coord = float(peak[1])
-                        self.reference_peaks.append([assignment, x_coord, y_coord])
+                        height = ""  # Empty height initially
+                        self.reference_peaks.append([assignment, x_coord, y_coord, height])
 
             # Handle list/tuple format
             elif isinstance(peak_data, (list, tuple)):
@@ -908,7 +913,8 @@ class PeakNavigator(ttk.Frame):
                         assignment = f"Ref{i+1}"
                         x_coord = float(peak[0])
                         y_coord = float(peak[1])
-                        self.reference_peaks.append([assignment, x_coord, y_coord])
+                        height = ""  # Empty height initially
+                        self.reference_peaks.append([assignment, x_coord, y_coord, height])
             else:
                 print(f"Peak Navigator Warning: Unrecognized reference peak data format: {type(peak_data)}")
                 return
@@ -944,7 +950,9 @@ class PeakNavigator(ttk.Frame):
                     assignment = peak.get('assignment', peak.get('Assignment', f"Det{i+1}"))
 
                     if x_coord != 0 and y_coord != 0:  # Skip empty coordinates
-                        self.detected_peaks.append([assignment, float(x_coord), float(y_coord)])
+                        # Get height if available from peak data
+                        height = peak.get('height', peak.get('intensity', peak.get('amplitude', "")))
+                        self.detected_peaks.append([assignment, float(x_coord), float(y_coord), height])
 
             # Handle pandas DataFrame
             elif hasattr(fitted_peaks, 'iloc') and hasattr(fitted_peaks, 'columns'):
@@ -1021,7 +1029,10 @@ class PeakNavigator(ttk.Frame):
         for i, peak in enumerate(peaks):
             if len(peak) >= 3:
                 assignment, x_coord, y_coord = peak[0], peak[1], peak[2]
-                self.tree.insert("", "end", values=(assignment, f"{x_coord:.3f}", f"{y_coord:.1f}"))
+                # Get height if available (from extracted heights), otherwise empty
+                height = peak[3] if len(peak) > 3 else ""
+                height_str = f"{height:.2e}" if height and height != "" else ""
+                self.tree.insert("", "end", values=(assignment, f"{x_coord:.3f}", f"{y_coord:.1f}", height_str))
                 print(f"Peak Navigator: Added peak {i+1}: {assignment} ({x_coord:.3f}, {y_coord:.1f})")
 
         # Update status
@@ -1311,11 +1322,11 @@ class PeakNavigator(ttk.Frame):
             if dialog.result:
                 new_assignment, new_x, new_y = dialog.result
 
-                # Add to detected peaks list
-                self.detected_peaks.append([new_assignment, new_x, new_y])
+                # Add to detected peaks list (with empty height)
+                self.detected_peaks.append([new_assignment, new_x, new_y, ""])
 
-                # Add to tree
-                self.tree.insert("", "end", values=(new_assignment, f"{new_x:.3f}", f"{new_y:.1f}"))
+                # Add to tree (with empty height column)
+                self.tree.insert("", "end", values=(new_assignment, f"{new_x:.3f}", f"{new_y:.1f}", ""))
 
                 # Update status
                 count = len(self.detected_peaks)
@@ -1339,7 +1350,8 @@ class PeakNavigator(ttk.Frame):
                 # Convert detected peaks back to dictionary format
                 updated_peaks = []
                 for i, peak in enumerate(self.detected_peaks):
-                    assignment, x_coord, y_coord = peak
+                    assignment, x_coord, y_coord = peak[0], peak[1], peak[2]
+                    height = peak[3] if len(peak) > 3 else ""
                     peak_dict = {
                         'assignment': assignment,
                         'ppm_x': x_coord,
@@ -1373,6 +1385,47 @@ class PeakNavigator(ttk.Frame):
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save peaks: {str(e)}")
 
+
+    def update_heights_from_results(self, fitted_results):
+        """
+        Update the Heights column in the peak navigator table with extracted heights.
+        Called after Extract Heights is clicked (when Voigt fitting is OFF).
+        """
+        if not fitted_results:
+            return
+
+        print(f"Peak Navigator: Updating heights for {len(fitted_results)} peaks")
+
+        # Create a mapping of assignments to heights
+        height_map = {}
+        for result in fitted_results:
+            assignment = result.get('assignment', result.get('Assignment', ''))
+            height = result.get('height', result.get('amplitude', result.get('intensity', '')))
+            if assignment and height != '':
+                height_map[assignment] = float(height)
+
+        # Update detected peaks data structure
+        for i, peak in enumerate(self.detected_peaks):
+            assignment = peak[0]
+            if assignment in height_map:
+                if len(peak) > 3:
+                    self.detected_peaks[i][3] = height_map[assignment]
+                else:
+                    self.detected_peaks[i].append(height_map[assignment])
+
+        # Update reference peaks data structure
+        for i, peak in enumerate(self.reference_peaks):
+            assignment = peak[0]
+            if assignment in height_map:
+                if len(peak) > 3:
+                    self.reference_peaks[i][3] = height_map[assignment]
+                else:
+                    self.reference_peaks[i].append(height_map[assignment])
+
+        # Refresh the table display to show the heights
+        self.refresh_peak_list()
+
+        print(f"Peak Navigator: Heights updated for {len(height_map)} peaks")
 
 class PeakEditDialog:
     """Dialog for editing peak properties"""

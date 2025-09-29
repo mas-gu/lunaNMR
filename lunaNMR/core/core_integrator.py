@@ -164,6 +164,21 @@ class VoigtIntegrator(BaseIntegrator):
         self.detected_nucleus_type = None
         self.gui_window_override = {'x': None, 'y': None}  # Track GUI overrides
 
+        # Detection search windows (set by GUI)
+        self.search_window_x = 0.01  # Default X search window in ppm
+        self.search_window_y = 0.05  # Default Y search window in ppm
+
+    def set_search_window(self, x_ppm, y_ppm):
+        """Set search window parameters for peak detection
+
+        Args:
+            x_ppm (float): ±X ppm search window (1H dimension)
+            y_ppm (float): ±Y ppm search window (15N/13C dimension)
+        """
+        self.search_window_x = x_ppm
+        self.search_window_y = y_ppm
+        print(f"🔍 Search windows set: X=±{x_ppm:.3f} ppm, Y=±{y_ppm:.3f} ppm")
+
     def load_nmr_data(self, data_2d, ppm_x_axis, ppm_y_axis):
         """
         TESTING SUPPORT: Load NMR data directly from arrays
@@ -2124,6 +2139,141 @@ class VoigtIntegrator(BaseIntegrator):
         ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
         return 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
 
+    def detect_peaks_professional(self, **kwargs):
+        """Professional peak detection - enhanced version with reference option"""
+        # If we have a peak list loaded, use reference-based detection
+        if hasattr(self, 'peak_list') and self.peak_list is not None:
+            return self._detect_peaks_reference_based()
+        else:
+            # No peak list - use fallback
+            print("❌ No peak list loaded for standard detection mode")
+            print("   Please load a peak list or switch to S/N threshold mode")
+            return []
+
+    def _detect_peaks_reference_based(self):
+        """Detect all peaks then match closest to peak list (exact backup approach)"""
+        if self.peak_list is None:
+            raise ValueError("Peak list must be loaded before detection")
+        if self.nmr_data is None:
+            raise ValueError("NMR data must be loaded before detection")
+
+        print(f"📋 Detection: detect all peaks then match closest to {len(self.peak_list)} reference peaks")
+
+        # Step 1: Detect ALL peaks using threshold (like S/N native mode)
+        # Ensure noise level is estimated
+        if not hasattr(self, 'noise_level') or self.noise_level is None:
+            self._estimate_noise_level_advanced()
+
+        # Use GUI threshold parameters (1H/15N ppm values are search windows)
+        threshold_multiplier = 3.0  # Default threshold multiplier
+        signal_threshold = self.noise_level * threshold_multiplier
+
+        print(f"   Step 1: Detecting all peaks (threshold={signal_threshold:.2e})")
+
+        # Detect all peaks using the existing threshold method
+        all_detected_peaks = self._detect_peaks_by_threshold(signal_threshold)
+
+        print(f"   Found {len(all_detected_peaks)} peaks total")
+
+        # Step 2: Match each reference peak to closest detected peak
+        search_window_x_ppm = self.search_window_x  # From GUI: 1H/15N (ppm) first value
+        search_window_y_ppm = self.search_window_y  # From GUI: 1H/15N (ppm) second value
+
+        print(f"   Step 2: Matching to reference peaks (search windows: X=±{search_window_x_ppm:.3f}, Y=±{search_window_y_ppm:.3f} ppm)")
+
+        matched_peaks = []
+        used_peaks = set()  # Track which detected peaks have been used
+
+        for idx, peak_row in self.peak_list.iterrows():
+            try:
+                ref_x_ppm = float(peak_row['Position_X'])
+                ref_y_ppm = float(peak_row['Position_Y'])
+                assignment = peak_row.get('Assignment', f'Peak_{idx+1}')
+
+                # Find closest detected peak within search window
+                best_match = None
+                best_distance = float('inf')
+
+                for i, detected_peak in enumerate(all_detected_peaks):
+                    if i in used_peaks:  # Skip already used peaks
+                        continue
+
+                    # Calculate distance from reference
+                    x_distance = abs(detected_peak['x_ppm'] - ref_x_ppm)
+                    y_distance = abs(detected_peak['y_ppm'] - ref_y_ppm)
+
+                    # Check if within search window
+                    if x_distance <= search_window_x_ppm and y_distance <= search_window_y_ppm:
+                        total_distance = np.sqrt(x_distance**2 + y_distance**2)
+                        if total_distance < best_distance:
+                            best_distance = total_distance
+                            best_match = (i, detected_peak)
+
+                if best_match is not None:
+                    # Use the matched detected peak
+                    peak_idx, detected_peak = best_match
+                    used_peaks.add(peak_idx)
+
+                    matched_peak = {
+                        'assignment': assignment,
+                        'ppm_x': detected_peak['x_ppm'],
+                        'ppm_y': detected_peak['y_ppm'],
+                        'x_point': detected_peak['indices'][1],
+                        'y_point': detected_peak['indices'][0],
+                        'intensity': detected_peak['intensity'],
+                        'snr': detected_peak['snr'],
+                        'detected': True,
+                        'detection_quality': 'Matched',
+                        'distance_from_reference': best_distance
+                    }
+
+                    if best_distance > 0.001:
+                        print(f"   {assignment}: matched to peak {best_distance:.4f} ppm away")
+
+                else:
+                    # No match found, use reference position
+                    ref_x_idx = np.argmin(np.abs(self.ppm_x_axis - ref_x_ppm))
+                    ref_y_idx = np.argmin(np.abs(self.ppm_y_axis - ref_y_ppm))
+                    ref_intensity = self.nmr_data[ref_y_idx, ref_x_idx]
+                    ref_snr = np.abs(ref_intensity) / self.noise_level if self.noise_level > 0 else 0
+
+                    matched_peak = {
+                        'assignment': assignment,
+                        'ppm_x': ref_x_ppm,
+                        'ppm_y': ref_y_ppm,
+                        'x_point': ref_x_idx,
+                        'y_point': ref_y_idx,
+                        'intensity': ref_intensity,
+                        'snr': ref_snr,
+                        'detected': False,
+                        'reference_retained': True,
+                        'detection_quality': 'Reference'
+                    }
+
+                matched_peaks.append(matched_peak)
+
+            except (ValueError, KeyError) as e:
+                print(f"⚠️ Skipping peak {idx+1}: {e}")
+                continue
+
+        # Store results
+        self.fitted_peaks = matched_peaks
+
+        # Update statistics
+        detected_count = sum(1 for p in matched_peaks if p.get('detected', False))
+        reference_retained = sum(1 for p in matched_peaks if p.get('reference_retained', False))
+
+        self.detection_statistics = {
+            'total_peaks': len(self.peak_list),
+            'detected_peaks': detected_count,
+            'reference_retained': reference_retained,
+            'detection_rate': (detected_count / len(self.peak_list) * 100) if len(self.peak_list) > 0 else 0
+        }
+
+        print(f"✅ Detection complete: {detected_count}/{len(self.peak_list)} matched, {reference_retained} references retained")
+
+        return matched_peaks
+
     def detect_peaks_full_mode(self, **kwargs):
         """Full peak detection mode"""
         return self.detect_peaks_professional(**kwargs)
@@ -2281,7 +2431,12 @@ class VoigtIntegrator(BaseIntegrator):
                         local_spectrum = self.nmr_data[np.ix_(y_indices, x_indices)]
                         local_y = np.max(local_spectrum, axis=0)  # Project to 1D
 
-                        # Create fit result format for ML collection
+                        # ENHANCEMENT: Extract direct intensity for internal standard comparison
+                        direct_intensity_data = self._extract_direct_intensity_for_ml_comparison(
+                            peak_data['ppm_x'], peak_data['ppm_y'], local_x, local_y
+                        )
+
+                        # Create enhanced fit result with direct intensity comparison
                         ml_fit_result = {
                             'success': True,
                             'amplitude': peak_data['intensity'],
@@ -2290,7 +2445,16 @@ class VoigtIntegrator(BaseIntegrator):
                             'gamma': 0.005,  # Estimated from S/N detection
                             'baseline': np.min(local_y),
                             'r_squared': 0.9,  # Assume high quality for S/N detected peaks
-                            'method': 'sn_native_detection'
+                            'method': 'sn_native_detection',
+                            # Add direct intensity comparison for ML training
+                            'direct_intensity': direct_intensity_data['intensity'],
+                            'direct_height': direct_intensity_data['height'],
+                            'intensity_ratio': direct_intensity_data.get('intensity_ratio', 1.0),
+                            'method_comparison': {
+                                'primary_method': 'sn_detection',
+                                'direct_method': 'spectrum_lookup',
+                                'both_available': True
+                            }
                         }
 
                         # Enhanced ML data collection v2.0 for S/N detection
@@ -2565,8 +2729,45 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             self.statistics['average_quality'] = ((current_avg * (total - 1)) + quality) / total
 
     def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown"):
-        """Enhanced peak fitting with advanced features"""
-        result = self.fit_peak_voigt_2d(peak_x_ppm, peak_y_ppm, assignment, use_dynamic_optimization=True) #GM False to True
+        """Enhanced peak fitting with advanced features and consensus fitting integration"""
+
+        # Check if simplified parameters are enabled (indicating automated mode preference)
+        use_consensus = False
+        if hasattr(self, 'parameter_manager') and hasattr(self.parameter_manager, 'use_simplified_mode'):
+            use_consensus = self.parameter_manager.use_simplified_mode
+        elif hasattr(self, 'gui_params') and self.gui_params.get('use_simplified_parameters', False):
+            use_consensus = True
+
+        if use_consensus and hasattr(self.voigt_fitter, 'fit_with_consensus'):
+            # Use advanced consensus fitting for automated mode
+            print(f"🚀 Using consensus fitting for peak at ({peak_x_ppm:.4f}, {peak_y_ppm:.4f})")
+
+            # Extract region data for consensus fitting using existing method
+            region_data = self.extract_peak_region(peak_x_ppm, peak_y_ppm, self.fitting_parameters.get('fitting_window_x', 0.15), self.fitting_parameters.get('fitting_window_y', 2.0))
+            if region_data is not None:
+                # Use the x cross-section for 1D consensus fitting
+                x_region = region_data['x_ppm_scale']
+                y_region = region_data['x_cross_section']  # Intensity data along x-axis
+            else:
+                x_region, y_region = None, None
+            if x_region is not None and y_region is not None:
+                nucleus_type = self.detect_nucleus_type(peak_x_ppm, peak_y_ppm)
+                consensus_result = self.voigt_fitter.fit_with_consensus(
+                    x_region, y_region, nucleus_type, use_simplified=True
+                )
+
+                if consensus_result and consensus_result.get('success', False):
+                    # Convert consensus result to standard format
+                    result = self.convert_consensus_result_to_standard(consensus_result, peak_x_ppm, peak_y_ppm, assignment)
+                    print(f"✅ Consensus fitting successful: R² = {result.get('avg_r_squared', 0):.4f}")
+
+                    self.update_statistics(True, result['avg_r_squared'])
+                    return result
+                else:
+                    print(f"⚠️ Consensus fitting failed, falling back to legacy method")
+
+        # Fallback to legacy fitting method
+        result = self.fit_peak_voigt_2d(peak_x_ppm, peak_y_ppm, assignment, use_dynamic_optimization=True)
 
         if result:
             self.update_statistics(True, result['avg_r_squared'])
@@ -2574,6 +2775,77 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             self.update_statistics(False)
 
         return result
+
+
+    def detect_nucleus_type(self, peak_x_ppm, peak_y_ppm):
+        """Detect nucleus type based on peak position"""
+        # Simple heuristic based on chemical shift ranges
+        if abs(peak_x_ppm) < 20:  # 1H range approximately 0-15 ppm
+            return '1H'
+        elif 100 <= abs(peak_x_ppm) <= 200:  # 13C range approximately 0-200 ppm
+            return '13C'
+        elif abs(peak_y_ppm) > 100:  # 15N range approximately 0-600 ppm
+            return '15N'
+        else:
+            return '1H'  # Default fallback
+
+    def convert_consensus_result_to_standard(self, consensus_result, peak_x_ppm, peak_y_ppm, assignment):
+        """Convert consensus fitting result to standard peak result format"""
+        try:
+            # Extract key metrics from consensus result
+            r_squared = consensus_result.get('r_squared', 0)
+            parameters = consensus_result.get('parameters', [])
+            fitted_curve = consensus_result.get('fitted_curve')
+
+            # Extract fitted parameters (assuming Voigt format: [amp, center, sigma, gamma, baseline])
+            if len(parameters) >= 5:
+                amplitude = parameters[0]
+                center = parameters[1]
+                sigma = parameters[2]
+                gamma = parameters[3]
+                baseline = parameters[4]
+                width = sigma + gamma  # Total width
+            else:
+                # Fallback values
+                amplitude, center, sigma, gamma, baseline, width = 1000, peak_x_ppm, 0.01, 0.01, 0, 0.02
+
+            # Create standard result dictionary
+            result = {
+                'assignment': assignment,
+                'peak_x': peak_x_ppm,
+                'peak_y': peak_y_ppm,
+                'amplitude': amplitude,
+                'volume': amplitude * width * np.pi,  # Approximate volume
+                'avg_r_squared': r_squared,
+                'height': amplitude,
+                'width': width,
+                'sigma': sigma,
+                'gamma': gamma,
+                'baseline': baseline,
+                'center_x': center,
+                'center_y': peak_y_ppm,
+                'success': True,
+                'method': 'consensus_fitting',
+                'quality_class': consensus_result.get('quality_class', 'Fair'),
+                'fitted_curve': fitted_curve,
+                'original_consensus_result': consensus_result
+            }
+
+            return result
+
+        except Exception as e:
+            print(f"Failed to convert consensus result: {e}")
+            # Return minimal fallback result
+            return {
+                'assignment': assignment,
+                'peak_x': peak_x_ppm,
+                'peak_y': peak_y_ppm,
+                'amplitude': 1000,
+                'volume': 1000,
+                'avg_r_squared': 0.5,
+                'success': False,
+                'method': 'consensus_fitting_failed'
+            }
 
     def batch_peak_fitting(self, peaks_list, progress_callback=None):
         """Batch fitting with progress tracking"""
@@ -2646,6 +2918,44 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
         print(f"   Optimization rounds: {optimization_report['optimization_summary']['total_rounds']}")
 
         return optimization_report
+
+    def _extract_direct_intensity_for_ml_comparison(self, ppm_x, ppm_y, local_x, local_y):
+        """
+        Extract direct intensity from spectrum data to compare with Voigt fitting
+        for ML training internal standards. Used in core integrator.
+        """
+        try:
+            if not hasattr(self, 'nmr_data') or self.nmr_data is None:
+                return {'intensity': 0.0, 'height': 0.0, 'intensity_ratio': 1.0}
+
+            # Find nearest indices in full spectrum
+            x_idx = np.argmin(np.abs(self.ppm_x_axis - ppm_x))
+            y_idx = np.argmin(np.abs(self.ppm_y_axis - ppm_y))
+
+            # Extract direct intensity at peak position
+            direct_intensity = float(self.nmr_data[y_idx, x_idx])
+            direct_height = abs(direct_intensity)
+
+            # Calculate intensity from local data (for comparison with detection/fitting region)
+            if len(local_y) > 0:
+                local_max = float(np.max(local_y))
+                intensity_ratio = direct_height / (local_max + 1e-8) if local_max > 0 else 1.0
+            else:
+                intensity_ratio = 1.0
+
+            return {
+                'intensity': direct_intensity,
+                'height': direct_height,
+                'intensity_ratio': intensity_ratio,
+                'x_idx': int(x_idx),
+                'y_idx': int(y_idx),
+                'extraction_method': 'spectrum_lookup_core'
+            }
+
+        except Exception as e:
+            # Silent failure - don't break ML data collection
+            return {'intensity': 0.0, 'height': 0.0, 'intensity_ratio': 1.0}
+
 def _clamp_guess_to_bounds(vector, lower_bounds, upper_bounds, margin=1e-6):
     """Clamp parameter vector to be safely inside the provided bounds."""
     clamped = []
@@ -2664,3 +2974,40 @@ def _clamp_guess_to_bounds(vector, lower_bounds, upper_bounds, margin=1e-6):
             clamped.append(max(value, lower_adj))
 
     return clamped
+
+    def _extract_direct_intensity_for_ml_comparison(self, ppm_x, ppm_y, local_x, local_y):
+        """
+        Extract direct intensity from spectrum data to compare with Voigt fitting
+        for ML training internal standards. Used in core integrator.
+        """
+        try:
+            if not hasattr(self, 'nmr_data') or self.nmr_data is None:
+                return {'intensity': 0.0, 'height': 0.0, 'intensity_ratio': 1.0}
+
+            # Find nearest indices in full spectrum
+            x_idx = np.argmin(np.abs(self.ppm_x_axis - ppm_x))
+            y_idx = np.argmin(np.abs(self.ppm_y_axis - ppm_y))
+
+            # Extract direct intensity at peak position
+            direct_intensity = float(self.nmr_data[y_idx, x_idx])
+            direct_height = abs(direct_intensity)
+
+            # Calculate intensity from local data (for comparison with detection/fitting region)
+            if len(local_y) > 0:
+                local_max = float(np.max(local_y))
+                intensity_ratio = direct_height / (local_max + 1e-8) if local_max > 0 else 1.0
+            else:
+                intensity_ratio = 1.0
+
+            return {
+                'intensity': direct_intensity,
+                'height': direct_height,
+                'intensity_ratio': intensity_ratio,
+                'x_idx': int(x_idx),
+                'y_idx': int(y_idx),
+                'extraction_method': 'spectrum_lookup_core'
+            }
+
+        except Exception as e:
+            # Silent failure - don't break ML data collection
+            return {'intensity': 0.0, 'height': 0.0, 'intensity_ratio': 1.0}

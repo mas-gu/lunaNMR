@@ -1229,35 +1229,80 @@ class BatchProcessor:
                             fit_params = x_fit.get('fit_params', {})
 
                             if x_data and y_data:
+                                # ENHANCEMENT: Add direct intensity as internal standard for training
+                                direct_intensity_data = self._extract_direct_intensity_for_ml(
+                                    ppm_x, ppm_y, x_data, y_data
+                                )
+
+                                # Enhanced fit_result with direct intensity comparison
+                                enhanced_fit_result = {
+                                    'r_squared': r_squared,
+                                    'voigt_amplitude': fit_params.get('amplitude', 0.0),
+                                    'direct_intensity': direct_intensity_data['intensity'],
+                                    'direct_height': direct_intensity_data['height'],
+                                    'intensity_ratio': direct_intensity_data.get('intensity_ratio', 1.0),
+                                    'method_comparison': {
+                                        'voigt_method': 'fitted',
+                                        'direct_method': 'spectrum_lookup',
+                                        'both_available': True
+                                    }
+                                }
+
                                 self.integrator.ml_data_collector.collect_training_sample(
                                     x_data=x_data,
                                     y_data=y_data,
                                     fit_params=fit_params,
-                                    fit_result={'r_squared': r_squared},
+                                    fit_result=enhanced_fit_result,
                                     peak_info=sample_data,
-                                    optimization_info={'method': 'batch_forced_collection'}
+                                    optimization_info={'method': 'batch_forced_collection_with_direct_comparison'}
                                 )
                                 self.logger.debug(f"     ✅ ML data collected for {assignment} (full data)")
                             else:
-                                # Fallback: create minimal sample
+                                # Fallback: create minimal sample with direct intensity comparison
+                                direct_intensity_minimal = self._extract_direct_intensity_minimal(ppm_x, ppm_y)
+
+                                minimal_fit_result = {
+                                    'r_squared': r_squared,
+                                    'direct_intensity': direct_intensity_minimal['intensity'],
+                                    'direct_height': direct_intensity_minimal['height'],
+                                    'method_comparison': {
+                                        'voigt_method': 'fitted_minimal',
+                                        'direct_method': 'spectrum_lookup',
+                                        'both_available': True
+                                    }
+                                }
+
                                 self.integrator.ml_data_collector.collect_training_sample(
                                     x_data=[ppm_x],  # Minimal data
                                     y_data=[ppm_y],
                                     fit_params={'r_squared': r_squared},
-                                    fit_result={'r_squared': r_squared},
+                                    fit_result=minimal_fit_result,
                                     peak_info=sample_data,
-                                    optimization_info={'method': 'batch_minimal_collection'}
+                                    optimization_info={'method': 'batch_minimal_collection_with_direct_comparison'}
                                 )
                                 self.logger.debug(f"     ✅ ML data collected for {assignment} (minimal)")
                         else:
-                            # Create minimal sample
+                            # Create minimal sample with direct intensity comparison
+                            direct_intensity_fallback = self._extract_direct_intensity_minimal(ppm_x, ppm_y)
+
+                            fallback_fit_result = {
+                                'r_squared': r_squared,
+                                'direct_intensity': direct_intensity_fallback['intensity'],
+                                'direct_height': direct_intensity_fallback['height'],
+                                'method_comparison': {
+                                    'voigt_method': 'fitted_fallback',
+                                    'direct_method': 'spectrum_lookup',
+                                    'both_available': True
+                                }
+                            }
+
                             self.integrator.ml_data_collector.collect_training_sample(
                                 x_data=[ppm_x],
                                 y_data=[ppm_y],
                                 fit_params={'r_squared': r_squared},
-                                fit_result={'r_squared': r_squared},
+                                fit_result=fallback_fit_result,
                                 peak_info=sample_data,
-                                optimization_info={'method': 'batch_minimal_collection'}
+                                optimization_info={'method': 'batch_minimal_collection_with_direct_comparison'}
                             )
                             self.logger.debug(f"     ✅ ML data collected for {assignment} (minimal fallback)")
                     else:
@@ -1715,6 +1760,72 @@ class BatchProcessor:
         }
 
         return processing_params
+
+    def _extract_direct_intensity_for_ml(self, ppm_x, ppm_y, x_data, y_data):
+        """
+        Extract direct intensity from spectrum data to compare with Voigt fitting
+        for ML training internal standards.
+        """
+        try:
+            if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
+                return {'intensity': 0.0, 'height': 0.0, 'intensity_ratio': 1.0}
+
+            # Find nearest indices in full spectrum
+            x_idx = np.argmin(np.abs(self.integrator.ppm_x_axis - ppm_x))
+            y_idx = np.argmin(np.abs(self.integrator.ppm_y_axis - ppm_y))
+
+            # Extract direct intensity at peak position
+            direct_intensity = float(self.integrator.nmr_data[y_idx, x_idx])
+            direct_height = abs(direct_intensity)
+
+            # Calculate intensity from local data (Voigt region)
+            if len(x_data) > 0 and len(y_data) > 0:
+                voigt_max = float(np.max(y_data))
+                intensity_ratio = direct_height / (voigt_max + 1e-8) if voigt_max > 0 else 1.0
+            else:
+                intensity_ratio = 1.0
+
+            return {
+                'intensity': direct_intensity,
+                'height': direct_height,
+                'intensity_ratio': intensity_ratio,
+                'x_idx': int(x_idx),
+                'y_idx': int(y_idx),
+                'extraction_method': 'spectrum_lookup'
+            }
+
+        except Exception as e:
+            self.logger.debug(f"Failed to extract direct intensity: {e}")
+            return {'intensity': 0.0, 'height': 0.0, 'intensity_ratio': 1.0}
+
+    def _extract_direct_intensity_minimal(self, ppm_x, ppm_y):
+        """
+        Extract direct intensity using minimal data (for fallback cases)
+        for ML training internal standards.
+        """
+        try:
+            if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
+                return {'intensity': 0.0, 'height': 0.0}
+
+            # Find nearest indices in full spectrum
+            x_idx = np.argmin(np.abs(self.integrator.ppm_x_axis - ppm_x))
+            y_idx = np.argmin(np.abs(self.integrator.ppm_y_axis - ppm_y))
+
+            # Extract direct intensity at peak position
+            direct_intensity = float(self.integrator.nmr_data[y_idx, x_idx])
+            direct_height = abs(direct_intensity)
+
+            return {
+                'intensity': direct_intensity,
+                'height': direct_height,
+                'x_idx': int(x_idx),
+                'y_idx': int(y_idx),
+                'extraction_method': 'spectrum_lookup_minimal'
+            }
+
+        except Exception as e:
+            self.logger.debug(f"Failed to extract minimal direct intensity: {e}")
+            return {'intensity': 0.0, 'height': 0.0}
 
 if __name__ == "__main__":
     # Basic command-line usage

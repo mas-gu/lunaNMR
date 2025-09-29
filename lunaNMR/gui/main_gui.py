@@ -28,6 +28,7 @@ import threading
 import subprocess
 from pathlib import Path
 from datetime import datetime
+import numpy as np
 
 # Add current directory to path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -111,7 +112,9 @@ class NMRPeaksSeriesGUI:
 
         # Initialize new decoupled architecture components
         self.param_manager = NMRParameterManager()
-        print("✅ Parameter manager initialized")
+        # Start in simplified mode by default
+        self.param_manager.use_simplified_mode = True
+        print("✅ Parameter manager initialized in simplified mode")
 
         self.processing_active = False
         # These will be created when needed
@@ -190,6 +193,14 @@ class NMRPeaksSeriesGUI:
         self.detection_square_size = tk.IntVar(value=3)          # Size of detection square X-dimension/1H (pixels)
         self.detection_rectangle_y = tk.IntVar(value=1)          # Size of detection rectangle Y-dimension/15N (pixels)
 
+        # Simplified parameter system (Priority 1 improvements)
+        self.use_simplified_parameters = tk.BooleanVar(value=True)  # Default to simplified mode (True = simplified, False = advanced)
+        self.simplified_sensitivity = tk.DoubleVar(value=0.5)       # Detection sensitivity (0-1)
+        self.simplified_window_scale = tk.DoubleVar(value=1.0)      # Window sizing scale factor
+        self.simplified_quality_target = tk.DoubleVar(value=0.85)   # Target fitting quality
+        self.simplified_noise_method = tk.StringVar(value='auto')   # Noise estimation method
+        self.simplified_baseline_method = tk.StringVar(value='auto') # Baseline estimation method
+
         # Peak editing parameters
         self.peak_edit_mode = tk.BooleanVar(value=False)         # Peak editing mode toggle
         self.edit_reference_peaks = tk.BooleanVar(value=True)    # Enable editing of reference peaks
@@ -205,6 +216,9 @@ class NMRPeaksSeriesGUI:
 
         # Global optimization toggle (default OFF for backward compatibility)
         self.use_global_optimization = tk.BooleanVar(value=False)
+
+        # Single spectrum Voigt fitting toggle (default ON for backward compatibility)
+        self.use_voigt_fitting = tk.BooleanVar(value=True)
 
         # Display options
         display_options = self.proc_params.get_display_options()
@@ -313,13 +327,25 @@ class NMRPeaksSeriesGUI:
         # Update parameter manager from GUI variables
         updated_params = self.param_manager.update_from_gui_variables(self)
 
+        # CRITICAL: Sync simplified mode flag before getting effective parameters
+        if hasattr(self, 'use_simplified_parameters'):
+            self.param_manager.use_simplified_mode = self.use_simplified_parameters.get()
+            if self.use_simplified_parameters.get():
+                # Update simplified parameters in the manager
+                self.param_manager.update_simplified_parameters(
+                    window_scale=self.simplified_window_scale.get(),
+                    quality_target=self.simplified_quality_target.get(),
+                    noise_estimation_method=self.simplified_noise_method.get(),
+                    baseline_method=self.simplified_baseline_method.get()
+                )
+
         # Validate parameters
         validation_errors = self.param_manager.validate_all_parameters()
         if validation_errors:
             print(f"⚠️ Parameter validation warnings: {', '.join(validation_errors[:3])}{'...' if len(validation_errors) > 3 else ''}")
 
-        # Get formatted parameters for integrator
-        integrator_params = self.param_manager.get_integrator_parameters()
+        # Get formatted parameters for integrator (uses effective parameters based on mode)
+        integrator_params = self.param_manager.get_effective_parameters()
 
         # Apply parameters to integrator
         detection_params = integrator_params['detection_params']
@@ -393,6 +419,73 @@ class NMRPeaksSeriesGUI:
             overlap_detection_factor=self.overlap_detection_factor.get(),
             residual_analysis_threshold=self.residual_analysis_threshold.get()
         )
+
+    def on_simplified_fitting_mode_change(self):
+        """Handle simplified fitting mode toggle - affects only Voigt fitting, not peak detection"""
+        use_simplified = self.use_simplified_parameters.get()
+
+        # Enable/disable the appropriate parameter frames
+        if use_simplified:
+            # Enable simplified mode in parameter manager
+            if hasattr(self, 'param_manager') and self.param_manager:
+                self.param_manager.enable_simplified_mode(
+                    sensitivity=self.simplified_sensitivity.get() if hasattr(self, 'simplified_sensitivity') else 0.5,
+                    window_scale=self.simplified_window_scale.get(),
+                    quality_target=self.simplified_quality_target.get(),
+                    noise_estimation_method=self.simplified_noise_method.get(),
+                    baseline_method=self.simplified_baseline_method.get()
+                )
+            # Show simplified controls and hide complex parameters
+            self.simplified_fitting_frame.pack(fill=tk.X, pady=5, after=self.simplified_fitting_frame.master.winfo_children()[0])
+            self.voigt_params_frame.pack_forget()
+            print("🎯 Simplified fitting mode active (3-5 parameters)")
+        else:
+            # Disable simplified mode in parameter manager
+            if hasattr(self, 'param_manager') and self.param_manager:
+                self.param_manager.disable_simplified_mode()
+            # Hide simplified controls and show complex parameters
+            self.simplified_fitting_frame.pack_forget()
+            self.voigt_params_frame.pack(fill=tk.X, pady=5)
+            print("🔧 Advanced fitting mode active (25+ parameters for expert control)")
+
+    def on_simplified_parameter_change(self, event=None):
+        """Handle simplified parameter changes"""
+        if not self.use_simplified_parameters.get():
+            return
+
+        # Update simplified parameter manager
+        if hasattr(self, 'param_manager') and self.param_manager:
+            self.param_manager.update_simplified_parameters(
+                sensitivity=self.simplified_sensitivity.get(),
+                window_scale=self.simplified_window_scale.get(),
+                quality_target=self.simplified_quality_target.get(),
+                noise_estimation_method=self.simplified_noise_method.get(),
+                baseline_method=self.simplified_baseline_method.get()
+            )
+            print("✅ Simplified parameters updated")
+
+    def _disable_widget_recursive(self, widget):
+        """Recursively disable a widget and all its children"""
+        try:
+            widget.configure(state='disabled')
+        except tk.TclError:
+            pass  # Some widgets don't support state
+
+        for child in widget.winfo_children():
+            self._disable_widget_recursive(child)
+
+    def _enable_widget_recursive(self, widget):
+        """Recursively enable a widget and all its children"""
+        try:
+            if isinstance(widget, ttk.Combobox):
+                widget.configure(state='readonly')
+            else:
+                widget.configure(state='normal')
+        except tk.TclError:
+            pass  # Some widgets don't support state
+
+        for child in widget.winfo_children():
+            self._enable_widget_recursive(child)
 
     def update_integrator_params(self):
         """Legacy method for updating integrator parameters. Now calls the new sync function."""
@@ -481,6 +574,7 @@ class NMRPeaksSeriesGUI:
         process_menu.add_command(label="Fit Selected Peak", command=self.fit_selected_peak)
         process_menu.add_command(label="Fit All Peaks", command=self.fit_all_peaks)
         process_menu.add_separator()
+        self.series_menu_item_idx = 7  # Track menu item position for dynamic updates
         process_menu.add_command(label="Start Series Integration", command=self.start_series_integration)
 
         # View menu
@@ -834,32 +928,6 @@ class NMRPeaksSeriesGUI:
         #                             command=self.on_parameter_change)
         #centroid_noise_spin.grid(row=7, column=1, sticky=tk.W, padx=(5,5))
 
-
-        # Advanced options
-        advanced_frame = ttk.Frame(params_frame)
-        advanced_frame.pack(fill=tk.X, pady=(5, 0))
-
-        ttk.Checkbutton(advanced_frame, text="Use Reference-Based Detection",
-                       variable=self.use_reference_detection,
-                       command=self.on_parameter_change).pack(anchor=tk.W)
-
-        # Peak Ridge Consolidation parameters (Solution A)
-        consolidation_frame = ttk.Frame(advanced_frame)
-        consolidation_frame.pack(fill=tk.X, pady=2)
-
-        ttk.Label(consolidation_frame, text="Y-Peak:").pack(side=tk.LEFT)
-        ttk.Label(consolidation_frame, text="X-T:").pack(side=tk.LEFT, padx=(20,0))
-        ttk.Spinbox(consolidation_frame, from_=0.01, to=0.2, increment=0.01, width=4,
-                   textvariable=self.consolidation_x_tolerance, format="%.3f",
-                   command=self.on_parameter_change).pack(side=tk.LEFT, padx=2)
-        #ttk.Label(consolidation_frame, text="ppm").pack(side=tk.LEFT)
-
-        ttk.Label(consolidation_frame, text="Y-T:").pack(side=tk.LEFT, padx=(10,0))
-        ttk.Spinbox(consolidation_frame, from_=0.5, to=10.0, increment=0.5, width=4,
-                   textvariable=self.consolidation_y_tolerance, format="%.1f",
-                   command=self.on_parameter_change).pack(side=tk.LEFT, padx=2)
-        ttk.Label(consolidation_frame, text="ppm").pack(side=tk.LEFT)
-
         # =================== DETECTION MODE CONTROLS ===================
         # Simplified detection controls for Standard and Enhanced modes only
         mode_controls_frame = ttk.LabelFrame(detection_frame, text="🎛️ Detection Mode Selection", padding=5)
@@ -1082,12 +1150,83 @@ class NMRPeaksSeriesGUI:
         voigt_frame = ttk.LabelFrame(parent, text="📈 Voigt Profile Fitting", padding=5)
         voigt_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Fitting parameters in organized layout
-        voigt_params_frame = ttk.LabelFrame(voigt_frame, text="Fitting Parameters", padding=5)
-        voigt_params_frame.pack(fill=tk.X, pady=5)
+        # Add simplified mode toggle at the top
+        simplified_toggle_frame = ttk.Frame(voigt_frame)
+        simplified_toggle_frame.pack(fill=tk.X, pady=(5, 10))
+
+        # Create an inverse variable for the checkbox (checked = advanced mode)
+        self.use_advanced_mode = tk.BooleanVar(value=False)
+
+        def toggle_mode():
+            # Invert the logic: checkbox checked = advanced mode = simplified OFF
+            self.use_simplified_parameters.set(not self.use_advanced_mode.get())
+            self.on_simplified_fitting_mode_change()
+
+        ttk.Checkbutton(simplified_toggle_frame,
+                       text="🔧 Show Advanced Parameters (25+ individual controls for expert users)",
+                       variable=self.use_advanced_mode,
+                       command=toggle_mode).pack(anchor=tk.W)
+
+        # Simplified parameters frame (shown by default)
+        self.simplified_fitting_frame = ttk.LabelFrame(voigt_frame, text="🎯 Simplified Fitting Parameters", padding=10)
+        self.simplified_fitting_frame.pack(fill=tk.X, pady=5)  # Pack immediately - shown by default
+
+        # Create a single grid container for all 4 rows
+        params_container = ttk.Frame(self.simplified_fitting_frame)
+        params_container.pack(fill=tk.X)
+
+        # Row 1: Window Scale
+        row = 0
+        ttk.Label(params_container, text="Window Scale:").grid(row=row, column=0, sticky=tk.W, pady=3)
+        window_scale_spin = ttk.Spinbox(params_container, from_=0.5, to=3.0, increment=0.1, width=10,
+                                      textvariable=self.simplified_window_scale,
+                                      command=self.on_simplified_parameter_change)
+        window_scale_spin.grid(row=row, column=1, sticky=tk.W, padx=(10,0), pady=3)
+        ttk.Label(params_container, text="(1.0 = default, 2.0 = larger windows, 0.5 = smaller)",
+                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=3)
+
+        # Row 2: Quality Target
+        row = 1
+        ttk.Label(params_container, text="Quality Target (R²):").grid(row=row, column=0, sticky=tk.W, pady=3)
+        quality_spin = ttk.Spinbox(params_container, from_=0.5, to=0.95, increment=0.05, width=10,
+                                 textvariable=self.simplified_quality_target,
+                                 command=self.on_simplified_parameter_change)
+        quality_spin.grid(row=row, column=1, sticky=tk.W, padx=(10,0), pady=3)
+        ttk.Label(params_container, text="(0.85 = default, 0.95 = strict, 0.6 = relaxed)",
+                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=3)
+
+        # Row 3: Noise Method
+        row = 2
+        ttk.Label(params_container, text="Noise Method:").grid(row=row, column=0, sticky=tk.W, pady=3)
+        noise_method_combo = ttk.Combobox(params_container, textvariable=self.simplified_noise_method,
+                                        values=['auto', 'percentile', 'robust'], width=12, state='readonly')
+        noise_method_combo.grid(row=row, column=1, sticky=tk.W, padx=(10,0), pady=3)
+        noise_method_combo.bind('<<ComboboxSelected>>', self.on_simplified_parameter_change)
+        ttk.Label(params_container, text="(auto = adaptive, percentile = statistical, robust = outlier-resistant)",
+                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=3)
+
+        # Row 4: Baseline Method
+        row = 3
+        ttk.Label(params_container, text="Baseline Method:").grid(row=row, column=0, sticky=tk.W, pady=3)
+        baseline_method_combo = ttk.Combobox(params_container, textvariable=self.simplified_baseline_method,
+                                           values=['auto', 'polynomial', 'iterative'], width=12, state='readonly')
+        baseline_method_combo.grid(row=row, column=1, sticky=tk.W, padx=(10,0), pady=3)
+        baseline_method_combo.bind('<<ComboboxSelected>>', self.on_simplified_parameter_change)
+        ttk.Label(params_container, text="(auto = best fit, polynomial = smooth, iterative = ArPLS)",
+                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=3)
+
+        # Help text for simplified mode
+        simplified_help = ttk.Label(self.simplified_fitting_frame,
+                                  text="ℹ️ Simplified mode uses intuitive parameters: window scale affects fitting regions, quality target sets R² threshold",
+                                  font=('TkDefaultFont', 8), foreground='blue', wraplength=600)
+        simplified_help.pack(anchor=tk.W, pady=(10, 5))
+
+        # Complex parameters frame (initially hidden, shown in advanced mode)
+        self.voigt_params_frame = ttk.LabelFrame(voigt_frame, text="⚙️ Advanced Fitting Parameters", padding=5)
+        # Don't pack initially - will be shown when advanced mode is enabled
 
         # Parameters grid
-        params_grid = ttk.Frame(voigt_params_frame)
+        params_grid = ttk.Frame(self.voigt_params_frame)
         params_grid.pack(fill=tk.X)
 
         ttk.Label(params_grid, text="X-Window:").grid(row=0, column=0, sticky=tk.W)
@@ -1115,11 +1254,11 @@ class NMRPeaksSeriesGUI:
         iter_spin.grid(row=1, column=3, sticky=tk.W, padx=5)
 
         # Global optimization toggle
-        global_opt_check = ttk.Checkbutton(params_grid, text="🔄 Use Global Optimization",
+        self.global_opt_check = ttk.Checkbutton(params_grid, text="🔄 Use Global Optimization",
                                          variable=self.use_global_optimization,
                                          command=self.on_parameter_change,
-                                         state="disabled")
-        global_opt_check.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10,0))
+                                         state="normal")  # Now controlled by Voigt fitting toggle
+        self.global_opt_check.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10,0))
 
         # Multi-Peak Detection Parameters
         ttk.Label(params_grid, text="🔀 Multi-Peak Detection", font=('TkDefaultFont', 9, 'bold')).grid(
@@ -1211,6 +1350,16 @@ class NMRPeaksSeriesGUI:
         parallel_check.grid(row=11, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
 
 
+        # Add Voigt fitting toggle at the top of the button frame
+        voigt_toggle_frame = ttk.Frame(voigt_frame)
+        voigt_toggle_frame.pack(fill=tk.X, pady=(5,0))
+
+        voigt_fitting_check = ttk.Checkbutton(voigt_toggle_frame,
+                                             text="🔬 Use Voigt Profile Fitting",
+                                             variable=self.use_voigt_fitting,
+                                             command=self._toggle_voigt_params)
+        voigt_fitting_check.pack(anchor=tk.W, padx=5)
+
         # Voigt buttons
         voigt_button_frame = ttk.Frame(voigt_frame)
         voigt_button_frame.pack(fill=tk.X, pady=5)
@@ -1221,7 +1370,26 @@ class NMRPeaksSeriesGUI:
                                               command=self.fit_all_peaks, width=17)
         self.fit_all_peaks_button.pack(side=tk.LEFT, padx=2)
 
+        # Add Reset Results button
+        ttk.Button(voigt_button_frame, text="🔄 Reset Results",
+                   command=self.reset_analysis_results, width=15).pack(side=tk.LEFT, padx=2)
 
+        # Update button text based on Voigt fitting toggle
+        self._update_fit_all_button_text()
+
+        # Setup series integration controls
+        self.setup_series_controls(parent)
+
+    def _update_fit_all_button_text(self):
+        """Update the Fit All Peaks button text based on Voigt fitting mode"""
+        if hasattr(self, 'fit_all_peaks_button'):
+            if self.use_voigt_fitting.get():
+                self.fit_all_peaks_button.configure(text="🔬 Fit All Peaks")
+            else:
+                self.fit_all_peaks_button.configure(text="📊 Extract Heights")
+
+    def setup_series_controls(self, parent):
+        """Set up series integration controls"""
         # =================== SERIES INTEGRATION SECTION ===================
         series_frame = ttk.LabelFrame(parent, text="🚀 Advanced Series Integration Workflow", padding=10)
         series_frame.pack(fill=tk.X, pady=(0, 10))
@@ -2007,6 +2175,30 @@ class NMRPeaksSeriesGUI:
 
     # =================== EVENT HANDLERS ===================
 
+    def _toggle_voigt_params(self):
+        """Toggle visibility of Voigt parameter frame based on checkbox state"""
+        if self.use_voigt_fitting.get():
+            # Enable Voigt-specific parameters
+            for widget in self.voigt_params_frame.winfo_children():
+                for child in widget.winfo_children():
+                    if isinstance(child, (tk.Spinbox, ttk.Checkbutton)):
+                        child.configure(state='normal')
+            if hasattr(self, 'global_opt_check'):
+                self.global_opt_check.configure(state='normal')
+        else:
+            # Disable Voigt-specific parameters when using direct intensity
+            for widget in self.voigt_params_frame.winfo_children():
+                for child in widget.winfo_children():
+                    if isinstance(child, (tk.Spinbox, ttk.Checkbutton)):
+                        child.configure(state='disabled')
+            # Keep global optimization disabled when not using Voigt
+            if hasattr(self, 'global_opt_check'):
+                self.global_opt_check.configure(state='disabled')
+                self.use_global_optimization.set(False)
+
+        # Update the fit all button text to reflect the current mode
+        self._update_fit_all_button_text()
+
     def _toggle_series_voigt_params(self):
         """Toggle visibility of series Voigt parameter frame based on checkbox state"""
         if self.series_use_voigt_fitting.get():
@@ -2015,6 +2207,17 @@ class NMRPeaksSeriesGUI:
             self._update_series_voigt_param_displays()
         else:
             self.series_voigt_params_frame.pack_forget()
+
+        # Update the series integration button text
+        self._update_series_button_text()
+
+    def _update_series_button_text(self):
+        """Update the series integration button text based on Voigt fitting mode"""
+        if hasattr(self, 'series_button'):
+            if self.series_use_voigt_fitting.get():
+                self.series_button.configure(text="🚀 START SERIES INTEGRATION")
+            else:
+                self.series_button.configure(text="📊 EXTRACT HEIGHTS (SERIES)")
 
     def _update_series_voigt_param_displays(self):
         """Update the parameter display labels in the series Voigt parameters section"""
@@ -2672,6 +2875,9 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             success = self.integrator.load_nmr_file(self.current_nmr_file)
 
             if success:
+                # Clear previous analysis results when loading new spectrum
+                self._clear_previous_analysis_results()
+
                 self.update_status("✅ Data loaded successfully - Ready for processing")
                 # Auto-adjust zoom to fit the loaded data
                 self.auto_adjust_zoom_to_data()
@@ -2695,6 +2901,84 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
 
         finally:
             self.root.config(cursor="")
+
+    def _clear_previous_analysis_results(self):
+        """
+        Clear previous analysis results when loading a new spectrum.
+        This prevents confusion between old and new spectrum results.
+        """
+        try:
+            print("🗺️ Clearing previous analysis results for new spectrum...")
+
+            # Clear fitted peaks and analysis results
+            if hasattr(self.integrator, 'fitted_peaks'):
+                self.integrator.fitted_peaks = []
+
+            # Clear last fitting/integration results
+            if hasattr(self, 'last_fitting_results'):
+                self.last_fitting_results = []
+            if hasattr(self, 'last_integration_results'):
+                self.last_integration_results = []
+
+            # Clear peak navigator detected peaks and heights
+            if hasattr(self, 'peak_navigator') and self.peak_navigator:
+                # Clear detected peaks list
+                self.peak_navigator.detected_peaks = []
+                # Clear heights from reference peaks
+                for i, peak in enumerate(self.peak_navigator.reference_peaks):
+                    if len(peak) > 3:
+                        self.peak_navigator.reference_peaks[i][3] = ""  # Clear height
+                    elif len(peak) == 3:
+                        self.peak_navigator.reference_peaks[i].append("")  # Add empty height
+
+            # Clear series results if present
+            if hasattr(self, 'batch_results'):
+                self.batch_results = None
+
+            # Reset Voigt fitting toggle to default (ON)
+            if hasattr(self, 'use_voigt_fitting'):
+                self.use_voigt_fitting.set(True)
+                self._update_fit_all_button_text()
+
+            print("✅ Previous analysis results cleared successfully")
+
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to clear some previous results: {e}")
+            # Don't raise exception - loading should continue even if clearing fails
+
+    def reset_analysis_results(self):
+        """
+        Manual reset of analysis results without loading new spectrum.
+        Provides user control over clearing results.
+        """
+        # Ask for confirmation
+        response = messagebox.askyesno(
+            "Reset Analysis Results",
+            "This will clear all analysis results including:\n"
+            "• Peak fitting/extraction results\n"
+            "• Heights in peak navigator\n"
+            "• Detected peaks\n"
+            "• Series processing results\n\n"
+            "The spectrum and reference peaks will remain loaded.\n\n"
+            "Continue with reset?"
+        )
+
+        if response:
+            self._clear_previous_analysis_results()
+
+            # Refresh peak navigator to show cleared heights
+            if hasattr(self, 'peak_navigator') and self.peak_navigator:
+                self.peak_navigator.refresh_peak_list()
+
+            # Update main plot to remove detected peak overlays
+            self.update_main_plot()
+
+            self.update_status("🔄 Analysis results reset successfully")
+            messagebox.showinfo("Reset Complete",
+                               "Analysis results have been cleared.\n"
+                               "The spectrum remains loaded and ready for new analysis.")
+        else:
+            self.update_status("❌ Reset cancelled by user")
 
     def update_current_status(self):
         """Update current file status display with workflow awareness"""
@@ -3932,6 +4216,7 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             print(f"   • Noise Threshold Multiplier: {detection_params.get('noise_threshold', 'N/A')}")
 
             print(f"\n⚙️ Advanced Fitting Parameters:")
+            print(f"   • Use Voigt Profile Fitting: {self.use_voigt_fitting.get()}")
             print(f"   • Global Optimization: {self.use_global_optimization.get()}")
             print(f"   • Parallel Processing: {self.use_parallel_processing.get()}")
             print(f"   • Peak Height Threshold: {self.peak_height_threshold.get()}")
@@ -3971,6 +4256,19 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             print(f"   • Search Window Y: ±{self.search_window_y.get()} ppm (15N/13C dimension)")
             print(f"   • Noise Threshold Multiplier: {self.noise_threshold.get()}")
 
+        # Add simplified parameter logging
+        print(f"\n🤖 Simplified Parameter Mode:")
+        print(f"   • Use Simplified Parameters: {self.use_simplified_parameters.get()}")
+        if self.use_simplified_parameters.get():
+            print(f"   • Mode: Simplified (3-5 parameters control fitting)")
+            print(f"   • Window Scale: {self.simplified_window_scale.get()}")
+            print(f"   • Quality Target (R²): {self.simplified_quality_target.get()}")
+            print(f"   • Noise Method: {self.simplified_noise_method.get()}")
+            print(f"   • Baseline Method: {self.simplified_baseline_method.get()}")
+            print(f"   ℹ️ Detection parameters remain at full complexity")
+        else:
+            print(f"   • Mode: Complex (25+ individual parameters)")
+
         print("="*60)
         print(f"📊 Peak List Info: {len(self.integrator.peak_list)} peaks to process")
         print("="*60 + "\n")
@@ -4002,6 +4300,19 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             # Update parameter manager from current GUI state
             self.param_manager.update_from_gui_variables(self)
 
+            # CRITICAL: Sync simplified mode for single spectrum processing
+            if hasattr(self, 'use_simplified_parameters'):
+                self.param_manager.use_simplified_mode = self.use_simplified_parameters.get()
+                if self.use_simplified_parameters.get():
+                    # Update simplified parameters in the manager
+                    self.param_manager.update_simplified_parameters(
+                        window_scale=self.simplified_window_scale.get(),
+                        quality_target=self.simplified_quality_target.get(),
+                        noise_estimation_method=self.simplified_noise_method.get(),
+                        baseline_method=self.simplified_baseline_method.get()
+                    )
+                    print("🤖 Using simplified parameters for fitting")
+
             # Create single spectrum processor
             self.single_spectrum_processor = SingleSpectrumProcessor(self.integrator, self.param_manager)
 
@@ -4013,17 +4324,25 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             # Set processing options based on GUI
             processing_options = {
                 'use_parallel': self.use_parallel_processing.get(),
-                'use_global_optimization': self.use_global_optimization.get()
+                'use_global_optimization': self.use_global_optimization.get(),
+                'use_voigt_fitting': self.use_voigt_fitting.get()  # Add Voigt fitting toggle
             }
 
             print(f"📋 Processing {len(self.integrator.peak_list)} peaks with options: {processing_options}")
 
-            # Process all peaks
-            fitted_results = self.single_spectrum_processor.process_peak_list(
-                self.integrator.peak_list,
-                processing_options,
-                progress_callback
-            )
+            # Check if Voigt fitting is disabled - use direct intensity extraction
+            if not self.use_voigt_fitting.get():
+                print("📊 Using direct intensity extraction (Voigt fitting disabled)")
+                fitted_results = self._extract_direct_intensities(self.integrator.peak_list, progress_callback)
+            else:
+                print("🔬 Using Voigt profile fitting")
+
+                # Process all peaks using Voigt fitting
+                fitted_results = self.single_spectrum_processor.process_peak_list(
+                    self.integrator.peak_list,
+                    processing_options,
+                    progress_callback
+                )
 
             if not progress_dialog.cancelled:
                 # Get comprehensive summary
@@ -4076,6 +4395,10 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
 
             self.integrator.fitted_peaks = standardized_results
             print(f"🔧 Standardized {len(standardized_results)} fitting results for series integration compatibility")
+
+            # Update peak navigator with heights
+            if hasattr(self, 'peak_navigator') and self.peak_navigator:
+                self.peak_navigator.update_heights_from_results(summary['results'])
 
         # Print detailed summary
         print(f"\n📊 Single Spectrum Processing Summary:")
@@ -4364,9 +4687,25 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
         Run the new independent multi-spectrum processing in background thread.
         """
         try:
-            # 1. Gather all parameters from parameter manager
-            all_params = self.param_manager.get_integrator_parameters()
+            # 1. Sync simplified mode before getting parameters
+            if hasattr(self, 'use_simplified_parameters'):
+                self.param_manager.use_simplified_mode = self.use_simplified_parameters.get()
+                if self.use_simplified_parameters.get():
+                    # Update simplified parameters in the manager
+                    self.param_manager.update_simplified_parameters(
+                        window_scale=self.simplified_window_scale.get(),
+                        quality_target=self.simplified_quality_target.get(),
+                        noise_estimation_method=self.simplified_noise_method.get(),
+                        baseline_method=self.simplified_baseline_method.get()
+                    )
+                    print("🤖 Using simplified parameters for series integration")
 
+            # 2. Get effective parameters (will use simplified if enabled)
+            all_params = self.param_manager.get_effective_parameters()
+
+            # CRITICAL FIX: Override with series-specific Voigt fitting setting
+            all_params['use_voigt_fitting'] = self.series_use_voigt_fitting.get()
+            print(f"   ✅ Applied series Voigt fitting setting: {self.series_use_voigt_fitting.get()}")
 
             # 2. Create the new independent processor
             multi_processor = MultiSpectrumProcessor(all_params)
@@ -5981,6 +6320,102 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
             )
             if response:
                 self.fit_all_peaks()
+
+    def _extract_direct_intensities(self, peak_list, progress_callback=None):
+        """Extract peak heights using direct intensity from spectrum without Voigt fitting"""
+        print("📊 Extracting direct intensities from spectrum data...")
+
+        if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
+            raise ValueError("No NMR data loaded")
+
+        fitted_results = []
+        total_peaks = len(peak_list)
+
+        for idx, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
+            # Update progress
+            if progress_callback and callable(progress_callback):
+                progress = ((idx + 1) / total_peaks) * 100
+                assignment = peak_row.get('Assignment', f'Peak_{idx+1}')
+                progress_callback(progress, f"Extracting intensity for {assignment}")
+
+            # Get peak position in PPM
+            peak_x_ppm = float(peak_row.get('Position_X', 0))
+            peak_y_ppm = float(peak_row.get('Position_Y', 0))
+            assignment = peak_row.get('Assignment', f'Peak_{idx+1}')
+
+            # Find nearest indices in spectrum data
+            x_idx = np.argmin(np.abs(self.integrator.ppm_x_axis - peak_x_ppm))
+            y_idx = np.argmin(np.abs(self.integrator.ppm_y_axis - peak_y_ppm))
+
+            # Extract direct intensity at peak position
+            intensity = float(self.integrator.nmr_data[y_idx, x_idx])
+
+            # Calculate noise level for SNR
+            noise_level = self.integrator.threshold if hasattr(self.integrator, 'threshold') else 1.0
+            snr = abs(intensity) / noise_level if noise_level > 0 else abs(intensity)
+
+            # Perform simple box integration for volume
+            box_size = 3  # Use 3x3 box around peak
+            y_min = max(0, y_idx - box_size)
+            y_max = min(self.integrator.nmr_data.shape[0], y_idx + box_size + 1)
+            x_min = max(0, x_idx - box_size)
+            x_max = min(self.integrator.nmr_data.shape[1], x_idx + box_size + 1)
+
+            # Extract region and calculate volume
+            region = self.integrator.nmr_data[y_min:y_max, x_min:x_max]
+            volume = float(np.sum(region))
+
+            # Determine quality based on SNR
+            if snr > 10:
+                quality = 'Excellent'
+            elif snr > 5:
+                quality = 'Good'
+            elif snr > 3:
+                quality = 'Fair'
+            else:
+                quality = 'Poor'
+
+            # Create result in same format as Voigt fitting for compatibility
+            result = {
+                'assignment': assignment,
+                'peak_number': idx + 1,
+                'ppm_x': peak_x_ppm,
+                'ppm_y': peak_y_ppm,
+                'Position_X': peak_x_ppm,  # For compatibility
+                'Position_Y': peak_y_ppm,  # For compatibility
+                'Assignment': assignment,  # For compatibility
+                'intensity': intensity,
+                'height': abs(intensity),  # Store as height for series integration
+                'volume': volume,
+                'snr': snr,
+                'quality': quality,
+                'success': True,
+                'method': 'direct_intensity',
+                'x_idx': x_idx,
+                'y_idx': y_idx,
+                # Add placeholder Voigt parameters for compatibility
+                'amplitude': abs(intensity),
+                'sigma': 0.01,  # Placeholder
+                'gamma': 0.01,  # Placeholder
+                'r_squared': 0.0,  # N/A for direct extraction
+                'avg_r_squared': 0.0,  # N/A for direct extraction
+                'fitting_quality': quality,
+                'detected': True,
+                'fitted': False  # Indicate this wasn't fitted
+            }
+
+            fitted_results.append(result)
+
+        # Store results in integrator for compatibility
+        self.integrator.fitted_peaks = fitted_results
+
+        # Update peak navigator with heights
+        if hasattr(self, 'peak_navigator') and self.peak_navigator:
+            self.peak_navigator.update_heights_from_results(fitted_results)
+
+        print(f"✅ Direct intensity extraction complete: {len(fitted_results)} peaks processed")
+
+        return fitted_results
 
     # =================== RESULTS ANALYSIS METHODS ===================
 

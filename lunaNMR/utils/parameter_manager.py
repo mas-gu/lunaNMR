@@ -21,6 +21,18 @@ class NMRParameterManager:
     def __init__(self):
         """Initialize with default parameters"""
 
+        # Initialize simplified parameter manager for automated fitting
+        try:
+            from .simplified_parameter_manager import SimplifiedParameterManager, ParameterAdapter
+            self.simplified_manager = SimplifiedParameterManager()
+            self.parameter_adapter = ParameterAdapter(self.simplified_manager)
+            self.use_simplified_mode = False  # Can be toggled by user
+            print("🚀 Simplified parameter manager initialized")
+        except ImportError:
+            self.simplified_manager = None
+            self.parameter_adapter = None
+            self.use_simplified_mode = False
+
         # Define all default parameters with validation ranges
         self.parameter_definitions = {
             # Detection Parameters
@@ -240,6 +252,84 @@ class NMRParameterManager:
         for param_name, definition in self.parameter_definitions.items():
             self.current_params[param_name] = definition['default']
         print("✅ All parameters reset to defaults")
+
+    # =====================================
+    # SIMPLIFIED PARAMETER METHODS (Priority 1)
+    # =====================================
+
+    def enable_simplified_mode(self, **simplified_params):
+        """
+        Enable simplified parameter mode with 3-5 core parameters.
+
+        This implements Priority 1 improvements by reducing parameter complexity.
+
+        Parameters:
+        -----------
+        sensitivity : float, optional
+            Detection sensitivity (0-1)
+        window_scale : float, optional
+            Window sizing scale factor (0.1-10.0)
+        quality_target : float, optional
+            Target fitting quality (0.3-1.0)
+        noise_estimation_method : str, optional
+            Noise estimation method
+        baseline_method : str, optional
+            Baseline estimation method
+        """
+        if not self.simplified_manager:
+            print("❌ Simplified parameter manager not available")
+            return
+
+        self.use_simplified_mode = True
+
+        # Update simplified parameters if provided
+        if simplified_params:
+            self.simplified_manager.update_simplified_parameters(**simplified_params)
+
+        print("✅ Simplified parameter mode enabled")
+        print(self.simplified_manager.get_parameter_summary())
+
+    def disable_simplified_mode(self):
+        """Disable simplified parameter mode and return to legacy parameters"""
+        self.use_simplified_mode = False
+        print("✅ Simplified parameter mode disabled - using legacy parameters")
+
+    def update_simplified_parameters(self, **kwargs):
+        """Update simplified parameters when in simplified mode"""
+        if not self.use_simplified_mode or not self.simplified_manager:
+            print("⚠️ Not in simplified mode or manager not available")
+            return
+
+        self.simplified_manager.update_simplified_parameters(**kwargs)
+        print("✅ Simplified parameters updated")
+
+    def get_effective_parameters(self, nucleus_type='default'):
+        """
+        Get effective parameters based on current mode.
+
+        Returns either simplified-derived parameters or legacy parameters.
+        """
+        if self.use_simplified_mode and self.parameter_adapter:
+            # Use simplified parameters with legacy compatibility
+            return self.parameter_adapter.get_integrator_parameters(nucleus_type)
+        else:
+            # Use legacy parameters
+            return self.get_integrator_parameters()
+
+    def get_simplified_summary(self):
+        """Get summary of current simplified parameters"""
+        if self.simplified_manager:
+            return self.simplified_manager.get_parameter_summary()
+        else:
+            return "Simplified parameter manager not available"
+
+    def validate_simplified_parameters(self):
+        """Validate simplified parameters"""
+        if self.simplified_manager:
+            is_valid, errors = self.simplified_manager.validate_simplified_parameters()
+            return is_valid, errors
+        else:
+            return True, []
 
     def export_parameters(self, filename: str):
         """Export current parameters to a file"""
