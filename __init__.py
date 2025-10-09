@@ -24,21 +24,18 @@ from .gui.gui_components import (
     ScrollableFrame,
     EnhancedFileListFrame,
     AdvancedProgressDialog,
-    StatisticsPanel
+    StatisticsPanel,
 )
 from .processors.series_processor import SeriesProcessor
 from .utils.config_manager import ConfigurationManager
 
 __all__ = [
-    'VoigtIntegrator',
-    'EnhancedVoigtIntegrator',
-    'ScrollableFrame',
-    'EnhancedFileListFrame',
-    'AdvancedProgressDialog',
-    'StatisticsPanel',
-    'SeriesProcessor',
-    'ConfigurationManager'
-
-
-
+    "VoigtIntegrator",
+    "EnhancedVoigtIntegrator",
+    "ScrollableFrame",
+    "EnhancedFileListFrame",
+    "AdvancedProgressDialog",
+    "StatisticsPanel",
+    "SeriesProcessor",
+    "ConfigurationManager",
 ]

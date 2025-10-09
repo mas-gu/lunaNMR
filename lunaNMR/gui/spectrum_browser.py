@@ -850,6 +850,9 @@ class SpectrumViewer:
         toolbar_voigt = NavigationToolbar2Tk(self.canvas_voigt, self.voigt_tab)
         toolbar_voigt.update()
 
+        # Create VoigtAnalysisPlotter instance (SHARED with main GUI)
+        self.voigt_plotter = VoigtAnalysisPlotter(self.fig_voigt, self.axes_voigt)
+
         # Initialize with placeholder
         for ax in self.axes_voigt.flat:
             ax.text(0.5, 0.5, 'Select a peak to view Voigt analysis',
@@ -875,43 +878,22 @@ class SpectrumViewer:
                 self.canvas_voigt.draw()
                 return
 
-            # Clear previous plots
-            for ax in self.axes_voigt.flat:
-                ax.clear()
+            # CRITICAL FIX: Use stored results from series processing
+            assignment_key = self.selected_peak.get('Assignment', self.selected_peak.get('assignment', assignment))
+            stored_result = self.find_stored_voigt_result(assignment_key)
+            print(f"🔍 Using stored result for Voigt analysis tab: {stored_result is not None}")
 
-            # Populate with Voigt analysis using existing logic (same as popup window)
-            if hasattr(self.integrator, 'nmr_data') and self.integrator.nmr_data is not None:
-                data = self.integrator.nmr_data
-                ppm_x = getattr(self.integrator, 'ppm_x_axis', None)
-                ppm_y = getattr(self.integrator, 'ppm_y_axis', None)
-
-                if ppm_x is not None and ppm_y is not None:
-                    # Show zoomed spectrum around peak
-                    zoom_x = 1.0  # ±1 ppm
-                    zoom_y = 20.0  # ±20 ppm
-
-                    # Calculate data indices for zoom region
-                    x_indices = np.where((ppm_x >= peak_x - zoom_x) & (ppm_x <= peak_x + zoom_x))[0]
-                    y_indices = np.where((ppm_y >= peak_y - zoom_y) & (ppm_y <= peak_y + zoom_y))[0]
-
-                    if len(x_indices) > 0 and len(y_indices) > 0:
-                        # Extract zoom data
-                        zoom_data = data[y_indices[0]:y_indices[-1]+1, x_indices[0]:x_indices[-1]+1]
-                        zoom_ppm_x = ppm_x[x_indices[0]:x_indices[-1]+1]
-                        zoom_ppm_y = ppm_y[y_indices[0]:y_indices[-1]+1]
-
-                        # CRITICAL FIX: Use stored results from series processing
-                        assignment_key = self.selected_peak.get('Assignment', self.selected_peak.get('assignment', assignment))
-                        stored_result = self.find_stored_voigt_result(assignment_key)
-                        print(f"🔍 Using stored result for Voigt analysis tab: {stored_result is not None}")
-
-                        # Use existing 1D analysis logic
-                        self.populate_1d_voigt_analysis(self.axes_voigt, zoom_data, zoom_ppm_x, zoom_ppm_y,
-                                                       peak_x, peak_y, assignment, stored_voigt_result=stored_result)
-
-                        # Update figure title
-                        self.fig_voigt.suptitle(f'Voigt Analysis: {assignment} at ({peak_x:.3f}, {peak_y:.1f}) ppm',
-                                               fontsize='small', fontweight='bold')
+            # USE SHARED VoigtAnalysisPlotter (SAME AS MAIN GUI)
+            # This automatically shows 4-panel 2D visualization for 2D simultaneous fits
+            if stored_result:
+                self.voigt_plotter.plot_voigt_analysis(stored_result)
+            else:
+                # No stored result - show placeholder
+                for ax in self.axes_voigt.flat:
+                    ax.clear()
+                    ax.text(0.5, 0.5, "❌ No Voigt fitting results available",
+                           ha='center', va='center', transform=ax.transAxes, fontsize='small')
+                    ax.set_title('Voigt Analysis - No Results')
 
             self.canvas_voigt.draw()
 

@@ -15,17 +15,17 @@ import os
 # CRITICAL: Set matplotlib backend BEFORE any matplotlib imports anywhere in the application
 # This ensures NavigationToolbar2Tk renders properly on Linux systems
 import matplotlib
-matplotlib.use('TkAgg', force=True)
+
+matplotlib.use("TkAgg", force=True)
 print(f"🖼️ Matplotlib backend forced to: {matplotlib.get_backend()}")
 
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+
 def check_dependencies():
     """Check if all required dependencies are available"""
-    required_modules = [
-        'pandas', 'numpy', 'matplotlib', 'scipy', 'sklearn', 'nmrglue'
-    ]
+    required_modules = ["pandas", "numpy", "matplotlib", "scipy", "sklearn", "nmrglue"]
 
     missing_modules = []
     for module in required_modules:
@@ -35,6 +35,7 @@ def check_dependencies():
             missing_modules.append(module)
 
     return missing_modules
+
 
 def setup_paths():
     """Setup Python paths for module imports"""
@@ -47,13 +48,16 @@ def setup_paths():
 
     return current_dir, parent_dir
 
+
 def check_dynamixs_availability():
     """Check if DynamiXs module is available"""
     try:
         from modules.dynamiXs import DynamiXsGUI, run_dynamixs
+
         return True
     except ImportError:
         return False
+
 
 def show_application_selector():
     """Show application selector GUI"""
@@ -75,8 +79,9 @@ def show_application_selector():
     main_frame.pack(fill=tk.BOTH, expand=True)
 
     # Title
-    title_label = ttk.Label(main_frame, text="LunaNMR Suite v0.9",
-                           font=("Arial", 16, "bold"))
+    title_label = ttk.Label(
+        main_frame, text="LunaNMR Suite v0.9", font=("Arial", 16, "bold")
+    )
     title_label.pack(pady=(0, 20))
 
     # Subtitle
@@ -91,28 +96,37 @@ def show_application_selector():
     lunaNMR_frame = ttk.Frame(app_frame)
     lunaNMR_frame.pack(fill=tk.X, pady=(0, 10))
 
-    ttk.Radiobutton(lunaNMR_frame, text="LunaNMR", variable=selected_app,
-                   value="lunaNMR").pack(anchor=tk.W)
-    ttk.Label(lunaNMR_frame, text="Advanced NMR Peak Analysis and Integration",
-             foreground="gray").pack(anchor=tk.W, padx=(20, 0))
+    ttk.Radiobutton(
+        lunaNMR_frame, text="LunaNMR", variable=selected_app, value="lunaNMR"
+    ).pack(anchor=tk.W)
+    ttk.Label(
+        lunaNMR_frame,
+        text="Advanced NMR Peak Analysis and Integration",
+        foreground="gray",
+    ).pack(anchor=tk.W, padx=(20, 0))
 
     # DynamiXs option
     dynamixs_frame = ttk.Frame(app_frame)
     dynamixs_frame.pack(fill=tk.X)
 
     dynamixs_available = check_dynamixs_availability()
-    dynamixs_radio = ttk.Radiobutton(dynamixs_frame, text="DynamiXs",
-                                    variable=selected_app, value="dynamixs")
+    dynamixs_radio = ttk.Radiobutton(
+        dynamixs_frame, text="DynamiXs", variable=selected_app, value="dynamixs"
+    )
 
     if dynamixs_available:
         dynamixs_radio.pack(anchor=tk.W)
-        ttk.Label(dynamixs_frame, text="Dynamic Analysis",
-                 foreground="gray").pack(anchor=tk.W, padx=(20, 0))
+        ttk.Label(dynamixs_frame, text="Dynamic Analysis", foreground="gray").pack(
+            anchor=tk.W, padx=(20, 0)
+        )
     else:
         dynamixs_radio.configure(state=tk.DISABLED)
         dynamixs_radio.pack(anchor=tk.W)
-        ttk.Label(dynamixs_frame, text="Dynamic Exchange Analysis (Not Available)",
-                 foreground="red").pack(anchor=tk.W, padx=(20, 0))
+        ttk.Label(
+            dynamixs_frame,
+            text="Dynamic Exchange Analysis (Not Available)",
+            foreground="red",
+        ).pack(anchor=tk.W, padx=(20, 0))
 
     # Button frame
     button_frame = ttk.Frame(main_frame)
@@ -122,8 +136,10 @@ def show_application_selector():
 
     def launch_selected():
         if selected_app.get() == "dynamixs" and not dynamixs_available:
-            messagebox.showerror("Module Not Available",
-                               "DynamiXs module is not available.\nPlease check the modules/dynamiXs directory.")
+            messagebox.showerror(
+                "Module Not Available",
+                "DynamiXs module is not available.\nPlease check the modules/dynamiXs directory.",
+            )
             return
         result["app"] = selected_app.get()
         root.quit()
@@ -132,7 +148,9 @@ def show_application_selector():
         result["app"] = None
         root.quit()
 
-    ttk.Button(button_frame, text="Launch", command=launch_selected).pack(side=tk.RIGHT, padx=(10, 0))
+    ttk.Button(button_frame, text="Launch", command=launch_selected).pack(
+        side=tk.RIGHT, padx=(10, 0)
+    )
     ttk.Button(button_frame, text="Cancel", command=cancel_launch).pack(side=tk.RIGHT)
 
     root.mainloop()
@@ -140,10 +158,12 @@ def show_application_selector():
 
     return result["app"]
 
+
 def launch_lunaNMR():
     """Launch LunaNMR application"""
     try:
         from lunaNMR.gui.main_gui import main as gui_main
+
         gui_main()
         return True
     except ImportError as e:
@@ -152,10 +172,12 @@ def launch_lunaNMR():
         messagebox.showerror("Import Error", error_msg)
         return False
 
+
 def launch_dynamixs():
     """Launch DynamiXs application"""
     try:
         from modules.dynamiXs import run_dynamixs
+
         run_dynamixs()
         return True
     except ImportError as e:
@@ -163,6 +185,7 @@ def launch_dynamixs():
         print(f"Error: {error_msg}")
         messagebox.showerror("Import Error", error_msg)
         return False
+
 
 def main():
     """Main launcher function"""
@@ -225,8 +248,10 @@ def main():
             pass
 
         import traceback
+
         traceback.print_exc()
         return False
+
 
 if __name__ == "__main__":
     try:
@@ -238,27 +263,30 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"💥 Critical launcher error: {e}")
         import traceback
+
         traceback.print_exc()
         success = False
     finally:
         # Ensure clean exit on Ubuntu
         import platform
 
-        success = locals().get('success', True)  # Default to success if undefined
+        success = locals().get("success", True)  # Default to success if undefined
         if platform.system() == "Linux":
-           import os
-           # Force clean exit
-           os._exit(0 if success else 1)
-        elif platform.system() == "Darwin":  # Add macOS support
-           import os
-           # Force clean exit on macOS too
-           os._exit(0 if success else 1)
-        else:
-           sys.exit(0 if success else 1)
+            import os
 
-        #if platform.system() == "Linux":
+            # Force clean exit
+            os._exit(0 if success else 1)
+        elif platform.system() == "Darwin":  # Add macOS support
+            import os
+
+            # Force clean exit on macOS too
+            os._exit(0 if success else 1)
+        else:
+            sys.exit(0 if success else 1)
+
+        # if platform.system() == "Linux":
         #    import os
         #    # Force clean exit
         #    os._exit(0 if success else 1)
-        #else:
+        # else:
         #    sys.exit(0 if success else 1)

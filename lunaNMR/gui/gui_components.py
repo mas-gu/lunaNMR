@@ -763,6 +763,15 @@ class PeakNavigator(ttk.Frame):
                                      font=("Arial", 9), foreground="gray")
         self.status_label.pack(anchor="w")
 
+        # Quality indicator legend
+        legend_frame = ttk.Frame(self)
+        legend_frame.pack(fill=tk.X, pady=(0, 5))
+
+        legend_label = ttk.Label(legend_frame,
+                                text="Quality: ✅ Good Fit  ⚠️ Low Quality/No Signal  ❌ Failed Fit",
+                                font=("Arial", 8), foreground="darkblue")
+        legend_label.pack(anchor="w")
+
         # Button frame for refresh and analysis
         button_frame = ttk.Frame(self)
         button_frame.pack(fill=tk.X)
@@ -952,7 +961,8 @@ class PeakNavigator(ttk.Frame):
                     if x_coord != 0 and y_coord != 0:  # Skip empty coordinates
                         # Get height if available from peak data
                         height = peak.get('height', peak.get('intensity', peak.get('amplitude', "")))
-                        self.detected_peaks.append([assignment, float(x_coord), float(y_coord), height])
+                        # Store original index from fitted_peaks to maintain correspondence
+                        self.detected_peaks.append([assignment, float(x_coord), float(y_coord), height, i])
 
             # Handle pandas DataFrame
             elif hasattr(fitted_peaks, 'iloc') and hasattr(fitted_peaks, 'columns'):
@@ -1025,15 +1035,40 @@ class PeakNavigator(ttk.Frame):
             peak_type_name = "Detected Peaks"
             print(f"Peak Navigator: Using detected peaks: {len(peaks)} peaks")
 
-        # Populate table
+        # Populate table with enhanced quality display
         for i, peak in enumerate(peaks):
             if len(peak) >= 3:
                 assignment, x_coord, y_coord = peak[0], peak[1], peak[2]
                 # Get height if available (from extracted heights), otherwise empty
                 height = peak[3] if len(peak) > 3 else ""
-                height_str = f"{height:.2e}" if height and height != "" else ""
-                self.tree.insert("", "end", values=(assignment, f"{x_coord:.3f}", f"{y_coord:.1f}", height_str))
-                print(f"Peak Navigator: Added peak {i+1}: {assignment} ({x_coord:.3f}, {y_coord:.1f})")
+
+                # Enhanced height display with quality indicators
+                if isinstance(height, str):
+                    # Already formatted string (Failed Fit, No Signal, etc.)
+                    height_str = height
+                elif height and height != "":
+                    # Numeric height - format appropriately
+                    if isinstance(height, (int, float)):
+                        height_str = f"{height:.2e}"
+                    else:
+                        height_str = str(height)
+                else:
+                    height_str = ""
+
+                # Add visual indicator for fitting status
+                if "Failed Fit" in height_str:
+                    assignment_display = f"❌ {assignment}"
+                elif "No Signal" in height_str:
+                    assignment_display = f"⚠️ {assignment}"
+                elif "R²:" in height_str:
+                    assignment_display = f"⚠️ {assignment}"
+                elif height_str and height_str not in ["", "Not Fitted"]:
+                    assignment_display = f"✅ {assignment}"
+                else:
+                    assignment_display = assignment
+
+                self.tree.insert("", "end", values=(assignment_display, f"{x_coord:.3f}", f"{y_coord:.1f}", height_str))
+                print(f"Peak Navigator: Added peak {i+1}: {assignment} ({x_coord:.3f}, {y_coord:.1f}) - Status: {height_str}")
 
         # Update status
         count = len(peaks)
@@ -1088,7 +1123,23 @@ class PeakNavigator(ttk.Frame):
 
         try:
             children = self.tree.get_children()
-            peak_index = children.index(selection[0])
+            navigator_index = children.index(selection[0])
+
+            # For detected peaks, use stored original index if available (to handle skipped peaks)
+            if self.selected_peak_type == "detected":
+                current_peaks = self.detected_peaks
+                if navigator_index < len(current_peaks):
+                    peak_data = current_peaks[navigator_index]
+                    # Check if we have stored original index (5th element added to handle skipped peaks)
+                    if len(peak_data) >= 5:
+                        peak_index = peak_data[4]  # Use original fitted_peaks index
+                    else:
+                        peak_index = navigator_index  # Fallback to navigator index
+                else:
+                    peak_index = navigator_index
+            else:
+                # For reference peaks, navigator index matches directly
+                peak_index = navigator_index
 
             if hasattr(self, 'spectrum_controller') and self.spectrum_controller:
                 self.spectrum_controller.navigator_show_peak_analysis(
@@ -1389,43 +1440,115 @@ class PeakNavigator(ttk.Frame):
     def update_heights_from_results(self, fitted_results):
         """
         Update the Heights column in the peak navigator table with extracted heights.
-        Called after Extract Heights is clicked (when Voigt fitting is OFF).
+        NOW WITH ASSIGNMENT SYNCHRONIZATION FIX - preserves original peak order
+        and clearly indicates failed fits to prevent navigator/assignment mismatch.
         """
         if not fitted_results:
             return
 
         print(f"Peak Navigator: Updating heights for {len(fitted_results)} peaks")
 
-        # Create a mapping of assignments to heights
+        # Create comprehensive mapping of assignments to fit results and status
         height_map = {}
+        fitting_status = {}
+
         for result in fitted_results:
             assignment = result.get('assignment', result.get('Assignment', ''))
             height = result.get('height', result.get('amplitude', result.get('intensity', '')))
-            if assignment and height != '':
-                height_map[assignment] = float(height)
+            r_squared = result.get('r_squared', result.get('R_squared', 0.0))
+            fitted_flag = result.get('fitted', True)  # Default to fitted unless explicitly marked as failed
 
-        # Update detected peaks data structure
+            if assignment:
+                # Store height (even if empty, to track that we attempted fitting)
+                if height != '' and height is not None:
+                    height_map[assignment] = float(height)
+                else:
+                    height_map[assignment] = "No Signal"
+
+                # Store fitting quality status
+                fitting_status[assignment] = {
+                    'fitted': fitted_flag,
+                    'r_squared': float(r_squared) if r_squared != '' else 0.0,
+                    'height_available': height != '' and height is not None
+                }
+
+        # Update detected peaks data structure with assignment preservation
         for i, peak in enumerate(self.detected_peaks):
             assignment = peak[0]
-            if assignment in height_map:
-                if len(peak) > 3:
-                    self.detected_peaks[i][3] = height_map[assignment]
-                else:
-                    self.detected_peaks[i].append(height_map[assignment])
 
-        # Update reference peaks data structure
+            if assignment in height_map:
+                # Peak was processed (successfully or unsuccessfully)
+                height_value = height_map[assignment]
+                status = fitting_status[assignment]
+
+                # Format height based on fitting success
+                if not status['fitted']:
+                    display_height = "Failed Fit"
+                elif not status['height_available']:
+                    display_height = "No Signal"
+                elif status['r_squared'] < 0.5:
+                    display_height = f"{height_value:.2e} (R²:{status['r_squared']:.2f})"
+                else:
+                    display_height = height_value
+
+            else:
+                # Peak was not processed at all
+                display_height = "Not Fitted"
+
+            # Update peak data structure
+            if len(peak) > 3:
+                self.detected_peaks[i][3] = display_height
+            else:
+                self.detected_peaks[i].append(display_height)
+
+        # Update reference peaks data structure with assignment preservation
+        original_peak_count = len(self.reference_peaks)
+        processed_peak_count = 0
+        failed_fit_count = 0
+
         for i, peak in enumerate(self.reference_peaks):
             assignment = peak[0]
-            if assignment in height_map:
-                if len(peak) > 3:
-                    self.reference_peaks[i][3] = height_map[assignment]
-                else:
-                    self.reference_peaks[i].append(height_map[assignment])
 
-        # Refresh the table display to show the heights
+            if assignment in height_map:
+                # Peak was processed (successfully or unsuccessfully)
+                height_value = height_map[assignment]
+                status = fitting_status[assignment]
+                processed_peak_count += 1
+
+                # Format height based on fitting success
+                if not status['fitted']:
+                    display_height = "Failed Fit"
+                    failed_fit_count += 1
+                elif not status['height_available']:
+                    display_height = "No Signal"
+                elif status['r_squared'] < 0.5:
+                    display_height = f"{height_value:.2e} (R²:{status['r_squared']:.2f})"
+                    failed_fit_count += 1
+                else:
+                    display_height = height_value
+
+            else:
+                # Peak was not processed at all (should not happen in normal workflow)
+                display_height = "Not Fitted"
+                failed_fit_count += 1
+
+            # Update peak data structure
+            if len(peak) > 3:
+                self.reference_peaks[i][3] = display_height
+            else:
+                self.reference_peaks[i].append(display_height)
+
+        # Refresh the table display to show the synchronized heights
         self.refresh_peak_list()
 
-        print(f"Peak Navigator: Heights updated for {len(height_map)} peaks")
+        # Enhanced status reporting
+        successful_fits = processed_peak_count - failed_fit_count
+        print(f"Peak Navigator: Assignment-synchronized update complete:")
+        print(f"  Original peaks: {original_peak_count}")
+        print(f"  Processed peaks: {processed_peak_count}")
+        print(f"  Successful fits: {successful_fits}")
+        print(f"  Failed/low quality fits: {failed_fit_count}")
+        print(f"  ✅ Assignment order preserved - no navigator mismatch")
 
 class PeakEditDialog:
     """Dialog for editing peak properties"""

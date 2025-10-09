@@ -199,13 +199,7 @@ class BatchProcessor:
                 except (TypeError, ValueError) as exc:
                     self.logger.warning(f"Invalid fitting_window_y override ({fitting_window_y}): {exc}")
 
-            if hasattr(self.integrator, 'ml_data_collector') and self.integrator.ml_data_collector:
-                try:
-                    self.integrator.ml_data_collector.update_window_settings(proc_param_config)
-                except AttributeError:
-                    self.logger.debug("ML data collector does not support window settings update (legacy version)")
-
-            self.logger.info("Batch processor initialized with ML data collection")
+            self.logger.info("Batch processor initialized")
         else:
             self.integrator = None
             self.logger.error("Core components not available - batch processing disabled")
@@ -646,10 +640,6 @@ class BatchProcessor:
         try:
             self.logger.info(f"Processing: {spectrum_file.name}")
 
-            # Record ML sample count at start of this spectrum
-            spectrum_start_ml_samples = len(self.integrator.ml_data_collector.session_data) if \
-                                        (self.integrator.ml_data_collector) else 0
-
             # Load spectrum
             if self._load_spectrum(spectrum_file):
                 # Set up integrator parameters
@@ -667,14 +657,8 @@ class BatchProcessor:
                     fitted_count = self._perform_voigt_fitting(detected_peaks, parameters)
                     result['peaks_fitted'] = fitted_count
 
-                    # Check ML data collection for this spectrum
-                    if self.integrator.ml_data_collector:
-                        spectrum_end_ml_samples = len(self.integrator.ml_data_collector.session_data)
-                        result['ml_samples_collected'] = spectrum_end_ml_samples - spectrum_start_ml_samples
-
                     result['success'] = True
-                    self.logger.info(f"  Successfully processed: {fitted_count} peaks fitted, "
-                                   f"{result['ml_samples_collected']} ML samples collected")
+                    self.logger.info(f"  Successfully processed: {fitted_count} peaks fitted")
 
                 else:
                     self.logger.warning(f"  No peaks detected in {spectrum_file.name}")
@@ -826,9 +810,6 @@ class BatchProcessor:
                 if failure_count > 0:
                     self.logger.debug(f"     Failed peaks: {[f.get('assignment', 'Unknown') for f in failed_fits if f]}")
 
-                # ML data collection is now handled automatically by SingleSpectrumProcessor
-                # No manual collection needed - it happens during the fitting process
-
                 return success_count
 
             else:
@@ -931,24 +912,12 @@ class BatchProcessor:
 
             self.logger.info(f"     📋 Processing {len(peak_list)} peaks with options: {processing_options}")
 
-            # Record ML samples before processing (exactly like GUI)
-            ml_samples_before = len(self.integrator.ml_data_collector.session_data) if hasattr(self.integrator, 'ml_data_collector') and self.integrator.ml_data_collector else 0
-
             # Process all peaks using the EXACT same method as GUI
             fitted_results = single_spectrum_processor.process_peak_list(
                 peak_list,
                 processing_options,
                 progress_callback
             )
-
-            # Check ML data collection results (exactly like GUI monitoring)
-            ml_samples_after = len(self.integrator.ml_data_collector.session_data) if hasattr(self.integrator, 'ml_data_collector') and self.integrator.ml_data_collector else 0
-            ml_samples_collected = ml_samples_after - ml_samples_before
-
-            if ml_samples_collected > 0:
-                self.logger.info(f"     🤖 ML data automatically collected: {ml_samples_collected} new samples")
-            else:
-                self.logger.warning(f"     ⚠️ No ML data collected automatically - this indicates an issue")
 
             # Store fitted results in integrator exactly like GUI does
             if fitted_results:
@@ -997,9 +966,6 @@ class BatchProcessor:
         total_peaks = len(detected_peaks)
         fitted_results = []
 
-        # Record ML samples before processing
-        ml_samples_before = len(self.integrator.ml_data_collector.session_data) if hasattr(self.integrator, 'ml_data_collector') and self.integrator.ml_data_collector else 0
-
         self.logger.info(f"     🎯 Direct enhanced_peak_fitting: {total_peaks} peaks")
         self.logger.info(f"     🔄 Parallel processing: {use_parallel}")
 
@@ -1010,14 +976,9 @@ class BatchProcessor:
             # Sequential processing for small peak sets or when parallel is disabled
             fitted_results = self._fit_peaks_sequential_direct(detected_peaks, parameters)
 
-        # Check ML data collection results
-        ml_samples_after = len(self.integrator.ml_data_collector.session_data) if hasattr(self.integrator, 'ml_data_collector') and self.integrator.ml_data_collector else 0
-        ml_samples_collected = ml_samples_after - ml_samples_before
-
         success_count = len([r for r in fitted_results if r and r.get('success', True)])
 
         self.logger.info(f"     ✅ Direct fitting completed: {success_count}/{total_peaks} successful")
-        self.logger.info(f"     🤖 ML samples collected: {ml_samples_collected}")
 
         return fitted_results
 
@@ -1176,146 +1137,6 @@ class BatchProcessor:
         except Exception as e:
             self.logger.error(f"     ❌ Fallback method failed: {e}")
             return []
-
-    def _collect_ml_data_from_fit(self, fit_result: Dict, nucleus_type: str):
-        """
-        Collect enhanced ML training data from successful fit results.
-        """
-        try:
-            # Check if result is valid (if it has essential fields, assume success)
-            if not fit_result or not fit_result.get('avg_r_squared', 0):
-                return
-
-            # Extract fitting data for ML collection
-            if hasattr(self.integrator, 'ml_data_collector') and self.integrator.ml_data_collector:
-                # FORCE ML data collection for this successful fit
-                assignment = fit_result.get('assignment', 'Unknown')
-                r_squared = fit_result.get('avg_r_squared', 0)
-
-                self.logger.debug(f"     Forcing ML data collection for {assignment}: R²={r_squared:.3f}")
-
-                # Create synthetic training data from the fit result
-                try:
-                    # Get peak position from fit result (handle both dict and tuple formats)
-                    peak_pos = fit_result.get('peak_position', None)
-                    ppm_x, ppm_y = None, None
-
-                    if isinstance(peak_pos, dict):
-                        ppm_x = peak_pos.get('ppm_x')
-                        ppm_y = peak_pos.get('ppm_y')
-                    elif isinstance(peak_pos, (tuple, list)) and len(peak_pos) >= 2:
-                        ppm_x, ppm_y = peak_pos[0], peak_pos[1]
-
-                    if ppm_x is not None and ppm_y is not None:
-                        # Get fit data
-                        x_fit = fit_result.get('x_fit', {})
-                        y_fit = fit_result.get('y_fit', {})
-
-                        # Create minimal training sample with available data
-                        sample_data = {
-                            'assignment': assignment,
-                            'ppm_x': ppm_x,
-                            'ppm_y': ppm_y,
-                            'r_squared': r_squared,
-                            'nucleus_type': nucleus_type,
-                            'fitting_quality': fit_result.get('fitting_quality', 'batch_processed'),
-                            'source': 'batch_processor_forced'
-                        }
-
-                        # Try to collect with any available data structure
-                        if x_fit and isinstance(x_fit, dict):
-                            x_data = x_fit.get('x_data', [])
-                            y_data = x_fit.get('y_data', [])
-                            fit_params = x_fit.get('fit_params', {})
-
-                            if x_data and y_data:
-                                # ENHANCEMENT: Add direct intensity as internal standard for training
-                                direct_intensity_data = self._extract_direct_intensity_for_ml(
-                                    ppm_x, ppm_y, x_data, y_data
-                                )
-
-                                # Enhanced fit_result with direct intensity comparison
-                                enhanced_fit_result = {
-                                    'r_squared': r_squared,
-                                    'voigt_amplitude': fit_params.get('amplitude', 0.0),
-                                    'direct_intensity': direct_intensity_data['intensity'],
-                                    'direct_height': direct_intensity_data['height'],
-                                    'intensity_ratio': direct_intensity_data.get('intensity_ratio', 1.0),
-                                    'method_comparison': {
-                                        'voigt_method': 'fitted',
-                                        'direct_method': 'spectrum_lookup',
-                                        'both_available': True
-                                    }
-                                }
-
-                                self.integrator.ml_data_collector.collect_training_sample(
-                                    x_data=x_data,
-                                    y_data=y_data,
-                                    fit_params=fit_params,
-                                    fit_result=enhanced_fit_result,
-                                    peak_info=sample_data,
-                                    optimization_info={'method': 'batch_forced_collection_with_direct_comparison'}
-                                )
-                                self.logger.debug(f"     ✅ ML data collected for {assignment} (full data)")
-                            else:
-                                # Fallback: create minimal sample with direct intensity comparison
-                                direct_intensity_minimal = self._extract_direct_intensity_minimal(ppm_x, ppm_y)
-
-                                minimal_fit_result = {
-                                    'r_squared': r_squared,
-                                    'direct_intensity': direct_intensity_minimal['intensity'],
-                                    'direct_height': direct_intensity_minimal['height'],
-                                    'method_comparison': {
-                                        'voigt_method': 'fitted_minimal',
-                                        'direct_method': 'spectrum_lookup',
-                                        'both_available': True
-                                    }
-                                }
-
-                                self.integrator.ml_data_collector.collect_training_sample(
-                                    x_data=[ppm_x],  # Minimal data
-                                    y_data=[ppm_y],
-                                    fit_params={'r_squared': r_squared},
-                                    fit_result=minimal_fit_result,
-                                    peak_info=sample_data,
-                                    optimization_info={'method': 'batch_minimal_collection_with_direct_comparison'}
-                                )
-                                self.logger.debug(f"     ✅ ML data collected for {assignment} (minimal)")
-                        else:
-                            # Create minimal sample with direct intensity comparison
-                            direct_intensity_fallback = self._extract_direct_intensity_minimal(ppm_x, ppm_y)
-
-                            fallback_fit_result = {
-                                'r_squared': r_squared,
-                                'direct_intensity': direct_intensity_fallback['intensity'],
-                                'direct_height': direct_intensity_fallback['height'],
-                                'method_comparison': {
-                                    'voigt_method': 'fitted_fallback',
-                                    'direct_method': 'spectrum_lookup',
-                                    'both_available': True
-                                }
-                            }
-
-                            self.integrator.ml_data_collector.collect_training_sample(
-                                x_data=[ppm_x],
-                                y_data=[ppm_y],
-                                fit_params={'r_squared': r_squared},
-                                fit_result=fallback_fit_result,
-                                peak_info=sample_data,
-                                optimization_info={'method': 'batch_minimal_collection_with_direct_comparison'}
-                            )
-                            self.logger.debug(f"     ✅ ML data collected for {assignment} (minimal fallback)")
-                    else:
-                        self.logger.debug(f"     ⚠️ No position data for {assignment}")
-
-                except Exception as e:
-                    self.logger.debug(f"     ❌ Failed to force ML collection for {assignment}: {e}")
-
-                self.logger.debug(f"     ML data for {assignment}: R²={r_squared:.3f}, Success={fit_result.get('success', False)}")
-
-        except Exception as e:
-            self.logger.debug(f"     ML data collection enhancement failed: {e}")
-            pass
 
     def find_spectrum_files(self, folder_path: Union[str, Path]) -> List[Path]:
         """
@@ -1647,13 +1468,6 @@ class BatchProcessor:
         self.logger.info(f"Failed processing: {self.stats['failed_files']}")
         self.logger.info(f"Total peaks detected: {self.stats['total_peaks_detected']}")
         self.logger.info(f"Total peaks fitted: {self.stats['total_peaks_fitted']}")
-
-        # Get actual ML samples from collector (session-wide count)
-        actual_ml_samples = len(self.integrator.ml_data_collector.session_data) if \
-                           (hasattr(self, 'integrator') and hasattr(self.integrator, 'ml_data_collector') and
-                            self.integrator.ml_data_collector) else 0
-
-        self.logger.info(f"ML training samples collected: {actual_ml_samples}")
         self.logger.info(f"Processing time: {processing_seconds:.1f} seconds")
 
         if self.stats['failed_files'] > 0:
@@ -1663,13 +1477,6 @@ class BatchProcessor:
 
         success_rate = (self.stats['processed_files'] / self.stats['total_files'] * 100) if self.stats['total_files'] > 0 else 0
         self.logger.info(f"\nSuccess rate: {success_rate:.1f}%")
-
-        if actual_ml_samples > 0:
-            self.logger.info(f"ML training data generation: SUCCESSFUL")
-            self.logger.info(f"Ready for Phase 2 ML model development")
-        else:
-            self.logger.warning(f"No ML training samples collected - check spectrum quality")
-
         self.logger.info("="*60)
 
     def get_processing_statistics(self) -> Dict[str, Any]:
@@ -1760,72 +1567,6 @@ class BatchProcessor:
         }
 
         return processing_params
-
-    def _extract_direct_intensity_for_ml(self, ppm_x, ppm_y, x_data, y_data):
-        """
-        Extract direct intensity from spectrum data to compare with Voigt fitting
-        for ML training internal standards.
-        """
-        try:
-            if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
-                return {'intensity': 0.0, 'height': 0.0, 'intensity_ratio': 1.0}
-
-            # Find nearest indices in full spectrum
-            x_idx = np.argmin(np.abs(self.integrator.ppm_x_axis - ppm_x))
-            y_idx = np.argmin(np.abs(self.integrator.ppm_y_axis - ppm_y))
-
-            # Extract direct intensity at peak position
-            direct_intensity = float(self.integrator.nmr_data[y_idx, x_idx])
-            direct_height = abs(direct_intensity)
-
-            # Calculate intensity from local data (Voigt region)
-            if len(x_data) > 0 and len(y_data) > 0:
-                voigt_max = float(np.max(y_data))
-                intensity_ratio = direct_height / (voigt_max + 1e-8) if voigt_max > 0 else 1.0
-            else:
-                intensity_ratio = 1.0
-
-            return {
-                'intensity': direct_intensity,
-                'height': direct_height,
-                'intensity_ratio': intensity_ratio,
-                'x_idx': int(x_idx),
-                'y_idx': int(y_idx),
-                'extraction_method': 'spectrum_lookup'
-            }
-
-        except Exception as e:
-            self.logger.debug(f"Failed to extract direct intensity: {e}")
-            return {'intensity': 0.0, 'height': 0.0, 'intensity_ratio': 1.0}
-
-    def _extract_direct_intensity_minimal(self, ppm_x, ppm_y):
-        """
-        Extract direct intensity using minimal data (for fallback cases)
-        for ML training internal standards.
-        """
-        try:
-            if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
-                return {'intensity': 0.0, 'height': 0.0}
-
-            # Find nearest indices in full spectrum
-            x_idx = np.argmin(np.abs(self.integrator.ppm_x_axis - ppm_x))
-            y_idx = np.argmin(np.abs(self.integrator.ppm_y_axis - ppm_y))
-
-            # Extract direct intensity at peak position
-            direct_intensity = float(self.integrator.nmr_data[y_idx, x_idx])
-            direct_height = abs(direct_intensity)
-
-            return {
-                'intensity': direct_intensity,
-                'height': direct_height,
-                'x_idx': int(x_idx),
-                'y_idx': int(y_idx),
-                'extraction_method': 'spectrum_lookup_minimal'
-            }
-
-        except Exception as e:
-            self.logger.debug(f"Failed to extract minimal direct intensity: {e}")
-            return {'intensity': 0.0, 'height': 0.0}
 
 if __name__ == "__main__":
     # Basic command-line usage

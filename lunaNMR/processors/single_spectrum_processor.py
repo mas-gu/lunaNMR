@@ -10,6 +10,7 @@ import threading
 import time
 from typing import List, Dict, Any, Optional
 import pandas as pd
+import numpy as np
 
 from datetime import datetime
 
@@ -124,72 +125,226 @@ class SingleSpectrumProcessor:
         fitted_results = []
         total_count = len(peak_list)
 
-        print(f"🔄 Starting sequential fitting of {total_count} peaks")
+        # Build all_peaks_context for 2D overlap detection and routing
+        all_peaks_context = []
+        for _, row in peak_list.iterrows():
+            all_peaks_context.append({
+                'assignment': str(row.get('Assignment', 'Unknown')),
+                'x_ppm': float(row['Position_X']),
+                'y_ppm': float(row['Position_Y']),
+                'pos_x': float(row['Position_X']),
+                'pos_y': float(row['Position_Y'])
+            })
 
+        print(f"🔄 Starting cluster-based sequential fitting of {total_count} peaks")
+        print(f"   🎯 2D overlap detection enabled with {len(all_peaks_context)} peaks context")
+
+        # STEP 1: Identify overlap clusters (graph-based, finds transitive overlaps)
+        clusters = self.integrator.identify_overlap_clusters(all_peaks_context)
+
+        # STEP 2: Build peak position → metadata mapping for result retrieval
+        peak_metadata = {}  # (x_ppm, y_ppm) → (peak_number, assignment, index)
         for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
+            peak_x = float(peak_row['Position_X'])
+            peak_y = float(peak_row['Position_Y'])
+            assignment = peak_row.get('Assignment', f'Peak_{i+1}')
+            peak_metadata[(peak_x, peak_y)] = {
+                'peak_number': i + 1,
+                'assignment': assignment,
+                'list_index': i
+            }
+
+        # STEP 3: Fit each cluster once, cache results by position
+        results_cache = {}  # (x_ppm, y_ppm) → fit_result
+        clusters_processed = 0
+
+        for cluster_idx, cluster in enumerate(clusters):
             if not self.processing_active:
                 print("⏹️ Processing cancelled")
                 break
 
-            # Get peak information
-            peak_number = i + 1
-            assignment = peak_row.get('Assignment', f'Peak_{peak_number}')
-            peak_x = float(peak_row['Position_X'])
-            peak_y = float(peak_row['Position_Y'])
+            cluster_size = len(cluster)
+            clusters_processed += 1
 
-            # Update progress
-            progress = (i / total_count) * 100
-            task_desc = f"Fitting peak {peak_number}/{total_count}"
+            # Update progress (cluster-level)
+            progress = (clusters_processed / len(clusters)) * 100
 
-            if self.progress_callback:
-                self.progress_callback(progress, task_desc, f"Processing {assignment}")
+            if cluster_size == 1:
+                # Isolated peak - standard fitting
+                peak_x, peak_y = cluster[0]
+                meta = peak_metadata.get((peak_x, peak_y))
+                if meta is None:
+                    continue  # Peak not in original list
 
-            print(f"   🎯 Fitting peak {peak_number}: {assignment} at ({peak_x:.3f}, {peak_y:.1f})")
+                assignment = meta['assignment']
+                peak_number = meta['peak_number']
 
-            # Perform fitting using the same method as main GUI
-            result = self.integrator.enhanced_peak_fitting(peak_x, peak_y, assignment)
-
-            if result:
-                # Add metadata
-                result['peak_number'] = peak_number
-                result['processing_mode'] = 'sequential'
-                fitted_results.append(result)
-
-                # Update statistics
-                self.stats['successful_fits'] += 1
-
-                # Log success
-                quality = result.get('fitting_quality', 'Unknown')
-                r_squared = result.get('avg_r_squared', 0)
-
+                task_desc = f"Fitting isolated peak {peak_number}/{total_count}"
                 if self.progress_callback:
-                    self.progress_callback(
-                        progress,
-                        task_desc,
-                        f"✅ {assignment}: {quality} (R² = {r_squared:.3f})"
-                    )
+                    self.progress_callback(progress, task_desc, f"Processing {assignment}")
 
-                print(f"     ✅ Success: {quality} (R² = {r_squared:.3f})")
+                print(f"   🎯 Fitting isolated peak {peak_number}: {assignment} at ({peak_x:.3f}, {peak_y:.1f})")
+
+                # Fit single peak (routes through consensus or standard 1D)
+                result = self.integrator.enhanced_peak_fitting(
+                    peak_x, peak_y, assignment,
+                    all_peaks_context=all_peaks_context
+                )
+
+                if result:
+                    result['peak_number'] = peak_number
+                    result['processing_mode'] = 'sequential'
+                    results_cache[(peak_x, peak_y)] = result
+                    self.stats['successful_fits'] += 1
+
+                    quality = result.get('fitting_quality', 'Unknown')
+                    r_squared = result.get('avg_r_squared', 0)
+                    print(f"     ✅ Success: {quality} (R² = {r_squared:.3f})")
+                else:
+                    self.stats['failed_fits'] += 1
+                    print(f"     ❌ Failed: Could not fit peak")
 
             else:
-                # Update statistics
-                self.stats['failed_fits'] += 1
+                # Overlap group - 2D simultaneous fitting ONCE
+                print(f"   🎯 Fitting overlap cluster {cluster_idx+1}: {cluster_size} peaks (simultaneous 2D)")
 
-                # Log failure
-                if self.progress_callback:
-                    self.progress_callback(
-                        progress,
-                        task_desc,
-                        f"❌ {assignment}: Fitting failed",
-                        failed=True
+                # Collect assignments for each peak in cluster
+                cluster_assignments = []
+                for peak_pos in cluster:
+                    meta = peak_metadata.get(peak_pos)
+                    if meta:
+                        print(f"      • Peak {meta['peak_number']}: {meta['assignment']} at ({peak_pos[0]:.3f}, {peak_pos[1]:.1f})")
+                        cluster_assignments.append(meta['assignment'])
+                    else:
+                        cluster_assignments.append('Unknown')
+
+                # Fit entire cluster once using 2D multi-peak fitter
+                # Pick first peak as "target" for routing (arbitrary choice)
+                target_x, target_y = cluster[0]
+                target_meta = peak_metadata.get((target_x, target_y), {'assignment': 'Unknown'})
+                target_assignment = target_meta.get('assignment', 'Unknown')
+
+                # Call 2D overlap fitting with assignments for GUI table display
+                group_result = self.integrator.fit_overlap_group_2d(
+                    cluster,
+                    target_assignment,
+                    peak_assignments=cluster_assignments
+                )
+
+                if group_result and group_result.get('success', False):
+                    # Extract 2D region data for visualization (CRITICAL for GUI)
+                    region_2d = self.integrator.extract_2d_region_for_overlap_group(cluster)
+
+                    # Safety check: ensure region extraction succeeded
+                    if region_2d is None:
+                        print(f"   ❌ Failed to extract 2D region for visualization")
+                        self.stats['failed_fits'] += len(cluster)
+                        continue
+
+                    # Reconstruct 2D fitted surface from PS2D parameters
+                    fitted_2d_surface, individual_surfaces = self.integrator._reconstruct_2d_surface(
+                        region_2d, group_result['peaks']
                     )
 
-                print(f"     ❌ Failed: Could not fit peak")
+                    # Extract result for EACH peak in cluster
+                    for peak_x, peak_y in cluster:
+                        meta = peak_metadata.get((peak_x, peak_y))
+                        if meta is None:
+                            continue
 
-            self.stats['total_processed'] += 1
+                        # Find matching peak in group_result
+                        best_match = None
+                        min_dist = float('inf')
+                        for peak_fit in group_result['peaks']:
+                            # NMRPipe: F1=Y, F2=X
+                            fit_x = peak_fit['pos_f2']
+                            fit_y = peak_fit['pos_f1']
+                            dist = np.sqrt((fit_x - peak_x)**2 + (fit_y - peak_y)**2)
+                            if dist < min_dist:
+                                min_dist = dist
+                                best_match = peak_fit
+
+                        if best_match:
+                            # Convert 2D fit result to standard format WITH VISUALIZATION DATA
+                            # This matches the format from fit_peak_voigt_2d() lines 2230-2261
+                            result = {
+                                'assignment': meta['assignment'],
+                                'peak_number': meta['peak_number'],
+                                'peak_position': (best_match['pos_f2'], best_match['pos_f1']),
+                                'peak_x': peak_x,
+                                'peak_y': peak_y,
+                                'amplitude': best_match['intensity'],
+                                'height': best_match['intensity'],  # Peak Navigator uses 'height'
+                                'volume': best_match['intensity'],  # Approximate
+                                'r_squared': group_result['r_squared'],  # Peak Navigator uses 'r_squared'
+                                'avg_r_squared': group_result['r_squared'],
+                                'center_x': best_match['pos_f2'],
+                                'center_y': best_match['pos_f1'],
+                                'sigma_x': best_match['lw_gau_f2'],
+                                'gamma_x': best_match['lw_lor_f2'],
+                                'sigma_y': best_match['lw_gau_f1'],
+                                'gamma_y': best_match['lw_lor_f1'],
+                                'fitting_quality': 'Excellent' if group_result['r_squared'] > 0.9 else 'Good',
+                                'quality': 'Excellent' if group_result['r_squared'] > 0.9 else 'Good',
+                                'success': True,
+                                'fitted': True,  # Peak Navigator uses 'fitted' flag
+                                'method': '2d_simultaneous_multi_peak',
+                                'processing_mode': 'sequential',
+                                'cluster_size': cluster_size,
+                                'overlap_group_size': len(cluster),
+                                # CRITICAL: Add visualization data for GUI
+                                'x_fit': {
+                                    'center': best_match['pos_f2'],
+                                    'sigma': best_match['lw_gau_f2'],
+                                    'gamma': best_match['lw_lor_f2'],
+                                    'amplitude': best_match['intensity'],
+                                    'r_squared': group_result['r_squared'],
+                                    'success': True,
+                                    'method': '2d_simultaneous'
+                                },
+                                'y_fit': {
+                                    'center': best_match['pos_f1'],
+                                    'sigma': best_match['lw_gau_f1'],
+                                    'gamma': best_match['lw_lor_f1'],
+                                    'amplitude': best_match['intensity'],
+                                    'r_squared': group_result['r_squared'],
+                                    'success': True,
+                                    'method': '2d_simultaneous'
+                                },
+                                # 2D visualization data
+                                'region_2d': region_2d,
+                                'fitted_2d_surface': fitted_2d_surface,
+                                'individual_surfaces': individual_surfaces,
+                                'all_peaks': group_result['peaks']
+                            }
+
+                            results_cache[(peak_x, peak_y)] = result
+                            self.stats['successful_fits'] += 1
+                            print(f"      ✅ Peak {meta['peak_number']} fitted: R² = {group_result['r_squared']:.3f}")
+                        else:
+                            self.stats['failed_fits'] += 1
+                            print(f"      ❌ Peak {meta['peak_number']}: No match found in 2D result")
+                else:
+                    # 2D fitting failed for entire cluster
+                    print(f"   ⚠️ 2D fitting failed for cluster {cluster_idx+1}")
+                    for peak_pos in cluster:
+                        meta = peak_metadata.get(peak_pos)
+                        if meta:
+                            self.stats['failed_fits'] += 1
+
+            self.stats['total_processed'] += cluster_size
 
             # Small delay to prevent UI freezing
             time.sleep(0.01)
+
+        # STEP 4: Return results in original peak_list order
+        for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
+            peak_x = float(peak_row['Position_X'])
+            peak_y = float(peak_row['Position_Y'])
+
+            result = results_cache.get((peak_x, peak_y))
+            if result:
+                fitted_results.append(result)
 
         success_rate = (len(fitted_results) / total_count * 100) if total_count > 0 else 0
         print(f"✅ Sequential fitting complete: {len(fitted_results)}/{total_count} successful ({success_rate:.1f}%)")

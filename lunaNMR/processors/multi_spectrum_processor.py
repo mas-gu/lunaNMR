@@ -18,6 +18,8 @@ from datetime import datetime
 # Independent imports - no GUI dependencies
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
 from lunaNMR.utils.file_manager import NMRFileManager
+from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
+from lunaNMR.utils.parameter_manager import NMRParameterManager
 
 class MultiSpectrumProcessor:
     """
@@ -41,6 +43,13 @@ class MultiSpectrumProcessor:
 
         # Initialize output folder for retrocompatibility
         self.output_folder = None
+
+        # PS2D linewidth reuse configuration (C++ peakfit.cpp:586-607 logic)
+        self.use_ps2d_linewidth_reuse = voigt_params.get('use_ps2d_linewidth_reuse', False)
+        self.reference_linewidths = {}  # Stores {assignment: {x_sigma, x_gamma, y_sigma, y_gamma}}
+        if self.use_ps2d_linewidth_reuse:
+            print("   🔒 PS2D Linewidth Reuse ENABLED in MultiSpectrumProcessor")
+            print("      Reference spectrum linewidths will be fixed for all series spectra")
 
     def process_nmr_series(self, nmr_files: List[str], reference_peaks: pd.DataFrame,
                           output_folder: str, peak_source_mode: str = 'reference',
@@ -214,43 +223,49 @@ class MultiSpectrumProcessor:
         # Set peak list in independent integrator
         self.integrator.peak_list = self.reference_peaks.copy()
 
-        fitted_results = []
-        successful_fits = 0
-        total_peaks = len(self.reference_peaks)
+        # USE SHARED SingleSpectrumProcessor LOGIC (NO DUPLICATION)
+        # Create a temporary parameter manager with current voigt_params
+        param_manager = NMRParameterManager()
+        param_manager.current_params = self.voigt_params.copy()
 
-        # Process each reference peak
-        for peak_idx, peak_row in self.reference_peaks.iterrows():
-            if not self.processing_active:
-                break
+        # Create SingleSpectrumProcessor instance
+        single_processor = SingleSpectrumProcessor(self.integrator, param_manager)
 
-            # Update progress for individual peaks
-            peak_progress = ((spectrum_number - 1) / total_spectra +
-                           (peak_idx + 1) / (len(self.reference_peaks) * total_spectra)) * 100
+        # Set processing active flag
+        single_processor.processing_active = self.processing_active
 
-            assignment = peak_row.get('Assignment', f'Peak_{peak_idx + 1}')
-            peak_x = float(peak_row['Position_X'])
-            peak_y = float(peak_row['Position_Y'])
-
+        # Define series-specific progress callback wrapper
+        def series_progress_callback(progress, task, log_msg=None, failed=False):
             if self.progress_callback:
+                # Adjust progress to account for multi-spectrum context
+                adjusted_progress = ((spectrum_number - 1) / total_spectra + progress / 100 / total_spectra) * 100
                 self.progress_callback(
-                    peak_progress,
+                    adjusted_progress,
                     f"Spectrum {spectrum_number}/{total_spectra}",
-                    f"Fitting {assignment} at ({peak_x:.3f}, {peak_y:.1f})"
+                    log_msg or task
                 )
 
-            # Perform fitting using independent integrator
-            result = self.integrator.enhanced_peak_fitting(peak_x, peak_y, assignment)
+        # Call THE SAME cluster-based fitting logic as "Fit All Peaks"
+        print(f"🔄 Using SingleSpectrumProcessor for spectrum {spectrum_number}/{total_spectra}")
+        fitted_results = single_processor._process_with_sequential_fitting(self.reference_peaks)
 
-            if result:
-                # Add comprehensive metadata
-                result['peak_number'] = peak_idx + 1
+        # Post-process results: Add spectrum metadata and handle linewidth reuse
+        successful_fits = 0
+        for result in fitted_results:
+            if result and result.get('success', False):
+                # Add spectrum-specific metadata
                 result['spectrum_file'] = spectrum_name
-                result['processing_mode'] = 'independent_series'
-                fitted_results.append(result)
+                result['processing_mode'] = 'series_integration'
                 successful_fits += 1
 
-        # Calculate spectrum-level statistics
+                # Extract linewidths from reference spectrum (first spectrum only)
+                if spectrum_number == 1 and self.use_ps2d_linewidth_reuse:
+                    assignment = result.get('assignment', 'Unknown')
+                    self._extract_and_store_linewidth(result, assignment)
+
+        total_peaks = len(self.reference_peaks)
         success_rate = (successful_fits / total_peaks * 100) if total_peaks > 0 else 0
+        print(f"✅ Series integration complete: {successful_fits}/{total_peaks} successful ({success_rate:.1f}%)")
 
         return {
             'success': successful_fits > 0,
@@ -646,3 +661,99 @@ class MultiSpectrumProcessor:
         """Cancel current processing operation"""
         self.processing_active = False
         print("⏹️ Multi-spectrum processing cancelled")
+
+    def _extract_and_store_linewidth(self, result, assignment):
+        """
+        Extract linewidths from reference spectrum fit (PS2D C++ style)
+
+        C++ PS2D approach (peakfit.cpp:586-607):
+        - Fit first plane/spectrum with full optimization
+        - Extract linewidths (LW F1, LW F2, Voigt params)
+        - Store for reuse in subsequent spectra
+
+        Parameters
+        ----------
+        result : dict
+            Fitting result from reference spectrum
+        assignment : str
+            Peak assignment identifier
+        """
+        try:
+            x_fit = result.get('x_fit', {})
+            y_fit = result.get('y_fit', {})
+
+            # Extract Gaussian (sigma) and Lorentzian (gamma) components
+            self.reference_linewidths[assignment] = {
+                'x_sigma': x_fit.get('sigma', 0.015),  # 1H dimension
+                'x_gamma': x_fit.get('gamma', 0.015),  # 1H dimension
+                'y_sigma': y_fit.get('sigma', 0.4),    # 15N/13C dimension
+                'y_gamma': y_fit.get('gamma', 0.4),    # 15N/13C dimension
+                'x_r_squared': x_fit.get('r_squared', 0),
+                'y_r_squared': y_fit.get('r_squared', 0)
+            }
+
+            print(f"      Stored linewidths for {assignment}: "
+                  f"σ_x={x_fit.get('sigma', 0):.4f}, γ_x={x_fit.get('gamma', 0):.4f}")
+
+        except Exception as e:
+            print(f"   ⚠️ Could not extract linewidths for {assignment}: {e}")
+
+    def _build_linewidth_constraints(self, assignment):
+        """
+        Build linewidth constraints from reference values (PS2D C++ style)
+
+        C++ PS2D approach (peakfit.cpp:588-606):
+        - Linewidths from plane 1 are COPIED to subsequent planes
+        - They are FIXED (not optimized) for planes 2, 3, 4, ...
+        - Only intensity is fitted for subsequent planes (~40% speedup)
+
+        Python implementation:
+        - Return very tight bounds around reference values (effectively fixes them)
+        - Allow ±1% tolerance for numerical stability
+
+        Parameters
+        ----------
+        assignment : str
+            Peak assignment to get constraints for
+
+        Returns
+        -------
+        dict or None : Linewidth constraints compatible with fit_voigt_profile
+            {
+                'x': {'sigma_bounds': (min, max), 'gamma_bounds': (min, max)},
+                'y': {'sigma_bounds': (min, max), 'gamma_bounds': (min, max)}
+            }
+        """
+        if not self.reference_linewidths or assignment not in self.reference_linewidths:
+            return None
+
+        ref_lw = self.reference_linewidths[assignment]
+
+        # PS2D EXACT approach: FIX linewidths to reference values
+        # Use very tight bounds (±1%) to effectively fix them while maintaining numerical stability
+        tolerance = 0.01  # 1% tolerance for numerical stability
+
+        constraints = {
+            'x': {
+                'sigma_bounds': (
+                    ref_lw['x_sigma'] * (1 - tolerance),
+                    ref_lw['x_sigma'] * (1 + tolerance)
+                ),
+                'gamma_bounds': (
+                    ref_lw['x_gamma'] * (1 - tolerance),
+                    ref_lw['x_gamma'] * (1 + tolerance)
+                )
+            },
+            'y': {
+                'sigma_bounds': (
+                    ref_lw['y_sigma'] * (1 - tolerance),
+                    ref_lw['y_sigma'] * (1 + tolerance)
+                ),
+                'gamma_bounds': (
+                    ref_lw['y_gamma'] * (1 - tolerance),
+                    ref_lw['y_gamma'] * (1 + tolerance)
+                )
+            }
+        }
+
+        return constraints

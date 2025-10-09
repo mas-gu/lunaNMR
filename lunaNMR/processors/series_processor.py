@@ -173,6 +173,10 @@ class SeriesProcessor:
         self.use_global_optimization = False
         self.num_integrations = 3  # Default number of integrations per peak
 
+        # PS2D linewidth reuse (C++ peakfit.cpp lines 586-607 logic)
+        self.reference_linewidths = {}  # Stores {assignment: {x_sigma, x_gamma, y_sigma, y_gamma}}
+        self.use_ps2d_linewidth_reuse = False  # Toggle for PS2D mode
+
         # INTEGRATION ENHANCEMENT: Integrated detection-fitting options
         self.integration_mode = 'standard'  # 'standard', 'integrated', 'adaptive'
         self.integration_parameters = {
@@ -763,14 +767,22 @@ class SeriesProcessor:
                             if is_reference and idx == 0:
                                 print(f"   Fitting Voigt profiles for peak {assignment} at ({ppm_x:.3f}, {ppm_y:.3f}) ppm")
 
-                            # Call the integrator's Voigt fitting method
+                            # PS2D LINEWIDTH REUSE: Build constraints for series spectra
+                            linewidth_constraints = None
+                            if not is_reference and self.use_ps2d_linewidth_reuse:
+                                linewidth_constraints = self._build_linewidth_constraints_from_reference(assignment)
+                                if linewidth_constraints and idx == 0:
+                                    print(f"   🔒 PS2D Mode: Using FIXED linewidths from reference (C++ peakfit.cpp:586-607)")
+
+                            # Call the integrator's Voigt fitting method WITH constraints
                             if hasattr(gui_integrator, 'enhanced_fitter') and gui_integrator.enhanced_fitter:
                                 result = gui_integrator.enhanced_fitter.fit_voigt_profile(
                                     gui_integrator.nmr_data,
                                     ppm_x, ppm_y,
                                     gui_integrator.ppm_scale_x,
                                     gui_integrator.ppm_scale_y,
-                                    assignment=assignment
+                                    assignment=assignment,
+                                    linewidth_constraints=linewidth_constraints  # NEW: Pass constraints
                                 )
                                 fitted_results.append(result)
                             else:
@@ -806,6 +818,13 @@ class SeriesProcessor:
 
                     if is_reference:
                         print(f"   ✅ Voigt fitting complete: {successful_fits}/{total_peaks} peaks ({detection_rate:.1f}%)")
+
+                    # PS2D LINEWIDTH REUSE: Extract linewidths from reference spectrum
+                    if is_reference and self.use_ps2d_linewidth_reuse:
+                        self.reference_linewidths = self._extract_reference_linewidths(
+                            fitted_results,
+                            spectrum_name
+                        )
 
                     return {
                         'status': 'success' if successful_fits > 0 else 'failed',
@@ -868,6 +887,117 @@ class SeriesProcessor:
                 ) else 0,
                 'detection_rate': 0.0
             }
+
+    def _extract_reference_linewidths(self, fitted_results, spectrum_name):
+        """
+        Extract linewidths from reference spectrum for PS2D reuse (C++ lines 586-607)
+
+        C++ PS2D logic:
+        - Fit first plane/spectrum with full optimization
+        - Extract linewidths (LW F1, LW F2, Voigt params)
+        - Reuse these linewidths for all subsequent spectra (fix them)
+        - Only fit intensity for subsequent spectra (40% speedup)
+
+        Parameters
+        ----------
+        fitted_results : list
+            Results from Voigt fitting of reference spectrum
+        spectrum_name : str
+            Name of reference spectrum (for logging)
+
+        Returns
+        -------
+        dict : Reference linewidths keyed by assignment
+        """
+        if not fitted_results:
+            print(f"   ⚠️ No fitted results to extract linewidths from")
+            return {}
+
+        linewidths = {}
+        successful_extractions = 0
+
+        for result in fitted_results:
+            try:
+                assignment = result.get('assignment', 'Unknown')
+
+                # Extract X-dimension linewidths (1H)
+                x_fit = result.get('x_fit', {})
+                x_sigma = x_fit.get('sigma', 0.015)  # Gaussian width
+                x_gamma = x_fit.get('gamma', 0.015)  # Lorentzian width
+
+                # Extract Y-dimension linewidths (15N/13C)
+                y_fit = result.get('y_fit', {})
+                y_sigma = y_fit.get('sigma', 0.4)    # Gaussian width
+                y_gamma = y_fit.get('gamma', 0.4)    # Lorentzian width
+
+                # Store linewidths for this peak
+                linewidths[assignment] = {
+                    'x_sigma': x_sigma,
+                    'x_gamma': x_gamma,
+                    'y_sigma': y_sigma,
+                    'y_gamma': y_gamma,
+                    'x_r_squared': x_fit.get('r_squared', 0),
+                    'y_r_squared': y_fit.get('r_squared', 0)
+                }
+
+                successful_extractions += 1
+
+            except Exception as e:
+                print(f"   ⚠️ Failed to extract linewidths for {result.get('assignment', 'Unknown')}: {e}")
+
+        if successful_extractions > 0:
+            print(f"   ✅ PS2D Linewidth Reuse: Extracted linewidths from {successful_extractions} reference peaks")
+            print(f"      These linewidths will be FIXED for all series spectra (C++ peakfit.cpp:586-607 logic)")
+
+        return linewidths
+
+    def _build_linewidth_constraints_from_reference(self, assignment):
+        """
+        Build linewidth constraints from reference values (PS2D C++ style)
+
+        C++ PS2D approach (peakfit.cpp:588-606):
+        - Linewidths from plane 1 are COPIED to subsequent planes
+        - They are FIXED (not optimized) for planes 2, 3, 4, ...
+        - Only intensity is fitted for subsequent planes
+
+        Python implementation:
+        - Return very tight bounds around reference values (effectively fixes them)
+        - Allow ±1% tolerance for numerical stability
+        - Format compatible with enhanced_voigt_fitter's linewidth_constraints parameter
+
+        Parameters
+        ----------
+        assignment : str
+            Peak assignment to get constraints for
+
+        Returns
+        -------
+        dict or None : Linewidth constraints in format expected by enhanced_voigt_fitter
+            {
+                'sigma_bounds': (min, max),  # Very tight bounds for X-dimension sigma
+                'gamma_bounds': (min, max)   # Very tight bounds for X-dimension gamma
+            }
+        """
+        if not self.reference_linewidths or assignment not in self.reference_linewidths:
+            return None
+
+        ref_lw = self.reference_linewidths[assignment]
+
+        # PS2D EXACT approach: FIX linewidths to reference values
+        # Use very tight bounds (±1%) to effectively fix them while maintaining numerical stability
+        tolerance = 0.01  # 1% tolerance for numerical stability
+
+        # For 1D fitting (X-dimension is primary), use X linewidths
+        # The enhanced_voigt_fitter expects sigma_bounds and gamma_bounds as tuples
+        x_sigma = ref_lw['x_sigma']
+        x_gamma = ref_lw['x_gamma']
+
+        constraints = {
+            'sigma_bounds': (x_sigma * (1 - tolerance), x_sigma * (1 + tolerance)),
+            'gamma_bounds': (x_gamma * (1 - tolerance), x_gamma * (1 + tolerance))
+        }
+
+        return constraints
 
     def save_individual_results(self, spectrum_name, result):
         """Save individual spectrum results with enhanced compatibility"""
@@ -1278,6 +1408,20 @@ class SeriesProcessor:
             peak_list = integrator.peak_list
             total_count = len(peak_list)
 
+            # Build all_peaks_context for 2D overlap detection and routing
+            all_peaks_context = []
+            for _, row in peak_list.iterrows():
+                all_peaks_context.append({
+                    'assignment': str(row.get('Assignment', 'Unknown')),
+                    'x_ppm': float(row['Position_X']),
+                    'y_ppm': float(row['Position_Y']),
+                    'pos_x': float(row['Position_X']),
+                    'pos_y': float(row['Position_Y'])
+                })
+
+            if is_reference:
+                print(f"   🎯 2D overlap detection enabled with {len(all_peaks_context)} peaks context")
+
             if self.use_parallel_processing:
                 if is_reference:
                     print(f"   Using parallel processing with {ParallelPeakFitter(integrator).max_workers} workers")
@@ -1290,8 +1434,9 @@ class SeriesProcessor:
                     if is_reference:
                         print(f"   Progress: {completed}/{total} peaks fitted")
 
-                # Run parallel fitting
-                fitted_results = parallel_fitter.fit_peaks_parallel(peak_list, progress_callback)
+                # Run parallel fitting with all_peaks_context
+                fitted_results = parallel_fitter.fit_peaks_parallel(peak_list, progress_callback,
+                                                                    all_peaks_context=all_peaks_context)
             else:
                 if is_reference:
                     print(f"   Using sequential processing")
@@ -1305,7 +1450,8 @@ class SeriesProcessor:
                     peak_y = float(peak_row['Position_Y'])
 
                     try:
-                        result = integrator.enhanced_peak_fitting(peak_x, peak_y, assignment)
+                        result = integrator.enhanced_peak_fitting(peak_x, peak_y, assignment,
+                                                                 all_peaks_context=all_peaks_context)
                         if result:
                             result['peak_number'] = peak_number
                             fitted_results.append(result)

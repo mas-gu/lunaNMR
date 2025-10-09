@@ -231,26 +231,27 @@ class SpectrumPlotter:
         else:
             # Plot detected/fitted peaks (existing code for red circles)
             if show_detected:
-                detected_x = [p['ppm_x'] for p in peak_list if p.get('detected')]
-                detected_y = [p['ppm_y'] for p in peak_list if p.get('detected')]
+                # Show ALL peaks in fitted_peaks list as "detected" (red circles)
+                # This includes both matched peaks and reference-retained peaks
+                detected_x = [p['ppm_x'] for p in peak_list]
+                detected_y = [p['ppm_y'] for p in peak_list]
                 if detected_x:
                     self.ax.scatter(detected_x, detected_y, c='red', marker='o', s=60,
                                   alpha=0.8, edgecolors='white', linewidth=1, zorder=5,
                                   label=f'Detected ({len(detected_x)})')
                     for peak in peak_list:
-                        if peak.get('detected'):
-                            # Use flexible field name lookup for assignment
-                            assignment_label = (peak.get('assignment') or
-                                              peak.get('Assignment') or
-                                              str(peak.get('peak_number', '')))
-                            annotation = self.ax.annotate(
-                                assignment_label,
-                                (peak['ppm_x'], peak['ppm_y']),
-                                xytext=(5, 5), textcoords='offset points',
-                                fontsize='small', color='red', fontweight='bold',
-                                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8)
-                            )
-                            self.peak_annotations.append(annotation)
+                        # Use flexible field name lookup for assignment
+                        assignment_label = (peak.get('assignment') or
+                                          peak.get('Assignment') or
+                                          str(peak.get('peak_number', '')))
+                        annotation = self.ax.annotate(
+                            assignment_label,
+                            (peak['ppm_x'], peak['ppm_y']),
+                            xytext=(5, 5), textcoords='offset points',
+                            fontsize='small', color='red', fontweight='bold',
+                            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8)
+                        )
+                        self.peak_annotations.append(annotation)
 
         # ENHANCED: Plot reference peaks (blue crosses) - ROBUST VERSION
         if show_assigned and hasattr(integrator, 'peak_list') and integrator.peak_list is not None:
@@ -468,36 +469,40 @@ class VoigtAnalysisPlotter:
             self._plot_no_data()
             return
 
-        # Clear all axes
-        for ax_row in self.axes:
-            for ax in ax_row:
-                ax.clear()
-
         # Extract data
-        x_fit = voigt_result.get('x_fit', {})
-        y_fit = voigt_result.get('y_fit', {})
         assignment = voigt_result.get('assignment', 'Unknown')
         quality = voigt_result.get('fitting_quality', 'Unknown')
+        method = voigt_result.get('method', '')
 
-        # Plot X-dimension fit (top left)
-        self._plot_1d_fit(self.axes[0][0], x_fit, '¹H Chemical Shift (ppm)',
-                         f'X-Dimension Fit - {assignment}')
+        # Check if this is 2D simultaneous fitting
+        if '2d_simultaneous' in method and 'region_2d' in voigt_result:
+            # Use 2D contour visualization (clears figure and creates 2×2 grid internally)
+            self._plot_2d_contour(voigt_result, assignment, quality)
+        else:
+            # Use traditional 1D cross-section visualization
+            # CRITICAL: Clear figure and recreate 2×1 axes grid (in case we're switching from 2D mode)
+            self.fig.clear()
 
-        # Plot Y-dimension fit (top right)
-        self._plot_1d_fit(self.axes[1][0], y_fit, '¹⁵N/¹³C Chemical Shift (ppm)',
-                         f'Y-Dimension Fit - {assignment}')
+            # Recreate original 2×1 axes layout
+            self.axes = [
+                [self.fig.add_subplot(2, 1, 1)],  # Top: X-dimension
+                [self.fig.add_subplot(2, 1, 2)]   # Bottom: Y-dimension
+            ]
 
-        # Plot X-dimension residuals (bottom left)
-        #self._plot_1d_residuals(self.axes[1][0], x_fit, '¹H Chemical Shift (ppm)',
-        #                       f'X-Dimension Residuals - {assignment}')
+            x_fit = voigt_result.get('x_fit', {})
+            y_fit = voigt_result.get('y_fit', {})
 
-        # Plot Y-dimension residuals (bottom right)
-        #self._plot_1d_residuals(self.axes[1][1], y_fit, '¹⁵N/¹³C Chemical Shift (ppm)',
-        #                       f'Y-Dimension Residuals - {assignment}')
+            # Plot X-dimension fit (top)
+            self._plot_1d_fit(self.axes[0][0], x_fit, '¹H Chemical Shift (ppm)',
+                             f'X-Dimension Fit - {assignment}')
 
-        # Set overall title
-        self.fig.suptitle(f'Voigt Profile Analysis: {assignment} (Quality: {quality})',
-                         fontsize='small', fontweight='bold')
+            # Plot Y-dimension fit (bottom)
+            self._plot_1d_fit(self.axes[1][0], y_fit, '¹⁵N/¹³C Chemical Shift (ppm)',
+                             f'Y-Dimension Fit - {assignment}')
+
+            # Set overall title
+            self.fig.suptitle(f'Voigt Profile Analysis: {assignment} (Quality: {quality})',
+                             fontsize='small', fontweight='bold')
 
     def _plot_1d_fit(self, ax, fit_data, xlabel, title):
         """Plot 1D fitting results"""
@@ -583,6 +588,203 @@ class VoigtAnalysisPlotter:
 
         if '¹H' in xlabel:
             ax.invert_xaxis()
+
+    def _plot_2d_contour(self, voigt_result, assignment, quality):
+        """
+        Plot 2D contour visualization for simultaneous multi-peak fitting
+
+        Layout (dynamically creates 2x2 grid):
+        [0,0] Experimental 2D Data    [0,1] Fitted 2D Surface
+        [1,0] 2D Residuals            [1,1] Parameters Table
+        """
+        import numpy as np
+
+        # Extract 2D data
+        region_2d = voigt_result.get('region_2d')
+        fitted_surface = voigt_result.get('fitted_2d_surface')
+        all_peaks = voigt_result.get('all_peaks', [])
+        r_squared = voigt_result.get('avg_r_squared', 0)
+
+        if region_2d is None or fitted_surface is None:
+            self._plot_no_data()
+            return
+
+        f1_ppm = region_2d['f1_ppm']
+        f2_ppm = region_2d['f2_ppm']
+        experimental = region_2d['intensity']
+
+        # Calculate residuals
+        residuals = experimental - fitted_surface
+
+        # Determine contour levels (adaptive based on data range)
+        # Focus on 20-100% of peak height to reveal saddle points between overlapping peaks
+        # Use COMBINED range of experimental and fitted to avoid truncation
+        vmin = min(np.min(experimental), np.min(fitted_surface))
+        vmax = max(np.max(experimental), np.max(fitted_surface))
+        levels = np.linspace(vmin + (vmax - vmin) * 0.2, vmax, 20)
+
+        # CRITICAL: Clear figure and create 2x2 grid for 2D visualization
+        # The default layout is 2x1, but we need 2x2 for 2D simultaneous fits
+        self.fig.clear()
+        gs = self.fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
+        ax_exp = self.fig.add_subplot(gs[0, 0])
+        ax_fit = self.fig.add_subplot(gs[0, 1])
+        ax_res = self.fig.add_subplot(gs[1, 0])
+        ax_table = self.fig.add_subplot(gs[1, 1])
+
+        # Plot 1: Experimental Data (top left) - BLUE filled contours
+        contour_exp = ax_exp.contourf(f2_ppm, f1_ppm, experimental, levels=levels,
+                                      cmap='Blues', alpha=0.8)
+        ax_exp.contour(f2_ppm, f1_ppm, experimental, levels=levels,
+                       colors='blue', linewidths=0.5, alpha=0.5)
+        ax_exp.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
+        ax_exp.set_ylabel('¹⁵N/¹³C Chemical Shift (ppm)', fontsize=9)
+        ax_exp.set_title(f'Experimental - {assignment}', fontsize=9, fontweight='bold')
+        ax_exp.invert_xaxis()
+        ax_exp.invert_yaxis()
+        ax_exp.grid(True, alpha=0.3)
+
+        # Mark peak positions
+        for i, peak in enumerate(all_peaks):
+            ax_exp.plot(peak['pos_f2'], peak['pos_f1'], 'r+', markersize=12, markeredgewidth=2)
+            # Use assignment if available, otherwise show peak number
+            peak_label = peak.get('assignment', str(i+1))
+            ax_exp.text(peak['pos_f2'], peak['pos_f1'], f"  {peak_label}",
+                       fontsize=8, color='red', fontweight='bold', va='center')
+
+        # Plot 2: Individual Fitted Peaks (top right) - Multi-color visualization
+        individual_surfaces = voigt_result.get('individual_surfaces', None)
+
+        # Define color palette for different peaks (works for n peaks)
+        colors = ['red', 'orange', 'purple', 'brown', 'pink', 'olive', 'cyan', 'magenta']
+
+        if individual_surfaces is not None and len(individual_surfaces) > 0:
+            # Plot each individual peak with a different color
+            for i, (peak_surface, peak) in enumerate(zip(individual_surfaces, all_peaks)):
+                color = colors[i % len(colors)]  # Cycle through colors if more than 8 peaks
+
+                # Add baseline to individual surface for proper visualization
+                peak_with_baseline = peak_surface + region_2d['intensity'].min()
+
+                # Calculate adaptive levels for this peak (40-100% of its max)
+                peak_min = np.min(peak_with_baseline)
+                peak_max = np.max(peak_with_baseline)
+                peak_levels = np.linspace(peak_min + (peak_max - peak_min) * 0.4, peak_max, 15)
+
+                # Plot contour lines for this peak
+                ax_fit.contour(f2_ppm, f1_ppm, peak_with_baseline, levels=peak_levels,
+                             colors=color, linewidths=1.2, alpha=0.7)
+
+            ax_fit.set_title(f'Individual Fitted Peaks (R²={r_squared:.3f})', fontsize=9, fontweight='bold')
+        else:
+            # Fallback: plot summed surface (original behavior)
+            contour_fit = ax_fit.contourf(f2_ppm, f1_ppm, fitted_surface, levels=levels,
+                                          cmap='Reds', alpha=0.8)
+            ax_fit.contour(f2_ppm, f1_ppm, fitted_surface, levels=levels,
+                           colors='red', linewidths=0.5, alpha=0.5)
+            ax_fit.set_title(f'Fitted (R²={r_squared:.3f}) - SAME levels', fontsize=9, fontweight='bold')
+
+        ax_fit.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
+        ax_fit.set_ylabel('¹⁵N/¹³C Chemical Shift (ppm)', fontsize=9)
+        ax_fit.invert_xaxis()
+        ax_fit.invert_yaxis()
+        ax_fit.grid(True, alpha=0.3)
+
+        # Mark peak positions with matching colors
+        for i, peak in enumerate(all_peaks):
+            if individual_surfaces is not None and len(individual_surfaces) > 0:
+                color = colors[i % len(colors)]
+            else:
+                color = 'blue'
+            ax_fit.plot(peak['pos_f2'], peak['pos_f1'], '+', color=color,
+                       markersize=12, markeredgewidth=2)
+            # Use assignment if available, otherwise show peak number
+            peak_label = peak.get('assignment', str(i+1))
+            ax_fit.text(peak['pos_f2'], peak['pos_f1'], f"  {peak_label}",
+                       fontsize=8, color=color, fontweight='bold', va='center')
+
+        # Plot 3: Residuals (bottom left) - Option D: Color-coded quality regions
+        # Calculate relative residuals as percentage
+        relative_residuals = 100 * residuals / np.max(experimental)
+
+        # Create discrete quality regions with strict thresholds
+        # good (<10%), moderate (10-20%), poor (>20%)
+        quality_map = np.abs(relative_residuals)
+
+        # Define custom colormap: green -> yellow -> red
+        from matplotlib.colors import BoundaryNorm, ListedColormap
+        colors_quality = ['#2ecc71', '#f1c40f', '#e74c3c']  # green, yellow, red
+        boundaries = [0, 10, 20, 100]  # percentage boundaries (strict for well-resolved fits)
+        cmap_quality = ListedColormap(colors_quality)
+        norm = BoundaryNorm(boundaries, cmap_quality.N)
+
+        # Plot filled contours with discrete colors
+        contourf_res = ax_res.contourf(f2_ppm, f1_ppm, quality_map,
+                                       levels=boundaries, cmap=cmap_quality, norm=norm, alpha=0.7)
+
+        # Add peak positions for reference
+        for i, peak in enumerate(all_peaks):
+            ax_res.plot(peak['pos_f2'], peak['pos_f1'], 'k+', markersize=8, markeredgewidth=1.5)
+
+        ax_res.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
+        ax_res.set_ylabel('¹⁵N/¹³C Chemical Shift (ppm)', fontsize=9)
+        ax_res.set_title('Fit Quality (Residual %)', fontsize=9, fontweight='bold')
+        ax_res.invert_xaxis()
+        ax_res.invert_yaxis()
+        ax_res.grid(True, alpha=0.3)
+
+        # Add legend for quality regions (strict thresholds)
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='#2ecc71', alpha=0.7, label='Good (<10%)'),
+            Patch(facecolor='#f1c40f', alpha=0.7, label='Moderate (10-20%)'),
+            Patch(facecolor='#e74c3c', alpha=0.7, label='Poor (>20%)')
+        ]
+        ax_res.legend(handles=legend_elements, loc='upper right', fontsize=7, framealpha=0.9)
+
+        # Plot 4: Parameters Table (bottom right)
+        ax_table.axis('off')
+
+        # Create cleaner table with vertical layout
+        table_text = "Fitted Parameters\n" + "="*30 + "\n\n"
+
+        for i, peak in enumerate(all_peaks):
+            # Calculate total linewidth (Gaussian + Lorentzian)
+            lw_f2 = peak['lw_gau_f2'] + peak['lw_lor_f2']
+            lw_f1 = peak['lw_gau_f1'] + peak['lw_lor_f1']
+
+            # Use matching color for peak number
+            colors_list = ['red', 'orange', 'purple', 'brown', 'pink', 'olive', 'cyan', 'magenta']
+            color = colors_list[i % len(colors_list)]
+
+            # Use assignment if available, otherwise fall back to "Peak N"
+            peak_label = peak.get('assignment', f'Peak {i+1}')
+
+            # Get volume (use intensity as fallback for backward compatibility)
+            volume = peak.get('volume', peak.get('intensity', 0.0))
+
+            # Line 1: Peak assignment
+            table_text += f"{peak_label}\n"
+            # Line 2: LW 1H and LW 15N
+            table_text += f"LW ¹H: {lw_f2:.4f}  LW ¹⁵N: {lw_f1:.3f}\n"
+            # Line 3: Volume
+            table_text += f"Volume: {volume:.2e}\n"
+            if i < len(all_peaks) - 1:
+                table_text += "\n"
+
+        # Display as monospace text
+        ax_table.text(0.1, 0.95, table_text, transform=ax_table.transAxes,
+                     fontsize=8, fontfamily='monospace', verticalalignment='top',
+                     bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9, edgecolor='gray'))
+
+        # Add overall statistics
+        stats_text = f"Quality: {quality}\nR² = {r_squared:.4f}\n{len(all_peaks)} peaks (simultaneous fit)"
+        ax_table.text(0.5, 0.1, stats_text, ha='center', va='center',
+                     fontsize=9, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+        # Set overall title
+        self.fig.suptitle(f'2D Simultaneous Voigt Fitting: {assignment}',
+                         fontsize=10, fontweight='bold')
 
     def _plot_2d_summary(self, ax, voigt_result):
         """Plot 2D fit summary information"""
@@ -683,9 +885,17 @@ Fit Timestamp: {str(timestamp)[:19] if timestamp != 'Unknown' else 'Unknown'}
 
     def _plot_no_data(self):
         """Plot message when no data is available"""
+        # Clear figure and recreate 2×1 axes layout (in case we're coming from 2D mode)
+        self.fig.clear()
+
+        # Recreate original 2×1 axes layout
+        self.axes = [
+            [self.fig.add_subplot(2, 1, 1)],  # Top
+            [self.fig.add_subplot(2, 1, 2)]   # Bottom
+        ]
+
         for ax_row in self.axes:
             for ax in ax_row:
-                ax.clear()
                 ax.text(0.5, 0.5, 'No Voigt analysis data\nFit a peak to view results',
                     transform=ax.transAxes, ha='center', va='center',
                     fontsize='small', bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray"))

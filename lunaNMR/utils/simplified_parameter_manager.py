@@ -24,6 +24,10 @@ class SimplifiedFittingParameters:
     window_scale: float = 1.0         # Fitting window scale factor (affects fitting windows only)
     quality_target: float = 0.85      # Target fitting quality (affects fitting R² thresholds only)
 
+    # Quality Target Parameters (control fitting complexity and convergence)
+    max_peaks_fit: int = 4            # Maximum peaks to attempt simultaneous fitting
+    max_iterations: int = 1000        # Maximum optimization iterations for fitting
+
     # Advanced Parameters (optional, for fine-tuning)
     noise_estimation_method: str = 'auto'  # 'auto', 'percentile', 'robust'
     baseline_method: str = 'auto'          # 'auto', 'polynomial', 'iterative'
@@ -102,7 +106,6 @@ class SimplifiedParameterManager:
                     value = self.natural_space_mappings[param_name]['transform'](value)
 
                 setattr(self.simplified_params, param_name, value)
-                print(f"✅ Updated simplified parameter {param_name} = {value}")
             else:
                 warnings.warn(f"Unknown simplified parameter: {param_name}")
 
@@ -243,18 +246,18 @@ class SimplifiedParameterManager:
             'fitting_window_x': base_window['x'] * scale,
             'fitting_window_y': base_window['y'] * scale,
             'min_r_squared': self.simplified_params.quality_target,
-            'max_iterations': 1000,  # Keep high for robustness
+            'max_iterations': self.simplified_params.max_iterations,  # Configurable from simplified params
 
             # Peak Detection Parameters - KEEP COMPLEX DEFAULTS (not affected by simplified mode)
             'height_threshold': 0.1,  # Fixed default, not sensitivity-based
             'distance_factor': 2.0,  # Fixed default, not sensitivity-based
             'prominence_threshold': 0.05,  # Fixed default, not sensitivity-based
             'smoothing_sigma': 1.0,  # Keep constant for stability
-            'max_peaks_fit': 25,  # Fixed default, not sensitivity-based
+            'max_peaks_fit': self.simplified_params.max_peaks_fit,  # Configurable from simplified params
             'max_optimization_iterations': 50,
 
             # Processing Options - MIXED (fitting-related ones affected by simplified mode)
-            'use_parallel_processing': True,
+            'use_parallel_processing': False,
             'use_global_optimization': self.simplified_params.quality_target > 0.8,  # Fitting-related
             'use_centroid_refinement': True,
 
@@ -317,6 +320,14 @@ class SimplifiedParameterManager:
         if not (0.3 <= self.simplified_params.quality_target <= 1.0):
             errors.append("Quality target must be between 0.3 and 1.0")
 
+        # Check max_peaks_fit range
+        if not (1 <= self.simplified_params.max_peaks_fit <= 20):
+            errors.append("Max peaks fit must be between 1 and 20")
+
+        # Check max_iterations range
+        if not (100 <= self.simplified_params.max_iterations <= 5000):
+            errors.append("Max iterations must be between 100 and 5000")
+
         # Check method validity
         valid_noise_methods = ['auto', 'percentile', 'robust']
         if self.simplified_params.noise_estimation_method not in valid_noise_methods:
@@ -333,7 +344,6 @@ class SimplifiedParameterManager:
 
         self.simplified_params = SimplifiedFittingParameters()
         self._cache_valid = False
-        print("✅ Simplified parameters reset to defaults")
 
 # Backward compatibility adapter
 class ParameterAdapter:

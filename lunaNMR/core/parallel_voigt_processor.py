@@ -66,25 +66,37 @@ class ParallelVoigtProcessor:
         
     def fit_all_peaks_parallel(self, peak_list, progress_callback=None):
         """
-        Complete parallel workflow that replicates all current 
+        Complete parallel workflow that replicates all current
         EnhancedVoigtFitter behavior across multiple processes.
-        
+
         Args:
             peak_list: DataFrame with peak information
             progress_callback: Optional progress callback function
-            
+
         Returns:
             List of fitting results (same format as sequential)
         """
         if len(peak_list) == 0:
             return []
-            
+
         print(f"🔬 Starting complete parallel Voigt fitting of {len(peak_list)} peaks")
         start_time = time.time()
-        
+
         try:
+            # Build all_peaks_context for 2D overlap detection (CRITICAL for automatic 2D routing)
+            all_peaks_context = []
+            for _, row in peak_list.iterrows():
+                all_peaks_context.append({
+                    'assignment': str(row.get('Assignment', 'Unknown')),
+                    'x_ppm': float(row['Position_X']),
+                    'y_ppm': float(row['Position_Y']),
+                    'pos_x': float(row['Position_X']),
+                    'pos_y': float(row['Position_Y'])
+                })
+            print(f"   🎯 2D overlap detection enabled with {len(all_peaks_context)} peaks context")
+
             # Phase 1: Data preparation and sharing
-            shared_context = self._prepare_shared_context()
+            shared_context = self._prepare_shared_context(all_peaks_context)
             
             # Phase 2: Task distribution  
             peak_tasks = self._create_peak_tasks(peak_list, shared_context)
@@ -124,10 +136,13 @@ class ParallelVoigtProcessor:
         import gc
         gc.collect()
     
-    def _prepare_shared_context(self):
+    def _prepare_shared_context(self, all_peaks_context=None):
         """
         Create shared memory context containing all data needed
         by worker processes without breaking current logic.
+
+        Args:
+            all_peaks_context: List of all peaks for overlap detection
         """
         
         # 1. Create shared memory for spectral data
@@ -161,20 +176,52 @@ class ParallelVoigtProcessor:
             
             # Preserve all current EnhancedVoigtFitter parameters
             'baseline_params': self._serialize_baseline_params(),
-            'fitting_params': self._serialize_fitting_params(), 
+            'fitting_params': self._serialize_fitting_params(),
             'quality_params': self._serialize_quality_params(),
-            'gui_params': getattr(self.original_fitter, 'gui_params', {}),
+            'gui_params': self._get_gui_params(),
             
             # Advanced parameters
             'fitting_windows': self._get_fitting_windows(),
             'optimization_settings': self._get_optimization_settings(),
             'validation_thresholds': self._get_validation_thresholds(),
-            
+
+            # NEW: Overlap resolution parameters
+            'overlap_resolution_params': self._serialize_overlap_resolution_params(),
+
+            # CRITICAL: All peaks context for automatic 2D routing
+            'all_peaks_context': all_peaks_context if all_peaks_context is not None else [],
+
             # Path information for worker imports
             'lunaNMR_path': os.path.dirname(os.path.dirname(__file__)),
         }
-        
+
         return shared_context
+
+    def _get_gui_params(self):
+        """
+        Get gui_params from fitter or parent integrator.
+
+        CRITICAL: gui_params must be available for PS2D multi-peak activation.
+        Priority: parent integrator > fitter > empty dict
+        """
+        # Try parent integrator first (most reliable source)
+        parent = getattr(self.original_fitter, 'parent', None)
+        if parent and hasattr(parent, 'gui_params') and parent.gui_params:
+            gui_params = parent.gui_params
+            use_ps2d = gui_params.get('use_ps2d_multi_peak', False)
+            print(f"📋 Parallel: gui_params from parent integrator (use_ps2d_multi_peak={use_ps2d})")
+            return gui_params
+
+        # Fall back to fitter's gui_params
+        if hasattr(self.original_fitter, 'gui_params') and self.original_fitter.gui_params:
+            gui_params = self.original_fitter.gui_params
+            use_ps2d = gui_params.get('use_ps2d_multi_peak', False)
+            print(f"📋 Parallel: gui_params from fitter (use_ps2d_multi_peak={use_ps2d})")
+            return gui_params
+
+        # Last resort: empty dict
+        print(f"⚠️ Parallel: No gui_params found, using empty dict (PS2D multi-peak will NOT activate)")
+        return {}
 
     def _serialize_baseline_params(self):
         """Extract all baseline correction parameters"""
@@ -235,8 +282,21 @@ class ParallelVoigtProcessor:
             'gradient_tolerance': getattr(self.original_fitter, 'gradient_tolerance', 1e-12)
         }
 
+    def _serialize_overlap_resolution_params(self):
+        """Extract overlap resolution parameters"""
+        overlap_config = getattr(self.original_fitter, 'overlap_config', None)
+        # Convert OverlapResolutionConfig to dict for multiprocessing serialization
+        if overlap_config is not None and hasattr(overlap_config, 'to_dict'):
+            overlap_config = overlap_config.to_dict()
+
+        return {
+            'enabled': getattr(self.original_fitter, 'overlap_detection_enabled', False),
+            'threshold': getattr(self.original_fitter, 'overlap_detection_threshold', 0.5),
+            'config': overlap_config
+        }
+
     def _get_validation_thresholds(self):
-        """Extract validation threshold parameters"""  
+        """Extract validation threshold parameters"""
         return {
             'peak_detection_threshold': getattr(self.original_fitter, 'peak_threshold', 0.1),
             'multipeak_threshold': getattr(self.original_fitter, 'multipeak_threshold', 0.3),
@@ -437,11 +497,13 @@ def _parallel_voigt_worker(peak_task):
         # Step 1: Initialize worker environment
         worker_integrator = _initialize_worker_fitter(peak_task['shared_context'])
         
-        # Step 2: Execute REAL enhanced_peak_fitting (same as GUI)
+        # Step 2: Execute REAL enhanced_peak_fitting (same as GUI) with 2D routing context
+        all_peaks_context = peak_task['shared_context'].get('all_peaks_context', None)
         result = worker_integrator.enhanced_peak_fitting(
-            peak_task['peak_x'], 
-            peak_task['peak_y'], 
-            str(peak_task['assignment'])  # Ensure string type
+            peak_task['peak_x'],
+            peak_task['peak_y'],
+            str(peak_task['assignment']),  # Ensure string type
+            all_peaks_context=all_peaks_context  # Enable automatic 2D routing
         )
         
         if result:
@@ -513,7 +575,16 @@ def _initialize_worker_fitter(shared_context):
     for param_name, param_value in integrator_params.items():
         if hasattr(worker_integrator, param_name):
             setattr(worker_integrator, param_name, param_value)
-    
+
+    # CRITICAL: Set gui_params on integrator (needed for PS2D multi-peak activation)
+    worker_integrator.gui_params = shared_context['gui_params']
+
+    # DEBUG: Verify gui_params were set
+    if worker_integrator.gui_params:
+        print(f"✅ Worker: gui_params set on integrator (use_ps2d_multi_peak={worker_integrator.gui_params.get('use_ps2d_multi_peak', 'N/A')})")
+    else:
+        print(f"❌ Worker: gui_params is None or empty!")
+
     # 6. Restore enhanced fitter parameters
     if worker_integrator.enhanced_fitter:
         worker_fitter = worker_integrator.enhanced_fitter
@@ -521,12 +592,20 @@ def _initialize_worker_fitter(shared_context):
         _restore_fitting_params(worker_fitter, shared_context['fitting_params'])
         _restore_quality_params(worker_fitter, shared_context['quality_params'])
         worker_fitter.gui_params = shared_context['gui_params']
+
+        # CRITICAL: Update enhanced_fitter's parent reference to point to worker_integrator
+        # This ensures enhanced_fitter calls adaptive_fit_1d on the correct integrator with gui_params
+        worker_fitter.parent = worker_integrator
+        print(f"✅ Worker: Enhanced fitter parent updated to worker_integrator")
         
         # Advanced settings
         _restore_fitting_windows(worker_fitter, shared_context['fitting_windows'])
         _restore_optimization_settings(worker_fitter, shared_context['optimization_settings'])
         _restore_validation_thresholds(worker_fitter, shared_context['validation_thresholds'])
-    
+
+        # NEW: Overlap resolution settings
+        _restore_overlap_resolution_params(worker_fitter, shared_context['overlap_resolution_params'])
+
     # Cleanup shared memory reference in worker
     try:
         shared_spectrum.close()
@@ -572,7 +651,27 @@ def _restore_optimization_settings(worker_fitter, optimization_settings):
     worker_fitter.gradient_tolerance = optimization_settings['gradient_tolerance']
 
 def _restore_validation_thresholds(worker_fitter, validation_thresholds):
-    """Restore validation threshold parameters"""  
+    """Restore validation threshold parameters"""
     worker_fitter.peak_threshold = validation_thresholds['peak_detection_threshold']
     worker_fitter.multipeak_threshold = validation_thresholds['multipeak_threshold']
     worker_fitter.noise_level = validation_thresholds['noise_level']
+
+def _restore_overlap_resolution_params(worker_fitter, overlap_params):
+    """Restore overlap resolution settings"""
+    # CRITICAL: Set the overlap_detection_enabled flag
+    worker_fitter.overlap_detection_enabled = overlap_params.get('enabled', False)
+    worker_fitter.overlap_detection_threshold = overlap_params.get('threshold', 0.5)
+
+    # Restore configuration if present
+    config = overlap_params.get('config')
+    if config is not None:
+        # Convert dict back to OverlapResolutionConfig if needed
+        if isinstance(config, dict):
+            try:
+                from lunaNMR.utils.overlap_config import OverlapResolutionConfig
+                worker_fitter.overlap_config = OverlapResolutionConfig(user_config=config)
+            except ImportError:
+                # Fallback: store as dict
+                worker_fitter.overlap_config = config
+        else:
+            worker_fitter.overlap_config = config

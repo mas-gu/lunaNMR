@@ -46,6 +46,15 @@ except ImportError:
         else:
             return 'poor'
 
+# Import overlap resolution modules (optional dependency for backward compatibility)
+try:
+    from .overlap_resolver_engine import OverlapResolverEngine
+    from ..utils.overlap_config import OverlapResolutionConfig
+    OVERLAP_RESOLUTION_AVAILABLE = True
+except ImportError:
+    OVERLAP_RESOLUTION_AVAILABLE = False
+    # Silently continue without overlap resolution - will print warning if user tries to enable it
+
 class EnhancedVoigtFitter:
     """Enhanced Voigt profile fitter with robust parameter estimation"""
 
@@ -104,14 +113,6 @@ class EnhancedVoigtFitter:
         if self.level2_params['robust_estimation_enabled']:
             self.parameter_estimator = RobustParameterEstimator(self)
 
-        # Initialize ML training data collector (Phase 1: Data Collection)
-        try:
-            from lunaNMR.ml.training_data_collector import MLTrainingDataCollector
-            self.ml_data_collector = MLTrainingDataCollector()
-            print("🤖 ML training data collection enabled")
-        except ImportError:
-            self.ml_data_collector = None
-            # Silently continue without ML data collection
 
         # Initialize automated fitting components (Priority 1 & 2 improvements)
         try:
@@ -131,6 +132,12 @@ class EnhancedVoigtFitter:
             self.use_automated_fitting = False
             print(f"⚠️ Automated fitting not available: {e}")
             # Continue with legacy fitting
+
+        # NEW: Overlap resolution components (lazy initialization for backward compatibility)
+        self.overlap_resolver = None  # Will be initialized on first use if needed
+        self.overlap_detection_enabled = False  # Default OFF for backward compatibility
+        self.overlap_detection_threshold = 0.5  # Minimum distance (ppm) to consider overlap
+        self.overlap_config = None  # Will use defaults if not set
 
     def set_gui_parameters(self, gui_fitting_params):
         """
@@ -188,10 +195,17 @@ class EnhancedVoigtFitter:
 
     def _calculate_gui_based_multiplier(self, nucleus_type, ppm_range, data_length, fitted_width=None):
         """
-        Calculate window multiplier based on GUI parameters instead of hardcoded values.
+        DEPRECATED: This function is NO LONGER USED.
 
-        This converts GUI ppm window settings into equivalent multipliers for the
-        existing window calculation logic, ensuring display consistency.
+
+        FIXED windows (NO multipliers, NO adaptation):
+        - radF1 = 0.6 ppm (indirect dimension, 15N/13C)
+        - radF2 = 0.06 ppm (direct dimension, 1H)
+
+        Data selection uses elliptical boundary: radius² = (F1-pos)²/radF1² + (F2-pos)²/radF2² <= 1.0
+
+        This function returns a dummy value for backward compatibility only.
+        The actual window selection is handled by Ps2dDataSelector in core_integrator.py.
 
         Parameters:
         -----------
@@ -206,44 +220,10 @@ class EnhancedVoigtFitter:
 
         Returns:
         --------
-        float : Calculated multiplier equivalent to GUI window size
-
-        Notes:
-        ------
-        - For 1H: uses gui_window_x
-        - For 15N/13C: uses gui_window_y
-        - Falls back to traditional hardcoded multipliers if no GUI params
+        float : Returns 1.0 (dummy value - NOT USED)
         """
-        if not hasattr(self, 'has_gui_params') or not self.has_gui_params:
-            # Backward compatibility: use original hardcoded values
-            return 6.0
-
-        # Select appropriate GUI window based on nucleus type
-        if nucleus_type == '1H':
-            gui_window_ppm = self.gui_window_x
-            typical_linewidth = 0.01  # typical 1H linewidth in ppm
-        else:  # 15N or 13C
-            gui_window_ppm = self.gui_window_y
-            typical_linewidth = 0.5   # typical 15N linewidth in ppm
-
-        # Method 1: Direct ppm-based calculation (RECOMMENDED)
-        # Calculate how many data points the GUI window represents
-        points_per_ppm = data_length / ppm_range if ppm_range > 0 else 1
-        gui_window_points = gui_window_ppm * points_per_ppm
-
-        # Convert to multiplier relative to fitted width
-        if fitted_width and fitted_width > 0:
-            fitted_width_points = fitted_width * points_per_ppm
-            multiplier = gui_window_points / fitted_width_points
-        else:
-            # Fallback: use typical linewidth
-            typical_width_points = typical_linewidth * points_per_ppm
-            multiplier = gui_window_points / typical_width_points if typical_width_points > 0 else 6.0
-
-        # Safety bounds: ensure reasonable multiplier values
-        multiplier = max(1.0, min(multiplier, 20.0))  # between 1× and 20× linewidth
-
-        return multiplier
+        # RETURN DUMMY VALUE - NOT USED ANYMORE
+        return 1.0  # No multiplier needed - PS2D uses fixed radF1/radF2
 
     # =====================================
     # AUTOMATED FITTING METHODS (Priority 1 & 2)
@@ -2732,11 +2712,294 @@ class EnhancedVoigtFitter:
 
 
 
+    def detect_potential_overlap(self, x_data: np.ndarray,
+                                  y_data: np.ndarray,
+                                  primary_peak_ppm: float,
+                                  nucleus_type: str = '1H') -> dict:
+        """
+        Detect if there are other peaks near the primary peak
+
+        Uses simple local maximum detection in a window around primary peak.
+        This is a lightweight overlap detector that routes to the full
+        OverlapResolverEngine when overlaps are detected.
+
+        Args:
+            x_data: PPM axis
+            y_data: Intensity data (should be baseline-corrected)
+            primary_peak_ppm: Main peak position
+            nucleus_type: Nucleus type for adaptive threshold
+
+        Returns:
+            {
+                'has_overlap': bool,
+                'peak_candidates': List[float],  # PPM positions
+                'n_peaks': int,
+                'separation_distance': float,     # Minimum distance between peaks
+                'confidence': float               # 0-1 scale
+            }
+        """
+        try:
+            # Define search window based on nucleus type
+            nucleus_windows = {
+                '1H': 0.3,   # ±0.3 ppm window for 1H
+                '15N': 1.0,  # ±1.0 ppm window for 15N
+                '13C': 0.8,  # ±0.8 ppm window for 13C
+            }
+            search_window = nucleus_windows.get(nucleus_type, 0.5)
+
+            # Extract region around primary peak
+            mask = np.abs(x_data - primary_peak_ppm) <= search_window
+            if not np.any(mask):
+                return {
+                    'has_overlap': False,
+                    'peak_candidates': [primary_peak_ppm],
+                    'n_peaks': 1,
+                    'separation_distance': float('inf'),
+                    'confidence': 0.0
+                }
+
+            x_region = x_data[mask]
+            y_region = y_data[mask]
+
+            # Find local maxima using scipy's find_peaks
+            # Adaptive prominence based on data range
+            data_range = np.max(y_region) - np.min(y_region)
+            prominence = 0.05 * data_range  # 5% of local data range
+
+            peaks_idx, properties = find_peaks(
+                y_region,
+                prominence=prominence,
+                distance=int(len(x_region) * 0.05)  # At least 5% of points apart
+            )
+
+            if len(peaks_idx) == 0:
+                return {
+                    'has_overlap': False,
+                    'peak_candidates': [primary_peak_ppm],
+                    'n_peaks': 1,
+                    'separation_distance': float('inf'),
+                    'confidence': 0.0
+                }
+
+            # Convert indices to PPM positions
+            peak_candidates = x_region[peaks_idx].tolist()
+
+            # Calculate minimum separation
+            if len(peak_candidates) > 1:
+                separations = np.diff(sorted(peak_candidates))
+                min_separation = float(np.min(np.abs(separations)))
+            else:
+                min_separation = float('inf')
+
+            # Determine if overlap exists
+            has_overlap = (
+                len(peak_candidates) > 1 and
+                min_separation < self.overlap_detection_threshold
+            )
+
+            # Confidence based on prominence and separation
+            if len(peak_candidates) > 1:
+                avg_prominence = float(np.mean(properties['prominences']))
+                prominence_ratio = avg_prominence / data_range
+                confidence = min(1.0, prominence_ratio * 2)  # Scale to 0-1
+            else:
+                confidence = 0.0
+
+            return {
+                'has_overlap': has_overlap,
+                'peak_candidates': peak_candidates,
+                'n_peaks': len(peak_candidates),
+                'separation_distance': min_separation,
+                'confidence': confidence
+            }
+
+        except Exception as e:
+            print(f"   ⚠️ Overlap detection failed: {e}")
+            return {
+                'has_overlap': False,
+                'peak_candidates': [primary_peak_ppm],
+                'n_peaks': 1,
+                'separation_distance': float('inf'),
+                'confidence': 0.0
+            }
+
+    def configure_overlap_resolution(self, enable: bool = True,
+                                     config: dict = None):
+        """
+        Configure overlap resolution behavior
+
+        This method enables/disables the overlap detection and resolution system.
+        By default, overlap resolution is DISABLED for backward compatibility.
+
+        Args:
+            enable: Enable/disable overlap detection
+            config: Optional configuration dictionary for overlap resolver
+
+        Example:
+            fitter.configure_overlap_resolution(
+                enable=True,
+                config={
+                    'jackknife': {'n_resamples': 100},
+                    'model_selection': {'max_peaks': 5}
+                }
+            )
+        """
+        if not OVERLAP_RESOLUTION_AVAILABLE:
+            print("⚠️ Overlap resolution modules not available")
+            print("   Please ensure overlap_resolver_engine.py and overlap_config.py are installed")
+            return
+
+        self.overlap_detection_enabled = enable
+
+        if config:
+            if self.overlap_config is None:
+                self.overlap_config = OverlapResolutionConfig(config)
+            else:
+                self.overlap_config.update(config)
+
+        status = 'enabled' if enable else 'disabled'
+        print(f"✅ Overlap resolution {status}")
+        if enable and config:
+            print(f"   Configuration updated: {list(config.keys())}")
+
+
+    def fit_voigt_profile(self, nmr_data, ppm_x, ppm_y, ppm_scale_x, ppm_scale_y,
+                          assignment=None, linewidth_constraints=None):
+        """
+        Fit Voigt profile to a 2D NMR peak by extracting cross-sections and fitting each dimension.
+
+        This is a wrapper method that extracts 1D cross-sections from 2D NMR data and fits
+        Voigt profiles along each dimension (X and Y). This method is called by series_processor.py
+        for PS2D-style linewidth reuse functionality.
+
+        Parameters:
+        -----------
+        nmr_data : np.ndarray
+            2D NMR data matrix (shape: [Y_points, X_points])
+        ppm_x : float
+            Peak position in X dimension (1H, ppm)
+        ppm_y : float
+            Peak position in Y dimension (15N/13C, ppm)
+        ppm_scale_x : np.ndarray
+            PPM scale for X dimension (1H)
+        ppm_scale_y : np.ndarray
+            PPM scale for Y dimension (15N/13C)
+        assignment : str, optional
+            Peak assignment/label (e.g., 'A123N-H')
+        linewidth_constraints : dict, optional
+            Linewidth constraints for PS2D linewidth reuse:
+            {
+                'x': {'sigma_bounds': (min, max), 'gamma_bounds': (min, max)},
+                'y': {'sigma_bounds': (min, max), 'gamma_bounds': (min, max)}
+            }
+
+        Returns:
+        --------
+        dict : Comprehensive fit results with X and Y dimension fits
+            {
+                'success': bool,
+                'x_fit': {...},  # X dimension fit results
+                'y_fit': {...},  # Y dimension fit results
+                'assignment': str,
+                'position': {'x': ppm_x, 'y': ppm_y},
+                'linewidth_constraints_applied': bool
+            }
+        """
+        # Find peak indices in the data
+        x_idx = np.argmin(np.abs(ppm_scale_x - ppm_x))
+        y_idx = np.argmin(np.abs(ppm_scale_y - ppm_y))
+
+        # Extract 1D cross-sections at peak position
+        # X cross-section: horizontal slice at peak Y position
+        x_cross_section = nmr_data[y_idx, :]
+        x_ppm_scale = ppm_scale_x
+
+        # Y cross-section: vertical slice at peak X position
+        y_cross_section = nmr_data[:, x_idx]
+        y_ppm_scale = ppm_scale_y
+
+        # Extract linewidth constraints for each dimension if provided
+        x_linewidth_constraints = None
+        y_linewidth_constraints = None
+        constraints_applied = False
+
+        if linewidth_constraints:
+            x_linewidth_constraints = linewidth_constraints.get('x')
+            y_linewidth_constraints = linewidth_constraints.get('y')
+            constraints_applied = (x_linewidth_constraints is not None or
+                                  y_linewidth_constraints is not None)
+
+            if constraints_applied:
+                print(f"   🔒 Applying linewidth constraints for {assignment or 'peak'}")
+                if x_linewidth_constraints:
+                    print(f"      X (1H): σ={x_linewidth_constraints.get('sigma_bounds')}, "
+                          f"γ={x_linewidth_constraints.get('gamma_bounds')}")
+                if y_linewidth_constraints:
+                    print(f"      Y (15N): σ={y_linewidth_constraints.get('sigma_bounds')}, "
+                          f"γ={y_linewidth_constraints.get('gamma_bounds')}")
+
+        # Fit X dimension (1H) with constraints
+        try:
+            x_fit = self.fit_peak_enhanced(
+                x_ppm_scale, x_cross_section,
+                initial_center=ppm_x,
+                nucleus_type='1H',
+                method='iterative_optimization',
+                linewidth_constraints=x_linewidth_constraints
+            )
+        except Exception as e:
+            print(f"   ⚠️ X dimension fit failed: {e}")
+            x_fit = {'success': False, 'error': str(e)}
+
+        # Fit Y dimension (15N/13C) with constraints
+        try:
+            y_fit = self.fit_peak_enhanced(
+                y_ppm_scale, y_cross_section,
+                initial_center=ppm_y,
+                nucleus_type='15N',  # Assume 15N, could be detected
+                method='iterative_optimization',
+                linewidth_constraints=y_linewidth_constraints
+            )
+        except Exception as e:
+            print(f"   ⚠️ Y dimension fit failed: {e}")
+            y_fit = {'success': False, 'error': str(e)}
+
+        # Combine results
+        result = {
+            'success': x_fit.get('success', False) and y_fit.get('success', False),
+            'x_fit': x_fit,
+            'y_fit': y_fit,
+            'assignment': assignment,
+            'position': {'x': ppm_x, 'y': ppm_y},
+            'linewidth_constraints_applied': constraints_applied,
+            'method': 'fit_voigt_profile'
+        }
+
+        # Print summary
+        if result['success']:
+            x_r2 = x_fit.get('r_squared', 0.0)
+            y_r2 = y_fit.get('r_squared', 0.0)
+            print(f"   ✅ Fit successful: R²_X={x_r2:.3f}, R²_Y={y_r2:.3f}")
+
+            # Extract fitted linewidths for reporting
+            if 'fitted_params' in x_fit:
+                x_sigma = x_fit['fitted_params'].get('sigma', 0.0)
+                x_gamma = x_fit['fitted_params'].get('gamma', 0.0)
+                print(f"      X linewidths: σ={x_sigma:.4f}, γ={x_gamma:.4f} ppm")
+
+            if 'fitted_params' in y_fit:
+                y_sigma = y_fit['fitted_params'].get('sigma', 0.0)
+                y_gamma = y_fit['fitted_params'].get('gamma', 0.0)
+                print(f"      Y linewidths: σ={y_sigma:.4f}, γ={y_gamma:.4f} ppm")
+        else:
+            print(f"   ❌ Fit failed for {assignment or 'peak'}")
+
+        return result
 
     def fit_peak_enhanced(self, x_data, y_data, initial_center=None, nucleus_type=None,
                          method='iterative_optimization', preprocessing=True,
                          all_peaks_context=None, linewidth_constraints=None, detection_confidence=None,
-                         _call_stack=None):
+                         force_single_peak=False, _call_stack=None):
         """
         ENHANCED PEAK FITTING WITH DYNAMIC OPTIMIZATION
 
@@ -2757,11 +3020,13 @@ class EnhancedVoigtFitter:
         - all_peaks_context: List of all suspected peaks for global parameter estimation (NEW)
         - linewidth_constraints: Dict with 'sigma_bounds' and 'gamma_bounds' for constrained fitting (NEW)
         - detection_confidence: Dict with detection confidence scores and peak characteristics (INTEGRATION)
+        - force_single_peak: If True, skip overlap resolution (default: False) (NEW)
 
         Returns:
         - Comprehensive fit results dictionary with optimization diagnostics
 
         BACKWARD COMPATIBILITY: Original methods preserved, new method is opt-in
+        NEW: Overlap detection and resolution (opt-in via configure_overlap_resolution)
         """
         # === RECURSION DETECTION ===
         if _call_stack is None:
@@ -2821,37 +3086,74 @@ class EnhancedVoigtFitter:
                 )
                 self.last_fit_diagnostics['global_params'] = global_params
 
-                # Step 2: Enhanced baseline estimation with asymmetry support
-                # Determine peak complexity for baseline method selection
-                well_resolved_count = global_params.get('well_resolved_count', 0)
-                if well_resolved_count >= 3:
-                    peak_complexity = 'simple'
-                elif well_resolved_count >= 1:
-                    peak_complexity = 'moderate'
-                else:
-                    peak_complexity = 'complex'  # Unknown context suggests complex overlapping peaks
+                # ===================================================================
+                # See spectrum.cpp:1100 (y.push_back(b)) and peakfit.cpp:370 (yred[j] = y[i])
+                # ===================================================================
+                baseline_est = 0.0
+                baseline_value = 0.0
+                print
 
-                print(f"   Detected peak complexity: {peak_complexity} (based on {well_resolved_count} well-resolved peaks)")
-
-                # Use adaptive baseline method selection for enhanced baseline correction
-                selected_method, baseline_est, baseline_info = self.adaptive_baseline_method_selection(
-                    x_data, y_data, peak_complexity=peak_complexity
-                )
-
-                # Store baseline method info in diagnostics
+                # Store baseline info in diagnostics
                 self.last_fit_diagnostics['baseline_method'] = {
-                    'selected_method': selected_method,
-                    'peak_complexity': peak_complexity,
-                    'method_info': baseline_info
+                    'selected_method': 'none',
+                    'peak_complexity': 'N/A',
+                    'method_info': 'Using raw data '
                 }
 
-                # Handle both scalar and array baseline results
+                # === NEW: OVERLAP DETECTION AND ROUTING ===
+                # Baseline-corrected data for overlap detection
                 if np.isscalar(baseline_est):
-                    baseline_value = baseline_est
-                    print(f"   Baseline method '{selected_method}': {baseline_value:.1f}")
+                    y_corrected = y_data - baseline_est
                 else:
-                    baseline_value = np.median(baseline_est)  # Use median for scalar amplitude calculation
-                    print(f"   Baseline method '{selected_method}': array (median: {baseline_value:.1f})")
+                    y_corrected = y_data - baseline_est
+
+                # Check if overlap detection is enabled and available
+                if (OVERLAP_RESOLUTION_AVAILABLE and
+                    self.overlap_detection_enabled and
+                    not force_single_peak):
+
+                    overlap_info = self.detect_potential_overlap(
+                        x_data, y_corrected, refined_center, nucleus_type
+                    )
+
+                    if overlap_info['has_overlap'] and overlap_info['n_peaks'] > 1:
+                        print(f"   🔍 Detected {overlap_info['n_peaks']} potentially overlapping peaks")
+                        print(f"      Separation: {overlap_info['separation_distance']:.4f} ppm, Confidence: {overlap_info['confidence']:.2f}")
+
+                        # Lazy initialize overlap resolver
+                        if self.overlap_resolver is None:
+                            self.overlap_resolver = OverlapResolverEngine(enhanced_fitter=self)
+                            if self.overlap_config:
+                                # Convert OverlapResolutionConfig to dict before updating
+                                config_dict = self.overlap_config.to_dict() if hasattr(self.overlap_config, 'to_dict') else self.overlap_config
+                                self.overlap_resolver.config.update(config_dict)
+                            print(f"   🚀 Overlap resolver initialized")
+
+                        # Try overlap resolution
+                        try:
+                            result = self.overlap_resolver.resolve_overlapping_peaks(
+                                x_data, y_corrected,
+                                overlap_info['peak_candidates']
+                            )
+
+                            # Add baseline back to result
+                            result['baseline'] = baseline_est if np.isscalar(baseline_est) else baseline_value
+                            result['fitting_method'] = 'overlap_resolution'
+                            result['overlap_info'] = overlap_info
+
+                            # Check if resolution was successful
+                            if result['success'] and result.get('r_squared', 0) > 0.7:
+                                print(f"   ✅ Overlap resolution successful: {result['n_peaks']} peaks, R²={result['r_squared']:.3f}")
+                                return result
+                            else:
+                                print(f"   ⚠️ Overlap resolution quality poor (R²={result.get('r_squared', 0):.3f})")
+                                print(f"   🔄 Falling back to single-peak fit")
+                                # Fall through to single-peak fitting
+
+                        except Exception as e:
+                            print(f"   ❌ Overlap resolution failed: {e}")
+                            print(f"   🔄 Falling back to single-peak fit")
+                            # Fall through to single-peak fitting
 
                 # INTEGRATION ENHANCEMENT: Use detection confidence for parameter estimation
                 if detection_confidence and isinstance(detection_confidence, dict):
@@ -2972,39 +3274,12 @@ class EnhancedVoigtFitter:
                     'success': standard_result.get('success', False)
                 }
 
-                # Step 4: Dynamic baseline optimization (if standard fit is not excellent)
-                if standard_quality < 0.95:  # Room for improvement
-                    print("   Starting dynamic baseline optimization...")
-
-                    optimized_baseline, baseline_quality, baseline_report = \
-                        self.optimize_baseline_iteratively(x_data, y_data, refined_center, initial_guess)
-
-                    self.last_fit_diagnostics['baseline_optimization'] = baseline_report
-
-                    # Refit with optimized baseline
-                    optimized_guess = initial_guess.copy()
-                    optimized_guess[4] = optimized_baseline
-
-                    optimized_result = self._fit_with_standard_method(x_data, y_data, optimized_guess, nucleus_type)
-                    optimized_quality = optimized_result.get('r_squared', 0)
-
-                    print(f"   Optimized fitting: R² = {optimized_quality:.4f}")
-
-                    # Choose best result
-                    if (optimized_result.get('success', False) and
-                        optimized_quality > standard_quality + 0.005):  # 0.5% improvement threshold
-
-                        print(f"   ✓ Baseline optimization effective: Δ R² = {optimized_quality - standard_quality:.4f}")
-                        best_result = optimized_result
-                        self.last_fit_diagnostics['baseline_optimization_effective'] = True
-                    else:
-                        print("   ⚠ Baseline optimization did not improve results")
-                        best_result = standard_result
-                        self.last_fit_diagnostics['baseline_optimization_effective'] = False
-                else:
-                    print("   Skipping baseline optimization: standard fit already excellent")
-                    best_result = standard_result
-                    self.last_fit_diagnostics['baseline_optimization_skipped'] = 'excellent_standard_fit'
+                # ===================================================================
+                # NO BASELINE OPTIMIZATION
+                # ===================================================================
+                print("   Skipping baseline optimization: using raw data approach")
+                best_result = standard_result
+                self.last_fit_diagnostics['baseline_optimization_skipped'] = 'raw_data_approach'
 
 ##
                 # === NEW: AUTOMATIC MULTI-PEAK DETECTION ===
@@ -3025,13 +3300,29 @@ class EnhancedVoigtFitter:
 
                         # Additional residual analysis for validation
                         if best_result.get('success', False):
+                            # Handle both flat and nested result formats
+                            if 'x_fit' in best_result:
+                                # Nested format from 2D fitting
+                                amplitude = best_result['x_fit']['amplitude']
+                                center = best_result['x_fit']['center']
+                                sigma = best_result['x_fit']['sigma']
+                                gamma = best_result['x_fit']['gamma']
+                                baseline = best_result['x_fit']['baseline']
+                            else:
+                                # Flat format from 1D fitting
+                                amplitude = best_result['amplitude']
+                                center = best_result['center']
+                                sigma = best_result['sigma']
+                                gamma = best_result['gamma']
+                                baseline = best_result['baseline']
+
                             fitted_curve = self.voigt_profile_1d(
                                 x_data,
-                                best_result['amplitude'],
-                                best_result['center'],
-                                best_result['sigma'],
-                                best_result['gamma'],
-                                best_result['baseline']
+                                amplitude,
+                                center,
+                                sigma,
+                                gamma,
+                                baseline
                             )
                             residuals = y_data - fitted_curve
                             residual_peaks = find_peaks(np.abs(residuals),
@@ -3101,51 +3392,6 @@ class EnhancedVoigtFitter:
                                     x_data, y_data, multi_result, nucleus_type
                                 )['quality_class']
 
-                                # Collect enhanced training data for ML development v2.0
-                                if hasattr(self, 'ml_data_collector') and self.ml_data_collector:
-                                    try:
-                                        # Prepare enhanced optimization info
-                                        optimization_info = {
-                                            'method': 'multi_peak_fitting',
-                                            'iterations': getattr(self, 'last_optimization_iterations', 0),
-                                            'converged': multi_result.get('success', False),
-                                            'final_cost': 1.0 - multi_result.get('r_squared', 0.0),
-                                            'initial_cost': 1.0,  # Assume poor initial fit
-                                            'residuals': getattr(self, 'last_residuals', []),
-                                            'parameter_errors': getattr(self, 'last_parameter_errors', {}),
-                                            'gradient_norm': getattr(self, 'last_gradient_norm', 0.0),
-                                            'hessian_condition': getattr(self, 'last_hessian_condition', 1.0)
-                                        }
-
-                                        # Prepare initial parameters (estimated)
-                                        initial_params = {
-                                            'amplitude': np.max(y_data) - np.min(y_data),
-                                            'center': x_data[np.argmax(y_data)],
-                                            'sigma': self.nmr_ranges[nucleus_type]['typical_width'],
-                                            'gamma': self.nmr_ranges[nucleus_type]['typical_width'] * 0.5,
-                                            'baseline': np.min(y_data)
-                                        }
-
-                                        self.ml_data_collector.collect_training_sample(
-                                            x_data=x_data,
-                                            y_data=y_data,
-                                            fit_result=multi_result,
-                                            context={
-                                                'detection_confidence': getattr(self, 'last_detection_confidence', 0.5),
-                                                'estimated_amplitude': np.max(y_data) - np.min(y_data),
-                                                'estimated_width': self.nmr_ranges[nucleus_type]['typical_width'],
-                                                'overlapping_peaks': detected_peaks,
-                                                'peak_complexity': 'complex',  # Since this is multi-peak
-                                                'baseline_stability': getattr(self, 'baseline_stability', 1.0)
-                                            },
-                                            nucleus_type=nucleus_type,
-                                            initial_params=initial_params,
-                                            optimization_info=optimization_info,
-                                            alternative_results=getattr(self, 'alternative_fit_results', [])
-                                        )
-                                    except Exception as e:
-                                        print(f"Enhanced ML data collection failed: {e}")
-
                                 return multi_result
                             else:
                                 print(f"   ⚠ Multi-peak fit did not improve results sufficiently (R² = {multi_quality:.3f})")
@@ -3175,71 +3421,6 @@ class EnhancedVoigtFitter:
                 if best_result.get('success', False):
                     best_result['optimization_diagnostics'] = self.last_fit_diagnostics
                     print(f"🎯 Iterative optimization complete: R² = {best_result['r_squared']:.4f}")
-
-                # Collect enhanced training data for ML development v2.0
-                if hasattr(self, 'ml_data_collector') and self.ml_data_collector:
-                    try:
-                        # Handle case where optimization_history might not be defined
-                        opt_history = getattr(self, 'optimization_history', [])
-                        if not opt_history:
-                            # Create minimal history from current result
-                            opt_history = [{'params': best_result, 'r_squared': best_result.get('r_squared', 0.0)}]
-
-                        # Prepare comprehensive optimization info from iterative process
-                        optimization_info = {
-                            'method': 'iterative_optimization',
-                            'iterations': len(opt_history),
-                            'converged': best_result.get('success', False),
-                            'final_cost': 1.0 - best_result.get('r_squared', 0.0),
-                            'initial_cost': 1.0 - opt_history[0].get('r_squared', 0.0) if opt_history else 1.0,
-                            'parameter_history': [h.get('params', {}) for h in opt_history],
-                            'cost_history': [1.0 - h.get('r_squared', 0.0) for h in opt_history],
-                            'residuals': getattr(self, 'last_residuals', []),
-                            'parameter_errors': getattr(self, 'last_parameter_errors', {}),
-                            'gradient_norm': getattr(self, 'last_gradient_norm', 0.0),
-                            'bounds_used': bounds if 'bounds' in locals() else {},
-                            'optimization_difficulty': len(opt_history) / 50.0  # Normalized difficulty
-                        }
-
-                        # Get initial parameters from optimization history
-                        initial_params = opt_history[0].get('params', {}) if opt_history else {
-                            'amplitude': np.max(y_data) - np.min(y_data),
-                            'center': x_data[np.argmax(y_data)],
-                            'sigma': self.nmr_ranges[nucleus_type]['typical_width'],
-                            'gamma': self.nmr_ranges[nucleus_type]['typical_width'] * 0.5,
-                            'baseline': np.min(y_data)
-                        }
-
-                        # Collect alternative results from optimization history
-                        alternative_results = []
-                        for i, hist_entry in enumerate(opt_history[:-3] if len(opt_history) > 3 else []):
-                            if hist_entry.get('r_squared', 0) > 0.5:  # Only decent fits
-                                alternative_results.append({
-                                    'method': f'iterative_step_{i}',
-                                    'r_squared': hist_entry.get('r_squared', 0),
-                                    **hist_entry.get('params', {})
-                                })
-
-                        self.ml_data_collector.collect_training_sample(
-                            x_data=x_data,
-                            y_data=y_data,
-                            fit_result=best_result,
-                            context={
-                                'detection_confidence': getattr(self, 'last_detection_confidence', 0.5),
-                                'estimated_amplitude': np.max(y_data) - np.min(y_data),
-                                'estimated_width': self.nmr_ranges[nucleus_type]['typical_width'],
-                                'overlapping_peaks': [],
-                                'peak_complexity': 'simple',  # Since this is single-peak
-                                'baseline_stability': getattr(self, 'baseline_stability', 1.0),
-                                'optimization_attempts': len(opt_history)
-                            },
-                            nucleus_type=nucleus_type,
-                            initial_params=initial_params,
-                            optimization_info=optimization_info,
-                            alternative_results=alternative_results
-                        )
-                    except Exception as e:
-                        print(f"Enhanced ML data collection failed: {e}")
 
                 return best_result
 
@@ -3329,52 +3510,6 @@ class EnhancedVoigtFitter:
                 'r_squared': quality_metrics['r_squared'],
                 'quality_class': quality_metrics['quality_class']
             }
-
-            # Collect enhanced training data for ML development v2.0
-            if hasattr(self, 'ml_data_collector') and self.ml_data_collector:
-                try:
-                    # Prepare optimization info for standard method
-                    optimization_info = {
-                        'method': 'standard_voigt_fitting',
-                        'iterations': getattr(self, 'last_optimization_iterations', 1),
-                        'converged': result.get('success', False),
-                        'final_cost': 1.0 - result.get('r_squared', 0.0),
-                        'initial_cost': 1.0,  # Standard method starts from initial guess
-                        'residuals': getattr(self, 'last_residuals', []),
-                        'parameter_errors': getattr(self, 'last_parameter_errors', {}),
-                        'cv_score': getattr(self, 'last_cv_score', 0.0),
-                        'bounds_used': getattr(self, 'last_bounds_used', {})
-                    }
-
-                    # Initial parameters from Voigt estimation
-                    initial_params = {
-                        'amplitude': np.max(y_data) - np.min(y_data),
-                        'center': x_data[np.argmax(y_data)],
-                        'sigma': self.nmr_ranges[nucleus_type]['typical_width'],
-                        'gamma': self.nmr_ranges[nucleus_type]['typical_width'] * 0.3,
-                        'baseline': np.min(y_data)
-                    }
-
-                    self.ml_data_collector.collect_training_sample(
-                        x_data=x_data,
-                        y_data=y_data,
-                        fit_result=result,
-                        context={
-                            'detection_confidence': getattr(self, 'last_detection_confidence', 0.5),
-                            'estimated_amplitude': np.max(y_data) - np.min(y_data),
-                            'estimated_width': self.nmr_ranges[nucleus_type]['typical_width'],
-                            'overlapping_peaks': [],
-                            'peak_complexity': 'simple',  # Standard method is single-peak
-                            'baseline_stability': getattr(self, 'baseline_stability', 1.0),
-                            'fitting_method': 'standard_voigt'
-                        },
-                        nucleus_type=nucleus_type,
-                        initial_params=initial_params,
-                        optimization_info=optimization_info,
-                        alternative_results=[]  # Standard method doesn't test alternatives
-                    )
-                except Exception as e:
-                    print(f"Enhanced ML data collection failed: {e}")
 
             return result
 

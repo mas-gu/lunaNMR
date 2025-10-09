@@ -114,7 +114,6 @@ class NMRPeaksSeriesGUI:
         self.param_manager = NMRParameterManager()
         # Start in simplified mode by default
         self.param_manager.use_simplified_mode = True
-        print("✅ Parameter manager initialized in simplified mode")
 
         self.processing_active = False
         # These will be created when needed
@@ -175,13 +174,13 @@ class NMRPeaksSeriesGUI:
         self.residual_analysis_threshold = tk.DoubleVar(value=fitting_params['residual_analysis_threshold'])
 
         # Peak detection parameters (for multi-peak fitting)
-        self.peak_height_threshold = tk.DoubleVar(value=0.02)    # 2% of max intensity
-        self.peak_distance_factor = tk.DoubleVar(value=50.0)     # 1/50 = 2% of spectrum
-        self.peak_prominence_threshold = tk.DoubleVar(value=0.01) # 1% of max intensity
-        self.smoothing_sigma = tk.DoubleVar(value=0.5)           # Gaussian smoothing
+        self.peak_height_threshold = tk.DoubleVar(value=0.005)    # 2% of max intensity #0.02
+        self.peak_distance_factor = tk.DoubleVar(value=200.0)     # 1/50 = 2% of spectrum #50
+        self.peak_prominence_threshold = tk.DoubleVar(value=0.005) # 1% of max intensity #0.01
+        self.smoothing_sigma = tk.DoubleVar(value=0.5)           # Gaussian smoothing 
         self.max_peaks_fit = tk.IntVar(value=4)                  # Maximum peaks to fit simultaneously
         self.max_optimization_iterations = tk.IntVar(value=100)   # Maximum iterative optimization attempts
-        self.use_parallel_processing = tk.BooleanVar(value=True) # Enable parallel processing
+        self.use_parallel_processing = tk.BooleanVar(value=False) # Enable parallel processing #was True
 
         # Peak Centroid Detection parameters (optional post-processing enhancement)
         self.use_centroid_refinement = tk.BooleanVar(value=False)  # Enable centroid refinement
@@ -198,8 +197,25 @@ class NMRPeaksSeriesGUI:
         self.simplified_sensitivity = tk.DoubleVar(value=0.5)       # Detection sensitivity (0-1)
         self.simplified_window_scale = tk.DoubleVar(value=1.0)      # Window sizing scale factor
         self.simplified_quality_target = tk.DoubleVar(value=0.85)   # Target fitting quality
+        self.simplified_max_peaks_fit = tk.IntVar(value=4)          # Maximum peaks for simultaneous fitting
+        self.simplified_max_iterations = tk.IntVar(value=1000)      # Maximum optimization iterations
         self.simplified_noise_method = tk.StringVar(value='auto')   # Noise estimation method
         self.simplified_baseline_method = tk.StringVar(value='auto') # Baseline estimation method
+
+        # Overlap resolution parameters
+        self.overlap_resolution_enabled = tk.BooleanVar(value=False)  # Default OFF (backward compatible)
+        self.overlap_resolution_preset = tk.StringVar(value='default')  # 'default', 'fast', or 'thorough'
+
+        self.use_ps2d_multi_peak = tk.BooleanVar(value=True)  # Use PS2D multi-peak for 2+ peaks (default ON)
+        print(f"🔧 GUI Init: use_ps2d_multi_peak initialized to {self.use_ps2d_multi_peak.get()}")
+        self.fix_linewidths = tk.BooleanVar(value=False)  # fixLW flag (default: linewidths float)
+        self.fix_positions = tk.BooleanVar(value=False)  # fixPos flag (default: positions float)
+
+        self.use_custom_linewidths = tk.BooleanVar(value=False)
+        self.lw_lorentz_1h = tk.DoubleVar(value=0.001)
+        self.lw_gauss_1h = tk.DoubleVar(value=0.03)      # 1H Gaussian CORRECTED: 0.03 ppm (was 0.3 - SWAPPED!)
+        self.lw_lorentz_15n = tk.DoubleVar(value=0.0001)
+        self.lw_gauss_15n = tk.DoubleVar(value=0.3)      # 15N Gaussian CORRECTED: 0.3 ppm (was 0.03 - SWAPPED!)
 
         # Peak editing parameters
         self.peak_edit_mode = tk.BooleanVar(value=False)         # Peak editing mode toggle
@@ -238,6 +254,9 @@ class NMRPeaksSeriesGUI:
         self.series_use_global_optimization = tk.BooleanVar(value=series_options.get('use_global_optimization', False))
         self.series_num_integrations = tk.IntVar(value=series_options.get('num_integrations', 3))  # Default: 3 integrations
 
+        # PS2D Linewidth Reuse for series integration (PS2D C++ peakfit.cpp:586-607)
+        self.use_ps2d_linewidth_reuse = tk.BooleanVar(value=series_options.get('use_ps2d_linewidth_reuse', False))  # Default OFF for backward compatibility
+
         # NEW: Series peak source and detection options
         self.series_peak_source = tk.StringVar(value="detected")  # "detected", "reference", "cascade"
         self.series_enable_detection = tk.BooleanVar(value=False)  # Default OFF - direct fitting only
@@ -265,23 +284,6 @@ class NMRPeaksSeriesGUI:
         self.enable_1d_refinement = tk.BooleanVar(value=integration_options.get('enable_1d_refinement', True))
         self.refinement_quality_threshold = tk.DoubleVar(value=integration_options.get('refinement_quality_threshold', 0.7))
         self.refinement_coordinate_threshold = tk.DoubleVar(value=integration_options.get('refinement_coordinate_threshold', 0.01))
-
-        # Enhanced Graph-Based Detection parameters (NEW)
-        # Enhanced Detection constraints - separate X and Y dimensions
-        self.enhanced_radius_x = tk.DoubleVar(value=integration_options.get('enhanced_radius_x', 0.05))    # 1H constraint (ppm)
-        self.enhanced_radius_y = tk.DoubleVar(value=integration_options.get('enhanced_radius_y', 2.0))     # 15N/13C constraint (ppm)
-        self.enhanced_pattern_similarity = tk.DoubleVar(value=integration_options.get('enhanced_pattern_similarity', 0.7))
-        self.enhanced_missing_tolerance = tk.IntVar(value=integration_options.get('enhanced_missing_tolerance', 1))
-        self.enhanced_position_weight = tk.DoubleVar(value=integration_options.get('enhanced_position_weight', 0.7))
-
-        # Enhanced Detection square size - now anisotropic (X and Y dimensions)
-        self.enhanced_detection_square_size = tk.IntVar(value=3)         # Size of detection square X-dimension/1H for Enhanced Detection
-        self.enhanced_detection_rectangle_y = tk.IntVar(value=1)         # Size of detection rectangle Y-dimension/15N for Enhanced Detection
-        self.enhanced_detection_square_ppm_x = tk.StringVar(value="(load data to see ppm)")
-
-        # Peak reduction parameters (NEW)
-        self.enhanced_peak_limit = tk.IntVar(value=integration_options.get('enhanced_peak_limit', 50))
-        self.enhanced_noise_threshold = tk.DoubleVar(value=integration_options.get('enhanced_noise_threshold', 0.01))
 
         # Peak coordinate adjustment parameters
         self.adjust_x_offset = tk.DoubleVar(value=0.0)  # ppm offset in 1H dimension
@@ -335,6 +337,8 @@ class NMRPeaksSeriesGUI:
                 self.param_manager.update_simplified_parameters(
                     window_scale=self.simplified_window_scale.get(),
                     quality_target=self.simplified_quality_target.get(),
+                    max_peaks_fit=self.simplified_max_peaks_fit.get(),
+                    max_iterations=self.simplified_max_iterations.get(),
                     noise_estimation_method=self.simplified_noise_method.get(),
                     baseline_method=self.simplified_baseline_method.get()
                 )
@@ -376,14 +380,30 @@ class NMRPeaksSeriesGUI:
                     if workflow_mode == "sn_threshold":
                         self.integrator.set_processing_mode('sn_native')
                     elif workflow_mode == "peak_list":
-                        self.integrator.set_processing_mode('peak_list')
+                        self.integrator.set_processing_mode('in_place')  # Fixed: 'peak_list' is invalid
                     else:
                         self.integrator.set_processing_mode('full_detection')
 
-                print(f"✅ S/N workflow parameters synced: threshold={sn_threshold_value}, expected_count={expected_count_value}")
-
             except (ValueError, AttributeError) as e:
-                print(f"⚠️ S/N parameter sync warning: {e}")
+                pass  # Silently ignore S/N parameter sync errors during startup
+
+        # Sync overlap resolution settings
+        if hasattr(self, 'overlap_resolution_enabled') and hasattr(self, 'overlap_resolution_preset'):
+            try:
+                overlap_enabled = self.overlap_resolution_enabled.get()
+                overlap_preset = self.overlap_resolution_preset.get()
+
+                if overlap_enabled:
+                    # Enable overlap resolution with selected preset
+                    self.integrator.enable_overlap_resolution_preset(preset=overlap_preset)
+                    print(f"✅ Overlap resolution enabled with '{overlap_preset}' preset")
+                else:
+                    # Disable overlap resolution
+                    self.integrator.configure_overlap_resolution(enable=False)
+                    print("✅ Overlap resolution disabled")
+
+            except (AttributeError, Exception) as e:
+                print(f"⚠️ Overlap resolution sync warning: {e}")
 
         print(f"✅ Parameters synchronized: {len(updated_params)} parameters updated via parameter manager")
 
@@ -448,6 +468,21 @@ class NMRPeaksSeriesGUI:
             self.voigt_params_frame.pack(fill=tk.X, pady=5)
             print("🔧 Advanced fitting mode active (25+ parameters for expert control)")
 
+    def on_custom_linewidths_toggle(self, event=None):
+        """Enable/disable custom linewidth input fields"""
+        state = 'normal' if self.use_custom_linewidths.get() else 'disabled'
+        self.lw_lorentz_1h_spin.config(state=state)
+        self.lw_gauss_1h_spin.config(state=state)
+        self.lw_lorentz_15n_spin.config(state=state)
+        self.lw_gauss_15n_spin.config(state=state)
+
+        if self.use_custom_linewidths.get():
+            print(f"⚙️ Custom linewidths enabled: 1H Lor={self.lw_lorentz_1h.get():.4f}, Gauss={self.lw_gauss_1h.get():.3f}")
+        else:
+            print
+
+        self.on_simplified_parameter_change()
+
     def on_simplified_parameter_change(self, event=None):
         """Handle simplified parameter changes"""
         if not self.use_simplified_parameters.get():
@@ -459,10 +494,14 @@ class NMRPeaksSeriesGUI:
                 sensitivity=self.simplified_sensitivity.get(),
                 window_scale=self.simplified_window_scale.get(),
                 quality_target=self.simplified_quality_target.get(),
+                max_peaks_fit=self.simplified_max_peaks_fit.get(),
+                max_iterations=self.simplified_max_iterations.get(),
                 noise_estimation_method=self.simplified_noise_method.get(),
                 baseline_method=self.simplified_baseline_method.get()
             )
-            print("✅ Simplified parameters updated")
+
+        # CRITICAL: Sync all parameters including overlap resolution to integrator
+        self._sync_parameters_to_integrator()
 
     def _disable_widget_recursive(self, widget):
         """Recursively disable a widget and all its children"""
@@ -569,7 +608,6 @@ class NMRPeaksSeriesGUI:
         process_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Processing", menu=process_menu)
         process_menu.add_command(label="Detect Peaks", command=self.detect_peaks)
-        process_menu.add_command(label="Enhanced Peak Detection", command=self.enhanced_detect_peaks)
         process_menu.add_command(label="Integrate Peaks", command=self.integrate_peaks)
         process_menu.add_command(label="Fit Selected Peak", command=self.fit_selected_peak)
         process_menu.add_command(label="Fit All Peaks", command=self.fit_all_peaks)
@@ -1048,11 +1086,6 @@ class NMRPeaksSeriesGUI:
                                              command=self.detect_peaks)
         self.detect_peaks_button.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=2)
 
-        # Enhanced Peak Detection button (NEW)
-        self.enhanced_detect_button = ttk.Button(button_frame, text="🚀 Enhanced Detection",
-                                               command=self.enhanced_detect_peaks, state='disabled')
-        self.enhanced_detect_button.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=2)
-
         # =================== PEAK NAVIGATION SECTION ===================
         nav_frame = ttk.LabelFrame(parent, text="🎯 Peak Navigation", padding=10)
         nav_frame.pack(fill=tk.X, pady=(0, 10))
@@ -1150,215 +1183,116 @@ class NMRPeaksSeriesGUI:
         voigt_frame = ttk.LabelFrame(parent, text="📈 Voigt Profile Fitting", padding=5)
         voigt_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Add simplified mode toggle at the top
-        simplified_toggle_frame = ttk.Frame(voigt_frame)
-        simplified_toggle_frame.pack(fill=tk.X, pady=(5, 10))
-
-        # Create an inverse variable for the checkbox (checked = advanced mode)
-        self.use_advanced_mode = tk.BooleanVar(value=False)
-
-        def toggle_mode():
-            # Invert the logic: checkbox checked = advanced mode = simplified OFF
-            self.use_simplified_parameters.set(not self.use_advanced_mode.get())
-            self.on_simplified_fitting_mode_change()
-
-        ttk.Checkbutton(simplified_toggle_frame,
-                       text="🔧 Show Advanced Parameters (25+ individual controls for expert users)",
-                       variable=self.use_advanced_mode,
-                       command=toggle_mode).pack(anchor=tk.W)
-
-        # Simplified parameters frame (shown by default)
-        self.simplified_fitting_frame = ttk.LabelFrame(voigt_frame, text="🎯 Simplified Fitting Parameters", padding=10)
+        # Simplified parameters frame (always shown, no toggle)
+        self.simplified_fitting_frame = ttk.LabelFrame(voigt_frame, text="🎯 PS2D-Style High-Performance Fitting", padding=10)
         self.simplified_fitting_frame.pack(fill=tk.X, pady=5)  # Pack immediately - shown by default
 
-        # Create a single grid container for all 4 rows
+        # PS2D-style status indicator
+        ps2d_status_frame = ttk.Frame(self.simplified_fitting_frame)
+        ps2d_status_frame.pack(fill=tk.X, pady=(0, 10))
+        ps2d_status_label = ttk.Label(ps2d_status_frame,
+                                     text="✅ PS2D-style fitting active: Multi-stage algorithm with optimal convergence",
+                                     font=('TkDefaultFont', 9, 'bold'), foreground='darkgreen')
+        ps2d_status_label.pack(anchor=tk.W)
+
+        # Create a single grid container for PS2D controls
         params_container = ttk.Frame(self.simplified_fitting_frame)
         params_container.pack(fill=tk.X)
 
-        # Row 1: Window Scale
+        # Header
         row = 0
-        ttk.Label(params_container, text="Window Scale:").grid(row=row, column=0, sticky=tk.W, pady=3)
-        window_scale_spin = ttk.Spinbox(params_container, from_=0.5, to=3.0, increment=0.1, width=10,
-                                      textvariable=self.simplified_window_scale,
-                                      command=self.on_simplified_parameter_change)
-        window_scale_spin.grid(row=row, column=1, sticky=tk.W, padx=(10,0), pady=3)
-        ttk.Label(params_container, text="(1.0 = default, 2.0 = larger windows, 0.5 = smaller)",
-                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=3)
+        ttk.Label(params_container, text="PS2D Multi-Peak Controls:", font=('TkDefaultFont', 9, 'bold')).grid(
+            row=row, column=0, columnspan=3, sticky=tk.W, pady=(0,3))
 
-        # Row 2: Quality Target
+        # PS2D is always active - show informational text instead of checkbox
         row = 1
-        ttk.Label(params_container, text="Quality Target (R²):").grid(row=row, column=0, sticky=tk.W, pady=3)
-        quality_spin = ttk.Spinbox(params_container, from_=0.5, to=0.95, increment=0.05, width=10,
-                                 textvariable=self.simplified_quality_target,
-                                 command=self.on_simplified_parameter_change)
-        quality_spin.grid(row=row, column=1, sticky=tk.W, padx=(10,0), pady=3)
-        ttk.Label(params_container, text="(0.85 = default, 0.95 = strict, 0.6 = relaxed)",
-                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=3)
+        ps2d_status_label = ttk.Label(params_container,
+                                      text="✅ PS2D 5-stage multi-peak fitting: Always active for optimal results",
+                                      font=('TkDefaultFont', 9), foreground='darkgreen')
+        ps2d_status_label.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=3)
 
-        # Row 3: Noise Method
         row = 2
-        ttk.Label(params_container, text="Noise Method:").grid(row=row, column=0, sticky=tk.W, pady=3)
-        noise_method_combo = ttk.Combobox(params_container, textvariable=self.simplified_noise_method,
-                                        values=['auto', 'percentile', 'robust'], width=12, state='readonly')
-        noise_method_combo.grid(row=row, column=1, sticky=tk.W, padx=(10,0), pady=3)
-        noise_method_combo.bind('<<ComboboxSelected>>', self.on_simplified_parameter_change)
-        ttk.Label(params_container, text="(auto = adaptive, percentile = statistical, robust = outlier-resistant)",
+        fix_lw_check = ttk.Checkbutton(params_container, text="🔒 Fix Linewidths (fixLW flag)",
+                                       variable=self.fix_linewidths,
+                                       command=self.on_simplified_parameter_change)
+        fix_lw_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=3)
+        ttk.Label(params_container, text="(Hold linewidths constant during multi-peak fitting)",
                  font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=3)
 
-        # Row 4: Baseline Method
         row = 3
-        ttk.Label(params_container, text="Baseline Method:").grid(row=row, column=0, sticky=tk.W, pady=3)
-        baseline_method_combo = ttk.Combobox(params_container, textvariable=self.simplified_baseline_method,
-                                           values=['auto', 'polynomial', 'iterative'], width=12, state='readonly')
-        baseline_method_combo.grid(row=row, column=1, sticky=tk.W, padx=(10,0), pady=3)
-        baseline_method_combo.bind('<<ComboboxSelected>>', self.on_simplified_parameter_change)
-        ttk.Label(params_container, text="(auto = best fit, polynomial = smooth, iterative = ArPLS)",
+        fix_pos_check = ttk.Checkbutton(params_container, text="🔒 Fix Positions (fixPos flag)",
+                                       variable=self.fix_positions,
+                                       command=self.on_simplified_parameter_change)
+        fix_pos_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=3)
+        ttk.Label(params_container, text="(Hold peak positions constant during multi-peak fitting)",
                  font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=3)
 
-        # Help text for simplified mode
+        row = 4
+        custom_lw_check = ttk.Checkbutton(params_container, text="⚙️ Custom Initial Linewidths",
+                                         variable=self.use_custom_linewidths,
+                                         command=self.on_custom_linewidths_toggle)
+        custom_lw_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(8,3))
+        ttk.Label(params_container, text="(Override defaults: Lor/Gauss 1H=0.001/0.3, 15N=0.0001/0.03)",
+                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=(8,3))
+
+        # Custom linewidth input fields (initially disabled)
+        self.lw_custom_frame = ttk.Frame(params_container)
+        self.lw_custom_frame.grid(row=5, column=0, columnspan=3, sticky=tk.W, pady=(0,5))
+
+        # 1H linewidths
+        ttk.Label(self.lw_custom_frame, text="  1H:").grid(row=0, column=0, sticky=tk.W, padx=(10,5))
+        ttk.Label(self.lw_custom_frame, text="Lor:").grid(row=0, column=1, sticky=tk.W)
+        self.lw_lorentz_1h_spin = ttk.Spinbox(self.lw_custom_frame, from_=0.0001, to=0.1, increment=0.001,
+                                              width=8, textvariable=self.lw_lorentz_1h, format="%.4f",
+                                              command=self.on_simplified_parameter_change, state='disabled')
+        self.lw_lorentz_1h_spin.grid(row=0, column=2, sticky=tk.W, padx=(2,10))
+
+        ttk.Label(self.lw_custom_frame, text="Gauss:").grid(row=0, column=3, sticky=tk.W)
+        self.lw_gauss_1h_spin = ttk.Spinbox(self.lw_custom_frame, from_=0.001, to=1.0, increment=0.01,
+                                            width=8, textvariable=self.lw_gauss_1h, format="%.3f",
+                                            command=self.on_simplified_parameter_change, state='disabled')
+        self.lw_gauss_1h_spin.grid(row=0, column=4, sticky=tk.W, padx=(2,0))
+
+        # 15N linewidths
+        ttk.Label(self.lw_custom_frame, text="  15N:").grid(row=1, column=0, sticky=tk.W, padx=(10,5), pady=(3,0))
+        ttk.Label(self.lw_custom_frame, text="Lor:").grid(row=1, column=1, sticky=tk.W, pady=(3,0))
+        self.lw_lorentz_15n_spin = ttk.Spinbox(self.lw_custom_frame, from_=0.00001, to=0.01, increment=0.0001,
+                                               width=8, textvariable=self.lw_lorentz_15n, format="%.5f",
+                                               command=self.on_simplified_parameter_change, state='disabled')
+        self.lw_lorentz_15n_spin.grid(row=1, column=2, sticky=tk.W, padx=(2,10), pady=(3,0))
+
+        ttk.Label(self.lw_custom_frame, text="Gauss:").grid(row=1, column=3, sticky=tk.W, pady=(3,0))
+        self.lw_gauss_15n_spin = ttk.Spinbox(self.lw_custom_frame, from_=0.001, to=0.5, increment=0.005,
+                                            width=8, textvariable=self.lw_gauss_15n, format="%.3f",
+                                            command=self.on_simplified_parameter_change, state='disabled')
+        self.lw_gauss_15n_spin.grid(row=1, column=4, sticky=tk.W, padx=(2,0), pady=(3,0))
+
+        # Help text for PS2D-style mode
         simplified_help = ttk.Label(self.simplified_fitting_frame,
-                                  text="ℹ️ Simplified mode uses intuitive parameters: window scale affects fitting regions, quality target sets R² threshold",
-                                  font=('TkDefaultFont', 8), foreground='blue', wraplength=600)
+                                  text="ℹ️ PS2D 5-stage Levenberg-Marquardt fitting with optimal convergence:\n"
+                                       "   • Stage 0: Intensity warm-up (positions/widths fixed)\n"
+                                       "   • Stage 1: Linewidth refinement (positions fixed)\n"
+                                       "   • Stage 2: Position refinement (if not fixed)\n"
+                                       "   • Stage 4: Global refinement (all parameters)\n"
+                                       "   • Max 250 iterations per stage with adaptive damping (λ=0.001 initial)\n"
+                                       "   • fixLW/fixPos: Constrain parameters during stages 1-4\n"
+                                       "   • Custom linewidths: Override automatic initial guesses",
+                                  font=('TkDefaultFont', 8), foreground='blue', wraplength=680, justify=tk.LEFT)
         simplified_help.pack(anchor=tk.W, pady=(10, 5))
 
-        # Complex parameters frame (initially hidden, shown in advanced mode)
-        self.voigt_params_frame = ttk.LabelFrame(voigt_frame, text="⚙️ Advanced Fitting Parameters", padding=5)
-        # Don't pack initially - will be shown when advanced mode is enabled
+        # Parallel processing option
+        parallel_frame = ttk.Frame(self.simplified_fitting_frame)
+        parallel_frame.pack(fill=tk.X, pady=(10, 0))
 
-        # Parameters grid
-        params_grid = ttk.Frame(self.voigt_params_frame)
-        params_grid.pack(fill=tk.X)
+        parallel_check = ttk.Checkbutton(parallel_frame,
+                                        text="🚀 Use Parallel Processing (75% cores)",
+                                        variable=self.use_parallel_processing,
+                                        command=self.on_simplified_parameter_change)
+        parallel_check.pack(anchor=tk.W)
+        ttk.Label(parallel_frame,
+                 text="⚠️ Note: Parallel processing not yet working with PS2D - will fall back to sequential mode",
+                 font=('TkDefaultFont', 8), foreground='orange').pack(anchor=tk.W, padx=(25,0))
 
-        ttk.Label(params_grid, text="X-Window:").grid(row=0, column=0, sticky=tk.W)
-        fit_x_spin = tk.Spinbox(params_grid, from_=0.01, to=0.5, increment=0.01, width=4,
-                               textvariable=self.fitting_window_x, #format="%.1f",
-                               command=self.on_parameter_change)
-        fit_x_spin.grid(row=0, column=1, sticky=tk.W, padx=(5,15))
-
-        ttk.Label(params_grid, text="Y-Window:").grid(row=0, column=2, sticky=tk.W)
-        fit_y_spin = tk.Spinbox(params_grid, from_=0.05, to=5.0, increment=0.05, width=4,
-                               textvariable=self.fitting_window_y, #format="%.1f",
-                               command=self.on_parameter_change)
-        fit_y_spin.grid(row=0, column=3, sticky=tk.W, padx=5)
-
-        ttk.Label(params_grid, text="Min R²:").grid(row=1, column=0, sticky=tk.W)
-        r2_spin = tk.Spinbox(params_grid, from_=0.1, to=1.0, increment=0.1, width=4,
-                            textvariable=self.min_r_squared, #format="%.2f",
-                            command=self.on_parameter_change)
-        r2_spin.grid(row=1, column=1, sticky=tk.W, padx=(5,15))
-
-        ttk.Label(params_grid, text="Max Iter:").grid(row=1, column=2, sticky=tk.W)
-        iter_spin = tk.Spinbox(params_grid, from_=10, to=5000, increment=50, width=4,
-                              textvariable=self.max_iterations,
-                              command=self.on_parameter_change)
-        iter_spin.grid(row=1, column=3, sticky=tk.W, padx=5)
-
-        # Global optimization toggle
-        self.global_opt_check = ttk.Checkbutton(params_grid, text="🔄 Use Global Optimization",
-                                         variable=self.use_global_optimization,
-                                         command=self.on_parameter_change,
-                                         state="normal")  # Now controlled by Voigt fitting toggle
-        self.global_opt_check.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10,0))
-
-        # Multi-Peak Detection Parameters
-        ttk.Label(params_grid, text="🔀 Multi-Peak Detection", font=('TkDefaultFont', 9, 'bold')).grid(
-            row=3, column=0, columnspan=4, sticky=tk.W, pady=(15,5))
-
-        # Row 4: R² Threshold and Min Improvement
-        ttk.Label(params_grid, text="R² Trigger:").grid(row=4, column=0, sticky=tk.W)
-        r2_thresh_spin = tk.Spinbox(params_grid, from_=0.1, to=1.0, increment=0.05, width=4,
-                                   textvariable=self.multi_peak_r2_threshold,
-                                   command=self.on_parameter_change)
-        r2_thresh_spin.grid(row=4, column=1, sticky=tk.W, padx=(5,15))
-        ttk.Label(params_grid, text="Min Improv:").grid(row=4, column=2, sticky=tk.W)
-        improv_spin = tk.Spinbox(params_grid, from_=0.05, to=0.5, increment=0.05, width=4,
-                                textvariable=self.multi_peak_improvement_threshold,
-                                command=self.on_parameter_change)
-        improv_spin.grid(row=4, column=3, sticky=tk.W, padx=5)
-
-        # Row 5: Peak Sensitivity and Overlap Factor
-        ttk.Label(params_grid, text="Sensitivity:").grid(row=5, column=0, sticky=tk.W)
-        sens_spin = tk.Spinbox(params_grid, from_=0.5, to=5.0, increment=0.1, width=4,
-                              textvariable=self.peak_detection_sensitivity,
-                              command=self.on_parameter_change)
-        sens_spin.grid(row=5, column=1, sticky=tk.W, padx=(5,15))
-        ttk.Label(params_grid, text="Overlap:").grid(row=5, column=2, sticky=tk.W)
-        overlap_spin = tk.Spinbox(params_grid, from_=0.3, to=1.5, increment=0.1, width=4,
-                                 textvariable=self.overlap_detection_factor,
-                                 command=self.on_parameter_change)
-        overlap_spin.grid(row=5, column=3, sticky=tk.W, padx=5)
-
-        # Row 6: Residual Threshold
-        ttk.Label(params_grid, text="Residual:").grid(row=6, column=0, sticky=tk.W)
-        residual_spin = tk.Spinbox(params_grid, from_=0.5, to=3.0, increment=0.1, width=4,
-                                  textvariable=self.residual_analysis_threshold,
-                                  command=self.on_parameter_change)
-        residual_spin.grid(row=6, column=1, sticky=tk.W, padx=(5,15))
-
-        # Peak Detection Parameters (Multi-Peak Fitting)
-        ttk.Label(params_grid, text="🔍 Peak Detection Parameters", font=('TkDefaultFont', 9, 'bold')).grid(
-            row=7, column=0, columnspan=4, sticky=tk.W, pady=(15,5))
-
-        # Row 8: Height threshold and Distance factor
-        ttk.Label(params_grid, text="Height %:").grid(row=8, column=0, sticky=tk.W)
-        height_spin = tk.Spinbox(params_grid, from_=0.005, to=0.2, increment=0.005, width=4,
-                               textvariable=self.peak_height_threshold, #format="%.3f",
-                               command=self.on_parameter_change)
-        height_spin.grid(row=8, column=1, sticky=tk.W, padx=(5,15))
-
-        ttk.Label(params_grid, text="Distance:").grid(row=8, column=2, sticky=tk.W)
-        distance_spin = tk.Spinbox(params_grid, from_=10, to=200, increment=10, width=4,
-                                 textvariable=self.peak_distance_factor,
-                                 command=self.on_parameter_change)
-        distance_spin.grid(row=8, column=3, sticky=tk.W, padx=5)
-
-        # Add ppm conversion display
-        self.distance_ppm_label = ttk.Label(params_grid, text="(≈0.00 ppm)",
-                                           font=('TkDefaultFont', 8), foreground='gray')
-        self.distance_ppm_label.grid(row=8, column=4, sticky=tk.W, padx=(2,0))
-
-        # Row 9: Prominence and Smoothing
-        ttk.Label(params_grid, text="Prominence:").grid(row=9, column=0, sticky=tk.W)
-        prom_spin = tk.Spinbox(params_grid, from_=0.001, to=0.1, increment=0.001, width=4,
-                             textvariable=self.peak_prominence_threshold, #format="%.3f",
-                             command=self.on_parameter_change)
-        prom_spin.grid(row=9, column=1, sticky=tk.W, padx=(5,15))
-
-        ttk.Label(params_grid, text="Smoothing:").grid(row=9, column=2, sticky=tk.W)
-        smooth_spin = tk.Spinbox(params_grid, from_=0.1, to=2.0, increment=0.1, width=4,
-                               textvariable=self.smoothing_sigma, format="%.1f",
-                               command=self.on_parameter_change)
-        smooth_spin.grid(row=9, column=3, sticky=tk.W, padx=5)
-
-        # Row 10: Max peaks to fit and Max iterations
-        ttk.Label(params_grid, text="Max Peaks:").grid(row=10, column=0, sticky=tk.W)
-        max_peaks_spin = tk.Spinbox(params_grid, from_=2, to=8, increment=1, width=4,
-                                  textvariable=self.max_peaks_fit,
-                                  command=self.on_parameter_change)
-        max_peaks_spin.grid(row=10, column=1, sticky=tk.W, padx=(5,15))
-
-        ttk.Label(params_grid, text="Max Iter:").grid(row=10, column=2, sticky=tk.W)
-        max_iter_spin = tk.Spinbox(params_grid, from_=10, to=500, increment=50, width=4,
-                                 textvariable=self.max_optimization_iterations,
-                                 command=self.on_parameter_change)
-        max_iter_spin.grid(row=10, column=3, sticky=tk.W, padx=5)
-
-        # Row 11: Parallel processing toggle
-        parallel_check = ttk.Checkbutton(params_grid, text="🚀 Use Parallel Processing (75% cores)",
-                                       variable=self.use_parallel_processing,
-                                       command=self.on_parameter_change)
-        parallel_check.grid(row=11, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
-
-
-        # Add Voigt fitting toggle at the top of the button frame
-        voigt_toggle_frame = ttk.Frame(voigt_frame)
-        voigt_toggle_frame.pack(fill=tk.X, pady=(5,0))
-
-        voigt_fitting_check = ttk.Checkbutton(voigt_toggle_frame,
-                                             text="🔬 Use Voigt Profile Fitting",
-                                             variable=self.use_voigt_fitting,
-                                             command=self._toggle_voigt_params)
-        voigt_fitting_check.pack(anchor=tk.W, padx=5)
 
         # Voigt buttons
         voigt_button_frame = ttk.Frame(voigt_frame)
@@ -1470,6 +1404,19 @@ class NMRPeaksSeriesGUI:
                        variable=self.series_use_parallel_processing).pack(anchor=tk.W, padx=10)
         #ttk.Checkbutton(options_frame, text="Use global optimization)",
         #               variable=self.series_use_global_optimization).pack(anchor=tk.W, padx=10)
+
+        # PS2D Linewidth Reuse option
+        ps2d_lw_check = ttk.Checkbutton(options_frame, text="🔒 PS2D Linewidth Reuse (Fix LW from reference, ~40% speedup)",
+                       variable=self.use_ps2d_linewidth_reuse, command=self._on_ps2d_linewidth_reuse_toggle)
+        ps2d_lw_check.pack(anchor=tk.W, padx=10)
+
+        # Add tooltip/help text for PS2D Linewidth Reuse
+        ps2d_help_frame = ttk.Frame(options_frame)
+        ps2d_help_frame.pack(fill=tk.X, padx=20, pady=(0, 5))
+        ttk.Label(ps2d_help_frame, text="ℹ️ When enabled: Reference spectrum uses full optimization, series spectra reuse linewidths",
+                 font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W)
+        ttk.Label(ps2d_help_frame, text="   Only intensity and position are optimized for series (PS2D C++ algorithm)",
+                 font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W)
 
         # Integrated detection-fitting controls
         ttk.Separator(options_frame, orient='horizontal').pack(fill=tk.X, pady=5)
@@ -2250,6 +2197,18 @@ class NMRPeaksSeriesGUI:
                             child.config(text=f"{self.max_peaks_fit.get()}")
                         elif 'opt_iter_display' in name:
                             child.config(text=f"{self.max_optimization_iterations.get()}")
+
+    def _on_ps2d_linewidth_reuse_toggle(self):
+        """Handle PS2D linewidth reuse toggle"""
+        enabled = self.use_ps2d_linewidth_reuse.get()
+        if enabled:
+            print("🔒 PS2D Linewidth Reuse ENABLED")
+            print("   Reference spectrum: Full optimization (all parameters)")
+            print("   Series spectra: Fixed linewidths from reference (~40% speedup)")
+            print("   Series optimization: Only intensity and position are fitted")
+        else:
+            print("🔓 PS2D Linewidth Reuse DISABLED")
+            print("   All spectra: Independent full optimization (all parameters)")
 
     def on_legacy_parameter_change(self): #GM changed
         """Handle parameter changes"""
@@ -3199,347 +3158,20 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 x_ppm_per_pixel = abs(x_axis[-1] - x_axis[0]) / len(x_axis)
                 y_ppm_per_pixel = abs(y_axis[-1] - y_axis[0]) / len(y_axis)
 
-                # Update both standard and enhanced detection rectangle displays (anisotropic)
+                # Update detection rectangle display (anisotropic)
                 standard_square_size_x = self.detection_square_size.get()
                 standard_rectangle_size_y = self.detection_rectangle_y.get()
-                enhanced_square_size_x = self.enhanced_detection_square_size.get()
-                enhanced_rectangle_size_y = self.enhanced_detection_rectangle_y.get()
 
                 standard_x_ppm = x_ppm_per_pixel * standard_square_size_x
                 standard_y_ppm = y_ppm_per_pixel * standard_rectangle_size_y
-                enhanced_x_ppm = x_ppm_per_pixel * enhanced_square_size_x
-                enhanced_y_ppm = y_ppm_per_pixel * enhanced_rectangle_size_y
 
-                # Update displays with anisotropic dimensions
+                # Update display with anisotropic dimensions
                 self.detection_square_ppm_x.set(f"(≈{standard_x_ppm:.3f}×{standard_y_ppm:.2f} ppm)")
-                self.enhanced_detection_square_ppm_x.set(f"(≈{enhanced_x_ppm:.3f}×{enhanced_y_ppm:.2f} ppm)")
 
             except:
                 self.detection_square_ppm_x.set("(load data to see ppm)")
-                self.enhanced_detection_square_ppm_x.set("(load data to see ppm)")
         else:
             self.detection_square_ppm_x.set("(load data to see ppm)")
-            self.enhanced_detection_square_ppm_x.set("(load data to see ppm)")
-
-    def enhanced_detect_peaks(self):
-        """Enhanced graph-based peak detection - alternative to standard detection"""
-        if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
-            messagebox.showerror("Error", "Please load NMR data first")
-            return
-
-        # Check if peak list is loaded for reference-based detection
-        if not hasattr(self.integrator, 'peak_list') or self.integrator.peak_list is None or self.integrator.peak_list.empty:
-            messagebox.showwarning("Warning",
-                "Enhanced Detection requires a reference peak list.\n"
-                "Please load a peak list first, then use Enhanced Detection\n"
-                "to improve peak assignments for overlapping cases.")
-            return
-
-        try:
-            self.update_status("🚀 Running Enhanced Graph-Based Peak Detection...")
-            self.root.config(cursor="watch")
-
-            # Import enhanced detection system
-            from integrated_detection_fitter import EnhancedPeakDetectionIntegrated, create_integrated_fitter
-
-            # Create or get integrated fitter
-            if not hasattr(self.integrator, 'integrated_fitter') or self.integrator.integrated_fitter is None:
-                self.integrator.integrated_fitter = create_integrated_fitter(
-                    self.integrator.enhanced_fitter if hasattr(self.integrator, 'enhanced_fitter') else None
-                )
-
-            # Create enhanced detector
-            enhanced_detector = EnhancedPeakDetectionIntegrated(self.integrator.integrated_fitter)
-
-            # Setup GUI parameters for enhanced detection (including user-configurable options)
-            gui_params = {
-                # Core detection parameters
-                'height_threshold': self.peak_height_threshold.get(),
-                'distance_factor': self.peak_distance_factor.get(),
-                'prominence_threshold': self.peak_prominence_threshold.get(),
-                'smoothing_sigma': self.smoothing_sigma.get(),
-                'max_peaks_fit': self.max_peaks_fit.get(),
-                'fitting_window_x': 0.3,  # Default for enhanced detection
-                # Peak Centroid Detection parameters
-                'use_centroid_refinement': self.use_centroid_refinement.get(),
-                'centroid_window_x_ppm': self.centroid_window_x_ppm.get(),
-                'centroid_window_y_ppm': self.centroid_window_y_ppm.get(),
-                'centroid_noise_multiplier': self.centroid_noise_multiplier.get(),
-                'fitting_window_y': 8.0,  # Default for enhanced detection
-                'noise_threshold': self.enhanced_noise_threshold.get(),  # Use enhanced detection noise threshold
-
-                # Detection square size (NEW - user configurable anisotropic)
-                'detection_square_size': self.enhanced_detection_square_size.get(),
-                'detection_rectangle_y': self.enhanced_detection_rectangle_y.get(),
-
-                # Peak Ridge Consolidation parameters (Solution A)
-                'consolidation_x_tolerance': self.consolidation_x_tolerance.get(),
-                'consolidation_y_tolerance': self.consolidation_y_tolerance.get(),
-
-                # Enhanced Detection specific parameters (NEW - user configurable)
-                'enhanced_radius_x': self.enhanced_radius_x.get(),              # 1H dimension constraint
-                'enhanced_radius_y': self.enhanced_radius_y.get(),              # 15N/13C dimension constraint
-                'enhanced_pattern_similarity': self.enhanced_pattern_similarity.get(),
-                'enhanced_missing_tolerance': self.enhanced_missing_tolerance.get(),
-                'enhanced_position_weight': self.enhanced_position_weight.get(),
-
-                # Peak reduction parameters (NEW - to reduce too many peaks)
-                'enhanced_peak_limit': self.enhanced_peak_limit.get()
-            }
-
-            # Get NMR data dimensions with error checking
-            if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
-                raise ValueError("NMR data not found in integrator")
-
-            if not hasattr(self.integrator, 'ppm_x_axis') or self.integrator.ppm_x_axis is None:
-                raise ValueError("1H axis (ppm_x_axis) not found in integrator")
-
-            if not hasattr(self.integrator, 'ppm_y_axis') or self.integrator.ppm_y_axis is None:
-                raise ValueError("15N axis (ppm_y_axis) not found in integrator")
-
-            nmr_data = self.integrator.nmr_data
-            x_axis = self.integrator.ppm_x_axis  # 1H axis
-            y_axis = self.integrator.ppm_y_axis  # 15N axis
-
-            print(f"   📊 NMR data shape: {nmr_data.shape}")
-            print(f"   📏 1H axis: {len(x_axis)} points [{np.min(x_axis):.2f}, {np.max(x_axis):.2f}] ppm")
-            print(f"   📏 15N axis: {len(y_axis)} points [{np.min(y_axis):.1f}, {np.max(y_axis):.1f}] ppm")
-
-            # Run enhanced detection
-            self.update_status("🔍 Analyzing peak patterns and overlaps...")
-
-            results = enhanced_detector.peak_detection_integrated_enhanced(
-                x_data=x_axis,
-                y_data=y_axis,
-                intensity_data=nmr_data,
-                peak_list=self.integrator.peak_list,
-                nucleus_type='2D',
-                gui_params=gui_params
-            )
-
-            # Process results
-            if results and results.get('success', False):
-                detected_peaks = results.get('peaks', [])
-
-
-                if detected_peaks:
-                    # Convert to DataFrame format (same as standard detection)
-                    peak_data = []
-                    fitted_peaks_data = []  # NEW: For red circles visualization
-
-                    for i, peak in enumerate(detected_peaks):
-                        # DataFrame format for peak_list (table display)
-                        peak_data.append({
-                            'Peak_Number': i + 1,
-                            'Position_X': peak.get('Position_X', 0),
-                            'Position_Y': peak.get('Position_Y', 0),
-                            'Intensity': peak.get('Intensity', 0),
-                            'Volume': peak.get('Volume', 0),
-                            'Assignment': peak.get('Assignment', f'Enhanced_{i+1}'),
-                            # Enhanced metadata
-                            'Detection_Method': peak.get('Detection_Method', 'enhanced_graph_based'),
-                            'Match_Confidence': peak.get('Match_Confidence', 0),
-                            'Match_Type': peak.get('Match_Type', 'enhanced'),
-                            'Position_Error_X': peak.get('Position_Error_X', 0)
-                        })
-
-                        # Dictionary format for fitted_peaks (red circles visualization)
-                        fitted_peaks_data.append({
-                            'Position_X': peak.get('Position_X', 0),
-                            'Position_Y': peak.get('Position_Y', 0),
-                            'ppm_x': peak.get('Position_X', 0),  # Alternative coordinate names
-                            'ppm_y': peak.get('Position_Y', 0),  # Alternative coordinate names
-                            'intensity': peak.get('Intensity', 0),
-                            'volume': peak.get('Volume', 0),
-                            'assignment': peak.get('Assignment', f'Enhanced_{i+1}'),
-                            'detected': True,     # KEY: This enables red circle display
-                            'fitted': True,      # Additional status flag
-                            'success': True,     # Additional status flag
-                            'method': 'enhanced_detection',
-                            'match_confidence': peak.get('Match_Confidence', 0),
-                            'match_type': peak.get('Match_Type', 'enhanced')
-                        })
-
-                    # Create new peak list DataFrame
-                    import pandas as pd
-                    enhanced_peak_list = pd.DataFrame(peak_data)
-
-                    # CRITICAL FIX: DO NOT replace the original reference peak list!
-                    # The reference peaks must remain constant - only store detected results separately
-
-                    # Store Enhanced Detection results separately (DO NOT replace peak_list!)
-                    self.integrator.enhanced_detection_results = enhanced_peak_list
-
-                    # IMPORTANT: Preserve original reference peak list (backup if needed)
-                    if not hasattr(self.integrator, 'original_reference_peaks'):
-                        self.integrator.original_reference_peaks = self.integrator.peak_list.copy()
-                        print(f"   📋 Backed up {len(self.integrator.original_reference_peaks)} original reference peaks")
-
-                    # Keep reference peak list unchanged for table display
-                    self.integrator.peak_list = self.integrator.original_reference_peaks.copy()
-
-                    # Update fitted_peaks to show ONLY successfully matched peaks for visualization
-                    # Red circles should show DETECTED coordinates (where peaks were actually found)
-                    self.integrator.fitted_peaks = self._create_detected_visualization_data(detected_peaks)
-
-                    print(f"   🔄 Reference peak preservation:")
-                    print(f"      Original references: {len(self.integrator.original_reference_peaks)}")
-                    print(f"      Current peak_list: {len(self.integrator.peak_list)}")
-                    print(f"      Enhanced results: {len(enhanced_peak_list)}")
-                    print(f"      Visualization points: {len(self.integrator.fitted_peaks)}")
-
-                    # Store peaks after limit filtering for debug visualization
-
-                    if hasattr(self.integrator, 'integrated_fitter'):
-                        print(f"🔍 DEBUG: integrated_fitter exists: {self.integrator.integrated_fitter is not None}")
-
-                    if hasattr(self.integrator, 'integrated_fitter') and self.integrator.integrated_fitter:
-                        # Try to get the debug data from the integrated_fitter
-                        included_peaks = self.integrator.integrated_fitter.get_included_peaks_after_limit_debug()
-                        #print(f"🔍 DEBUG: Retrieved {len(included_peaks) if included_peaks else 0} included peaks after limit from fitter")
-
-                        # Also check the enhanced detector directly for debug data
-                        if hasattr(enhanced_detector, 'detector'):
-                            if hasattr(enhanced_detector.detector, '_included_peaks_after_limit_debug'):
-                                direct_peaks = enhanced_detector.detector._included_peaks_after_limit_debug
-                                print(f"🔍 DEBUG: Found {len(direct_peaks) if direct_peaks else 0} peaks in enhanced_detector.detector")
-                                if direct_peaks and not included_peaks:
-                                    included_peaks = direct_peaks
-                                    print(f"🔍 DEBUG: Using direct detector peaks as fallback")
-                            else:
-                                print(f"🔍 DEBUG: enhanced_detector.detector does not have _included_peaks_after_limit_debug")
-                        else:
-                            print(f"🔍 DEBUG: enhanced_detector does not have detector attribute")
-
-                        # Check enhanced_detector itself
-                        if hasattr(enhanced_detector, '_included_peaks_after_limit_debug'):
-                            direct_peaks2 = enhanced_detector._included_peaks_after_limit_debug
-                            #print(f"🔍 DEBUG: Found {len(direct_peaks2) if direct_peaks2 else 0} peaks in enhanced_detector itself")
-                            if direct_peaks2 and not included_peaks:
-                                included_peaks = direct_peaks2
-                                #print(f"🔍 DEBUG: Using enhanced_detector peaks as fallback")
-
-                        self.integrator.included_peaks_after_limit_debug = included_peaks
-                        if included_peaks:
-                            #print(f"🔍 DEBUG: Stored {len(included_peaks)} included peaks after limit for visualization")
-                            # Print first few peaks for debugging
-                            for i, peak in enumerate(included_peaks[:3]):
-                                print(f"🔍 DEBUG: Included peak {i+1}: {dict(list(peak.items())[:6])}")
-                        else:
-                            print(f"🔍 DEBUG: No included peaks after limit to store")
-                    else:
-                        print(f"🔍 DEBUG: integrated_fitter not available or None")
-
-                    # FALLBACK: If integrated_fitter method fails, use the fitted_peaks_data as debug data
-                    #if not hasattr(self.integrator, 'included_peaks_after_limit_debug') or not self.integrator.included_peaks_after_limit_debug:
-                        #print(f"🔍 DEBUG: Using fitted_peaks_data as fallback debug data")
-                        # Convert fitted_peaks_data to the expected format for debug visualization
-                    #    if fitted_peaks_data:
-                    #        debug_peaks_fallback = []
-                    #        for peak in fitted_peaks_data:
-                    #            debug_peaks_fallback.append({
-                    #                'position_x': peak.get('ppm_x', peak.get('Position_X', 0)),
-                    #                'position_y': peak.get('ppm_y', peak.get('Position_Y', 0)),
-                    #                'intensity': peak.get('intensity', 0),
-                    #                'method': 'enhanced_detection_fallback'
-                    #            })
-                    #        self.integrator.included_peaks_after_limit_debug = debug_peaks_fallback
-                    #        #print(f"🔍 DEBUG: Fallback stored {len(debug_peaks_fallback)} peaks for debug visualization")
-
-                    # Update display and plots
-                    self.update_main_plot()
-                    self.update_statistics()
-
-                    # Success message with enhanced metrics
-                    easy_matches = results.get('easy_matches', 0)
-                    complex_matches = results.get('complex_matches', 0)
-                    overall_confidence = results.get('overall_confidence', 0)
-
-                    # Count matched vs preserved peaks
-                    matched_count = len([p for p in detected_peaks if p.get('Detection_Method') == 'enhanced_graph_based'])
-                    preserved_count = len(detected_peaks) - matched_count
-
-                    self.update_status(
-                        f"✅ Enhanced Detection: {len(detected_peaks)} peaks total "
-                        f"({matched_count} matched: {easy_matches} easy + {complex_matches} complex, "
-                        f"{preserved_count} preserved, Confidence: {overall_confidence:.2f})"
-                    )
-
-                    messagebox.showinfo("Enhanced Detection Complete",
-                        f"Enhanced Graph-Based Detection completed successfully!\n\n"
-                        f"Results:\n"
-                        f"• Total peaks detected: {len(detected_peaks)}\n"
-                        f"• Easy matches: {easy_matches}\n"
-                        f"• Complex pattern matches: {complex_matches}\n"
-                        f"• Overall confidence: {overall_confidence:.1%}\n\n"
-                        f"The enhanced peak list is now ready for 'Fit All Peaks'.")
-
-                else:
-                    self.update_status("⚠️ Enhanced Detection: No peaks detected")
-                    messagebox.showwarning("No Peaks", "Enhanced detection found no peaks.")
-            else:
-                error_msg = results.get('error', 'Unknown error') if results else 'Detection failed'
-                self.update_status(f"❌ Enhanced Detection failed: {error_msg}")
-                messagebox.showerror("Detection Error", f"Enhanced detection failed: {error_msg}")
-
-        except Exception as e:
-            error_msg = str(e)
-            self.update_status(f"❌ Enhanced Detection error: {error_msg}")
-
-            # Provide specific guidance for common errors
-            if "x_axis" in error_msg or "y_axis" in error_msg:
-                guidance = ("This appears to be a data axis error.\n"
-                           "Please ensure NMR data is properly loaded.")
-            elif "ppm_x_axis" in error_msg or "ppm_y_axis" in error_msg:
-                guidance = ("NMR axes not found. Please ensure NMR data\n"
-                           "is loaded correctly before using Enhanced Detection.")
-            elif "peak_list" in error_msg:
-                guidance = ("Peak list required for Enhanced Detection.\n"
-                           "Please load a peak list file first.")
-            else:
-                guidance = "Try using standard 'Detect Peaks' instead."
-
-            messagebox.showerror("Enhanced Detection Error",
-                f"Enhanced detection failed with error:\n{error_msg}\n\n"
-                f"Suggestion: {guidance}")
-        finally:
-            self.root.config(cursor="")
-
-    def _create_detected_visualization_data(self, detected_peaks):
-        """
-        Create visualization data for red circles showing DETECTED coordinates
-        Only show detected peaks that were successfully matched to reference peaks
-        """
-        detected_viz_data = []
-
-        # Only show detected coordinates for successfully matched peaks
-        for peak in detected_peaks:
-            detection_method = peak.get('Detection_Method', '')
-            if detection_method != 'detected_unassigned' and detection_method != 'reference_only':
-                # This peak was matched - show the DETECTED coordinate as red circle
-                assignment = peak.get('Assignment', '')
-
-                # Use the detected coordinates (Position_X/Y contain detected coordinates from Simple Pattern Matcher)
-                detected_x = peak.get('Position_X', 0)  # DETECTED coordinate
-                detected_y = peak.get('Position_Y', 0)  # DETECTED coordinate
-
-                detected_viz_data.append({
-                    'Position_X': detected_x,  # DETECTED coordinate (red circle)
-                    'Position_Y': detected_y,  # DETECTED coordinate (red circle)
-                    'ppm_x': detected_x,
-                    'ppm_y': detected_y,
-                    'intensity': peak.get('Intensity', 0),
-                    'volume': peak.get('Volume', 0),
-                    'assignment': assignment,
-                    'detected': True,      # Enable red circle display
-                    'fitted': True,       # Additional status flag
-                    'success': True,      # Additional status flag
-                    'match_type': peak.get('Match_Type', 'enhanced'),
-                    'confidence': peak.get('Match_Confidence', 0)
-                })
-
-        print(f"   🔴 Created {len(detected_viz_data)} detected peak visualization points (red circles)")
-        return detected_viz_data
 
     def _detect_peaks_standard(self):
         """Standard peak detection method (legacy)"""
@@ -3627,6 +3259,13 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 'smoothing_sigma': self.smoothing_sigma.get(),
                 'max_peaks_fit': self.max_peaks_fit.get(),
                 'max_optimization_iterations': self.max_optimization_iterations.get(),
+                'use_ps2d_multi_peak': self.use_ps2d_multi_peak.get(),
+                'fix_linewidths': self.fix_linewidths.get(),
+                'fix_positions': self.fix_positions.get(),
+                'lw_lorentz_1h': self.lw_lorentz_1h.get() if self.use_custom_linewidths.get() else None,
+                'lw_gauss_1h': self.lw_gauss_1h.get() if self.use_custom_linewidths.get() else None,
+                'lw_lorentz_15n': self.lw_lorentz_15n.get() if self.use_custom_linewidths.get() else None,
+                'lw_gauss_15n': self.lw_gauss_15n.get() if self.use_custom_linewidths.get() else None,
                 # Peak Centroid Detection parameters
                 'use_centroid_refinement': self.use_centroid_refinement.get(),
                 'centroid_window_x_ppm': self.centroid_window_x_ppm.get(),
@@ -3649,6 +3288,9 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 'noise_level': getattr(self, 'noise_level', tk.DoubleVar(value=0.001)).get(),
                 'min_snr': getattr(self, 'min_snr', tk.DoubleVar(value=3.0)).get()
             }
+
+            # DEBUG: Show PS2D parameter being passed to integrator
+            print(f"🔧 GUI -> Integrator: use_ps2d_multi_peak={gui_params.get('use_ps2d_multi_peak', 'NOT SET')}")
 
             # Update parameters
             self.on_parameter_change()
@@ -4269,6 +3911,16 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
         else:
             print(f"   • Mode: Complex (25+ individual parameters)")
 
+        # Log overlap resolution settings
+        if hasattr(self, 'overlap_resolution_enabled'):
+            print(f"\n🔬 Overlap Resolution:")
+            print(f"   • Enabled: {self.overlap_resolution_enabled.get()}")
+            if self.overlap_resolution_enabled.get():
+                print(f"   • Preset: {self.overlap_resolution_preset.get()}")
+                print(f"   • Multi-peak fitting: Staged optimization with jackknife validation")
+            else:
+                print(f"   • Status: Disabled (using standard single-peak fitting)")
+
         print("="*60)
         print(f"📊 Peak List Info: {len(self.integrator.peak_list)} peaks to process")
         print("="*60 + "\n")
@@ -4308,6 +3960,8 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                     self.param_manager.update_simplified_parameters(
                         window_scale=self.simplified_window_scale.get(),
                         quality_target=self.simplified_quality_target.get(),
+                        max_peaks_fit=self.simplified_max_peaks_fit.get(),
+                        max_iterations=self.simplified_max_iterations.get(),
                         noise_estimation_method=self.simplified_noise_method.get(),
                         baseline_method=self.simplified_baseline_method.get()
                     )
@@ -4498,6 +4152,17 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
 
         print(f"🔄 Refitting {len(poor_performers)} poor performers with learned constraints")
 
+        # Build all_peaks_context for 2D overlap detection
+        all_peaks_context = []
+        for _, row in peak_list.iterrows():
+            all_peaks_context.append({
+                'assignment': str(row.get('Assignment', 'Unknown')),
+                'x_ppm': float(row['Position_X']),
+                'y_ppm': float(row['Position_Y']),
+                'pos_x': float(row['Position_X']),
+                'pos_y': float(row['Position_Y'])
+            })
+
         # Start with linear results and replace poor performers with constraint-based fits
         improved_results = linear_results.copy()
 
@@ -4523,11 +4188,12 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 peak_y = float(peak_data['Position_Y'])
                 assignment = peak_data.get('Assignment', f'Peak_{peak_number}')
 
-                # Run enhanced Voigt fitting with linewidth constraints
-                result = self.integrator.fit_peak_voigt_2d(
+                # Use enhanced_peak_fitting() for proper API layering (enables 2D routing)
+                result = self.integrator.enhanced_peak_fitting(
                     peak_x, peak_y, assignment,
-                    use_dynamic_optimization=True,
-                    linewidth_constraints=linewidth_constraints
+                    linewidth_constraints=linewidth_constraints,
+                    all_peaks_context=all_peaks_context,
+                    use_dynamic_optimization=True
                 )
 
                 if result and result.get('avg_r_squared', 0) > 0:
@@ -4638,8 +4304,10 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 position_x = 0
                 position_y = 0
 
-                # Priority order: non-zero ppm_x/ppm_y > peak_position > Position_X/Position_Y
-                if peak.get('ppm_x') and peak.get('ppm_x') != 0:
+                # Priority order: peak_x/peak_y > non-zero ppm_x/ppm_y > peak_position > Position_X/Position_Y
+                if peak.get('peak_x'):
+                    position_x = float(peak.get('peak_x'))
+                elif peak.get('ppm_x') and peak.get('ppm_x') != 0:
                     position_x = float(peak.get('ppm_x'))
                 elif peak.get('peak_position') and len(peak.get('peak_position')) >= 2:
                     position_x = float(peak.get('peak_position')[0])
@@ -4648,7 +4316,9 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 elif peak.get('position_x'):
                     position_x = float(peak.get('position_x'))
 
-                if peak.get('ppm_y') and peak.get('ppm_y') != 0:
+                if peak.get('peak_y'):
+                    position_y = float(peak.get('peak_y'))
+                elif peak.get('ppm_y') and peak.get('ppm_y') != 0:
                     position_y = float(peak.get('ppm_y'))
                 elif peak.get('peak_position') and len(peak.get('peak_position')) >= 2:
                     position_y = float(peak.get('peak_position')[1])
@@ -4695,6 +4365,8 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                     self.param_manager.update_simplified_parameters(
                         window_scale=self.simplified_window_scale.get(),
                         quality_target=self.simplified_quality_target.get(),
+                        max_peaks_fit=self.simplified_max_peaks_fit.get(),
+                        max_iterations=self.simplified_max_iterations.get(),
                         noise_estimation_method=self.simplified_noise_method.get(),
                         baseline_method=self.simplified_baseline_method.get()
                     )
@@ -4706,6 +4378,14 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             # CRITICAL FIX: Override with series-specific Voigt fitting setting
             all_params['use_voigt_fitting'] = self.series_use_voigt_fitting.get()
             print(f"   ✅ Applied series Voigt fitting setting: {self.series_use_voigt_fitting.get()}")
+
+            # PS2D Linewidth Reuse: Override with GUI setting
+            all_params['use_ps2d_linewidth_reuse'] = self.use_ps2d_linewidth_reuse.get()
+            if self.use_ps2d_linewidth_reuse.get():
+                print(f"   ✅ PS2D Linewidth Reuse: ENABLED")
+                print(f"      Reference linewidths will be fixed for all series spectra")
+            else:
+                print(f"   ℹ️  PS2D Linewidth Reuse: DISABLED (independent full optimization)")
 
             # 2. Create the new independent processor
             multi_processor = MultiSpectrumProcessor(all_params)

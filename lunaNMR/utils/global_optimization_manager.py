@@ -286,9 +286,11 @@ class GlobalOptimizationManager:
 
             try:
                 # Standard fitting (no dynamic optimization)
-                result = integrator_instance.fit_peak_voigt_2d(
+                # Use enhanced_peak_fitting() for proper API layering
+                result = integrator_instance.enhanced_peak_fitting(
                     x_pos, y_pos, peak_id,
-                    use_dynamic_optimization=False  # Phase 1 uses standard fitting
+                    use_dynamic_optimization=False,  # Phase 1 uses standard fitting
+                    all_peaks_context=None  # Global optimization handles overlap differently
                 )
 
                 if result and result.get('success', False):
@@ -515,12 +517,11 @@ class GlobalOptimizationManager:
             logger.info(f"     X constraints: σ=({x_linewidth_constraints['sigma_bounds'][0]:.4f}, {x_linewidth_constraints['sigma_bounds'][1]:.4f})")
             logger.info(f"     Y constraints: σ=({y_linewidth_constraints['sigma_bounds'][0]:.2f}, {y_linewidth_constraints['sigma_bounds'][1]:.2f})")
 
-            # Apply constraints through enhanced_voigt_fitter directly
-            # This will require updating core_integrator to pass constraints through
-            result = integrator_instance.fit_peak_voigt_2d(
+            # Apply constraints using enhanced_peak_fitting() for proper API layering
+            result = integrator_instance.enhanced_peak_fitting(
                 x_pos, y_pos, peak_id,
                 use_dynamic_optimization=True,
-                all_peaks_context=[(x_pos, y_pos)],  # Provide context
+                all_peaks_context=None,  # Global optimization handles overlap differently
                 linewidth_constraints={'x': x_linewidth_constraints, 'y': y_linewidth_constraints}
             )
 

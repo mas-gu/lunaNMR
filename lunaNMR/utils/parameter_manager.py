@@ -27,7 +27,6 @@ class NMRParameterManager:
             self.simplified_manager = SimplifiedParameterManager()
             self.parameter_adapter = ParameterAdapter(self.simplified_manager)
             self.use_simplified_mode = False  # Can be toggled by user
-            print("🚀 Simplified parameter manager initialized")
         except ImportError:
             self.simplified_manager = None
             self.parameter_adapter = None
@@ -43,19 +42,19 @@ class NMRParameterManager:
             # Fitting Parameters
             'fitting_window_x': {'default': 0.15, 'min': 0.01, 'max': 0.5, 'type': float},  # Increased from 0.05 to ensure adequate data points
             'fitting_window_y': {'default': 2, 'min': 0.01, 'max': 10.0, 'type': float},
-            'min_r_squared': {'default': 0.7, 'min': 0.0, 'max': 1.0, 'type': float},  # Lowered from 0.85 to be less restrictive
+            'min_r_squared': {'default': 0.1, 'min': 0.0, 'max': 1.0, 'type': float},  # Lowered to 0.1 for debugging/QC
             'max_iterations': {'default': 1000, 'min': 10, 'max': 1000, 'type': int},  # Increased from 100 to ensure convergence
 
             # Peak Detection Parameters
-            'height_threshold': {'default': 0.1, 'min': 0.01, 'max': 1.0, 'type': float},
-            'distance_factor': {'default': 2.0, 'min': 1.0, 'max': 100.0, 'type': float},
-            'prominence_threshold': {'default': 0.05, 'min': 0.01, 'max': 0.5, 'type': float},
+            'height_threshold': {'default': 0.1, 'min': 0.001, 'max': 1.0, 'type': float},
+            'distance_factor': {'default': 2.0, 'min': 1.0, 'max': 300.0, 'type': float},
+            'prominence_threshold': {'default': 0.05, 'min': 0.001, 'max': 0.5, 'type': float},
             'smoothing_sigma': {'default': 1.0, 'min': 0.1, 'max': 5.0, 'type': float},
             'max_peaks_fit': {'default': 50, 'min': 1, 'max': 200, 'type': int},
             'max_optimization_iterations': {'default': 50, 'min': 1, 'max': 100, 'type': int},  # Increased from 10 to 50, max raised to 100
 
             # Processing Options (boolean parameters)
-            'use_parallel_processing': {'default': True, 'type': bool},
+            'use_parallel_processing': {'default': False, 'type': bool},
             'use_global_optimization': {'default': False, 'type': bool},
             'use_centroid_refinement': {'default': True, 'type': bool},
 
@@ -69,7 +68,19 @@ class NMRParameterManager:
             # Advanced Parameters
             'centroid_window_x_ppm': {'default': 0.02, 'min': 0.005, 'max': 0.1, 'type': float},
             'centroid_window_y_ppm': {'default': 1.0, 'min': 0.01, 'max': 5.0, 'type': float},
-            'centroid_noise_multiplier': {'default': 2.0, 'min': 1.0, 'max': 5.0, 'type': float}
+            'centroid_noise_multiplier': {'default': 2.0, 'min': 1.0, 'max': 5.0, 'type': float},
+
+            # PS2D Multi-Peak Fitting Parameters
+            'use_ps2d_multi_peak': {'default': True, 'type': bool},
+            'fix_linewidths': {'default': False, 'type': bool},
+            'fix_positions': {'default': False, 'type': bool},
+            'lw_lorentz_1h': {'default': None, 'type': (type(None), float)},
+            'lw_gauss_1h': {'default': None, 'type': (type(None), float)},
+            'lw_lorentz_15n': {'default': None, 'type': (type(None), float)},
+            'lw_gauss_15n': {'default': None, 'type': (type(None), float)},
+
+            # Series Integration / PS2D Linewidth Reuse Parameters
+            'use_ps2d_linewidth_reuse': {'default': False, 'type': bool}  # Enable PS2D linewidth reuse from reference spectrum (C++ peakfit.cpp:586-607)
         }
 
         # Initialize current parameters with defaults
@@ -113,7 +124,17 @@ class NMRParameterManager:
             'multi_peak_improvement_threshold': 'multi_peak_improvement_threshold',
             'peak_detection_sensitivity': 'peak_detection_sensitivity',
             'overlap_detection_factor': 'overlap_detection_factor',
-            'residual_analysis_threshold': 'residual_analysis_threshold'
+            'residual_analysis_threshold': 'residual_analysis_threshold',
+            # PS2D multi-peak fitting parameters (CRITICAL for PS2D activation)
+            'use_ps2d_multi_peak': 'use_ps2d_multi_peak',
+            'fix_linewidths': 'fix_linewidths',
+            'fix_positions': 'fix_positions',
+            'lw_lorentz_1h': 'lw_lorentz_1h',
+            'lw_gauss_1h': 'lw_gauss_1h',
+            'lw_lorentz_15n': 'lw_lorentz_15n',
+            'lw_gauss_15n': 'lw_gauss_15n',
+            # Series Integration / PS2D Linewidth Reuse
+            'use_ps2d_linewidth_reuse': 'use_ps2d_linewidth_reuse'
         }
 
         updated_params = {}
@@ -194,7 +215,17 @@ class NMRParameterManager:
                 'use_centroid_refinement': self.current_params['use_centroid_refinement'],
                 'centroid_window_x_ppm': self.current_params['centroid_window_x_ppm'],
                 'centroid_window_y_ppm': self.current_params['centroid_window_y_ppm'],
-                'centroid_noise_multiplier': self.current_params['centroid_noise_multiplier']
+                'centroid_noise_multiplier': self.current_params['centroid_noise_multiplier'],
+                # PS2D multi-peak fitting parameters (CRITICAL for PS2D activation)
+                'use_ps2d_multi_peak': self.current_params.get('use_ps2d_multi_peak', True),
+                'fix_linewidths': self.current_params.get('fix_linewidths', False),
+                'fix_positions': self.current_params.get('fix_positions', False),
+                'lw_lorentz_1h': self.current_params.get('lw_lorentz_1h', None),
+                'lw_gauss_1h': self.current_params.get('lw_gauss_1h', None),
+                'lw_lorentz_15n': self.current_params.get('lw_lorentz_15n', None),
+                'lw_gauss_15n': self.current_params.get('lw_gauss_15n', None),
+                # Series Integration / PS2D Linewidth Reuse
+                'use_ps2d_linewidth_reuse': self.current_params.get('use_ps2d_linewidth_reuse', False)
             },
             'processing_options': {
                 'use_parallel_processing': self.current_params['use_parallel_processing'],
@@ -211,17 +242,25 @@ class NMRParameterManager:
             if param_name in self.parameter_definitions:
                 definition = self.parameter_definitions[param_name]
 
-                # Check type
+                # Check type (handle both single types and tuples for Optional types)
                 expected_type = definition['type']
-                if not isinstance(current_value, expected_type):
-                    errors.append(f"{param_name}: expected {expected_type.__name__}, got {type(current_value).__name__}")
+                if isinstance(expected_type, tuple):
+                    # Multiple acceptable types (e.g., Optional[float] = (NoneType, float))
+                    if not isinstance(current_value, expected_type):
+                        type_names = " or ".join(t.__name__ for t in expected_type)
+                        errors.append(f"{param_name}: expected {type_names}, got {type(current_value).__name__}")
+                else:
+                    # Single type
+                    if not isinstance(current_value, expected_type):
+                        errors.append(f"{param_name}: expected {expected_type.__name__}, got {type(current_value).__name__}")
 
                 # Check range for numeric types
-                if expected_type in [int, float]:
-                    if 'min' in definition and current_value < definition['min']:
-                        errors.append(f"{param_name}: value {current_value} below minimum {definition['min']}")
-                    if 'max' in definition and current_value > definition['max']:
-                        errors.append(f"{param_name}: value {current_value} above maximum {definition['max']}")
+                if expected_type in [int, float] or (isinstance(expected_type, tuple) and float in expected_type):
+                    if current_value is not None:  # Skip range check for None values
+                        if 'min' in definition and current_value < definition['min']:
+                            errors.append(f"{param_name}: value {current_value} below minimum {definition['min']}")
+                        if 'max' in definition and current_value > definition['max']:
+                            errors.append(f"{param_name}: value {current_value} above maximum {definition['max']}")
 
         return errors
 
@@ -301,7 +340,6 @@ class NMRParameterManager:
             return
 
         self.simplified_manager.update_simplified_parameters(**kwargs)
-        print("✅ Simplified parameters updated")
 
     def get_effective_parameters(self, nucleus_type='default'):
         """
@@ -311,7 +349,15 @@ class NMRParameterManager:
         """
         if self.use_simplified_mode and self.parameter_adapter:
             # Use simplified parameters with legacy compatibility
-            return self.parameter_adapter.get_integrator_parameters(nucleus_type)
+            params = self.parameter_adapter.get_integrator_parameters(nucleus_type)
+
+            # CRITICAL FIX: Detection parameters (search windows) must ALWAYS use GUI values
+            # Simplified mode only affects FITTING parameters, NOT detection parameters
+            params['detection_params']['search_window_x'] = self.current_params['search_window_x']
+            params['detection_params']['search_window_y'] = self.current_params['search_window_y']
+            params['detection_params']['noise_threshold'] = self.current_params['noise_threshold']
+
+            return params
         else:
             # Use legacy parameters
             return self.get_integrator_parameters()

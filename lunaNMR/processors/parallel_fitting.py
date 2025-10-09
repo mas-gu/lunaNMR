@@ -45,19 +45,32 @@ class ParallelPeakFitter:
 
         print(f" Parallel fitting initialized with {self.max_workers} workers (75% of {cpu_count()} cores)")
 
-    def fit_peaks_parallel(self, peak_list, progress_callback=None):
+    def fit_peaks_parallel(self, peak_list, progress_callback=None, all_peaks_context=None):
         """
         Fit multiple peaks in parallel
 
         Args:
             peak_list: DataFrame with peak information
             progress_callback: Optional callback for progress updates
+            all_peaks_context: Optional list of all peaks for 2D overlap detection
 
         Returns:
             List of fitting results
         """
         if len(peak_list) == 0:
             return []
+
+        # Build all_peaks_context if not provided (for 2D overlap detection)
+        if all_peaks_context is None:
+            all_peaks_context = []
+            for _, row in peak_list.iterrows():
+                all_peaks_context.append({
+                    'assignment': str(row.get('Assignment', 'Unknown')),
+                    'x_ppm': float(row['Position_X']),
+                    'y_ppm': float(row['Position_Y']),
+                    'pos_x': float(row['Position_X']),
+                    'pos_y': float(row['Position_Y'])
+                })
 
         # Prepare peak data for parallel processing
         peak_tasks = []
@@ -72,7 +85,8 @@ class ParallelPeakFitter:
                 'peak_x': peak_x,
                 'peak_y': peak_y,
                 'assignment': assignment,
-                'integrator_data': self._serialize_integrator_data()
+                'integrator_data': self._serialize_integrator_data(),
+                'all_peaks_context': all_peaks_context
             })
 
         print(f" Starting parallel fitting of {len(peak_tasks)} peaks...")
@@ -247,11 +261,13 @@ def _fit_single_peak_worker(task_data):
             except ImportError:
                 integrator.enhanced_fitter = None
 
-        # Perform the fitting
+        # Perform the fitting with all_peaks_context for 2D overlap detection
+        all_peaks_context = task_data.get('all_peaks_context', None)
         result = integrator.enhanced_peak_fitting(
             task_data['peak_x'],
             task_data['peak_y'],
-            task_data['assignment']
+            task_data['assignment'],
+            all_peaks_context=all_peaks_context
         )
 
         if result:
