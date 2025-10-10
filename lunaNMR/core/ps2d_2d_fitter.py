@@ -447,7 +447,6 @@ class Ps2dMultiPeakFitter2D:
         #
         # Rationale: Overlapping peaks create ill-conditioned problems where
         # formal convergence may not be achievable even when fit quality is acceptable.
-        # PS2D's C++ code likely uses similar pragmatic criteria for difficult cases.
         formal_convergence = info['success']
         pragmatic_success = r_squared > 0.3
         final_success = formal_convergence or pragmatic_success

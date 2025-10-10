@@ -1,452 +1,90 @@
-# Architecture Guide - lunaNMR v0.9
+# Architecture Guide – lunaNMR v0.9
 
-Complete architectural overview of lunaNMR v0.9.
+This document summarizes the main subsystems in `lunaNMR_v0o9`, how they interact, and where new features such as the PS2D 2D fitting pipeline and automated ML hooks live.
 
-## Table of Contents
-
-1. [Package Structure](#package-structure)
-2. [Core Architecture](#core-architecture)
-3. [Module Descriptions](#module-descriptions)
-4. [Data Flow](#data-flow)
-5. [Extension Points](#extension-points)
-6. [Integration Patterns](#integration-patterns)
-7. [Development Guidelines](#development-guidelines)
-
----
-
-## Package Structure
-
-### ** Modular Architecture**
-
-lunaNMR v0.9 implements a professional Python package structure with clear separation of concerns:
+## 1. High-Level Layout
 
 ```
 lunaNMR_v0o9/
-├── lunaNMR/                    # Main package
-│   ├── __init__.py            # Package initialization & exports
-│   ├── gui/                   # Graphical user interface
-│   │   ├── __init__.py
-│   │   ├── main_gui.py        # Primary GUI application
-│   │   ├── gui_components.py  # Reusable GUI components
-│   │   └── spectrum_browser.py # Interactive spectrum viewer
-│   ├── core/                  # Core processing engines
-│   │   ├── __init__.py
-│   │   ├── core_integrator.py           # Base integration engine
-│   │   ├── enhanced_voigt_fitter.py     # Advanced Voigt fitting
-│   │   ├── enhanced_peak_picker.py      # Peak detection algorithms
-│   │   └── integrated_detection_fitter.py # Unified detection+fitting
-│   ├── processors/            # Spectrum processors
-│   │   ├── __init__.py
-│   │   ├── series_processor.py         # Time-series analysis
-│   │   ├── multi_spectrum_processor.py # Multi-condition analysis
-│   │   ├── single_spectrum_processor.py # Single spectrum analysis
-│   │   └── parallel_fitting.py         # Parallel processing
-│   ├── integrators/           # Specialized integrators
-│   │   ├── __init__.py
-│   │   ├── inplace_advanced_nmr_integrator.py
-│   │   ├── inplace_series_nmr_integrator.py
-│   │   └── simple_pattern_matcher.py
-│   ├── utils/                 # Utility classes
-│   │   ├── __init__.py
-│   │   ├── config_manager.py          # Configuration management
-│   │   ├── file_manager.py            # File I/O operations
-│   │   ├── parameter_manager.py       # Parameter handling
-│   │   └── global_optimization_manager.py
-│   └── validation/            # Validation & testing tools
-│       ├── __init__.py
-│       └── verify_installation.py
-├── modules/                   # Optional modules
-│   ├── __init__.py
-│   └── dynamiXs/             # DynamiXs integration (optional)
-│       ├── __init__.py
-│       └── [DynamiXs files...]
-├── docs/                     # Documentation
-├── launch_lunaNMR.py         # Unified launcher with app selector
-└── README.md
+├── launch_lunaNMR.py           # Entry-point launcher
+├── docs/                       # Contributor & user documentation
+├── data_example/               # Reference spectra
+├── lunaNMR/                    # Primary Python package
+│   ├── gui/                    # Tkinter GUI and visualization
+│   ├── processors/             # Workflow orchestration (single, batch, series)
+│   ├── core/                   # Numerical engines: detection, PS2D fitting, overlap resolver
+│   ├── batch_processing/       # CLI batch runner + ML data capture
+│   ├── integrators/            # Specialized in-memory integrators
+│   ├── utils/                  # Config, parameter, and file managers
+│   ├── ml/                     # Training data collectors for PS2D
+│   └── validation/             # Installation diagnostics
+├── modules/                    # Optional add-ons (e.g., DynamiXs)
+└── batch_ml/, ml_training_data/ # Output and training artefacts
 ```
 
----
+## 2. Layered Responsibilities
 
-## Core Architecture
+| Layer | Modules | Responsibilities |
+|-------|---------|------------------|
+| **Presentation** | `lunaNMR/gui` | Tkinter UI, interactive plots, peak navigator, spectrum browser, Voigt analysis dashboard |
+| **Workflow** | `lunaNMR/processors`, `lunaNMR/batch_processing` | Turn detection + fitting engines into end-user flows (single spectrum, multi-condition, batch, CLI) |
+| **Core Services** | `lunaNMR/core` | Peak detection, PS2D 2D multi-peak fitting, overlap grouping, consensus fitting, jackknife validation, correlation analysis |
+| **Domain Utilities** | `lunaNMR/utils`, `lunaNMR/integrators` | Parameter management, config storage, file I/O, nucleus-specific helpers, specialized integrators |
+| **Machine Learning** | `lunaNMR/ml`, `batch_ml/`, `ml_training_data/` | Capture PS2D fitting diagnostics, export training samples, notebooks and artefacts |
 
-### **Layered Architecture Pattern**
+Processors call into the core engines, then hand results to the GUI or batch exporters. The batch processor shares the same engines, guaranteeing parity between interactive and scripted workflows.
 
-lunaNMR follows a layered architecture with clear responsibilities:
+## 3. Core Engine Highlights
 
-```
-┌─────────────────────────────────────────┐
-│             Presentation Layer          │
-│          lunaNMR.gui.main_gui           │
-│     User Interface & Visualization      │
-├─────────────────────────────────────────┤
-│            Application Layer            │
-│        lunaNMR.processors.*             │
-│      Business Logic & Workflows         │
-├─────────────────────────────────────────┤
-│              Service Layer              │
-│         lunaNMR.integrators.*           │
-│      Specialized Analysis Services      │
-├─────────────────────────────────────────┤
-│               Core Layer                │
-│           lunaNMR.core.*                │
-│     Fundamental Processing Engines      │
-├─────────────────────────────────────────┤
-│            Infrastructure Layer         │
-│           lunaNMR.utils.*               │
-│    Configuration, I/O, Validation       │
-└─────────────────────────────────────────┘
-```
+- **Enhanced Peak Picker** (`core/enhanced_peak_picker.py`): multi-method detection with clustering, S/N analysis, and adaptive windows.
+- **PS2D Fitting Stack**:
+  - `ps2d_data_selector.py` – constructs elliptical masks around overlap clusters.
+  - `ps2d_style_fitter.py` – Faddeeva-based Voigt primitives with optional Numba acceleration.
+  - `ps2d_2d_fitter.py` – five-stage Levenberg–Marquardt optimizer for simultaneous 2D fits.
+  - `ps2d_exact_overlap_detector.py` / `ps2d_exact_overlap_integration.py` – geometric overlap grouping and integration wrappers.
+  - `overlap_resolver_engine.py` – staged 1D backup pipeline with model-selection, jackknife, and correlation analysis.
+- **Consensus & Simplified Modes** (`core/consensus_fitting_engine.py`, `utils/simplified_parameter_manager.py`): reduce the parameter space to a handful of intuitive controls.
+- **Validation & QA**: `jackknife_validator.py`, `parameter_correlation_analyzer.py`, and PS2D training collector feed both user diagnostics and ML pipelines.
 
-### **Component Interaction Model**
+## 4. Workflow Orchestration
 
-```python
-# Example of how components interact
-from lunaNMR.core import EnhancedVoigtFitter
-from lunaNMR.processors import SingleSpectrumProcessor
-from lunaNMR.utils import ConfigManager, FileManager
-from lunaNMR.gui import main_gui
+- **Single Spectrum Processor** orchestrates detection, PS2D routing, and GUI table population.
+- **Multi Spectrum Processor** iterates over conditions (temperature, titration, etc.) while sharing parameter presets.
+- **Series Processor** handles kinetic/relaxation series and exports time-course plots.
+- **Batch Processor** (CLI or GUI-triggered) applies the exact same PS2D and consensus engines, logging rich metadata and optionally persisting ML samples.
 
-# Configuration flows down through all layers
-config = ConfigManager()
+## 5. GUI Architecture
 
-# Core components provide fundamental algorithms
-fitter = EnhancedVoigtFitter(config)
+The GUI follows an MVC-inspired split:
 
-# Processors orchestrate workflows
-processor = SingleSpectrumProcessor(fitter, config)
+- **Model**: Integrator state, fitted peak lists, batch results.
+- **View**: `main_gui.py` dashboards, `gui_components.py` widgets, `visualization.py` plotting helpers, `spectrum_browser.py` interactive viewer.
+- **Controller**: Callbacks that forward requests to processors and update the shared integrator.
 
-# GUI coordinates user interaction
-gui = main_gui.NMRPeaksSeriesGUI(processor)
-```
+The “Voigt Analysis” tab renders either 1D cross sections or the PS2D 2×2 contour dashboard depending on the fitting method returned.
 
----
+## 6. Extension Points
 
-## 📋 Module Descriptions
+- **New processors**: subclass `BaseProcessor`‑style utilities in `processors/` and reuse the integrator API.
+- **Additional fitting strategies**: integrate with `core/overlap_resolver_engine.py` or provide new engines that conform to the same result schema (`pos_f1`, `pos_f2`, widths, intensities, quality metrics).
+- **Machine learning**: drop collectors into `lunaNMR/ml/` and register them with the PS2D or batch processors.
+- **Optional modules**: place self-contained apps inside `modules/` and expose them through `launch_lunaNMR.py`.
 
-### **lunaNMR.core - Core Processing Engines**
-
-**Purpose**: Fundamental NMR analysis algorithms and mathematical operations.
-
-**Key Components**:
-- `CoreIntegrator`: Base class for all integration operations
-- `EnhancedVoigtFitter`: Advanced Voigt profile fitting with multi-peak support
-- `EnhancedPeakPicker`: Professional peak detection with clustering algorithms
-- `IntegratedDetectionFitter`: Unified peak detection and fitting pipeline
-
-**Responsibilities**:
-- Mathematical peak fitting algorithms
-- Signal processing operations  
-- Baseline correction methods
-- Quality assessment metrics
-
-**Import Pattern**:
-```python
-from lunaNMR.core import EnhancedVoigtFitter, EnhancedPeakPicker
-from lunaNMR.core.core_integrator import VoigtIntegrator
-```
-
-### **lunaNMR.processors - Spectrum Processors**
-
-**Purpose**: High-level analysis workflows for different experimental scenarios.
-
-**Key Components**:
-- `SeriesProcessor`: Time-series relaxation analysis (T₁, T₂, NOE)
-- `MultiSpectrumProcessor`: Multi-condition experiments (titrations, temperature)
-- `SingleSpectrumProcessor`: Individual spectrum analysis
-- `ParallelFitting`: Parallel processing for large datasets
-
-**Responsibilities**:
-- Orchestrating multi-step analysis workflows
-- Managing data transformations
-- Coordinating between core components
-- Batch processing capabilities
-
-**Import Pattern**:
-```python
-from lunaNMR.processors import SeriesProcessor, MultiSpectrumProcessor
-```
-
-### **lunaNMR.integrators - Specialized Integrators**
-
-**Purpose**: Domain-specific integration methods for specialized NMR experiments.
-
-**Key Components**:
-- `InplaceAdvancedNMRIntegrator`: In-memory advanced analysis
-- `InplaceSeriesNMRIntegrator`: Series analysis with memory optimization
-- `SimplePatternMatcher`: Pattern recognition for automated assignments
-
-**Responsibilities**:
-- Specialized analysis algorithms
-- Memory-efficient processing
-- Pattern recognition and classification
-
-### **lunaNMR.gui - Graphical User Interface**
-
-**Purpose**: User interface components and visualization tools.
-
-**Key Components**:
-- `main_gui.py`: Primary application interface
-- `gui_components.py`: Reusable UI widgets
-- `spectrum_browser.py`: Interactive spectrum visualization
-
-**Responsibilities**:
-- User interaction management
-- Data visualization
-- Configuration interfaces
-- Results presentation
-
-**Architecture Pattern**: Model-View-Controller (MVC)
-- **Model**: Data and analysis results
-- **View**: GUI components and plots  
-- **Controller**: Event handlers and workflow coordination
-
-### **lunaNMR.utils - Utility Classes**
-
-**Purpose**: Cross-cutting concerns and infrastructure services.
-
-**Key Components**:
-- `ConfigManager`: Configuration management
-- `FileManager`: File I/O operations with format support
-- `ParameterManager`: Parameter validation and optimization
-- `GlobalOptimizationManager`: System-wide optimization
-
-**Responsibilities**:
-- Configuration management
-- File format handling
-- Parameter validation
-- System utilities
-
-### **lunaNMR.validation - Validation & Testing**
-
-**Purpose**: Installation verification and system testing.
-
-**Key Components**:
-- `verify_installation.py`: Installation verification script
-
-**Responsibilities**:
-- Dependency checking
-- System compatibility validation
-- Installation troubleshooting
-
-### **modules/ - Optional Modules**
-
-**Purpose**: Optional functionality that extends lunaNMR capabilities.
-
-**Structure**:
-- `modules.dynamiXs`: Dynamic exchange analysis (T₁, T₂, NOE fitting)
-
-**Design Pattern**: Plugin architecture allowing independent development and deployment.
-
----
-
-## Data Flow
-
-### **Typical Analysis Workflow**
-
-```python
-# 1. Configuration & Setup
-config = ConfigManager()
-file_manager = FileManager()
-
-# 2. Data Loading
-spectrum_data = file_manager.load_spectrum('data.ft2')
-peak_list = file_manager.load_peak_list('peaks.csv')
-
-# 3. Core Processing
-peak_picker = EnhancedPeakPicker(config)
-detected_peaks = peak_picker.detect_peaks(spectrum_data)
-
-voigt_fitter = EnhancedVoigtFitter(config)
-fitting_results = voigt_fitter.fit_peaks(detected_peaks, spectrum_data)
-
-# 4. High-Level Processing
-processor = SingleSpectrumProcessor(voigt_fitter, config)
-analysis_results = processor.process_spectrum(spectrum_data, peak_list)
-
-# 5. Results Export
-file_manager.export_results(analysis_results, 'results.csv')
-```
-
-### **Data Flow Diagram**
+## 7. Runtime Data Flow (PS2D path)
 
 ```
-User Input → ConfigManager → FileManager → Core Engines → Processors → GUI Display
-    ↓              ↓             ↓            ↓             ↓           ↓
-Configuration → File I/O → Peak Detection → Analysis → Visualization → Export
+GUI action → processors.single_spectrum_processor
+          → core.integrated_detection_fitter (detection + overlap analysis)
+          → core.ps2d_data_selector (mask)
+          → core.ps2d_2d_fitter (stage 0–4 fit)
+          → core.ps2d_training_collector (optional ML sample)
+          → processors format results → GUI tables / plots
 ```
 
-### **Memory Management**
+Fallback behaviour swaps in the staged 1D engine (`staged_fitting_strategy.py`) via the overlap resolver when PS2D is disabled or the data is purely 1D.
 
-- **Lazy Loading**: Large datasets loaded only when needed
-- **Streaming Processing**: Large series processed in chunks
-- **Memory Monitoring**: Automatic memory usage optimization
-- **Garbage Collection**: Explicit cleanup of temporary objects
+## 8. Keeping the Architecture Healthy
 
----
-
-## 🔧 Extension Points
-
-### **Adding Custom Fitting Algorithms**
-
-```python
-# 1. Create custom fitter inheriting from base classes
-from lunaNMR.core.core_integrator import BaseIntegrator
-
-class CustomFitter(BaseIntegrator):
-    def fit_peak(self, x_data, y_data, initial_params):
-        # Implement custom fitting logic
-        pass
-
-# 2. Register with the system
-from lunaNMR.utils import ParameterManager
-ParameterManager.register_fitter('custom', CustomFitter)
-```
-
-### **Creating New Processors**
-
-```python
-# 1. Inherit from base processor
-from lunaNMR.processors.base_processor import BaseProcessor
-
-class TemperatureSeriesProcessor(BaseProcessor):
-    def process_temperature_series(self, temperature_data):
-        # Implement temperature-dependent analysis
-        pass
-
-# 2. Integration with GUI
-# Add menu item in main_gui.py to access new processor
-```
-
-### **Plugin Development**
-
-```python
-# modules/custom_plugin/__init__.py
-class CustomPlugin:
-    def __init__(self):
-        self.name = "Custom Analysis Plugin"
-
-    def get_analysis_methods(self):
-        return {'custom_analysis': self.custom_analysis}
-
-    def custom_analysis(self, data):
-        # Custom analysis implementation
-        pass
-```
-
----
-
-## Integration Patterns
-
-### **Dependency Injection**
-
-Components receive dependencies through constructors:
-
-```python
-# Dependencies injected at initialization
-class EnhancedVoigtFitter:
-    def __init__(self, config_manager, parameter_manager):
-        self.config = config_manager
-        self.params = parameter_manager
-```
-
-### **Observer Pattern**
-
-Progress updates and notifications:
-
-```python
-class AnalysisProgress:
-    def __init__(self):
-        self.observers = []
-
-    def add_observer(self, observer):
-        self.observers.append(observer)
-
-    def notify_progress(self, current, total):
-        for observer in self.observers:
-            observer.update_progress(current, total)
-```
-
-### **Factory Pattern**
-
-Dynamic component creation:
-
-```python
-class ProcessorFactory:
-    @staticmethod
-    def create_processor(processor_type, config):
-        if processor_type == 'series':
-            return SeriesProcessor(config)
-        elif processor_type == 'multi_spectrum':
-            return MultiSpectrumProcessor(config)
-        # etc.
-```
-
----
-
-## Development Guidelines
-
-### **Import Structure**
-
-**Absolute Imports**: Always use absolute imports from the package root:
-```python
-# Correct
-from lunaNMR.core import EnhancedVoigtFitter
-from lunaNMR.utils.config_manager import ConfigManager
-
-# Avoid relative imports in most cases
-```
-
-### **Configuration Management**
-
-**Centralized Configuration**: All components should accept configuration:
-```python
-class NewComponent:
-    def __init__(self, config=None):
-        self.config = config or ConfigManager.get_default()
-```
-
-### **Error Handling**
-
-**Graceful Degradation**: Components should handle errors gracefully:
-```python
-try:
-    result = enhanced_analysis(data)
-except AnalysisError:
-    # Fall back to basic analysis
-    result = basic_analysis(data)
-```
-
-### **Testing Strategy**
-
-**Unit Tests**: Each module should have comprehensive unit tests
-**Integration Tests**: Test component interactions
-**Validation Tests**: Verify against known standards
-
-### **Documentation Standards**
-
-**Docstring Format**: Use NumPy-style docstrings
-**Type Hints**: Include type annotations for all public APIs
-**Examples**: Provide usage examples in docstrings
-
----
-
-## 🚀 Performance Considerations
-
-### **Optimization Strategies**
-
-1. **Vectorized Operations**: Use NumPy for mathematical operations
-2. **Parallel Processing**: Leverage multiprocessing for independent tasks
-3. **Memory Management**: Implement memory-efficient algorithms
-4. **Caching**: Cache expensive computations
-5. **Lazy Loading**: Load data only when needed
-
-### **Scalability**
-
-The modular architecture enables:
-- **Horizontal Scaling**: Multiple instances for different datasets
-- **Vertical Scaling**: Optimized algorithms for larger datasets
-- **Distributed Processing**: Framework ready for cluster deployment
-
----
-
-This architecture provides a solid foundation for current NMR analysis needs while maintaining flexibility for future enhancements and extensions. The modular design ensures maintainability, testability, and extensibility as the software continues to evolve.
+- Maintain parity between GUI and batch processors so that regression tests cover both code paths.
+- When introducing new engines, extend the shared result schema (`pos_f1`, `pos_f2`, `lw_lor_*`, `lw_gau_*`, `intensity`, quality flags) to keep downstream consumers compatible.
+- Update this document and `PACKAGE_STRUCTURE.md` whenever directories are added, renamed, or deprecated.
