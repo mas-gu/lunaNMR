@@ -23,14 +23,8 @@ try:
 except ImportError:
     pass
 
-try:
-    from .integrated_detection_fitter import IntegratedDetectionFitter
-except ImportError:
-    pass
-
 __all__ = [
     'CoreIntegrator',
     'EnhancedVoigtFitter',
-    'EnhancedPeakPicker',
-    'IntegratedDetectionFitter'
+    'EnhancedPeakPicker'
 ]

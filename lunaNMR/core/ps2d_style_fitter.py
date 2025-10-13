@@ -56,26 +56,26 @@ else:
 # ============================================================================
 # ============================================================================
 
-SQRT_2 = 1.4142135624  # Exact constant from faddeeva.cpp
+SQRT_2 = 1.4142135624  
 SQRT_2PI = np.sqrt(2.0 * np.pi)
 SQRT_8LN2 = np.sqrt(8.0 * np.log(2.0))
 
-# Levenberg-Marquardt parameters (from fitmrq.cpp)
-LAMBDA_INIT = 0.001      # Initial damping (line 40)
+# Levenberg-Marquardt parameters 
+LAMBDA_INIT = 0.0001      # Initial damping (line 40)
 LAMBDA_UP = 10.0         # Increase factor on rejection (line 135)
-LAMBDA_DOWN = 0.1        # Decrease factor on acceptance (line 125)
-MAX_ITER = 250           # Default max iterations (reduced from 1000→500→250 - 2025-10-08)
-CONV_TOL = 1e-6          # Convergence tolerance (EPS_CONV)
+LAMBDA_DOWN = 0.05        # Decrease factor on acceptance #was 0.1
+MAX_ITER = 500           # Default max iterations was 250
+CONV_TOL = 1e-9          # Convergence tolerance (EPS_CONV) #was 1e-6 
 NDONE = 1                # Must converge for 1 consecutive iteration
 SLOW_PROGRESS_TOL = 1e-7 # Slow progress threshold: Δχ²/χ² < 1e-7 (0.00001%)
 SLOW_PROGRESS_LIMIT = 15 # Exit after 15 consecutive slow-progress iterations
 
-# Derivative step size (from faddeeva.cpp line 1974)
-DERIV_STEP_MULTIPLIER = 1.000001  # Relative step = 1e-6
+# Derivative step size 
+DERIV_STEP_MULTIPLIER = 1.00001  # Relative step = 1e-6 was 1.000001
 
 
 # ============================================================================
-# VOIGT PROFILE COMPUTATION (Exact port from faddeeva.cpp)
+# VOIGT PROFILE COMPUTATION 
 # ============================================================================
 
 @jit_decorator
@@ -113,7 +113,7 @@ def voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
     - 2D Voigt = V_F1 × V_F2 × intensity
     """
 
-    # Convert FWHM to sigma/gamma (faddeeva.cpp lines 1933-1936)
+    # Convert FWHM to sigma/gamma 
     sigma_f1 = lw_gauss_f1 / SQRT_8LN2
     sigma_f2 = lw_gauss_f2 / SQRT_8LN2
     gamma_f1 = lw_lorentz_f1 / 2.0
@@ -123,7 +123,7 @@ def voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
     sigma_f1 = max(sigma_f1, 1e-10)
     sigma_f2 = max(sigma_f2, 1e-10)
 
-    # Build complex arguments for Faddeeva function (lines 1941-1942)
+    # Build complex arguments for Faddeeva function 
     z1 = ((pos_f1 - f1) + 1j * gamma_f1) / (sigma_f1 * SQRT_2)
     z2 = ((pos_f2 - f2) + 1j * gamma_f2) / (sigma_f2 * SQRT_2)
 
@@ -141,7 +141,7 @@ def voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
 def multi_voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
                            params: np.ndarray, n_peaks: int) -> np.ndarray:
     """
-    Multi-peak 2D Voigt profile computation (EXACT port from faddeeva.cpp lines 1938-1948)
+    Multi-peak 2D Voigt profile computation 
 
     Sums multiple 2D Voigt profiles for simultaneous multi-peak fitting.
     This is the core function needed for overlapping peak deconvolution in 2D.
@@ -163,7 +163,6 @@ def multi_voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
 
     Notes:
     ------
-    C++ reference (faddeeva.cpp:1938-1948):
     ```cpp
     for (Int i=0; i<nopeaks; i++) {
         Doub sigmaF1 = a[4+i*NPAR_VOIGT]/sqrt(8*log(2));
@@ -193,7 +192,7 @@ def multi_voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
     # Parameter stride: 8 values per peak
     NPAR_VOIGT = 8
 
-    # Loop through peaks and sum contributions (faddeeva.cpp:1938)
+    # Loop through peaks and sum contributions 
     for i in range(n_peaks):
         # Extract parameters for peak i
         offset = i * NPAR_VOIGT
@@ -215,7 +214,7 @@ def multi_voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
             intensity
         )
 
-        # Add to sum (faddeeva.cpp:1944 "y += ...")
+        # Add to sum 
         result += peak_contribution
 
     return result
@@ -249,7 +248,7 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
 
     Notes:
     ------
-    Follows exact  derivative strategy from faddeeva.cpp:1974-1992:
+    Follows exact  derivative strategy :
     - Relative stepping: param_new = param × 1.000001
     - Step size: delta = param × 0.000001
     - Derivative: (f(param+delta) - f(param)) / delta
@@ -325,7 +324,7 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
             params_perturbed[global_idx] = original_value
 
         # Analytical derivative for intensity (parameter index 6)
-        # ∂y/∂A = y/A (faddeeva.cpp:1991)
+        # ∂y/∂A = y/A 
         intensity_idx = offset + 6
         INTENSITY_THRESHOLD = 1e-6
 
@@ -383,7 +382,6 @@ def voigt_profile_1d(x: np.ndarray,
     Note:
     -----
     This matches  exactly - baseline must be removed BEFORE fitting
-    (see faddeeva.cpp voigt function lines 1955-1990)
     """
 
     # Convert FWHM to sigma/gamma
@@ -405,7 +403,7 @@ def voigt_profile_1d(x: np.ndarray,
 
 
 # ============================================================================
-# NUMERICAL DERIVATIVES WITH RELATIVE STEPPING (faddeeva.cpp lines 1974-1992)
+# NUMERICAL DERIVATIVES WITH RELATIVE STEPPING 
 # ============================================================================
 
 def compute_voigt_jacobian_1d(x: np.ndarray, params: np.ndarray) -> np.ndarray:
@@ -425,7 +423,6 @@ def compute_voigt_jacobian_1d(x: np.ndarray, params: np.ndarray) -> np.ndarray:
 
     Implementation:
     ---------------
-    From faddeeva.cpp lines 1974-1992:
     - Relative step = 1.000001 × parameter_value
     - Step size = 0.000001 × parameter_value
     - Intensity derivative is ANALYTICAL: ∂y/∂A = y/A
@@ -455,7 +452,7 @@ def compute_voigt_jacobian_1d(x: np.ndarray, params: np.ndarray) -> np.ndarray:
         # Derivative: (f(x+h) - f(x)) / h
         jac[:, i] = (y_perturbed - y_base) / step_size
 
-    # Analytical derivative for intensity (faddeeva.cpp line 1991)
+    # Analytical derivative for intensity (
     # ∂y/∂A = y/A
     INTENSITY_THRESHOLD = 1e-6
     if abs(params[3]) > INTENSITY_THRESHOLD:
@@ -475,7 +472,7 @@ def compute_voigt_jacobian_1d(x: np.ndarray, params: np.ndarray) -> np.ndarray:
 
 
 # ============================================================================
-# LEVENBERG-MARQUARDT WITH ADDITIVE DAMPING (fitmrq.cpp)
+# LEVENBERG-MARQUARDT WITH ADDITIVE DAMPING 
 # ============================================================================
 
 class Ps2dStyleLevenbergMarquardt:
@@ -501,7 +498,7 @@ class Ps2dStyleLevenbergMarquardt:
         """
         Initialize LM optimizer with  parameters
 
-        Parameters match fitmrq.cpp lines 32-46
+        Parameters match 
         """
         self.lambda_init = lambda_init
         self.lambda_up = lambda_up
@@ -588,11 +585,11 @@ class Ps2dStyleLevenbergMarquardt:
             # Extract free parameters only
             J = J_full[:, free_indices]
 
-            # Build normal equations: α·δa = β (fitmrq.cpp lines 69-76)
+            # Build normal equations: α·δa = β
             alpha = J.T @ J  # α = J^T · J
             beta = J.T @ residuals  # β = J^T · (y - y_pred)
 
-            # ADDITIVE damping (fitmrq.cpp line 88) - CRITICAL DIFFERENCE
+            # ADDITIVE damping 
             alpha_damped = alpha + lam * np.eye(n_free)
 
             try:
@@ -614,7 +611,7 @@ class Ps2dStyleLevenbergMarquardt:
             y_new = func(x, *params_new)
             chi2_new = np.sum((y - y_new)**2)
 
-            # Accept or reject step (fitmrq.cpp lines 122-135)
+            # Accept or reject step 
             if chi2_new < chi2:
                 # ACCEPT step
                 params = params_new
@@ -622,7 +619,7 @@ class Ps2dStyleLevenbergMarquardt:
                 chi2_old = chi2
                 stagnant_iterations = 0  # Reset stagnation counter
 
-                # Check convergence (fitmrq.cpp line 120)
+                # Check convergence 
                 if abs(chi2_new - chi2) < max(self.tol, self.tol * chi2):
                     done_count += 1
                 else:
@@ -688,13 +685,13 @@ class Ps2dStyleLevenbergMarquardt:
 
 
 # ============================================================================
-# MULTI-STAGE FITTING STRATEGY (peakfit.cpp lines 231-456)
+# MULTI-STAGE FITTING STRATEGY 
 # ============================================================================
 
 class MultiStageFitter:
     """
 
-    Implements 4-stage progressive refinement (peakfit.cpp):
+    Implements 4-stage progressive refinement :
     - Stage 0: Fix positions/widths, fit only intensity (VOIGT initialization)
     - Stage 1: Fix positions, float widths + intensity
     - Stage 2: Float positions (if allowed)

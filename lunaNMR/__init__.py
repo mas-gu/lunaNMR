@@ -20,7 +20,6 @@ try:
     from .core.core_integrator import CoreIntegrator
     from .core.enhanced_voigt_fitter import EnhancedVoigtFitter
     from .core.enhanced_peak_picker import EnhancedPeakPicker
-    from .core.integrated_detection_fitter import IntegratedDetectionFitter
 except ImportError:
     pass
 
@@ -64,12 +63,11 @@ except ImportError:
 
 __all__ = [
     'NMRPeaksSeriesGUI',
-    'CoreIntegrator', 
+    'CoreIntegrator',
     'EnhancedVoigtFitter',
     'EnhancedPeakPicker',
-    'IntegratedDetectionFitter',
     'SeriesProcessor',
-    'MultiSpectrumProcessor', 
+    'MultiSpectrumProcessor',
     'SingleSpectrumProcessor',
     'ParallelFitting',
     'ConfigManager',

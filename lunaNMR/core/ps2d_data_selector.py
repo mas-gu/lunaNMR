@@ -1,44 +1,49 @@
 """
-PS2D Data Selection Module - Exact Clone of 
+PS2D Data Selection Module - Exact Clone of
 ===============================================================================
 
-It replaces lunaNMR's adaptive window multiplier approach with 
+It replaces lunaNMR's adaptive window multiplier approach with
 fixed elliptical window selection.
 
-Key Implementation from spectrum.cpp lines 1010-1020:
+
 1. FIXED integration radius (radF1, radF2) - never changes during fitting
 2. Elliptical boundary test: radius = (F1-pos)²/radF1² + (F2-pos)²/radF2² <= 1.0
 3. Include data points inside ellipse, exclude outside
 4. NO adaptive windows, NO multipliers, NO linewidth-based scaling
 
-Default values from peak.cpp lines 181-182:
+
 - radF1 = 0.6 ppm (indirect dimension, 15N/13C)
 - radF2 = 0.06 ppm (direct dimension, 1H)
 
 Date: 2025-10-04
 Version: 1.0 - EXACT_PS2D_CLONE
+Version: 2.0 - CENTRALIZED_CONFIG (2025-10-10)
 """
 
 import numpy as np
 from typing import Dict, Tuple, Optional
 
+# Import centralized configuration
+from .ps2d_config import get_ps2d_config
+
 
 class Ps2dDataSelector:
     """
-    Exact clone of  data selection logic from spectrum.cpp.
 
     This class implements FIXED elliptical windows exactly as  does.
     NO adaptive behavior, NO multipliers, NO creativity - just pure cloning.
     """
 
-    def __init__(self, spectrum_type: str = '15N-HSQC'):
+    def __init__(self, spectrum_type: str = '15N-HSQC', config=None):
         """
-        Initialize with  default values.
+        Initialize with centralized config or default values.
 
         Parameters
         ----------
         spectrum_type : str
             Type of spectrum ('15N-HSQC', '13C-HSQC', etc.)
+        config : PS2DConfig, optional
+            Configuration object. If None, uses global config.
         """
         # radF1(0.6), radF2(0.06), radF3(0.6)
         #
@@ -47,15 +52,16 @@ class Ps2dDataSelector:
         # F2 = direct dimension (horizontal) = 1H in HSQC
         # F3 = 3rd dimension (for 3D spectra)
 
-        if spectrum_type in ['15N-HSQC', '13C-HSQC', '1H-15N', '1H-13C']:
-            self.radF1 = 0.6   # Indirect dimension (15N or 13C) - ppm @0.6
-            self.radF2 = 0.06  # Direct dimension (1H) - ppm #0.06
-        else:
-            # Default to 15N-HSQC values
-            self.radF1 = 0.6
-            self.radF2 = 0.06
+        # Use centralized configuration
+        if config is None:
+            config = get_ps2d_config()
+
+        # Use selector-specific radii (broader for safety)
+        self.radF1 = config.radF1_selector
+        self.radF2 = config.radF2_selector
 
         self.spectrum_type = spectrum_type
+        self.config = config
 
     def select_data_elliptical(self,
                                x_data: np.ndarray,
@@ -64,10 +70,10 @@ class Ps2dDataSelector:
                                peak_y_pos: float,
                                dimension: str = 'x') -> Dict:
         """
-        Select data using FIXED elliptical window (EXACT clone of spectrum.cpp lines 1010-1020).
+        Select data using FIXED elliptical window.
 
         This is the CORE  logic:
-        ```cpp
+        ```
         Doub radius = SQR((_F1-peak[k].appF1)/peak[k].radF1) +
                       SQR((_F2-peak[k].appF2)/peak[k].radF2);
         if (radius <= 1.0) {
@@ -131,9 +137,9 @@ class Ps2dDataSelector:
                                    peak_f1_pos: float,
                                    peak_f2_pos: float) -> Dict:
         """
-        Select 2D data using FIXED elliptical window (EXACT clone of spectrum.cpp).
+        Select 2D data using FIXED elliptical window.
 
-        ```cpp
+        ``
         Doub radius = SQR((_F1-peak[k].appF1)/peak[k].radF1) +
                       SQR((_F2-peak[k].appF2)/peak[k].radF2);
         if (radius <= 1.0) {
@@ -179,10 +185,10 @@ class Ps2dDataSelector:
 
     def get_window_boundaries(self, peak_pos: float, dimension: str = 'x') -> Tuple[float, float]:
         """
-        Get window boundaries for plotting/display (from spectrum.cpp lines 1584-1587).
+        Get window boundaries for plotting/display .
 
          calculation:
-        ```cpp
+        ```
         imin = (Int)(((peak.f1+peak.radF1)*obsF1 - firstF1)/deltaF1 + 0.5);
         imax = (Int)(((peak.f1-peak.radF1)*obsF1 - firstF1)/deltaF1 + 0.5);
         ```
@@ -230,18 +236,17 @@ def select_data_2d_for_overlap_group(f1_data: np.ndarray,
                                       f2_data: np.ndarray,
                                       intensity: np.ndarray,
                                       peak_positions: list,
-                                      radF1: float = 0.6,
-                                      radF2: float = 0.06) -> Dict:
+                                      radF1: float = None,
+                                      radF2: float = None,
+                                      config=None) -> Dict:
     """
     Select 2D data for overlap group using UNION of elliptical windows
-    (EXACT clone of spectrum.cpp lines 1009-1020)
 
     This is the CORE function for 2D multi-peak fitting in 
     For an overlap group with N peaks, select the union of all elliptical
     windows. Each data point is included if it falls inside ANY peak's ellipse.
 
-    Key C++ logic (spectrum.cpp:1009-1020):
-    ```cpp
+    ```
     for (Uint k=0; k<peak.size(); ++k) {
         Doub radius = SQR((_F1-peak[k].appF1)/peak[k].radF1) +
                       SQR((_F2-peak[k].appF2)/peak[k].radF2);
@@ -265,10 +270,12 @@ def select_data_2d_for_overlap_group(f1_data: np.ndarray,
         Intensity values, same shape as f1_data
     peak_positions : list of tuples
         List of (f1_pos, f2_pos) for each peak in overlap group
-    radF1 : float
-        Ellipse radius in F1 dimension (default 0.6 ppm from peak.cpp:181)
-    radF2 : float
-        Ellipse radius in F2 dimension (default 0.06 ppm from peak.cpp:182)
+    radF1 : float, optional
+        Ellipse radius in F1 dimension (default from config)
+    radF2 : float, optional
+        Ellipse radius in F2 dimension (default from config)
+    config : PS2DConfig, optional
+        Configuration object. If None, uses global config.
 
     Returns:
     --------
@@ -282,6 +289,15 @@ def select_data_2d_for_overlap_group(f1_data: np.ndarray,
         'radF2_used': radF2 value used
     """
 
+    # Use centralized configuration if radF1/radF2 not specified
+    if radF1 is None or radF2 is None:
+        if config is None:
+            config = get_ps2d_config()
+        if radF1 is None:
+            radF1 = config.radF1_selector
+        if radF2 is None:
+            radF2 = config.radF2_selector
+
     # Flatten inputs if needed
     f1_flat = f1_data.ravel()
     f2_flat = f2_data.ravel()
@@ -291,14 +307,14 @@ def select_data_2d_for_overlap_group(f1_data: np.ndarray,
     mask = np.zeros(n_points, dtype=bool)
 
     # For each point, check if it's inside ANY peak's ellipse
-    # (spectrum.cpp:1009-1020)
+
     for i in range(n_points):
         point_f1 = f1_flat[i]
         point_f2 = f2_flat[i]
 
         # Check against all peaks in overlap group
         for peak_f1, peak_f2 in peak_positions:
-            # Elliptical boundary test (spectrum.cpp:1011-1012)
+            # Elliptical boundary test
             radius_squared = ((point_f1 - peak_f1) / radF1) ** 2 + \
                            ((point_f2 - peak_f2) / radF2) ** 2
 

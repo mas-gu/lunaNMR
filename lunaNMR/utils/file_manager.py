@@ -201,7 +201,13 @@ class NMRFileManager:
             'f1': 'Position_Y',
             'assignment': 'Assignment',
             'assign': 'Assignment',
-            'label': 'Assignment'
+            'label': 'Assignment',
+            'height': 'Height',
+            'intensity': 'Intensity',
+            'amp': 'Intensity',
+            'amplitude': 'Intensity',
+            'int': 'Intensity',
+            'volume': 'Volume'
         }
 
         # Apply mappings (case insensitive)

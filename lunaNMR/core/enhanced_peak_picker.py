@@ -507,8 +507,8 @@ class EnhancedPeakPicker:
             # Check if this medium peak is in the shadow of a dominant peak
             is_in_shadow = False
             for dom_peak in dominant_peaks:
-                distance = np.sqrt((peak['x_ppm'] - dom_peak['x_ppm'])**2 +
-                                 (peak['y_ppm'] - dom_peak['y_ppm'])**2)
+                distance = np.sqrt((peak['ppm_x'] - dom_peak['ppm_x'])**2 +
+                                 (peak['ppm_y'] - dom_peak['ppm_y'])**2)
                 if distance < adaptive_shadow_distance:  # Adaptive shadow detection
                     is_in_shadow = True
                     break
@@ -579,8 +579,8 @@ class EnhancedPeakPicker:
             nearby_peaks = []
             for j, other_peak in enumerate(peaks):
                 if i != j:
-                    distance = np.sqrt((peak['x_ppm'] - other_peak['x_ppm'])**2 +
-                                     (peak['y_ppm'] - other_peak['y_ppm'])**2)
+                    distance = np.sqrt((peak['ppm_x'] - other_peak['ppm_x'])**2 +
+                                     (peak['ppm_y'] - other_peak['ppm_y'])**2)
 
                     # Adaptive overlap threshold based on peak intensities and nucleus type
                     intensity_ratio = min(peak.get('intensity', 1), other_peak.get('intensity', 1)) / \

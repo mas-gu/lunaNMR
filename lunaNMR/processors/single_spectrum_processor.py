@@ -124,16 +124,54 @@ class SingleSpectrumProcessor:
 
         fitted_results = []
         total_count = len(peak_list)
+        
+        print(f"   🔍 DEBUG peak_list columns: {list(peak_list.columns)}")
+        print(f"   🔍 DEBUG first row: {peak_list.iloc[0].to_dict()}")
+
+        # CRITICAL: Measure intensities if missing
+        if 'Height' not in peak_list.columns and 'Intensity' not in peak_list.columns:
+            print("   ⚠️ Peak list missing Height/Intensity - measuring now from spectrum...")
+            if self.integrator.nmr_data is not None:
+                data = self.integrator.nmr_data
+                x_axis = self.integrator.ppm_x_axis
+                y_axis = self.integrator.ppm_y_axis
+
+                intensities = []
+                for _, row in peak_list.iterrows():
+                    x_ppm = row['Position_X']
+                    y_ppm = row['Position_Y']
+
+                    # Find closest indices
+                    x_idx = np.argmin(np.abs(x_axis - x_ppm))
+                    y_idx = np.argmin(np.abs(y_axis - y_ppm))
+
+                    # Measure intensity at peak position
+                    intensity = data[y_idx, x_idx]
+                    intensities.append(intensity)
+
+                # Add columns to DataFrame
+                peak_list['Height'] = intensities
+                peak_list['Intensity'] = intensities
+
+                # Update integrator's copy too
+                self.integrator.peak_list = peak_list
+
+                print(f"   ✅ Measured intensities for {len(intensities)} peaks")
+            else:
+                print("   ❌ Cannot measure intensities - no spectrum data loaded")
 
         # Build all_peaks_context for 2D overlap detection and routing
         all_peaks_context = []
         for _, row in peak_list.iterrows():
+            # Try both 'Height' and 'Intensity' columns (different sources use different names)
+            intensity = row.get('Height', row.get('Intensity', None))
             all_peaks_context.append({
                 'assignment': str(row.get('Assignment', 'Unknown')),
                 'x_ppm': float(row['Position_X']),
                 'y_ppm': float(row['Position_Y']),
                 'pos_x': float(row['Position_X']),
-                'pos_y': float(row['Position_Y'])
+                'pos_y': float(row['Position_Y']),
+                'intensity': intensity  # Preserve peak picker intensity
             })
 
         print(f"🔄 Starting cluster-based sequential fitting of {total_count} peaks")
@@ -224,16 +262,42 @@ class SingleSpectrumProcessor:
                 target_meta = peak_metadata.get((target_x, target_y), {'assignment': 'Unknown'})
                 target_assignment = target_meta.get('assignment', 'Unknown')
 
-                # Call 2D overlap fitting with assignments for GUI table display
+                # Convert cluster tuples to dictionaries with full peak information
+                cluster_dicts = []
+                for peak_x, peak_y in cluster:
+                    # Find matching peak in all_peaks_context
+                    peak_dict = None
+                    for ctx_peak in all_peaks_context:
+                        ctx_x = ctx_peak.get('x_ppm') or ctx_peak.get('pos_x')
+                        ctx_y = ctx_peak.get('y_ppm') or ctx_peak.get('pos_y')
+                        if abs(ctx_x - peak_x) < 0.001 and abs(ctx_y - peak_y) < 0.01:
+                            peak_dict = ctx_peak
+                            break
+
+                    # If not found, create minimal dict
+                    if peak_dict is None:
+                        peak_dict = {
+                            'x_ppm': peak_x,
+                            'y_ppm': peak_y,
+                            'pos_x': peak_x,
+                            'pos_y': peak_y,
+                            'intensity': None
+                        }
+
+                    cluster_dicts.append(peak_dict)
+
+                print(f"   🔍 DEBUG cluster_dicts[0] = {cluster_dicts[0]}")
+
+                # Call 2D overlap fitting with dictionary format
                 group_result = self.integrator.fit_overlap_group_2d(
-                    cluster,
+                    cluster_dicts,
                     target_assignment,
                     peak_assignments=cluster_assignments
                 )
 
                 if group_result and group_result.get('success', False):
                     # Extract 2D region data for visualization (CRITICAL for GUI)
-                    region_2d = self.integrator.extract_2d_region_for_overlap_group(cluster)
+                    region_2d = self.integrator.extract_2d_region_for_overlap_group(cluster_dicts)
 
                     # Safety check: ensure region extraction succeeded
                     if region_2d is None:

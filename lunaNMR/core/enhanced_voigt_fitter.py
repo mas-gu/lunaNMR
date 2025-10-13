@@ -47,13 +47,13 @@ except ImportError:
             return 'poor'
 
 # Import overlap resolution modules (optional dependency for backward compatibility)
-try:
-    from .overlap_resolver_engine import OverlapResolverEngine
-    from ..utils.overlap_config import OverlapResolutionConfig
-    OVERLAP_RESOLUTION_AVAILABLE = True
-except ImportError:
-    OVERLAP_RESOLUTION_AVAILABLE = False
-    # Silently continue without overlap resolution - will print warning if user tries to enable it
+#try:
+#    from .overlap_resolver_engine import OverlapResolverEngine
+#    from ..utils.overlap_config import OverlapResolutionConfig
+#    OVERLAP_RESOLUTION_AVAILABLE = True
+#except ImportError:
+#    OVERLAP_RESOLUTION_AVAILABLE = False
+#    # Silently continue without overlap resolution - will print warning if user tries to enable it
 
 class EnhancedVoigtFitter:
     """Enhanced Voigt profile fitter with robust parameter estimation"""
@@ -114,30 +114,24 @@ class EnhancedVoigtFitter:
             self.parameter_estimator = RobustParameterEstimator(self)
 
 
-        # Initialize automated fitting components (Priority 1 & 2 improvements)
+        # Initialize simplified parameter manager (core functionality)
         try:
             from ..utils.simplified_parameter_manager import SimplifiedParameterManager, ParameterAdapter
-            from .consensus_fitting_engine import ConsensusDetector, ConsensusFittingEngine
-
             self.simplified_param_manager = SimplifiedParameterManager()
             self.parameter_adapter = ParameterAdapter(self.simplified_param_manager)
-            self.consensus_detector = ConsensusDetector()
-            self.consensus_fitter = ConsensusFittingEngine()
+        except ImportError:
+            self.simplified_param_manager = None
+            self.parameter_adapter = None
 
-            # Flag to enable automated fitting mode
-            self.use_automated_fitting = True
-            print("🚀 Automated fitting engine initialized (Priority 1 & 2 improvements)")
-
-        except ImportError as e:
-            self.use_automated_fitting = False
-            print(f"⚠️ Automated fitting not available: {e}")
-            # Continue with legacy fitting
+        # Consensus fitting engine was removed (Phase 2 cleanup - orphaned overlap subsystem)
+        # Kept flag for backward compatibility with any code checking this attribute
+        self.use_automated_fitting = False
 
         # NEW: Overlap resolution components (lazy initialization for backward compatibility)
-        self.overlap_resolver = None  # Will be initialized on first use if needed
-        self.overlap_detection_enabled = False  # Default OFF for backward compatibility
-        self.overlap_detection_threshold = 0.5  # Minimum distance (ppm) to consider overlap
-        self.overlap_config = None  # Will use defaults if not set
+#        self.overlap_resolver = None  # Will be initialized on first use if needed
+#       self.overlap_detection_enabled = False  # Default OFF for backward compatibility
+#        self.overlap_detection_threshold = 0.5  # Minimum distance (ppm) to consider overlap
+#        self.overlap_config = None  # Will use defaults if not set
 
     def set_gui_parameters(self, gui_fitting_params):
         """
@@ -3087,7 +3081,6 @@ class EnhancedVoigtFitter:
                 self.last_fit_diagnostics['global_params'] = global_params
 
                 # ===================================================================
-                # See spectrum.cpp:1100 (y.push_back(b)) and peakfit.cpp:370 (yred[j] = y[i])
                 # ===================================================================
                 baseline_est = 0.0
                 baseline_value = 0.0

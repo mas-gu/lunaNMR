@@ -312,10 +312,137 @@ class SpectrumPlotter:
                 import traceback
                 traceback.print_exc()
 
+        # Plot PS2D ellipses if requested (debug tool)
+        show_ellipses = kwargs.get('show_ellipses', False)
+        nucleus_type = kwargs.get('nucleus_type', '15N')
+        if show_ellipses:
+            self._plot_ps2d_ellipses(integrator, nucleus_type)
+
         # Add legend
         handles, labels = self.ax.get_legend_handles_labels()
         if handles:
             self.ax.legend(loc='upper right', fontsize='small')
+
+    def _plot_ps2d_ellipses(self, integrator, nucleus_type='15N'):
+        """
+        Plot PS2D elliptical integration windows for all peaks (debug tool).
+
+        This visualization shows the elliptical windows that PS2D uses for:
+        1. Data selection (radF1_selector × radF2_selector)
+        2. Fitting region (radF1 × radF2)
+
+        Args:
+            integrator: EnhancedVoigtIntegrator with peak_list
+            nucleus_type: '15N' or '13C' for config lookup
+        """
+        from matplotlib.patches import Ellipse as EllipsePatch
+
+        # Get PS2D configuration
+        try:
+            from lunaNMR.core.ps2d_config import get_ps2d_config
+            # DO NOT call set_ps2d_config() here - it would override user's manual changes!
+            # Just read the current config which may have been modified by the user
+            config = get_ps2d_config()
+
+            radF1 = config.radF1
+            radF2 = config.radF2
+            radF1_selector = config.radF1_selector
+            radF2_selector = config.radF2_selector
+
+        except Exception as e:
+            print(f"⚠️  Could not load PS2D config: {e}")
+            return
+
+        # Get peak positions - try multiple sources
+        peaks_to_plot = []
+
+        # Try 1: Reference peak list (DataFrame)
+        if hasattr(integrator, 'peak_list') and integrator.peak_list is not None:
+            try:
+                peak_df = integrator.peak_list
+
+                # Find position columns
+                x_col, y_col = None, None
+                for col_name in ['Position_X', 'position_x', 'pos_x', 'x_ppm', '1H']:
+                    if col_name in peak_df.columns:
+                        x_col = col_name
+                        break
+
+                for col_name in ['Position_Y', 'position_y', 'pos_y', 'y_ppm', '15N', '13C']:
+                    if col_name in peak_df.columns:
+                        y_col = col_name
+                        break
+
+                if x_col and y_col:
+                    for idx, row in peak_df.iterrows():
+                        peaks_to_plot.append({
+                            'x': float(row[x_col]),
+                            'y': float(row[y_col]),
+                            'label': row.get('Assignment', f'Peak_{idx+1}')
+                        })
+            except Exception as e:
+                print(f"⚠️  Could not extract peaks from peak_list: {e}")
+
+        # Try 2: Detected/fitted peaks (list of dicts)
+        if not peaks_to_plot and hasattr(integrator, 'fitted_peaks') and integrator.fitted_peaks:
+            try:
+                for peak in integrator.fitted_peaks:
+                    peaks_to_plot.append({
+                        'x': peak.get('ppm_x', peak.get('x_ppm', 0)),
+                        'y': peak.get('ppm_y', peak.get('y_ppm', 0)),
+                        'label': peak.get('assignment', peak.get('Assignment', 'Unknown'))
+                    })
+            except Exception as e:
+                print(f"⚠️  Could not extract peaks from fitted_peaks: {e}")
+
+        if not peaks_to_plot:
+            print("⚠️  No peaks available for ellipse visualization")
+            return
+
+        try:
+            # Plot ellipses for each peak
+            for idx, peak in enumerate(peaks_to_plot):
+                peak_x = peak['x']
+                peak_y = peak['y']
+
+                # Data selector ellipse (outer, dashed)
+                selector_ellipse = EllipsePatch(
+                    (peak_x, peak_y),
+                    width=2 * radF2_selector,  # diameter in 1H dimension
+                    height=2 * radF1_selector,  # diameter in 15N/13C dimension
+                    fill=False,
+                    edgecolor='cyan',
+                    linestyle='--',
+                    linewidth=1.5,
+                    alpha=0.6,
+                    zorder=6,
+                    label='Data Selector' if idx == 0 else ''
+                )
+                self.ax.add_patch(selector_ellipse)
+
+                # Fitting region ellipse (inner, solid)
+                fitting_ellipse = EllipsePatch(
+                    (peak_x, peak_y),
+                    width=2 * radF2,  # diameter in 1H dimension
+                    height=2 * radF1,  # diameter in 15N/13C dimension
+                    fill=False,
+                    edgecolor='magenta',
+                    linestyle='-',
+                    linewidth=2,
+                    alpha=0.8,
+                    zorder=7,
+                    label='Fitting Region' if idx == 0 else ''
+                )
+                self.ax.add_patch(fitting_ellipse)
+
+            print(f"✅ Plotted PS2D ellipses for {len(peaks_to_plot)} peaks")
+            print(f"   Fitting region: {radF1:.3f} × {radF2:.3f} ppm")
+            print(f"   Data selector: {radF1_selector:.3f} × {radF2_selector:.3f} ppm")
+
+        except Exception as e:
+            print(f"❌ Error plotting PS2D ellipses: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _plot_fitted_curves(self, voigt_fits):
         """Overlay fitted Voigt curves on spectrum"""

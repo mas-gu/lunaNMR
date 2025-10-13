@@ -45,6 +45,7 @@ if matplotlib.get_backend() != 'TkAgg':
 
 from lunaNMR.utils.parameter_manager import NMRParameterManager
 from lunaNMR.utils.font_config import get_display_text, configure_emoji_support
+from lunaNMR.core.ps2d_config import set_ps2d_config, get_ps2d_config
 
 from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
 from lunaNMR.processors.multi_spectrum_processor import MultiSpectrumProcessor
@@ -63,7 +64,8 @@ try:
         PeakNavigator
     )
     from lunaNMR.utils.file_manager import NMRFileManager, DataValidator, FileMetadata
-    from lunaNMR.processors.series_processor import SeriesProcessor, SeriesAnalyzer, BatchResults
+    #from lunaNMR.processors.series_processor import SeriesProcessor, SeriesAnalyzer, BatchResults
+    from lunaNMR.processors.multi_spectrum_processor import SeriesAnalyzer, BatchResults
     from lunaNMR.gui.visualization import SpectrumPlotter, VoigtAnalysisPlotter, SeriesPlotter, PlotManager
     from lunaNMR.utils.config_manager import ConfigurationManager, UserPreferences, ProcessingParameters
 
@@ -96,8 +98,7 @@ class NMRPeaksSeriesGUI:
         self.integrator = EnhancedVoigtIntegrator()
         self.file_manager = NMRFileManager()
         self.validator = DataValidator()
-        self.series_processor = SeriesProcessor()
-        self.series_analyzer = SeriesAnalyzer()
+
 
         # Configuration management
         self.config_manager = ConfigurationManager("NMRPeakSeries")
@@ -109,6 +110,7 @@ class NMRPeaksSeriesGUI:
         self.current_peak_file = None
         self.current_voigt_result = None
         self.batch_results = None
+        self.series_output_folder = None
 
         # Initialize new decoupled architecture components
         self.param_manager = NMRParameterManager()
@@ -188,6 +190,9 @@ class NMRPeaksSeriesGUI:
         self.centroid_window_y_ppm = tk.DoubleVar(value=0.1)       # Y-window size in ppm (15N dimension)
         self.centroid_noise_multiplier = tk.DoubleVar(value=2.0)   # Noise threshold multiplier
 
+        # PS2D Configuration parameters
+        self.nucleus_type = tk.StringVar(value='15N')  # Default to 15N-HSQC
+
         # Detection square size parameters - now anisotropic (X and Y dimensions)
         self.detection_square_size = tk.IntVar(value=3)          # Size of detection square X-dimension/1H (pixels)
         self.detection_rectangle_y = tk.IntVar(value=1)          # Size of detection rectangle Y-dimension/15N (pixels)
@@ -241,6 +246,13 @@ class NMRPeaksSeriesGUI:
         self.show_detected = tk.BooleanVar(value=display_options['show_detected'])
         self.show_assigned = tk.BooleanVar(value=display_options['show_assigned'])
         self.show_fitted_curves = tk.BooleanVar(value=display_options['show_fitted_curves'])
+        self.show_ellipses = tk.BooleanVar(value=False)  # Debug tool for PS2D elliptical windows
+
+        # PS2D parameters (initialized from ps2d_config)
+        ps2d_config = get_ps2d_config()
+        self.ps2d_radF1 = tk.DoubleVar(value=ps2d_config.radF1)
+        self.ps2d_radF2 = tk.DoubleVar(value=ps2d_config.radF2)
+        self.ps2d_max_iterations = tk.IntVar(value=ps2d_config.max_iterations)
 
         # Series options
         series_options = self.proc_params.get_series_options()
@@ -271,16 +283,7 @@ class NMRPeaksSeriesGUI:
         self.max_integration_iterations = tk.IntVar(value=5)
         self.show_detection_quality = tk.BooleanVar(value=False)
 
-        # Advanced integration parameters (missing from GUI)
-        self.adaptive_thresholds_enabled = tk.BooleanVar(value=integration_options.get('adaptive_thresholds_enabled', False))
-        self.multi_resolution_enabled = tk.BooleanVar(value=integration_options.get('multi_resolution_enabled', False))
-        self.physics_constraints_enabled = tk.BooleanVar(value=integration_options.get('physics_constraints_enabled', True))
-        self.convergence_threshold = tk.DoubleVar(value=integration_options.get('convergence_threshold', 0.01))
-        self.fit_likelihood_threshold = tk.DoubleVar(value=integration_options.get('fit_likelihood_threshold', 0.2))
-        # Detection mode control (in-place vs full detection)
-        self.force_full_detection = tk.BooleanVar(value=integration_options.get('force_full_detection', False))
-
-        # 1D Refinement parameters (NEW)
+        # 1D Refinement parameters
         self.enable_1d_refinement = tk.BooleanVar(value=integration_options.get('enable_1d_refinement', True))
         self.refinement_quality_threshold = tk.DoubleVar(value=integration_options.get('refinement_quality_threshold', 0.7))
         self.refinement_coordinate_threshold = tk.DoubleVar(value=integration_options.get('refinement_coordinate_threshold', 0.01))
@@ -388,19 +391,19 @@ class NMRPeaksSeriesGUI:
                 pass  # Silently ignore S/N parameter sync errors during startup
 
         # Sync overlap resolution settings
-        if hasattr(self, 'overlap_resolution_enabled') and hasattr(self, 'overlap_resolution_preset'):
-            try:
-                overlap_enabled = self.overlap_resolution_enabled.get()
-                overlap_preset = self.overlap_resolution_preset.get()
+        #if hasattr(self, 'overlap_resolution_enabled') and hasattr(self, 'overlap_resolution_preset'):
+        #    try:
+        #        overlap_enabled = self.overlap_resolution_enabled.get()
+        #        overlap_preset = self.overlap_resolution_preset.get()
 
-                if overlap_enabled:
-                    # Enable overlap resolution with selected preset
-                    self.integrator.enable_overlap_resolution_preset(preset=overlap_preset)
-                    print(f"✅ Overlap resolution enabled with '{overlap_preset}' preset")
-                else:
-                    # Disable overlap resolution
-                    self.integrator.configure_overlap_resolution(enable=False)
-                    print("✅ Overlap resolution disabled")
+        #        if overlap_enabled:
+        #            # Enable overlap resolution with selected preset
+        #            self.integrator.enable_overlap_resolution_preset(preset=overlap_preset)
+        #            print(f"✅ Overlap resolution enabled with '{overlap_preset}' preset")
+        #        else:
+        #            # Disable overlap resolution
+        #            self.integrator.configure_overlap_resolution(enable=False)
+        #            print("✅ Overlap resolution disabled")
 
             except (AttributeError, Exception) as e:
                 print(f"⚠️ Overlap resolution sync warning: {e}")
@@ -791,6 +794,69 @@ class NMRPeaksSeriesGUI:
                                              font=('TkDefaultFont', 8), foreground='blue')
         self.file_validation_label.pack(anchor=tk.W, padx=(20, 0))
 
+        # =================== PS2D CONFIGURATION SECTION ===================
+        ps2d_config_frame = ttk.LabelFrame(parent, text="⚙️ PS2D Algorithm Configuration", padding=10)
+        ps2d_config_frame.pack(fill=tk.X, pady=(0, 10))
+
+        nucleus_frame = ttk.Frame(ps2d_config_frame)
+        nucleus_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(nucleus_frame, text="Nucleus Type:", font=('TkDefaultFont', 9, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+
+        nucleus_combo = ttk.Combobox(nucleus_frame, textvariable=self.nucleus_type,
+                                     values=['15N', '13C'], state='readonly', width=10)
+        nucleus_combo.pack(side=tk.LEFT, padx=(0, 10))
+        nucleus_combo.bind('<<ComboboxSelected>>', self.on_nucleus_type_change)
+
+        ttk.Label(nucleus_frame, text="(for 2D overlap fitting)",
+                 font=('TkDefaultFont', 8), foreground='gray').pack(side=tk.LEFT, padx=(0, 15))
+
+        # Debug: Show Ellipses checkbox
+        show_ellipses_check = ttk.Checkbutton(nucleus_frame, text="Show Ellipses",
+                                              variable=self.show_ellipses,
+                                              command=self.update_main_plot)
+        show_ellipses_check.pack(side=tk.LEFT)
+
+        # PS2D Radii Controls
+        radii_frame = ttk.Frame(ps2d_config_frame)
+        radii_frame.pack(fill=tk.X, pady=5)
+
+        # Row 0: Labels and spinboxes
+        ttk.Label(radii_frame, text="Ellipse Radii:", font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+
+        ttk.Label(radii_frame, text="radF1:").grid(row=0, column=1, sticky=tk.W)
+        radF1_spin = tk.Spinbox(radii_frame, from_=0.01, to=2.0, increment=0.01,
+                                textvariable=self.ps2d_radF1, width=6, format="%.3f")
+        radF1_spin.grid(row=0, column=2, sticky=tk.W, padx=(2, 15))
+        # Remove command from spinbox - we'll use explicit Apply button only
+        radF1_spin.bind('<Return>', lambda e: self.on_ps2d_radii_change())
+
+        ttk.Label(radii_frame, text="radF2:").grid(row=0, column=3, sticky=tk.W)
+        radF2_spin = tk.Spinbox(radii_frame, from_=0.001, to=0.5, increment=0.005,
+                                textvariable=self.ps2d_radF2, width=6, format="%.3f")
+        radF2_spin.grid(row=0, column=4, sticky=tk.W, padx=(2, 15))
+        # Remove command from spinbox - we'll use explicit Apply button only
+        radF2_spin.bind('<Return>', lambda e: self.on_ps2d_radii_change())
+
+        ttk.Label(radii_frame, text="(ppm)", font=('TkDefaultFont', 8), foreground='gray').grid(row=0, column=5, sticky=tk.W)
+
+        # Row 1: Max iterations control
+        ttk.Label(radii_frame, text="Max Iterations:", font=('TkDefaultFont', 9, 'bold')).grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(10, 0))
+
+        max_iter_spin = tk.Spinbox(radii_frame, from_=50, to=2000, increment=50,
+                                   textvariable=self.ps2d_max_iterations, width=6)
+        max_iter_spin.grid(row=1, column=1, sticky=tk.W, padx=(2, 15), pady=(10, 0))
+        max_iter_spin.bind('<Return>', lambda e: self.on_ps2d_params_change())
+
+        ttk.Label(radii_frame, text="(per LM stage)", font=('TkDefaultFont', 8), foreground='gray').grid(row=1, column=2, sticky=tk.W, pady=(10, 0))
+
+        # Row 2: Apply button and helper text
+        apply_params_btn = ttk.Button(radii_frame, text="Apply Changes", command=self.on_ps2d_params_change, width=15)
+        apply_params_btn.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+
+        ttk.Label(radii_frame, text="← Click to update parameters",
+                 font=('TkDefaultFont', 8), foreground='gray').grid(row=2, column=2, columnspan=4, sticky=tk.W, pady=(5, 0), padx=(5, 0))
+
         # =================== SPECTRUM CONTROLS SECTION ===================
         spectrum_frame = ttk.LabelFrame(parent, text="🖼️ Spectrum Display Controls", padding=10)
         spectrum_frame.pack(fill=tk.X, pady=(0, 10))
@@ -1167,6 +1233,16 @@ class NMRPeaksSeriesGUI:
                                           command=self.update_edit_mode_status)
         deletion_checkbox.pack(side=tk.LEFT, padx=(20, 0))
 
+        # Peak addition mode
+        addition_frame = ttk.Frame(edit_frame)
+        addition_frame.pack(fill=tk.X, pady=(5, 2))
+
+        self.peak_addition_mode = tk.BooleanVar(value=False)
+        addition_checkbox = ttk.Checkbutton(addition_frame, text="➕ Enable Peak Addition (Left-click to add)",
+                                          variable=self.peak_addition_mode,
+                                          command=self.update_edit_mode_status)
+        addition_checkbox.pack(side=tk.LEFT, padx=(20, 0))
+
         # Instructions
         #instructions_label = ttk.Label(edit_frame,
         #                             text="Instructions: Click peak to select, click new position to move",
@@ -1418,30 +1494,6 @@ class NMRPeaksSeriesGUI:
         ttk.Label(ps2d_help_frame, text="   Only intensity and position are optimized for series (PS2D C++ algorithm)",
                  font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W)
 
-        # Integrated detection-fitting controls
-        ttk.Separator(options_frame, orient='horizontal').pack(fill=tk.X, pady=5)
-        ttk.Label(options_frame, text=" Integrated Detection-Fitting:", font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W)
-
-        # Integration mode selection
-        integration_mode_frame = ttk.Frame(options_frame)
-        integration_mode_frame.pack(fill=tk.X, padx=10, pady=2)
-
-        ttk.Label(integration_mode_frame, text="Integration Mode:").pack(side=tk.LEFT)
-        integration_mode_combo = ttk.Combobox(integration_mode_frame, textvariable=self.integration_mode,
-                                            values=['standard'], #, 'enhanced'
-                                            state="readonly", width=12)
-        integration_mode_combo.pack(side=tk.LEFT, padx=(5, 0))
-        integration_mode_combo.bind('<<ComboboxSelected>>', self.on_integration_mode_change)
-
-
-        # Integration status display
-        self.integration_status_frame = ttk.Frame(options_frame)
-        self.integration_status_frame.pack(fill=tk.X, padx=10, pady=2)
-
-        self.integration_status_label = ttk.Label(self.integration_status_frame,
-                                                text="Status: Standard mode",
-                                                font=('TkDefaultFont', 8), foreground='blue')
-        self.integration_status_label.pack(side=tk.LEFT)
 
         # Number of integrations option for Voigt fitting
         integrations_frame = ttk.Frame(options_frame)
@@ -2261,76 +2313,6 @@ class NMRPeaksSeriesGUI:
             else:
                 self.distance_ppm_label.config(text="(load data for ppm)")
 
-    def on_integration_mode_change(self, event=None):
-        """Handle integration mode change"""
-        mode = self.integration_mode.get()
-
-        # Update series processor integration mode
-        try:
-            integration_params = {
-                # 1D Refinement parameters (NEW)
-                'enable_1d_refinement': self.enable_1d_refinement.get(),
-                'refinement_quality_threshold': self.refinement_quality_threshold.get(),
-                'refinement_coordinate_threshold': self.refinement_coordinate_threshold.get(),
-            }
-            self.series_processor.set_integration_mode(mode, **integration_params)
-
-            # Update status display
-            mode_suffix = " (Full Detection)" if self.force_full_detection.get() and mode in ['integrated', 'adaptive'] else ""
-            refinement_suffix = " + 1D Refinement" if self.enable_1d_refinement.get() and mode in ['integrated', 'adaptive'] else ""
-            status_text = f"Status: {mode.title()} mode{mode_suffix}{refinement_suffix} (Core detection params: height={self.peak_height_threshold.get():.3f}, max_peaks={self.max_peaks_fit.get()})"
-            # Mode-specific status text updates (integrated/adaptive modes removed)
-
-            # Update both status labels (series section and single spectrum section)
-            self.integration_status_label.config(text=status_text)
-            if hasattr(self, 'single_integration_status'):
-                self.single_integration_status.config(text=status_text)
-
-            # Enable/disable parameter controls based on mode
-            state = 'normal' if mode != 'standard' else 'disabled'
-
-            # Enable/disable series integration controls
-            for frame in [self.integration_params_frame]:
-                for widget in frame.winfo_children():
-                    for child in widget.winfo_children():
-                        if isinstance(child, (ttk.Spinbox,)):
-                            child.config(state=state)
-
-            # Enable/disable single spectrum integration controls
-            if hasattr(self, 'single_integration_controls'):
-                for control in self.single_integration_controls:
-                    control.config(state=state)
-
-            # Enable/disable single spectrum integration checkboxes
-            if hasattr(self, 'single_integration_checkboxes'):
-                checkbox_state = 'normal' if mode != 'standard' else 'disabled'
-                for checkbox in self.single_integration_checkboxes:
-                    checkbox.config(state=checkbox_state)
-
-            # Update button text to reflect current mode
-            if hasattr(self, 'detect_peaks_button'):
-                if mode == 'integrated':
-                    self.detect_peaks_button.config(text="🔍 Detect Peaks (INT)")
-                elif mode == 'adaptive':
-                    self.detect_peaks_button.config(text="🔍 Detect Peaks (ADV)")
-                else:
-                    self.detect_peaks_button.config(text="🔍 Detect Peaks")
-
-            if hasattr(self, 'fit_all_peaks_button'):
-                if mode == 'integrated':
-                    self.fit_all_peaks_button.config(text="📈 Fit All Peaks (INT)")
-                elif mode == 'adaptive':
-                    self.fit_all_peaks_button.config(text="📈 Fit All Peaks (ADV)")
-                else:
-                    self.fit_all_peaks_button.config(text="📈 Fit All Peaks")
-
-            self.update_status(f"✅ Integration mode changed to: {mode}")
-            print(f"Integration mode changed to: {mode}")
-
-        except Exception as e:
-            self.update_status(f"❌ Error setting integration mode: {str(e)}", error=True)
-            print(f"Error setting integration mode: {e}")
-
     def show_integration_progress(self):
         """Show the integration progress panel"""
         self.progress_frame.pack(fill=tk.X, pady=(0, 10), before=self.progress_frame.master.children['!labelframe3'])  # Before Status & Export
@@ -2390,23 +2372,13 @@ class NMRPeaksSeriesGUI:
 
     def pause_integration(self):
         """Pause the current integration process"""
-        # Set integration state to paused
-        if hasattr(self.series_processor, 'pause_integration'):
-            self.series_processor.pause_integration()
-            self.pause_integration_button.config(text="▶️ Resume")
-            self.update_status("Integration paused by user")
-        else:
-            print("Pause functionality not implemented in series processor")
+        # Note: Pause functionality not currently implemented for series processing
+        print("Pause functionality not implemented in series processor")
 
     def stop_integration(self):
         """Stop the current integration process"""
-        # Set integration state to stopped
-        if hasattr(self.series_processor, 'stop_integration'):
-            self.series_processor.stop_integration()
-            self.hide_integration_progress()
-            self.update_status("Integration stopped by user")
-        else:
-            print("Stop functionality not implemented in series processor")
+        # Note: Stop functionality not currently implemented for series processing
+        print("Stop functionality not implemented in series processor")
 
     def reset_integration_progress(self):
         """Reset the progress display to initial state"""
@@ -2792,6 +2764,85 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
         else:
             self.update_status(f"Peak list selected: {filename}. Please select an NMR spectrum.")
 
+    def on_nucleus_type_change(self, event=None):
+        """Handle nucleus type selection change for PS2D configuration"""
+        nucleus = self.nucleus_type.get()
+        set_ps2d_config(nucleus)
+        config = get_ps2d_config()
+
+        # Update GUI parameter values from config
+        self.ps2d_radF1.set(config.radF1)
+        self.ps2d_radF2.set(config.radF2)
+        self.ps2d_max_iterations.set(config.max_iterations)
+
+        # Log the change
+        print(f"⚙️ PS2D configuration switched to: {nucleus}")
+        print(f"   radF1={config.radF1:.3f} ppm, radF2={config.radF2:.4f} ppm")
+        print(f"   max_iterations={config.max_iterations}")
+        print(f"   overlap_threshold_y={config.overlap_threshold_y:.3f} ppm, overlap_threshold_x={config.overlap_threshold_x:.3f} ppm")
+
+        # Update status bar
+        self.update_status(f"⚙️ PS2D configuration: {nucleus}-HSQC (radF1={config.radF1:.2f}, radF2={config.radF2:.3f})")
+
+        # Update plot if ellipses are shown
+        if self.show_ellipses.get():
+            self.update_main_plot()
+
+    def on_ps2d_params_change(self):
+        """Handle manual change of PS2D parameters (radii and max_iterations)"""
+        try:
+            radF1 = self.ps2d_radF1.get()
+            radF2 = self.ps2d_radF2.get()
+            max_iterations = self.ps2d_max_iterations.get()
+
+            # Validate values
+            if radF1 <= 0 or radF2 <= 0:
+                print("⚠️  Radii must be positive values")
+                self.update_status("⚠️  PS2D radii must be positive")
+                return
+
+            if max_iterations < 50:
+                print("⚠️  Max iterations must be at least 50")
+                self.update_status("⚠️  PS2D max iterations must be ≥ 50")
+                return
+
+            # CRITICAL: Update ps2d_config global instance
+            # This ensures all PS2D functions use the new values
+            config = get_ps2d_config()
+            config.radF1 = radF1
+            config.radF2 = radF2
+            config.max_iterations = max_iterations
+
+            # Also update selector radii proportionally to maintain safety margin
+            # Typically selector radii are ~1.5× fitting radii
+            config.radF1_selector = radF1 * 1.5
+            config.radF2_selector = radF2 * 1.5
+
+            print(f"✅ PS2D parameters updated:")
+            print(f"   Fitting region: radF1={radF1:.4f}, radF2={radF2:.4f} ppm")
+            print(f"   Data selector:  radF1_selector={config.radF1_selector:.4f}, radF2_selector={config.radF2_selector:.4f} ppm")
+            print(f"   Max iterations: {max_iterations} per LM stage")
+
+            # ALWAYS refresh the spectrum plot to show updated ellipses
+            # This ensures the user sees the effect of their changes immediately
+            self.update_main_plot()
+
+            # Update status bar
+            self.update_status(f"✅ PS2D params: radF1={radF1:.3f}, radF2={radF2:.4f} ppm, max_iter={max_iterations}")
+
+        except tk.TclError:
+            # Invalid number entered, ignore silently
+            pass
+        except Exception as e:
+            print(f"❌ Error updating PS2D parameters: {e}")
+            import traceback
+            traceback.print_exc()
+            self.update_status(f"❌ Error updating PS2D parameters")
+
+    def on_ps2d_radii_change(self):
+        """Legacy callback for radii-only changes (redirect to full param handler)"""
+        self.on_ps2d_params_change()
+
     def load_current_data(self):
         """Load currently selected files with workflow-aware logic"""
         if not self.current_nmr_file:
@@ -2825,6 +2876,13 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 # Load into integrator
                 self.integrator.peak_list = peak_df
 
+                # Check if intensity/height columns exist; if not, will measure after spectrum loads
+                if 'Height' not in peak_df.columns and 'Intensity' not in peak_df.columns:
+                    print("   ⚠️ Loaded peak list has no Height/Intensity - will measure after spectrum loads")
+                    self._need_intensity_measurement = True
+                else:
+                    self._need_intensity_measurement = False
+
             else:  # S/N threshold mode
                 # NEW WORKFLOW - SPECTRUM ONLY
                 print("🎯 Loading in S/N Threshold mode (spectrum only)")
@@ -2834,6 +2892,11 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             success = self.integrator.load_nmr_file(self.current_nmr_file)
 
             if success:
+                # If peak list was loaded without intensities, measure them now
+                if hasattr(self, '_need_intensity_measurement') and self._need_intensity_measurement:
+                    print("   📏 Measuring peak intensities from spectrum...")
+                    self._measure_peak_intensities()
+                    self._need_intensity_measurement = False
                 # Clear previous analysis results when loading new spectrum
                 self._clear_previous_analysis_results()
 
@@ -2860,6 +2923,39 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
 
         finally:
             self.root.config(cursor="")
+
+    def _measure_peak_intensities(self):
+        """Measure peak intensities from loaded spectrum data"""
+        if self.integrator.peak_list is None or self.integrator.nmr_data is None:
+            return
+
+        try:
+            peak_list = self.integrator.peak_list
+            data = self.integrator.nmr_data
+            x_axis = self.integrator.ppm_x_axis
+            y_axis = self.integrator.ppm_y_axis
+
+            intensities = []
+            for _, peak in peak_list.iterrows():
+                x_ppm = peak['Position_X']
+                y_ppm = peak['Position_Y']
+
+                # Find closest indices
+                x_idx = np.argmin(np.abs(x_axis - x_ppm))
+                y_idx = np.argmin(np.abs(y_axis - y_ppm))
+
+                # Measure intensity at peak position
+                intensity = data[y_idx, x_idx]
+                intensities.append(intensity)
+
+            # Add both Height and Intensity columns
+            self.integrator.peak_list['Height'] = intensities
+            self.integrator.peak_list['Intensity'] = intensities
+
+            print(f"   ✅ Measured intensities for {len(intensities)} peaks")
+
+        except Exception as e:
+            print(f"   ⚠️ Failed to measure intensities: {e}")
 
     def _clear_previous_analysis_results(self):
         """
@@ -3119,26 +3215,19 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
     # =================== PROCESSING METHODS ===================
 
     def detect_peaks(self):
-        """Perform peak detection - supports both standard and integrated detection"""
+        """Perform peak detection - supports S/N threshold and standard (peak list) modes"""
         if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
             messagebox.showerror("Error", "Please load NMR data first")
             return
 
         try:
-            # Check workflow mode first (S/N vs Peak List)
+            # Check workflow mode (S/N vs Peak List)
             if hasattr(self, 'workflow_mode') and self.workflow_mode.get() == "sn_threshold":
                 # Use S/N native detection workflow
                 self._detect_peaks_sn_native()
             else:
-                # Check integration mode for traditional workflows
-                integration_mode = self.integration_mode.get()
-
-                if integration_mode in ['integrated', 'adaptive']:
-                    # Use integrated detection-fitting
-                    self._detect_peaks_integrated()
-                else:
-                    # Use standard detection (legacy)
-                   self._detect_peaks_standard()
+                # Use standard detection (peak list mode)
+                self._detect_peaks_standard()
 
         except Exception as e:
             self.update_status(f"❌ Detection failed: {str(e)}")
@@ -3231,382 +3320,8 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
         finally:
             self.root.config(cursor="")
 
-    def _detect_peaks_integrated(self):
-        """Integrated detection-fitting method"""
-        import time
-        from integrated_detection_fitter import create_integrated_fitter
-
-        self.update_status("Detecting peaks (integrated mode)...")
-        self.root.config(cursor="watch")
-
-        # Show progress panel
-        self.show_integration_progress()
-        self.integration_start_time = time.time()
-
-        try:
-            # Create integrated fitter if not available
-            if not hasattr(self.integrator, 'integrated_fitter') or self.integrator.integrated_fitter is None:
-                self.integrator.integrated_fitter = create_integrated_fitter(
-                    self.integrator.enhanced_fitter if hasattr(self.integrator, 'enhanced_fitter') else None
-                )
-
-            # Configure integration parameters - include GUI detection parameters
-            integration_params = {
-                # SOLUTION 1: Add essential detection parameters from GUI
-                'height_threshold': self.peak_height_threshold.get(),
-                'distance_factor': self.peak_distance_factor.get(),
-                'prominence_threshold': self.peak_prominence_threshold.get(),
-                'smoothing_sigma': self.smoothing_sigma.get(),
-                'max_peaks_fit': self.max_peaks_fit.get(),
-                'max_optimization_iterations': self.max_optimization_iterations.get(),
-                'use_ps2d_multi_peak': self.use_ps2d_multi_peak.get(),
-                'fix_linewidths': self.fix_linewidths.get(),
-                'fix_positions': self.fix_positions.get(),
-                'lw_lorentz_1h': self.lw_lorentz_1h.get() if self.use_custom_linewidths.get() else None,
-                'lw_gauss_1h': self.lw_gauss_1h.get() if self.use_custom_linewidths.get() else None,
-                'lw_lorentz_15n': self.lw_lorentz_15n.get() if self.use_custom_linewidths.get() else None,
-                'lw_gauss_15n': self.lw_gauss_15n.get() if self.use_custom_linewidths.get() else None,
-                # Peak Centroid Detection parameters
-                'use_centroid_refinement': self.use_centroid_refinement.get(),
-                'centroid_window_x_ppm': self.centroid_window_x_ppm.get(),
-                'centroid_window_y_ppm': self.centroid_window_y_ppm.get(),
-                'centroid_noise_multiplier': self.centroid_noise_multiplier.get(),
-                # SOLUTION: Add advanced integration parameters from GUI
-                'adaptive_thresholds_enabled': self.adaptive_thresholds_enabled.get(),
-                'multi_resolution_enabled': self.multi_resolution_enabled.get(),
-                'physics_constraints_enabled': self.physics_constraints_enabled.get(),
-                'convergence_threshold': self.convergence_threshold.get(),
-                'fit_likelihood_threshold': self.fit_likelihood_threshold.get(),
-                # Detection mode control
-                'force_full_detection': self.force_full_detection.get(),
-                # 1D Refinement parameters (NEW)
-                'enable_1d_refinement': self.enable_1d_refinement.get(),
-                'refinement_quality_threshold': self.refinement_quality_threshold.get(),
-                'refinement_coordinate_threshold': self.refinement_coordinate_threshold.get(),
-                # Add all other GUI parameters for complete integration
-                'threshold': getattr(self, 'threshold', tk.DoubleVar(value=0.01)).get(),
-                'noise_level': getattr(self, 'noise_level', tk.DoubleVar(value=0.001)).get(),
-                'min_snr': getattr(self, 'min_snr', tk.DoubleVar(value=3.0)).get()
-            }
-
-            # DEBUG: Show PS2D parameter being passed to integrator
-            print(f"🔧 GUI -> Integrator: use_ps2d_multi_peak={gui_params.get('use_ps2d_multi_peak', 'NOT SET')}")
-
-            # Update parameters
-            self.on_parameter_change()
-
-            # Choose between in-place fitting and full detection based on user preference
-            if self.force_full_detection.get():
-                print(f"🔍 USER REQUESTED FULL DETECTION: Using iterative detection-fitting with default max iterations")
-                self._run_integrated_detection_fitting(integration_params)
-            else:
-                print(f"📍 Using in-place fitting mode (fast fitting of existing peaks)")
-                self._run_integrated_inplace_fitting(integration_params)
-
-        except Exception as e:
-            self.hide_integration_progress()
-            raise e
-
-    def _run_integrated_detection_fitting(self, integration_params):
-        """Run the integrated detection-fitting process (OLD SERIES METHOD - SHOULD NOT BE USED FOR FIT ALL PEAKS)"""
-        print("⚠️⚠️⚠️ WARNING: Using OLD SERIES INTEGRATION method - this should NOT be called for Fit All Peaks! ⚠️⚠️⚠️")
-        import time
-
-        total_peaks = len(self.integrator.peak_list) if hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None else 0
-        max_iterations = 5  # Default max iterations
-
-        # Initialize progress
-        self.update_integration_progress(
-            status_text="Starting integrated detection-fitting...",
-            progress_percent=0,
-            current_iteration=0,
-            max_iterations=max_iterations,
-            peaks_processed=0,
-            total_peaks=total_peaks,
-            convergence_status="Running",
-            elapsed_time=0
-        )
-
-        try:
-            # Get the integrated fitter
-            integrated_fitter = self.integrator.integrated_fitter
-
-            # Initialize variables for progress tracking
-            peaks_processed = 0
-            avg_quality = 0.0
-            results = None
-
-            # Perform iterative detection-fitting
-            for iteration in range(max_iterations):
-                iteration_start = time.time()
-
-                # Update progress
-                elapsed_time = time.time() - self.integration_start_time
-                progress_percent = ((iteration + 1) / max_iterations) * 100
-
-                self.update_integration_progress(
-                    status_text=f"Iteration {iteration + 1}: Detection and fitting...",
-                    progress_percent=progress_percent,
-                    current_iteration=iteration + 1,
-                    max_iterations=max_iterations,
-                    peaks_processed=0,
-                    total_peaks=total_peaks,
-                    convergence_status="Running",
-                    elapsed_time=elapsed_time
-                )
-
-                # Force GUI update
-                self.root.update_idletasks()
-
-                # Perform integrated detection-fitting
-                if hasattr(integrated_fitter, 'integrated_detection_fitting'):
-                    # CRITICAL FIX: Pass 2D NMR data for both-dimension peak detection
-                    if hasattr(self.integrator, 'nmr_data') and self.integrator.nmr_data is not None:
-                        # For 2D NMR: pass the full 2D data matrix and both axes
-                        nmr_2d_data = self.integrator.nmr_data
-                        x_axis = self.integrator.ppm_x_axis  # 1H axis
-                        y_axis = self.integrator.ppm_y_axis  # 15N axis
-                        print(f"      🔧 FIXED: Using 2D NMR data shape {nmr_2d_data.shape} for both-dimension detection")
-                        print(f"         1H axis: {len(x_axis)} points [{np.min(x_axis):.1f}, {np.max(x_axis):.1f}] ppm")
-                        print(f"         15N axis: {len(y_axis)} points [{np.min(y_axis):.1f}, {np.max(y_axis):.1f}] ppm")
-                        print(f"         Intensity range: [{np.min(nmr_2d_data):.1f}, {np.max(nmr_2d_data):.1f}]")
-                    else:
-                        # Fallback (shouldn't happen)
-                        nmr_2d_data = None
-                        x_axis = self.integrator.ppm_x_axis
-                        y_axis = self.integrator.ppm_y_axis
-                        print(f"      ⚠️ FALLBACK: No NMR data found, using axes only")
-
-                    # Determine if in-place mode (peak list available)
-                    peak_list = getattr(self.integrator, 'peak_list', None)
-                    in_place_mode = peak_list is not None and not peak_list.empty
-
-                    if in_place_mode:
-                        print(f"      📍 USING IN-PLACE MODE: {len(peak_list)} reference peaks from peak list")
-                    else:
-                        print(f"      🌐 USING FULL-SPECTRUM MODE: No peak list constraints")
-
-                    results = integrated_fitter.integrated_detection_fitting(
-                        x_axis,           # 1H chemical shifts
-                        y_axis,           # 15N chemical shifts
-                        nucleus_type='2D', # Changed to indicate 2D detection
-                        gui_params=integration_params,
-                        nmr_2d_data=nmr_2d_data,  # Pass 2D intensity matrix separately
-                        peak_list=peak_list,       # Pass peak list for in-place mode
-                        in_place_mode=in_place_mode # Enable in-place constraints
-                    )
-                else:
-                    # Fallback to standard detection if method not available
-                    detected_peaks = self.integrator.process_peaks()
-                    results = {'peaks': detected_peaks, 'converged': True, 'iterations': iteration + 1}
-
-                # Update results
-                if results and 'peaks' in results:
-                    self.integrator.fitted_peaks = results['peaks']
-
-                    # Calculate quality metrics
-                    if isinstance(results['peaks'], list) and len(results['peaks']) > 0:
-                        quality_scores = [peak.get('composite_quality', 0.5) for peak in results['peaks']]
-                        avg_quality = sum(quality_scores) / len(quality_scores)
-                        peaks_processed = len(results['peaks'])
-                    else:
-                        avg_quality = 0
-                        peaks_processed = 0
-
-                    # Update progress with results
-                    self.update_integration_progress(
-                        status_text=f"Iteration {iteration + 1}: Processing complete",
-                        progress_percent=progress_percent,
-                        current_iteration=iteration + 1,
-                        max_iterations=max_iterations,
-                        peaks_processed=peaks_processed,
-                        total_peaks=total_peaks,
-                        quality_score=avg_quality,
-                        convergence_status="Converged" if results.get('converged', False) else "Running",
-                        elapsed_time=elapsed_time
-                    )
-
-                    # Check convergence
-                    if results.get('converged', False):
-                        break
-
-                # Force GUI update
-                self.root.update_idletasks()
-
-                # Small delay to allow GUI updates
-                time.sleep(0.1)
-
-            # Final update
-            total_time = time.time() - self.integration_start_time
-            final_status = "Converged" if results and results.get('converged', False) else "Max iterations reached"
-
-            self.update_integration_progress(
-                status_text=f"Integration complete: {final_status}",
-                progress_percent=100,
-                current_iteration=max_iterations,
-                max_iterations=max_iterations,
-                peaks_processed=peaks_processed,
-                total_peaks=total_peaks,
-                quality_score=avg_quality,
-                convergence_status=final_status,
-                elapsed_time=total_time
-            )
-
-            # Update plots and statistics
-            self.update_main_plot()
-            self.update_statistics()
-
-            # Store results for diagnostics
-            self.last_integration_results = results['peaks'] if results and 'peaks' in results else []
-            self.last_processing_time = total_time
-
-            # Update diagnostics
-            if hasattr(self, 'refresh_diagnostics'):
-                self.refresh_diagnostics()
-
-            self.update_status(f"✅ Integrated detection complete: {peaks_processed} peaks processed in {total_time:.2f}s")
-
-            # Hide progress after 3 seconds
-            self.root.after(3000, self.hide_integration_progress)
-
-        except Exception as e:
-            self.update_integration_progress(
-                status_text=f"Error: {str(e)}",
-                convergence_status="Failed"
-            )
-            self.hide_integration_progress()
-            raise e
-
-    def _run_integrated_inplace_fitting(self, integration_params):
-        """Run integrated in-place fitting for existing 2D peak list"""
-        import time
-        import numpy as np
-
-        try:
-            # Get peak list and validate
-            peak_list = self.integrator.peak_list
-            if peak_list is None or peak_list.empty:
-                self.update_status("❌ No peak list available for in-place fitting")
-                return
-
-            total_peaks = len(peak_list)
-            print(f"🔄🔄🔄 USING NEW IN-PLACE METHOD: Starting integrated in-place fitting for {total_peaks} peaks 🔄🔄🔄")
-
-            # Initialize progress
-            self.update_integration_progress(
-                status_text=f"Starting in-place integrated fitting for {total_peaks} peaks...",
-                progress_percent=0,
-                current_iteration=0,
-                max_iterations=1,
-                peaks_processed=0,
-                total_peaks=total_peaks,
-                convergence_status="Running",
-                elapsed_time=0
-            )
-
-            # Get integrated fitter
-            integrated_fitter = self.integrator.integrated_fitter
-
-            # Get NMR data for in-place fitting
-            if hasattr(self.integrator, 'nmr_data') and self.integrator.nmr_data is not None:
-                nmr_2d_data = self.integrator.nmr_data
-                x_axis = self.integrator.ppm_x_axis  # 1H axis
-                y_axis = self.integrator.ppm_y_axis  # 15N axis
-                print(f"   📊 Using 2D NMR data shape {nmr_2d_data.shape} for in-place fitting")
-                print(f"      1H axis: {len(x_axis)} points [{np.min(x_axis):.1f}, {np.max(x_axis):.1f}] ppm")
-                print(f"      15N axis: {len(y_axis)} points [{np.min(y_axis):.1f}, {np.max(y_axis):.1f}] ppm")
-            else:
-                self.update_status("❌ No NMR data available for in-place fitting")
-                return
-
-            # Force GUI update
-            self.root.update_idletasks()
-
-            # Perform integrated in-place fitting
-            results = integrated_fitter.integrated_detection_fitting(
-                x_axis,           # 1H chemical shifts
-                y_axis,           # 15N chemical shifts
-                nucleus_type='2D', # 2D detection
-                gui_params=integration_params,
-                nmr_2d_data=nmr_2d_data,  # Pass 2D intensity matrix
-                peak_list=peak_list,       # Pass peak list for in-place mode
-                in_place_mode=True         # Enable in-place constraints
-            )
-
-            # Process results
-            if results and results.get('success', False):
-                fitted_peaks = results.get('peaks', [])
-                peaks_processed = len(fitted_peaks)
-                avg_quality = results.get('avg_r_squared', 0)
-
-                # Store results in integrator
-                self.integrator.fitted_peaks = fitted_peaks
-
-                # Update progress
-                progress_percent = 100
-                self.update_integration_progress(
-                    status_text="In-place integrated fitting complete",
-                    progress_percent=progress_percent,
-                    current_iteration=1,
-                    max_iterations=1,
-                    peaks_processed=peaks_processed,
-                    total_peaks=total_peaks,
-                    quality_score=avg_quality,
-                    convergence_status="Converged",
-                    elapsed_time=time.time() - self.integration_start_time
-                )
-
-                # Update plots and statistics
-                self.update_main_plot()
-                self.update_statistics()
-                # Load detected peaks into navigator
-                if hasattr(self, 'peak_navigator'):
-                    self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
-
-                # Store results for diagnostics
-                self.last_integration_results = fitted_peaks
-                self.last_processing_time = time.time() - self.integration_start_time
-
-                # Update diagnostics
-                if hasattr(self, 'refresh_diagnostics'):
-                    self.refresh_diagnostics()
-
-                detection_diagnostics = results.get('integration_diagnostics', {})
-                detected_count = detection_diagnostics.get('detected_count', 0)
-                retained_count = detection_diagnostics.get('retained_count', 0)
-                detection_rate = detection_diagnostics.get('detection_rate', 0)
-
-                total_time = time.time() - self.integration_start_time
-                self.update_status(f"✅ In-place integrated fitting complete: {peaks_processed}/{total_peaks} peaks processed, {detected_count} detected + {retained_count} retained ({detection_rate:.1f}% detection rate) in {total_time:.2f}s")
-
-                print(f"🏁 In-place integrated fitting results:")
-                print(f"   Total processed: {peaks_processed}/{total_peaks}")
-                print(f"   Detected: {detected_count}, Retained: {retained_count}")
-                print(f"   Detection rate: {detection_rate:.1f}%")
-                print(f"   Average R²: {avg_quality:.3f}")
-                print(f"   Processing time: {total_time:.2f}s")
-
-            else:
-                error_msg = results.get('error', 'Unknown error') if results else 'No results returned'
-                self.update_status(f"❌ In-place integrated fitting failed: {error_msg}")
-                print(f"❌ In-place integrated fitting failed: {error_msg}")
-
-            # Hide progress after 3 seconds
-            self.root.after(3000, self.hide_integration_progress)
-
-        except Exception as e:
-            self.update_integration_progress(
-                status_text=f"Error: {str(e)}",
-                convergence_status="Failed"
-            )
-            self.hide_integration_progress()
-            print(f"❌ Exception in in-place fitting: {e}")
-            import traceback
-            traceback.print_exc()
-            raise e
-
     def integrate_peaks(self):
-        """Integrate detected peaks - supports both standard and integrated modes"""
+        """Integrate detected peaks using standard mode"""
         if not hasattr(self.integrator, 'fitted_peaks') or (
             self.integrator.fitted_peaks is None or
             (hasattr(self.integrator.fitted_peaks, 'empty') and self.integrator.fitted_peaks.empty) or
@@ -3616,15 +3331,8 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             return
 
         try:
-            # Check integration mode
-            integration_mode = self.integration_mode.get()
-
-            if integration_mode in ['integrated', 'adaptive']:
-                # Use integrated mode - peaks are already fitted during detection
-                self._integrate_peaks_integrated()
-            else:
-                # Use standard integration (legacy)
-                self._integrate_peaks_standard()
+            # Use standard integration
+            self._integrate_peaks_standard()
 
         except Exception as e:
             self.update_status(f"❌ Integration error: {str(e)}")
@@ -3648,31 +3356,6 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             self.update_statistics()
         else:
             self.update_status("❌ Integration failed")
-
-    def _integrate_peaks_integrated(self):
-        """Integrated mode - peaks are already fitted, just update display"""
-        self.update_status("Integration complete (integrated mode)...")
-
-        # In integrated mode, peaks are already fitted with quality scores
-        if hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
-            peaks = self.integrator.fitted_peaks
-
-            if isinstance(peaks, list):
-                total_peaks = len(peaks)
-                high_quality = sum(1 for p in peaks if p.get('composite_quality', 0) >= 0.7)
-                converged = sum(1 for p in peaks if p.get('converged', False))
-
-                self.update_status(f"✅ Integrated mode: {total_peaks} peaks analyzed, {high_quality} high quality, {converged} converged")
-            else:
-                self.update_status("✅ Integrated peaks processed")
-
-            self.update_statistics()
-
-            # Update diagnostics if available
-            if hasattr(self, 'refresh_diagnostics'):
-                self.refresh_diagnostics()
-        else:
-            self.update_status("❌ No integrated results available")
 
     def fit_selected_peak(self):
         """Fit Voigt profile to selected peak"""
@@ -3791,10 +3474,13 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 import pandas as pd
                 peak_list_data = []
                 for peak in detected_peaks:
+                    intensity = peak.get('intensity', None)
                     peak_list_data.append({
                         'Assignment': peak['assignment'],
                         'Position_X': peak['ppm_x'],  # Use Position_X instead of X_PPM
                         'Position_Y': peak['ppm_y'],  # Use Position_Y instead of Y_PPM
+                        'Height': intensity,  # Peak height from detection
+                        'Intensity': intensity,  # Same as height for detected peaks
                         'X_HZ': 0,  # Placeholder
                         'Y_HZ': 0   # Placeholder
                     })
@@ -5001,16 +4687,15 @@ Total Peaks Processed: {total_peaks}
 
     def _update_series_processor_compatibility(self, new_batch_results):
         """
-        Update series_processor attributes for export function compatibility.
+        Update series output folder for export function compatibility.
         """
-        if hasattr(self, 'series_processor') and new_batch_results:
+        if new_batch_results:
             metadata = new_batch_results.get('metadata', {})
             output_folder = metadata.get('output_folder', '')
 
             if output_folder:
-                # Update series_processor.output_folder for legacy export compatibility
-                self.series_processor.output_folder = output_folder
-                print(f"✅ Series processor output folder updated: {output_folder}")
+                self.series_output_folder = output_folder
+                print(f"✅ Series output folder updated: {output_folder}")
 
     # =================== VISUALIZATION UPDATES ===================
 
@@ -5034,6 +4719,8 @@ Total Peaks Processed: {total_peaks}
                 show_detected=self.show_detected.get(),
                 show_assigned=self.show_assigned.get(),
                 show_fitted=self.show_fitted_curves.get(),
+                show_ellipses=self.show_ellipses.get(),
+                nucleus_type=self.nucleus_type.get(),
                 #show_included_peaks_after_limit_debug=self.show_included_peaks_after_limit_debug.get()
             )
 
@@ -5257,22 +4944,26 @@ Total Peaks Processed: {total_peaks}
         ref_enabled = self.edit_reference_peaks.get()
         det_enabled = self.edit_detected_peaks.get()
 
-        # Check if deletion mode is enabled
+        # Check if addition, deletion, or move mode is enabled (priority: addition > deletion > move)
+        addition_enabled = self.peak_addition_mode.get()
         deletion_enabled = self.peak_deletion_mode.get()
 
-        if deletion_enabled:
-            deletion_suffix = " [DELETE MODE]"
+        if addition_enabled:
+            mode_suffix = " [ADD MODE]"
+            status_color = 'green'
+        elif deletion_enabled:
+            mode_suffix = " [DELETE MODE]"
             status_color = 'red'
         else:
-            deletion_suffix = " [MOVE MODE]"
+            mode_suffix = " [MOVE MODE]"
             status_color = 'blue'
 
         if ref_enabled and det_enabled:
-            status_text = f"Mode: EDIT (Ref + Det){deletion_suffix}"
+            status_text = f"Mode: EDIT (Ref + Det){mode_suffix}"
         elif ref_enabled:
-            status_text = f"Mode: EDIT (Ref only){deletion_suffix}"
+            status_text = f"Mode: EDIT (Ref only){mode_suffix}"
         elif det_enabled:
-            status_text = f"Mode: EDIT (Det only){deletion_suffix}"
+            status_text = f"Mode: EDIT (Det only){mode_suffix}"
         else:
             status_text = "Mode: EDIT (None selected!)"
             self.edit_mode_status_label.config(text=status_text, foreground='orange')
@@ -5286,6 +4977,12 @@ Total Peaks Processed: {total_peaks}
             return
 
         click_x, click_y = event.xdata, event.ydata
+
+        # Check if addition mode is enabled (highest priority)
+        if self.peak_addition_mode.get():
+            # Addition mode: add new peak at click position
+            self.add_new_peak(click_x, click_y)
+            return
 
         # Check if deletion mode is enabled
         if self.peak_deletion_mode.get():
@@ -5465,6 +5162,161 @@ Total Peaks Processed: {total_peaks}
         except Exception as e:
             messagebox.showerror("Deletion Error", f"Failed to delete peak: {str(e)}")
             print(f"❌ Peak deletion failed: {e}")
+
+    def _find_max_assignment_number(self, peaks_list, assignment_key='Assignment'):
+        """Helper: Find highest assignment number from peak list
+
+        Parameters:
+        -----------
+        peaks_list : list or DataFrame
+            List of peaks (dicts) or DataFrame with Assignment column
+        assignment_key : str
+            Key/column name for assignment (default: 'Assignment')
+
+        Returns:
+        --------
+        int : Highest assignment number found
+        """
+        import re
+        max_assignment = 0
+
+        # Handle DataFrame (reference peaks)
+        if hasattr(peaks_list, 'iterrows'):
+            for idx, row in peaks_list.iterrows():
+                assignment = row.get(assignment_key, '')
+                max_assignment = max(max_assignment, self._extract_number_from_assignment(assignment))
+
+        # Handle list of dicts (detected peaks)
+        elif isinstance(peaks_list, list):
+            for peak in peaks_list:
+                assignment = peak.get(assignment_key, '') if isinstance(peak, dict) else ''
+                max_assignment = max(max_assignment, self._extract_number_from_assignment(assignment))
+
+        return max_assignment
+
+    def _extract_number_from_assignment(self, assignment):
+        """Helper: Extract numeric value from assignment string"""
+        import re
+        try:
+            if isinstance(assignment, (int, float)):
+                return int(assignment)
+            elif isinstance(assignment, str):
+                # Extract digits from string (e.g., "Peak_123" -> 123, "45" -> 45)
+                numbers = re.findall(r'\d+', str(assignment))
+                if numbers:
+                    return int(numbers[-1])  # Take the last number found
+        except (ValueError, TypeError):
+            pass
+        return 0
+
+    def add_new_peak(self, click_x, click_y):
+        """Add a new peak at the clicked position (workflow-aware)"""
+        import pandas as pd
+
+        try:
+            # WORKFLOW-AWARE LOGIC:
+            # - S/N Threshold mode → always add to detected peaks (user is building detected list)
+            # - Peak List mode → prefer reference peaks (traditional workflow with reference file)
+
+            workflow_mode = getattr(self, 'workflow_mode', tk.StringVar(value="peak_list")).get()
+
+            if workflow_mode == "sn_threshold":
+                # S/N mode: always add to detected peaks
+                add_to_reference = False
+                print(f"📍 S/N Threshold mode: adding peak to detected peaks list")
+            else:
+                # Peak list mode: use checkbox selection
+                ref_enabled = self.edit_reference_peaks.get()
+                det_enabled = self.edit_detected_peaks.get()
+
+                if not ref_enabled and not det_enabled:
+                    print("❌ No peak list selected for addition. Enable Reference or Detected peaks first.")
+                    self.selected_peak_label.config(text="Error: No peak list selected for addition")
+                    return
+
+                # Prefer reference peaks if both are enabled
+                add_to_reference = ref_enabled
+                print(f"📍 Peak List mode: adding to {'reference' if add_to_reference else 'detected'} peaks")
+
+            if add_to_reference:
+                # Add to reference peak list (DataFrame)
+                # Find the highest assignment number
+                max_assignment = 0
+                if hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None and len(self.integrator.peak_list) > 0:
+                    max_assignment = self._find_max_assignment_number(self.integrator.peak_list, 'Assignment')
+
+                # Create new assignment number
+                new_assignment = str(max_assignment + 1)
+
+                # Create new peak row
+                new_peak = pd.DataFrame([{
+                    'Assignment': new_assignment,
+                    'Position_X': click_x,
+                    'Position_Y': click_y
+                }])
+
+                # Add to peak list
+                if hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
+                    self.integrator.peak_list = pd.concat([self.integrator.peak_list, new_peak], ignore_index=True)
+                else:
+                    self.integrator.peak_list = new_peak
+
+                print(f"✅ Added reference peak '{new_assignment}' at ({click_x:.3f}, {click_y:.1f})")
+
+                # Update peak navigator if showing reference peaks
+                if hasattr(self, 'peak_navigator') and hasattr(self.peak_navigator, 'selected_peak_type') and self.peak_navigator.selected_peak_type == 'reference':
+                    self.peak_navigator.load_reference_peaks(self.integrator.peak_list)
+
+                self.selected_peak_label.config(text=f"Added reference peak '{new_assignment}' at ({click_x:.3f}, {click_y:.1f})")
+
+            else:
+                # Add to detected peak list (list of dictionaries)
+                # Find the highest assignment number from detected peaks
+                max_assignment = 0
+                if hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
+                    max_assignment = self._find_max_assignment_number(self.integrator.fitted_peaks, 'assignment')
+
+                # Create new assignment number
+                new_assignment = str(max_assignment + 1)
+
+                # Create new detected peak
+                new_peak = {
+                    'assignment': new_assignment,
+                    'ppm_x': click_x,
+                    'ppm_y': click_y,
+                    'height': 0.0,  # Will be updated if fitted
+                    'r_squared': 0.0,  # Will be updated if fitted
+                    'status': 'manual_add'
+                }
+
+                # Add to fitted peaks list
+                if hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
+                    self.integrator.fitted_peaks.append(new_peak)
+                else:
+                    self.integrator.fitted_peaks = [new_peak]
+
+                print(f"✅ Added detected peak '{new_assignment}' at ({click_x:.3f}, {click_y:.1f})")
+
+                # Update peak navigator if showing detected peaks
+                if hasattr(self, 'peak_navigator') and hasattr(self.peak_navigator, 'selected_peak_type') and self.peak_navigator.selected_peak_type == 'detected':
+                    self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
+
+                self.selected_peak_label.config(text=f"Added detected peak '{new_assignment}' at ({click_x:.3f}, {click_y:.1f})")
+
+            # Refresh the main plot
+            self.update_main_plot()
+
+            # Update statistics
+            self.update_statistics()
+
+            print(f"✅ Peak addition completed successfully")
+
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Addition Error", f"Failed to add peak: {str(e)}")
+            print(f"❌ Peak addition failed: {e}")
+            import traceback
+            traceback.print_exc()
 
     # =================== FILE OPERATIONS ===================
 
@@ -6200,14 +6052,16 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
     def _create_peak_tracking_tab(self, parent):
         """Create peak tracking analysis tab"""
         # Check if tracking files exist
-        if not self.series_processor.output_folder:
+        #if not self.series_processor.output_folder:
+        if not self.series_output_folder:    
             ttk.Label(parent, text="Peak tracking data not available.\nRun series integration to generate tracking data.",
                      font=('TkDefaultFont', 12), foreground='gray').pack(expand=True)
             return
 
-        tracking_file = os.path.join(self.series_processor.output_folder, "comprehensive_peak_tracking.csv")
-        intensity_file = os.path.join(self.series_processor.output_folder, "peak_intensity_matrix.csv")
-
+        #tracking_file = os.path.join(self.series_processor.output_folder, "comprehensive_peak_tracking.csv")
+        tracking_file = os.path.join(self.series_output_folder,   "comprehensive_peak_tracking.csv")
+        #intensity_file = os.path.join(self.series_processor.output_folder, "peak_intensity_matrix.csv")
+        intensity_file = os.path.join(self.series_output_folder,  "peak_intensity_matrix.csv")
         if not os.path.exists(tracking_file):
             ttk.Label(parent, text="Peak tracking files not found.\nThey should be generated during series integration.",
                      font=('TkDefaultFont', 12), foreground='orange').pack(expand=True)
@@ -6340,7 +6194,8 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
     def _create_quality_assessment_tab(self, parent):
         """Create quality assessment tab"""
         # Generate quality report
-        if hasattr(self.series_processor.batch_results, 'statistics'):
+        #if hasattr(self.series_processor.batch_results, 'statistics'):
+        if hasattr(self.batch_results, 'statistics'):
             analyzer = SeriesAnalyzer()
             analyzer.load_results(self.batch_results)
             quality_report = analyzer.generate_quality_report()
@@ -6521,9 +6376,11 @@ Success Rate: {quality_report['summary']['success_rate']:.1f}%
         # Implementation for legacy format export
         # This would be the old export logic for backward compatibility
         try:
-            if hasattr(self.series_processor, 'output_folder') and self.series_processor.output_folder:
+            #if hasattr(self.series_processor, 'output_folder') and self.series_processor.output_folder:
+            if self.series_output_folder:
                 # Use existing CSV files if available
-                tracking_file = os.path.join(self.series_processor.output_folder, "comprehensive_peak_tracking.csv")
+                #tracking_file = os.path.join(self.series_processor.output_folder, "comprehensive_peak_tracking.csv")
+                tracking_file = os.path.join(self.series_output_folder,  "comprehensive_peak_tracking.csv")
                 if os.path.exists(tracking_file):
                     # Copy existing file to user-selected location
                     filename = filedialog.asksaveasfilename(
@@ -6570,7 +6427,8 @@ Success Rate: {quality_report['summary']['success_rate']:.1f}%
 
     def batch_export_results(self, format_type='csv'):
         """Batch export results in specified format"""
-        if not self.series_processor.output_folder:
+        #if not self.series_processor.output_folder:
+        if not self.series_output_folder:
             messagebox.showwarning("No Data", "No series results to export.")
             return
 
@@ -6581,7 +6439,8 @@ Success Rate: {quality_report['summary']['success_rate']:.1f}%
                     # Copy all CSV files from output folder
                     import glob
                     import shutil
-                    csv_files = glob.glob(os.path.join(self.series_processor.output_folder, "*.csv"))
+                    #csv_files = glob.glob(os.path.join(self.series_processor.output_folder, "*.csv"))
+                    csv_files = glob.glob(os.path.join(self.series_output_folder, "*.csv"))
                     for file in csv_files:
                         shutil.copy2(file, folder)
                     messagebox.showinfo("Export Complete", f"Exported {len(csv_files)} CSV files to:\n{folder}")
@@ -6599,11 +6458,13 @@ Success Rate: {quality_report['summary']['success_rate']:.1f}%
 
     def export_intensity_matrix(self):
         """Export peak intensity matrix"""
-        if not self.series_processor.output_folder:
+        #if not self.series_processor.output_folder:
+        if not self.series_output_folder:
             messagebox.showwarning("No Data", "No intensity matrix available.")
             return
 
-        intensity_file = os.path.join(self.series_processor.output_folder, "peak_intensity_matrix.csv")
+        #intensity_file = os.path.join(self.series_processor.output_folder, "peak_intensity_matrix.csv")
+        intensity_file = os.path.join(self.series_output_folder,   "peak_intensity_matrix.csv")
         if os.path.exists(intensity_file):
             filename = filedialog.asksaveasfilename(
                 title="Export Intensity Matrix",
@@ -6622,11 +6483,13 @@ Success Rate: {quality_report['summary']['success_rate']:.1f}%
 
     def export_tracking_table(self):
         """Export peak tracking table"""
-        if not self.series_processor.output_folder:
+        #if not self.series_processor.output_folder:
+        if not self.series_output_folder:
             messagebox.showwarning("No Data", "No tracking table available.")
             return
 
-        tracking_file = os.path.join(self.series_processor.output_folder, "comprehensive_peak_tracking.csv")
+        #tracking_file = os.path.join(self.series_processor.output_folder, "comprehensive_peak_tracking.csv")
+        tracking_file = os.path.join(self.series_output_folder,  "comprehensive_peak_tracking.csv")
         if os.path.exists(tracking_file):
             filename = filedialog.asksaveasfilename(
                 title="Export Peak Tracking Table",
@@ -6645,11 +6508,13 @@ Success Rate: {quality_report['summary']['success_rate']:.1f}%
 
     def export_detection_stats(self):
         """Export detection statistics"""
-        if not self.series_processor.output_folder:
+        #if not self.series_processor.output_folder:
+        if not self.series_output_folder:
             messagebox.showwarning("No Data", "No detection statistics available.")
             return
 
-        stats_file = os.path.join(self.series_processor.output_folder, "detection_statistics.csv")
+        #stats_file = os.path.join(self.series_processor.output_folder, "detection_statistics.csv")
+        stats_file = os.path.join(self.series_output_folder,  "detection_statistics.csv")
         if os.path.exists(stats_file):
             filename = filedialog.asksaveasfilename(
                 title="Export Detection Statistics",
@@ -6768,7 +6633,7 @@ Detection Rate Statistics:
             browser = SpectrumBrowserDialog(
                 self.root,
                 self.batch_results,  # Use legacy-compatible format
-                self.series_processor if hasattr(self, 'series_processor') else None,
+                None,  # series_processor no longer used
                 original_data_folder
             )
 

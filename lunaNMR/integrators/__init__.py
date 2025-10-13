@@ -18,13 +18,7 @@ try:
 except ImportError:
     pass
 
-try:
-    from .simple_pattern_matcher import SimplePatternMatcher
-except ImportError:
-    pass
-
 __all__ = [
     'InplaceAdvancedNMRIntegrator',
-    'InplaceSeriesNMRIntegrator',
-    'SimplePatternMatcher'
+    'InplaceSeriesNMRIntegrator'
 ]

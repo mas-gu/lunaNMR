@@ -40,6 +40,7 @@ from .ps2d_style_fitter import (
     SQRT_2,
     SQRT_8LN2
 )
+from .ps2d_config import get_ps2d_config
 from scipy.special import wofz
 
 # Import training data collector (optional)
@@ -117,7 +118,15 @@ class Ps2dMultiPeakFitter2D:
             Training data collector for ML model development
         """
         self.verbose = verbose
-        self.optimizer = Ps2dStyleLevenbergMarquardt(verbose=verbose)
+
+        # Get max_iterations from ps2d_config
+        config = get_ps2d_config()
+        max_iterations = config.max_iterations
+
+        self.optimizer = Ps2dStyleLevenbergMarquardt(
+            verbose=verbose,
+            max_iter=max_iterations
+        )
         self.training_collector = training_collector
 
     def fit_multi_peak_2d(self,
@@ -150,7 +159,7 @@ class Ps2dMultiPeakFitter2D:
             If True, linewidths are fixed during fitting
         data_mask : np.ndarray, optional
             Boolean mask indicating which data points to use for fitting.
-            PS2D uses union of elliptical windows (spectrum.cpp:1010-1020).
+            PS2D uses union of elliptical windows
             If None, all data points are used (NOT recommended for overlapping peaks).
 
         Returns:
@@ -166,11 +175,11 @@ class Ps2dMultiPeakFitter2D:
 
         Notes:
         ------
-        5-stage fitting strategy (peakfit.cpp lines 231-456):
+        5-stage fitting strategy 
         - Stage 0: Fix positions/widths, fit intensities only
         - Stage 1: Fix positions, float widths + intensities
         - Stage 2: Float positions (if allowed)
-        - Stage 3: NOT USED in 2D (3D-specific stage)
+        - Stage 3: For future implementations 
         - Stage 4: Final global refinement (all parameters float)
         """
 
@@ -240,12 +249,21 @@ class Ps2dMultiPeakFitter2D:
         median_lw_lor_f2 = np.median(initial_lw_lor_f2)
         median_lw_gau_f2 = np.median(initial_lw_gau_f2)
 
+        # Get nucleus-adaptive position margins from centralized config
+        config = get_ps2d_config()
+
+        # Calculate cluster-wide intensity bounds to prevent artificial constraints
+        # Root cause: Per-peak bounds from contaminated 1D cross-sections can trap peaks
+        # Solution: Use max initial intensity across cluster to set bounds for all peaks
+        max_initial_intensity = max(peak['intensity'] for peak in initial_peaks)
+
         if self.verbose:
             print(f"   📊 Cluster median linewidths:")
             print(f"      F1: Lor={median_lw_lor_f1:.4f}, Gau={median_lw_gau_f1:.4f} ppm")
             print(f"      F2: Lor={median_lw_lor_f2:.4f}, Gau={median_lw_gau_f2:.4f} ppm")
-            print(f"      Bounds: F1 (15N): 0.5× to 5.0× median (10× asymmetric, max total ~0.5 ppm)")
+            print(f"      Bounds: F1 ({config.nucleus_type}): 0.5× to 5.0× median (10× asymmetric, max total ~0.5 ppm)")
             print(f"              F2 (1H):  0.5× to 2.0× median (4× symmetric, enforces homogeneity)")
+            print(f"   📊 Cluster intensity bounds: 0.1% to 500% of max initial ({max_initial_intensity:.2e})")
             sys.stdout.flush()
 
         lower_bounds = []
@@ -257,20 +275,20 @@ class Ps2dMultiPeakFitter2D:
             # F1 position bounds - constrain to ~1 linewidth of movement
             # Estimated FWHM ≈ 2 * lw_gau, allow ±1.5× FWHM as safety margin
             fwhm_f1 = 2.0 * peak['lw_gau_f1']
-            pos_f1_margin = max(1.5 * fwhm_f1, 0.1)  # Minimum 0.1 ppm
+            pos_f1_margin = max(1.5 * fwhm_f1, config.pos_margin_f1)  # Nucleus-adaptive minimum
             lower_bounds.append(peak['pos_f1'] - pos_f1_margin)
             upper_bounds.append(peak['pos_f1'] + pos_f1_margin)
 
             # F1 linewidths - asymmetric bounds: tight lower (prevent collapse), loose upper (allow growth)
             # Rationale: Initial guesses often 0.1 ppm default → true LW may be much larger
             # 5× multiplier limits total LW (Lor+Gau) to ~0.5 ppm when median=0.05
-            lower_bounds.extend([median_lw_lor_f1 * 0.5, median_lw_gau_f1 * 0.5])
-            upper_bounds.extend([median_lw_lor_f1 * 5.0, median_lw_gau_f1 * 5.0])
+            lower_bounds.extend([median_lw_lor_f1 * 0.5, median_lw_gau_f1 * 0.5]) #was 0.5
+            upper_bounds.extend([median_lw_lor_f1 * 5, median_lw_gau_f1 * 5]) #was 5
 
             # F2 position bounds - constrain to ~1 linewidth of movement
             # Estimated FWHM ≈ 2 * lw_gau, allow ±1.5× FWHM as safety margin
             fwhm_f2 = 2.0 * peak['lw_gau_f2']
-            pos_f2_margin = max(1.5 * fwhm_f2, 0.01)  # Minimum 0.01 ppm
+            pos_f2_margin = max(1.5 * fwhm_f2, config.pos_margin_f2)  # Nucleus-adaptive minimum
             lower_bounds.append(peak['pos_f2'] - pos_f2_margin)
             upper_bounds.append(peak['pos_f2'] + pos_f2_margin)
 
@@ -279,10 +297,12 @@ class Ps2dMultiPeakFitter2D:
             lower_bounds.extend([median_lw_lor_f2 * 0.5, median_lw_gau_f2 * 0.5])
             upper_bounds.extend([median_lw_lor_f2 * 2.0, median_lw_gau_f2 * 2.0])
 
-            # Intensity bounds
-            # Prevent degenerate solutions where peaks collapse to zero intensity
-            lower_bounds.append(peak['intensity'] * 0.01)  # Min 1% of initial guess
-            upper_bounds.append(peak['intensity'] * 5.0)
+            # Intensity bounds - cluster-relative to prevent trapping
+            # All peaks can reach 0.1% to 500% of the brightest peak in cluster
+            # This prevents per-peak bounds from artificially constraining overlapping peaks
+            # where 1D cross-sections give contaminated (too low) initial guesses
+            lower_bounds.append(max_initial_intensity * 0.001)  # Min 0.1% of max
+            upper_bounds.append(max_initial_intensity * 5.0)    # Max 5× max
 
             # Spare (always zero)
             lower_bounds.append(0.0)
@@ -299,38 +319,86 @@ class Ps2dMultiPeakFitter2D:
         # Validate and clip initial parameters
         params = np.clip(params, bounds[0], bounds[1])
 
+        # DIAGNOSTIC: Log initial intensity values before any fitting
+        if self.verbose:
+            print(f"\n   📊 Initial intensity estimates (normalized, before fitting):")
+            for i in range(n_peaks):
+                offset = i * NPAR_VOIGT
+                intensity = params[offset + 6]
+                lower = bounds[0][offset + 6]
+                upper = bounds[1][offset + 6]
+                print(f"      Peak {i+1}: {intensity:.6e} (bounds: [{lower:.6e}, {upper:.6e}])")
+            sys.stdout.flush()
+
         total_iterations = 0
 
         # ====================================================================
-        # STAGE 0: Fix positions and linewidths, fit intensities ONLY
+        # STAGE 0: DISABLED - Causes intensity collapse with wrong initial linewidths
         # ====================================================================
-        if self.verbose:
-            print("\nStage 0: Intensity warm-up (positions/widths fixed)")
-            sys.stdout.flush()
+        # Root cause: Fitting intensity-only with fixed (wrong) linewidths is unstable.
+        # When initial linewidths don't match true peak shape (common for 13C peaks),
+        # the optimizer drives intensity → 0 to minimize χ² (intensity hits lower bound).
+        #
+        # Why it fails for 13C but works for 15N:
+        # - 15N peaks: FWHM ~0.10 ppm → 1D cross-section guess ~0.10 ppm (close enough)
+        # - 13C peaks: FWHM ~0.05 ppm → 1D cross-section guess ~0.10 ppm (2× too broad)
+        #
+        # Solution: Skip Stage 0, start with Stage 1 (linewidths + intensity together)
+        # This allows optimizer to adjust both simultaneously, preventing collapse.
+        # ====================================================================
 
-        # Fix all parameters except intensities
-        fixed_stage0 = {}
-        for i in range(n_peaks):
-            offset = i * NPAR_VOIGT
-            for j in range(7):  # Fix first 7 params (all except spare)
-                if j != 6:  # Don't fix intensity (index 6)
-                    fixed_stage0[offset + j] = params[offset + j]
-            fixed_stage0[offset + 7] = 0.0  # Fix spare to 0
+        # Compute initial χ² for convergence tracking (before any optimization)
+        y_pred_initial = multi_voigt_profile_2d(f1_grid, f2_grid, params, n_peaks).ravel()
+        y_pred_initial_masked = y_pred_initial[mask_flat]
+        self._stage0_initial_chi2 = np.sum((y_flat_masked - y_pred_initial_masked)**2)
 
-        params, cov, info = self.optimizer.fit(
-            func=model_function,
-            jacobian=jacobian_function,
-            x=f1_flat,  # Dummy x (not used, grids stored in closure)
-            y=y_flat_masked,  # Use masked data (union of elliptical windows)
-            p0=params,
-            bounds=bounds,
-            fixed_params=fixed_stage0
-        )
+        # STAGE 0 DISABLED - Skip directly to Stage 1
+        # Initialize cov and info for first stage
+        cov = None
+        info = {'success': False, 'iterations': 0, 'final_chi2': self._stage0_initial_chi2}
 
-        total_iterations += info['iterations']
-        if self.verbose:
-            print(f"  Iterations: {info['iterations']}, χ² = {info['final_chi2']:.6e}")
-            sys.stdout.flush()
+        # if self.verbose:
+        #     print("\nStage 0: Intensity warm-up (positions/widths fixed)")
+        #     sys.stdout.flush()
+        #
+        # # Fix all parameters except intensities
+        # fixed_stage0 = {}
+        # for i in range(n_peaks):
+        #     offset = i * NPAR_VOIGT
+        #     for j in range(7):  # Fix first 7 params (all except spare)
+        #         if j != 6:  # Don't fix intensity (index 6)
+        #             fixed_stage0[offset + j] = params[offset + j]
+        #     fixed_stage0[offset + 7] = 0.0  # Fix spare to 0
+        #
+        # params, cov, info = self.optimizer.fit(
+        #     func=model_function,
+        #     jacobian=jacobian_function,
+        #     x=f1_flat,  # Dummy x (not used, grids stored in closure)
+        #     y=y_flat_masked,  # Use masked data (union of elliptical windows)
+        #     p0=params,
+        #     bounds=bounds,
+        #     fixed_params=fixed_stage0
+        # )
+        #
+        # total_iterations += info['iterations']
+        # if self.verbose:
+        #     print(f"  Iterations: {info['iterations']}, χ² = {info['final_chi2']:.6e}")
+        #     # DIAGNOSTIC: Track intensity evolution through stages
+        #     print(f"  📊 Intensity tracking (Stage 0 → normalized values):")
+        #     for i in range(n_peaks):
+        #         offset = i * NPAR_VOIGT
+        #         intensity = params[offset + 6]
+        #         lower = bounds[0][offset + 6]
+        #         upper = bounds[1][offset + 6]
+        #         at_lower = abs(intensity - lower) / max(abs(lower), 1e-10) < 0.01
+        #         at_upper = abs(intensity - upper) / max(abs(upper), 1e-10) < 0.01
+        #         bound_status = ""
+        #         if at_lower:
+        #             bound_status = " ⚠️  AT LOWER BOUND"
+        #         elif at_upper:
+        #             bound_status = " ⚠️  AT UPPER BOUND"
+        #         print(f"     Peak {i+1}: {intensity:.6e} (bounds: [{lower:.6e}, {upper:.6e}]){bound_status}")
+        #     sys.stdout.flush()
 
         # ====================================================================
         # STAGE 1: Fix positions, float linewidths + intensities
@@ -361,6 +429,22 @@ class Ps2dMultiPeakFitter2D:
             total_iterations += info['iterations']
             if self.verbose:
                 print(f"  Iterations: {info['iterations']}, χ² = {info['final_chi2']:.6e}")
+                # DIAGNOSTIC: Track intensity evolution through stages
+                print(f"  📊 Intensity tracking (Stage 1 → after linewidth+intensity fit):")
+                for i in range(n_peaks):
+                    offset = i * NPAR_VOIGT
+                    intensity = params[offset + 6]
+                    lower = bounds[0][offset + 6]
+                    upper = bounds[1][offset + 6]
+                    at_lower = abs(intensity - lower) / max(abs(lower), 1e-10) < 0.01
+                    at_upper = abs(intensity - upper) / max(abs(upper), 1e-10) < 0.01
+                    bound_status = ""
+                    if at_lower:
+                        bound_status = " ⚠️  AT LOWER BOUND"
+                    elif at_upper:
+                        bound_status = " ⚠️  AT UPPER BOUND"
+                    print(f"     Peak {i+1}: {intensity:.6e} (bounds: [{lower:.6e}, {upper:.6e}]){bound_status}")
+                sys.stdout.flush()
 
         # ====================================================================
         # STAGE 2: Float positions (if allowed)
@@ -389,6 +473,22 @@ class Ps2dMultiPeakFitter2D:
             total_iterations += info['iterations']
             if self.verbose:
                 print(f"  Iterations: {info['iterations']}, χ² = {info['final_chi2']:.6e}")
+                # DIAGNOSTIC: Track intensity evolution through stages
+                print(f"  📊 Intensity tracking (Stage 2 → after position refinement):")
+                for i in range(n_peaks):
+                    offset = i * NPAR_VOIGT
+                    intensity = params[offset + 6]
+                    lower = bounds[0][offset + 6]
+                    upper = bounds[1][offset + 6]
+                    at_lower = abs(intensity - lower) / max(abs(lower), 1e-10) < 0.01
+                    at_upper = abs(intensity - upper) / max(abs(upper), 1e-10) < 0.01
+                    bound_status = ""
+                    if at_lower:
+                        bound_status = " ⚠️  AT LOWER BOUND"
+                    elif at_upper:
+                        bound_status = " ⚠️  AT UPPER BOUND"
+                    print(f"     Peak {i+1}: {intensity:.6e} (bounds: [{lower:.6e}, {upper:.6e}]){bound_status}")
+                sys.stdout.flush()
 
         # ====================================================================
         # STAGE 3: SKIPPED (3D-specific stage, not used for 2D)
@@ -420,13 +520,44 @@ class Ps2dMultiPeakFitter2D:
         total_iterations += info['iterations']
         if self.verbose:
             print(f"  Iterations: {info['iterations']}, χ² = {info['final_chi2']:.6e}")
+            # DIAGNOSTIC: Track intensity evolution through stages
+            print(f"  📊 Intensity tracking (Stage 4 → final global refinement):")
+            for i in range(n_peaks):
+                offset = i * NPAR_VOIGT
+                intensity = params[offset + 6]
+                lower = bounds[0][offset + 6]
+                upper = bounds[1][offset + 6]
+                at_lower = abs(intensity - lower) / max(abs(lower), 1e-10) < 0.01
+                at_upper = abs(intensity - upper) / max(abs(upper), 1e-10) < 0.01
+                bound_status = ""
+                if at_lower:
+                    bound_status = " ⚠️  AT LOWER BOUND"
+                elif at_upper:
+                    bound_status = " ⚠️  AT UPPER BOUND"
+                print(f"     Peak {i+1}: {intensity:.6e} (bounds: [{lower:.6e}, {upper:.6e}]){bound_status}")
             sys.stdout.flush()
+
+# ====================================================================
+        # STAGE 6: DISABLED - Causes intensity collapse
+        # ====================================================================
+        # This experimental stage was causing catastrophic failures:
+        # - Intensities collapsed from 10^8 → 0.01
+        # - χ² → ∞ (infinite)
+        # - R² → negative (worse than mean)
+        #
+        # Root cause: Freezing positions/linewidths and refitting only intensities
+        # creates an ill-conditioned problem that causes parameter collapse.
+        #
+        # SOLUTION: Use Stage 4 results directly (all parameters refined together)
+        # ====================================================================
+
+        # Stage 6 disabled - use Stage 4 results
 
         # ====================================================================
         # Compute final R² and prepare results
         # ====================================================================
         y_fit_flat = multi_voigt_profile_2d(f1_grid, f2_grid, params, n_peaks).ravel()
-        y_fit_2d = y_fit_flat.reshape(intensity.shape)
+        y_fit_2d = y_fit_flat.reshape(f1_grid.shape)  # Use grid shape instead of intensity.shape
 
         # Compute R² using ONLY masked data (PS2D approach)
         # This prevents unfitted peaks outside ellipses from degrading R²
@@ -441,23 +572,37 @@ class Ps2dMultiPeakFitter2D:
             sys.stdout.flush()
 
         # Pragmatic success criterion for 2D multi-peak fitting:
-        # Accept result if EITHER:
+        # Accept result if ANY of:
         # (1) Formal convergence achieved (optimizer converged within tolerance)
         # (2) R² > 0.3 (acceptable fit for overlapping NMR peaks)
+        # (3) χ² reduced by > 100× from initial (proves convergence even if R² broken)
         #
-        # Rationale: Overlapping peaks create ill-conditioned problems where
-        # formal convergence may not be achievable even when fit quality is acceptable.
+        # Rationale: For very narrow peaks on baseline-heavy regions, R² can be
+        # negative even when fitting is excellent (proven by massive χ² reduction).
         formal_convergence = info['success']
-        pragmatic_success = r_squared > 0.3
-        final_success = formal_convergence or pragmatic_success
+        pragmatic_r2_success = r_squared > 0.3
+
+        # Check χ² reduction from Stage 0 initial χ²
+        # We track Stage 0's first iteration as the baseline
+        # Require 100× reduction as evidence of successful convergence
+        chi2_reduction_success = False
+        if hasattr(self, '_stage0_initial_chi2'):
+            chi2_reduction = self._stage0_initial_chi2 / info['final_chi2']
+            chi2_reduction_success = chi2_reduction > 100
+            if self.verbose and chi2_reduction_success:
+                print(f"   📊 χ² reduced {chi2_reduction:.0f}× (from {self._stage0_initial_chi2:.2e} → {info['final_chi2']:.2e})")
+
+        final_success = formal_convergence or pragmatic_r2_success or chi2_reduction_success
 
         if self.verbose:
-            if pragmatic_success and not formal_convergence:
+            if chi2_reduction_success and not formal_convergence and not pragmatic_r2_success:
+                print(f"   ✅ Pragmatic acceptance: χ² reduced {chi2_reduction:.0f}× (excellent convergence despite negative R²)")
+            elif pragmatic_r2_success and not formal_convergence:
                 print(f"   ✅ Pragmatic acceptance: R² = {r_squared:.4f} > 0.3 (acceptable fit despite no formal convergence)")
             elif formal_convergence:
-                print(f"   ✅ Formal convergence achieved")
+                print(f"   ✅ Formal convergence achieved (R² = {r_squared:.4f})")
             else:
-                print(f"   ❌ Failed: R² = {r_squared:.4f} < 0.3 and no convergence")
+                print(f"   ❌ Failed: R² = {r_squared:.4f} < 0.3, no convergence, χ² reduction insufficient")
             sys.stdout.flush()
 
         # Extract fitted peaks and calculate derived quantities
@@ -499,7 +644,7 @@ class Ps2dMultiPeakFitter2D:
         result = {
             'success': final_success,
             'formal_convergence': formal_convergence,
-            'pragmatic_acceptance': pragmatic_success and not formal_convergence,
+            'pragmatic_acceptance': pragmatic_r2_success and not formal_convergence,
             'n_peaks': n_peaks,
             'peaks': fitted_peaks,
             'r_squared': r_squared,

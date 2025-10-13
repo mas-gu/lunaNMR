@@ -7,13 +7,13 @@ Date: 2025
 """
 
 import os
+import json
 import pandas as pd
 import numpy as np
 from datetime import datetime
 import threading
 import time
 from typing import List, Dict, Any, Optional
-from datetime import datetime
 
 # Independent imports - no GUI dependencies
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
@@ -757,3 +757,246 @@ class MultiSpectrumProcessor:
         }
 
         return constraints
+
+
+## GM added 
+
+class BatchResults:
+    """Container for batch processing results with analysis capabilities"""
+
+    def __init__(self):
+        self.results = {}
+        self.metadata = {
+            'start_time': None,
+            'end_time': None,
+            'total_spectra': 0,
+            'successful_spectra': 0,
+            'failed_spectra': 0,
+            'processing_mode': 'unknown'
+        }
+        self.statistics = {}
+        self.errors = []
+
+    def add_result(self, spectrum_name, result_data):
+        """Add a single spectrum result"""
+        self.results[spectrum_name] = result_data
+
+        # Update metadata
+        if result_data.get('status') == 'success':
+            self.metadata['successful_spectra'] += 1
+        else:
+            self.metadata['failed_spectra'] += 1
+            if 'error' in result_data:
+                self.errors.append({
+                    'spectrum': spectrum_name,
+                    'error': result_data['error']
+                })
+
+    def get_summary(self):
+        """Get processing summary"""
+        total = len(self.results)
+        success = self.metadata['successful_spectra']
+        failed = self.metadata['failed_spectra']
+
+        if self.metadata['start_time'] and self.metadata['end_time']:
+            duration = self.metadata['end_time'] - self.metadata['start_time']
+            duration_str = str(duration).split('.')[0]  # Remove microseconds
+        else:
+            duration_str = "Unknown"
+
+        summary = {
+            'total_spectra': total,
+            'successful': success,
+            'failed': failed,
+            'success_rate': (success / total * 100) if total > 0 else 0,
+            'duration': duration_str,
+            'processing_mode': self.metadata['processing_mode'],
+            'error_count': len(self.errors)
+        }
+
+        return summary
+
+    def export_results(self, output_folder):
+        """Export all results to files"""
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+
+        # Export summary
+        summary_file = os.path.join(output_folder, "batch_summary.json")
+        with open(summary_file, 'w') as f:
+            json.dump({
+                'metadata': self.metadata,
+                'summary': self.get_summary(),
+                'statistics': self.statistics,
+                'errors': self.errors
+            }, f, indent=2, default=str)
+
+        # Export individual results
+        if self.results:
+            # Create consolidated integration results
+            all_integrations = []
+            detection_stats = []
+
+            for spectrum_name, result in self.results.items():
+                # Detection statistics
+                detection_stats.append({
+                    'spectrum': spectrum_name,
+                    'status': result.get('status', 'unknown'),
+                    'detected_peaks': result.get('detected_peaks', 0),
+                    'total_peaks': result.get('total_peaks', 0),
+                    'detection_rate': result.get('detection_rate', 0.0),
+                    'noise_level': result.get('noise_level', 0.0),
+                    'processing_time': result.get('processing_time', 0.0)
+                })
+
+                # Individual integrations
+                if result.get('integration_results'):
+                    for integration in result['integration_results']:
+                        integration_with_spectrum = integration.copy()
+                        integration_with_spectrum['spectrum'] = spectrum_name
+                        all_integrations.append(integration_with_spectrum)
+
+            # Save detection statistics
+            if detection_stats:
+                stats_file = os.path.join(output_folder, "detection_statistics.csv")
+                pd.DataFrame(detection_stats).to_csv(stats_file, index=False)
+
+            # Save consolidated integrations
+            if all_integrations:
+                integration_file = os.path.join(output_folder, "all_integrations.csv")
+                pd.DataFrame(all_integrations).to_csv(integration_file, index=False, float_format='%.6f')
+
+        return output_folder
+    
+## GM added 
+
+class SeriesAnalyzer:
+    """Analysis and visualization of series processing results"""
+
+    def __init__(self):
+        self.results = None
+
+    def load_results(self, batch_results):
+        """Load batch results for analysis"""
+        self.results = batch_results
+
+    def analyze_detection_trends(self):
+        """Analyze detection rate trends across series"""
+        if self.results is None or not hasattr(self.results, 'results') or not self.results.results:
+            return None
+
+        detection_data = []
+        for spectrum_name, result in self.results.results.items():
+            if result['status'] == 'success':
+                detection_data.append({
+                    'spectrum': spectrum_name,
+                    'detection_rate': result.get('detection_rate', 0.0),
+                    'detected_peaks': result.get('detected_peaks', 0),
+                    'total_peaks': result.get('total_peaks', 0),
+                    'noise_level': result.get('noise_level', 0.0)
+                })
+
+        if not detection_data:
+            return None
+
+        df = pd.DataFrame(detection_data)
+
+        analysis = {
+            'data': df,
+            'trends': {
+                'best_spectrum': df.loc[df['detection_rate'].idxmax()]['spectrum'],
+                'worst_spectrum': df.loc[df['detection_rate'].idxmin()]['spectrum'],
+                'average_detection': df['detection_rate'].mean(),
+                'detection_consistency': 1.0 - (df['detection_rate'].std() / df['detection_rate'].mean()) if df['detection_rate'].mean() > 0 else 0
+            },
+            'correlations': {}
+        }
+
+        # Analyze correlations
+        if len(df) > 2:
+            # Correlation between noise level and detection rate
+            noise_detection_corr = df['noise_level'].corr(df['detection_rate'])
+            analysis['correlations']['noise_vs_detection'] = noise_detection_corr
+
+        return analysis
+
+    def generate_quality_report(self):
+        """Generate comprehensive quality assessment report"""
+        if not self.results:
+            return None
+
+        summary = self.results.get_summary()
+
+        # Quality thresholds
+        thresholds = {
+            'excellent_detection': 90.0,
+            'good_detection': 70.0,
+            'fair_detection': 50.0,
+            'min_success_rate': 80.0
+        }
+
+        report = {
+            'overall_grade': 'Unknown',
+            'summary': summary,
+            'quality_metrics': {},
+            'recommendations': [],
+            'issues': []
+        }
+
+        # Calculate quality metrics
+        if summary['success_rate'] >= thresholds['min_success_rate']:
+            if 'statistics' in self.results.statistics and 'detection_rate' in self.results.statistics:
+                avg_detection = self.results.statistics['detection_rate']['mean']
+
+                if avg_detection >= thresholds['excellent_detection']:
+                    report['overall_grade'] = 'Excellent'
+                elif avg_detection >= thresholds['good_detection']:
+                    report['overall_grade'] = 'Good'
+                elif avg_detection >= thresholds['fair_detection']:
+                    report['overall_grade'] = 'Fair'
+                else:
+                    report['overall_grade'] = 'Poor'
+                    report['issues'].append(f"Low average detection rate: {avg_detection:.1f}%")
+
+                report['quality_metrics']['average_detection_rate'] = avg_detection
+                report['quality_metrics']['detection_consistency'] = 1.0 - (
+                    self.results.statistics['detection_rate']['std'] / avg_detection
+                ) if avg_detection > 0 else 0
+            else:
+                report['overall_grade'] = 'Poor'
+                report['issues'].append("No detection statistics available")
+        else:
+            report['overall_grade'] = 'Failed'
+            report['issues'].append(f"Low success rate: {summary['success_rate']:.1f}%")
+
+        # Generate recommendations
+        if report['overall_grade'] in ['Poor', 'Fair']:
+            report['recommendations'].append("Consider adjusting detection parameters")
+            report['recommendations'].append("Review noise threshold settings")
+            report['recommendations'].append("Check data quality and preprocessing")
+
+        if summary['error_count'] > 0:
+            report['recommendations'].append(f"Investigate {summary['error_count']} processing errors")
+
+        return report
+
+    def export_analysis(self, output_file):
+        """Export analysis results to file"""
+        if not self.results:
+            return False
+
+        analysis_data = {
+            'timestamp': datetime.now().isoformat(),
+            'summary': self.results.get_summary(),
+            'statistics': self.results.statistics,
+            'trends': self.analyze_detection_trends(),
+            'quality_report': self.generate_quality_report()
+        }
+
+        try:
+            with open(output_file, 'w') as f:
+                json.dump(analysis_data, f, indent=2, default=str)
+            return True
+        except Exception as e:
+            print(f"Failed to export analysis: {e}")
+            return False

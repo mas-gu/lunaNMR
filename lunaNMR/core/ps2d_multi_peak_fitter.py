@@ -272,7 +272,8 @@ class Ps2dLinewidthEstimator:
 
     def get_linewidth(self, dimension: str, assignment: str = None,
                      x_data: np.ndarray = None, y_data: np.ndarray = None,
-                     all_peak_positions: List[float] = None) -> Tuple[float, float]:
+                     all_peak_positions: List[float] = None,
+                     nucleus_type_override: str = None) -> Tuple[float, float]:
         """
         Get linewidth following REVISED hierarchy (spatial analysis prioritized)
 
@@ -285,21 +286,26 @@ class Ps2dLinewidthEstimator:
         Parameters
         ----------
         dimension : str
-            Dimension identifier ('1H', '15N', 'x', 'y')
+            Dimension identifier ('1H', '15N', '13C', 'x', 'y')
         assignment : str, optional
             Peak assignment for user override lookup
         x_data, y_data : np.ndarray, optional
             Data for spatial analysis (if not in cache)
         all_peak_positions : List[float], optional
             Peak context for spatial analysis
+        nucleus_type_override : str, optional
+            Explicit nucleus type ('1H', '15N', '13C') to override dimension mapping
 
         Returns
         -------
         tuple : (lw_lorentz, lw_gauss) in ppm
         """
-        # Map x/y to nucleus type
-        nucleus_map = {'x': '1H', 'y': '15N'}
-        nucleus_type = nucleus_map.get(dimension, dimension)
+        # Map x/y to nucleus type (with override support for 13C)
+        if nucleus_type_override:
+            nucleus_type = nucleus_type_override
+        else:
+            nucleus_map = {'x': '1H', 'y': '15N'}
+            nucleus_type = nucleus_map.get(dimension, dimension)
 
         if assignment and assignment in self.user_overrides:
             if dimension in self.user_overrides[assignment]:
