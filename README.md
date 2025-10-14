@@ -13,8 +13,7 @@ LunaNMR is a professional-grade software suite for Nuclear Magnetic Resonance (N
 ## Key Features
 
 ###  **Advanced Peak Analysis**
-- **Advanced Voigt Fitting**: Multi-peak deconvolution with Gaussian and Lorentzian components
-- **ArPLS Baseline Correction**: Asymmetrically Reweighted Penalized Least Squares algorithm
+- **Advanced 2D Voigt Fitting**: Multi-peak deconvolution with Gaussian and Lorentzian components
 - **Multi-Peak Detection**: Automatic clustering and overlapping peak resolution
 - **Quality Assessment**: R² values, uncertainties, and confidence intervals
 
@@ -81,16 +80,6 @@ lunaNMR_v0o9/
 └──  docs/                      # Comprehensive documentation
 ```
 
-### **Core Components**
-
-| Component | Purpose | Key Classes |
-|-----------|---------|-------------|
-| **lunaNMR.core** | Fundamental algorithms | `CoreIntegrator`, `EnhancedVoigtFitter`, `EnhancedPeakPicker` |
-| **lunaNMR.processors** | Analysis workflows | `SeriesProcessor`, `MultiSpectrumProcessor` |
-| **lunaNMR.gui** | User interface | `main_gui`, `spectrum_browser` |
-| **lunaNMR.utils** | Configuration & I/O | `ConfigManager`, `FileManager` |
-| **modules.dynamiXs** | Relaxation analysis | `DynamiXsGUI` (optional) |
-
 ---
 
 ##  Scientific Background
@@ -101,7 +90,6 @@ LunaNMR implements professional-grade Voigt profile fitting, combining Gaussian 
 
 **Mathematical Foundation:**
 - **Voigt Function**: Convolution of Gaussian (instrumental broadening) and Lorentzian (natural linewidth) functions
-- **ArPLS Baseline Correction**: Asymmetrically Reweighted Penalized Least Squares with automatic λ selection
 - **Multi-Peak Deconvolution**: Simultaneous fitting of overlapping peaks with constraints
 
 **Key Algorithms:**
