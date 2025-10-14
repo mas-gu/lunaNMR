@@ -63,6 +63,9 @@ class MultiSpectrumProcessor:
         self.progress_callback = progress_callback
         self.processing_active = True
 
+        # Track processing duration
+        start_time = datetime.now()
+
         try:
             # Initialize comprehensive batch results structure
             batch_results = self._initialize_comprehensive_batch_results(
@@ -115,6 +118,11 @@ class MultiSpectrumProcessor:
                         'spectrum_file': spectrum_name
                     }
 
+            # Calculate processing duration
+            end_time = datetime.now()
+            duration = end_time - start_time
+            duration_str = str(duration).split('.')[0]  # Remove microseconds
+
             # Finalize results with comprehensive statistics
             batch_results['summary'] = {
                 'total_spectra': total_spectra,
@@ -123,7 +131,9 @@ class MultiSpectrumProcessor:
                 'success_rate': (successful_spectra / total_spectra * 100) if total_spectra > 0 else 0,
                 'total_peaks_processed': total_peaks_processed,
                 'total_successful_fits': total_successful_fits,
-                'overall_detection_rate': (total_successful_fits / total_peaks_processed * 100) if total_peaks_processed > 0 else 0
+                'overall_detection_rate': (total_successful_fits / total_peaks_processed * 100) if total_peaks_processed > 0 else 0,
+                'duration': duration_str,
+                'processing_mode': 'series_integration'
             }
 
             # Create all output files for downstream compatibility
@@ -247,7 +257,13 @@ class MultiSpectrumProcessor:
 
         # Call THE SAME cluster-based fitting logic as "Fit All Peaks"
         print(f"🔄 Using SingleSpectrumProcessor for spectrum {spectrum_number}/{total_spectra}")
-        fitted_results = single_processor._process_with_sequential_fitting(self.reference_peaks)
+
+        # Conditional routing: use parallel or sequential based on parameter
+        if self.voigt_params.get('use_parallel_processing', False):
+            print(f"🚀 Using parallel processing for spectrum {spectrum_number}")
+            fitted_results = single_processor._process_with_parallel_fitting(self.reference_peaks)
+        else:
+            fitted_results = single_processor._process_with_sequential_fitting(self.reference_peaks)
 
         # Post-process results: Add spectrum metadata and handle linewidth reuse
         successful_fits = 0
@@ -355,15 +371,24 @@ class MultiSpectrumProcessor:
             ref_x, ref_y = 0.0, 0.0
             if self.reference_peaks is not None:
                 try:
+                    # CRITICAL: Convert assignment to string for consistent comparison
+                    # (same fix as Peak Navigator - assignments can be float or string)
+                    assignment_str = str(assignment)
+
+                    # Also convert reference peaks assignments to strings for comparison
                     matching_ref = self.reference_peaks[
-                        self.reference_peaks['Assignment'] == assignment
+                        self.reference_peaks['Assignment'].astype(str) == assignment_str
                     ]
                     if not matching_ref.empty:
                         ref_x = float(matching_ref['Position_X'].iloc[0])
                         ref_y = float(matching_ref['Position_Y'].iloc[0])
                         print(f"   🎯 Found reference coordinates for {assignment}: ({ref_x:.3f}, {ref_y:.1f})")
+                    else:
+                        print(f"   ⚠️ No reference match found for assignment: {assignment} (type: {type(assignment)})")
                 except Exception as e:
                     print(f"   ⚠️ Error getting reference coordinates for {assignment}: {e}")
+                    import traceback
+                    traceback.print_exc()
 
             # Initialize with reference coordinates as defaults
             peak_data = {
@@ -445,6 +470,37 @@ class MultiSpectrumProcessor:
                 elif 'peak_intensity' in fit_result:
                     height = float(fit_result['peak_intensity'])
 
+                # Extract detected intensity (from peak detection, not fitting)
+                detected_intensity = 0.0
+                if 'detected_intensity' in fit_result:
+                    detected_intensity = float(fit_result['detected_intensity'])
+                # Fallback: use intensity from all_peaks_context if available
+                elif self.reference_peaks is not None:
+                    try:
+                        matching_peak = self.reference_peaks[
+                            self.reference_peaks['Assignment'] == assignment
+                        ]
+                        if not matching_peak.empty:
+                            if 'Height' in matching_peak.columns:
+                                detected_intensity = float(matching_peak['Height'].iloc[0])
+                            elif 'Intensity' in matching_peak.columns:
+                                detected_intensity = float(matching_peak['Intensity'].iloc[0])
+                    except:
+                        pass
+
+                # Extract linewidths (FWHM in ppm)
+                lw_x, lw_y = 0.0, 0.0
+                if x_fit:
+                    x_sigma = x_fit.get('sigma', 0)
+                    x_gamma = x_fit.get('gamma', 0)
+                    # FWHM = 2*sqrt(2*ln(2))*sigma + 2*gamma (Voigt FWHM approximation)
+                    lw_x = 2 * np.sqrt(2 * np.log(2)) * x_sigma + 2 * x_gamma
+
+                if y_fit:
+                    y_sigma = y_fit.get('sigma', 0)
+                    y_gamma = y_fit.get('gamma', 0)
+                    lw_y = 2 * np.sqrt(2 * np.log(2)) * y_sigma + 2 * y_gamma
+
                 # SNR extraction - try multiple sources
                 snr = 0.0
                 if 'snr' in fit_result:
@@ -489,6 +545,9 @@ class MultiSpectrumProcessor:
                     'quality': quality,
                     'r_squared': r_squared,
                     'fitted': True,
+                    'detected_intensity': detected_intensity,
+                    'lw_x': lw_x,
+                    'lw_y': lw_y,
                     'voigt_fit_data': {
                         'x_fit': x_fit,
                         'y_fit': y_fit
@@ -559,12 +618,16 @@ class MultiSpectrumProcessor:
             # Main comprehensive tracking file
             tracking_file = os.path.join(self.output_folder, "comprehensive_peak_tracking.csv")
             tracking_df.to_csv(tracking_file, index=False, float_format='%.6f')
+            print(f"✅ Created comprehensive peak tracking: {tracking_file}")
 
-            # Create intensity matrix
+            # Create matrix files
             self._create_intensity_matrix(tracking_df)
-
-            # Create detection matrix
+            self._create_detected_intensity_matrix(tracking_df)
+            self._create_volume_matrix(tracking_df)
             self._create_detection_matrix(tracking_df)
+
+            # Create per-spectrum detailed files
+            self._create_per_spectrum_files(batch_results)
 
             # Create summary statistics file
             self._create_summary_statistics_file(batch_results)
@@ -598,6 +661,12 @@ class MultiSpectrumProcessor:
                             peak_row[f'{spectrum_key}_Position_X'] = peak.get('Position_X', 0.0)
                             peak_row[f'{spectrum_key}_Position_Y'] = peak.get('Position_Y', 0.0)
                             peak_row[f'{spectrum_key}_R_Squared'] = peak.get('R_Squared', 0.0)
+
+                            # Add detected intensity and linewidth information
+                            peak_row[f'{spectrum_key}_Detected_Intensity'] = peak.get('detected_intensity', 0.0)
+                            peak_row[f'{spectrum_key}_LW_X'] = peak.get('lw_x', 0.0)
+                            peak_row[f'{spectrum_key}_LW_Y'] = peak.get('lw_y', 0.0)
+
                             found_peak = True
                             break
 
@@ -610,6 +679,9 @@ class MultiSpectrumProcessor:
                     peak_row[f'{spectrum_key}_Position_X'] = 0.0
                     peak_row[f'{spectrum_key}_Position_Y'] = 0.0
                     peak_row[f'{spectrum_key}_R_Squared'] = 0.0
+                    peak_row[f'{spectrum_key}_Detected_Intensity'] = 0.0
+                    peak_row[f'{spectrum_key}_LW_X'] = 0.0
+                    peak_row[f'{spectrum_key}_LW_Y'] = 0.0
 
             all_peaks_data.append(peak_row)
 
@@ -638,6 +710,93 @@ class MultiSpectrumProcessor:
 
         detection_file = os.path.join(self.output_folder, "peak_detection_matrix.csv")
         detection_data.to_csv(detection_file, index=False)
+
+    def _create_detected_intensity_matrix(self, tracking_df: pd.DataFrame):
+        """Create peak detected intensity matrix file (from peak detection, not fitting)"""
+        intensity_detected_data = tracking_df[['Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y']].copy()
+
+        for col in tracking_df.columns:
+            if col.endswith('_Detected_Intensity'):
+                spectrum_name = col.replace('_Detected_Intensity', '')
+                intensity_detected_data[spectrum_name] = tracking_df[col]
+
+        detected_intensity_file = os.path.join(self.output_folder, "peak_intensity_detected_matrix.csv")
+        intensity_detected_data.to_csv(detected_intensity_file, index=False, float_format='%.6f')
+        print(f"✅ Created detected intensity matrix: {detected_intensity_file}")
+
+    def _create_volume_matrix(self, tracking_df: pd.DataFrame):
+        """Create peak volume matrix file"""
+        volume_data = tracking_df[['Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y']].copy()
+
+        for col in tracking_df.columns:
+            if col.endswith('_Volume'):
+                spectrum_name = col.replace('_Volume', '')
+                volume_data[spectrum_name] = tracking_df[col]
+
+        volume_file = os.path.join(self.output_folder, "peak_volume_matrix.csv")
+        volume_data.to_csv(volume_file, index=False, float_format='%.6f')
+        print(f"✅ Created volume matrix: {volume_file}")
+
+    def _create_per_spectrum_files(self, batch_results: Dict[str, Any]):
+        """
+        Create individual CSV file for each spectrum with comprehensive peak information
+
+        Columns: peak_number, assignment, Reference_X, Reference_Y,
+                 Detected_Intensity, Height, Volume, LW_X, LW_Y, R_Squared, Quality
+        """
+        per_spectrum_folder = os.path.join(self.output_folder, "per_spectrum_results")
+        if not os.path.exists(per_spectrum_folder):
+            os.makedirs(per_spectrum_folder)
+
+        for spectrum_name, result_data in batch_results['results'].items():
+            if not result_data.get('success', False):
+                continue
+
+            spectrum_key = os.path.splitext(spectrum_name)[0]
+            integration_results = result_data.get('integration_results', [])
+
+            if not integration_results:
+                continue
+
+            # Build per-spectrum DataFrame
+            spectrum_peaks = []
+            for peak in integration_results:
+                # Find reference coordinates
+                ref_x, ref_y = 0.0, 0.0
+                assignment = peak.get('assignment', peak.get('Assignment', 'Unknown'))
+
+                if self.reference_peaks is not None:
+                    try:
+                        matching_ref = self.reference_peaks[
+                            self.reference_peaks['Assignment'] == assignment
+                        ]
+                        if not matching_ref.empty:
+                            ref_x = float(matching_ref['Position_X'].iloc[0])
+                            ref_y = float(matching_ref['Position_Y'].iloc[0])
+                    except:
+                        pass
+
+                peak_row = {
+                    'Peak_Number': peak.get('peak_number', peak.get('Peak_Number', 0)),
+                    'Assignment': assignment,
+                    'Reference_X': ref_x,
+                    'Reference_Y': ref_y,
+                    'Detected_Intensity': peak.get('detected_intensity', 0.0),
+                    'Height': peak.get('Height', peak.get('height', 0.0)),
+                    'Volume': peak.get('Volume', peak.get('volume', 0.0)),
+                    'LW_X': peak.get('lw_x', 0.0),
+                    'LW_Y': peak.get('lw_y', 0.0),
+                    'R_Squared': peak.get('R_Squared', peak.get('r_squared', 0.0)),
+                    'Quality': peak.get('Quality', peak.get('quality', 'Unknown'))
+                }
+                spectrum_peaks.append(peak_row)
+
+            if spectrum_peaks:
+                spectrum_df = pd.DataFrame(spectrum_peaks)
+                spectrum_file = os.path.join(per_spectrum_folder, f"{spectrum_key}.csv")
+                spectrum_df.to_csv(spectrum_file, index=False, float_format='%.6f')
+
+        print(f"✅ Created per-spectrum CSV files in: {per_spectrum_folder}")
 
     def _create_summary_statistics_file(self, batch_results: Dict[str, Any]):
         """Create summary statistics file"""

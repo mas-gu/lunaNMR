@@ -82,7 +82,7 @@ class PS2DConfig:
             # Position bounds (fitting movement limits)
             # ================================================================
             # Maximum distance peaks can move from initial position during fitting
-            'pos_margin_f1': 0.2,         # 15N position movement limit (ppm)
+            'pos_margin_f1': 0.05,         # 15N position movement limit (ppm)
             'pos_margin_f2': 0.05,        # 1H position movement limit (ppm)
 
             # ================================================================
@@ -129,8 +129,8 @@ class PS2DConfig:
             'min_linewidth_f2': 0.005,    # Minimum 1H linewidth
 
             # Position bounds (moderate for peak movement)
-            'pos_margin_f1': 0.04,        # Allow ±0.04 ppm movement (relaxed)
-            'pos_margin_f2': 0.04,        # Allow ±0.04 ppm movement
+            'pos_margin_f1': 0.05,        # Allow ±0.04 ppm movement (relaxed)
+            'pos_margin_f2': 0.02,        # Allow ±0.04 ppm movement
 
             # Cluster size limits (allow larger groups as requested)
             'max_cluster_size': 6,        # Max 6 peaks per cluster (same as 15N)

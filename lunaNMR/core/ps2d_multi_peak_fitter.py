@@ -3,7 +3,7 @@ PS2D-Style Multi-Peak Voigt Fitter for LunaNMR
 ==============================================
 
 Complete port of  multi-peak fitting implementation (C++ → Python).
-Implements the exact 5-stage fitting strategy from peakfit.cpp for simultaneous
+Implements the exact 5-stage fitting strategy 
 fitting of multiple overlapping Voigt peaks.
 
 1. Multi-peak simultaneous fitting (2-10 peaks)
@@ -27,24 +27,24 @@ from typing import Dict, List, Tuple, Optional, Union
 import warnings
 
 # ============================================================================
-# MATHEMATICAL CONSTANTS (from faddeeva.cpp and fitfunctions.cpp)
+# MATHEMATICAL CONSTANTS 
 # ============================================================================
 
 SQRT_2 = 1.4142135624                    # √2
 SQRT_2PI = np.sqrt(2.0 * np.pi)         # √(2π)
 SQRT_8LN2 = np.sqrt(8.0 * np.log(2.0))  # √(8·ln(2)) = 2.35482...
 
-# Derivative step size (from fitfunctions.cpp line 1986)
+# Derivative step size 
 DERIV_STEP = 1.000001  # Relative 1e-6 step (0.0001%)
 
-# Levenberg-Marquardt optimizer parameters (from fitmrq.cpp)
+# Levenberg-Marquardt optimizer parameters 
 LAMBDA_INIT = 0.001
 LAMBDA_UP = 10.0
 LAMBDA_DOWN = 0.1
 MAX_ITER = 1000
 CONV_TOL = 1e-6
 
-# From peakfit.cpp: NPAR_VOIGT = 6 (2D), but we use 1D simplification
+# NPAR_VOIGT = 6 (2D), but we use 1D simplification
 NPAR_VOIGT_1D = 4  # pos, lw_lor, lw_gauss, intensity (per peak) - NO baseline
 NFIX_1D = 3        # pos, lw_lor, lw_gauss (fixed shape parameters)
 
@@ -132,7 +132,6 @@ class Ps2dLinewidthEstimator:
         """
         Register a fitted peak as reference template 
 
-        Matches  peak.cpp:598-605 where unspecified peaks inherit
         from reference peak 'p' parameter.
 
         Parameters
@@ -362,14 +361,12 @@ def reset_global_estimator():
 
 
 # ============================================================================
-# VOIGT PROFILE COMPUTATION (from faddeeva.cpp)
+# VOIGT PROFILE COMPUTATION 
 # ============================================================================
 
 def voigt_peak_height_1d(lw_gauss: float, lw_lorentz: float) -> float:
     """
     Calculate peak height of unit-volume Voigt profile (1D version).
-
-    From faddeeva.cpp lines 1998-2018. This is used to convert between
     peak intensity (height) and volume (integral).
 
     Parameters
@@ -399,9 +396,7 @@ def voigt_peak_height_1d(lw_gauss: float, lw_lorentz: float) -> float:
 
 def multi_voigt_profile_1d(x: np.ndarray, params: np.ndarray, n_peaks: int) -> np.ndarray:
     """
-    Multi-peak 1D Voigt profile - EXACT  (NO baseline)
-
-    From faddeeva.cpp lines 1927-1950 (voigt function)
+    Multi-peak 1D Voigt profile - EXACT  (NO baseline))
 
     Parameters organized as :
     For each peak i (i=0 to n_peaks-1):
@@ -411,8 +406,6 @@ def multi_voigt_profile_1d(x: np.ndarray, params: np.ndarray, n_peaks: int) -> n
         params[i*4 + 3] = intensity (volume)
 
     NO BASELINE - data must be baseline-corrected BEFORE fitting!
-
-    Mathematical Formula (from faddeeva.cpp):
     ------------------------------------------------
     y(x) = Σ[i=0 to n_peaks-1] Intensity_i * Voigt(x, i)
 
@@ -439,7 +432,7 @@ def multi_voigt_profile_1d(x: np.ndarray, params: np.ndarray, n_peaks: int) -> n
     """
     y = np.zeros_like(x, dtype=float)
 
-    # Loop over all overlapping peaks (from faddeeva.cpp line 220)
+    # Loop over all overlapping peaks 
     for i in range(n_peaks):
         # Extract parameters for peak i
         pos = params[i * 4 + 0]
@@ -447,16 +440,14 @@ def multi_voigt_profile_1d(x: np.ndarray, params: np.ndarray, n_peaks: int) -> n
         lw_gauss = params[i * 4 + 2]
         intensity = params[i * 4 + 3]
 
-        # Convert FWHM to internal sigma/gamma (faddeeva.cpp lines 222-225)
+        # Convert FWHM to internal sigma/gamma 
         sigma = lw_gauss / SQRT_8LN2  # Gaussian sigma
         gamma = lw_lorentz / 2.0       # Lorentzian gamma
 
         # Complex argument: z = (position - x + i*gamma) / (sigma*sqrt(2))
-        # (faddeeva.cpp line 228)
         z = (pos - x + 1j * gamma) / (sigma * SQRT_2)
 
         # Voigt profile = intensity * Re[w(z)] / (sigma*sqrt(2*pi))
-        # (faddeeva.cpp lines 233-236)
         w_z = wofz(z)
         voigt = w_z.real / (sigma * SQRT_2PI)
 
@@ -470,8 +461,6 @@ def compute_multi_voigt_jacobian_1d(x: np.ndarray, params: np.ndarray,
                                      n_peaks: int) -> np.ndarray:
     """
     Jacobian for multi-peak Voigt - EXACT  (NO baseline)
-
-    From fitfunctions.cpp lines 1953-1996 (voigt function)
 
     Uses the exact  approach:
     - Numerical derivatives with 1e-6 relative step for pos/linewidths
@@ -496,13 +485,13 @@ def compute_multi_voigt_jacobian_1d(x: np.ndarray, params: np.ndarray,
     n_points = len(x)
     n_params = n_peaks * 4  # NO baseline!
 
-    # Initialize Jacobian (fitfunctions.cpp lines 301-302)
+    # Initialize Jacobian 
     jac = np.zeros((n_points, n_params), dtype=float)
 
     # Compute current function value
     y_base = multi_voigt_profile_1d(x, params, n_peaks)
 
-    # Loop over all peaks (fitfunctions.cpp line 307)
+    # Loop over all peaks 
     for i in range(n_peaks):
         base_idx = i * 4
 
@@ -513,10 +502,8 @@ def compute_multi_voigt_jacobian_1d(x: np.ndarray, params: np.ndarray,
         intensity = params[base_idx + 3]
 
         # NUMERICAL DERIVATIVES (finite difference, 0.0001% perturbation)
-        # From fitfunctions.cpp lines 328-357
 
         # 1. d/d(position) - parameter params[base_idx + 0]
-        # (fitfunctions.cpp lines 330-332)
         if abs(pos) > 1e-10:
             params_perturb = params.copy()
             params_perturb[base_idx + 0] *= DERIV_STEP
@@ -524,7 +511,6 @@ def compute_multi_voigt_jacobian_1d(x: np.ndarray, params: np.ndarray,
             jac[:, base_idx + 0] = (y_perturb - y_base) / (0.000001 * abs(pos))
 
         # 2. d/d(lorentzian_width) - parameter params[base_idx + 1]
-        # (fitfunctions.cpp lines 334-337)
         if abs(lw_lorentz) > 1e-10:
             params_perturb = params.copy()
             params_perturb[base_idx + 1] *= DERIV_STEP
@@ -532,7 +518,6 @@ def compute_multi_voigt_jacobian_1d(x: np.ndarray, params: np.ndarray,
             jac[:, base_idx + 1] = (y_perturb - y_base) / (0.000001 * abs(lw_lorentz))
 
         # 3. d/d(gaussian_width) - parameter params[base_idx + 2]
-        # (fitfunctions.cpp lines 349-352)
         if abs(lw_gauss) > 1e-10:
             params_perturb = params.copy()
             params_perturb[base_idx + 2] *= DERIV_STEP
@@ -540,7 +525,7 @@ def compute_multi_voigt_jacobian_1d(x: np.ndarray, params: np.ndarray,
             jac[:, base_idx + 2] = (y_perturb - y_base) / (0.000001 * abs(lw_gauss))
 
         # 4. d/d(intensity) - parameter params[base_idx + 3] - ANALYTICAL!
-        # (fitfunctions.cpp line 360: dyda[i+5+f3] = f/a[i+f3+5])
+        # dyda[i+5+f3] = f/a[i+f3+5])
         if abs(intensity) > 1e-10:
             # Compute contribution from this peak only
             # Zero out other peaks
@@ -555,24 +540,23 @@ def compute_multi_voigt_jacobian_1d(x: np.ndarray, params: np.ndarray,
 
 
 # ============================================================================
-# FIVE-STAGE MULTI-PEAK FITTER (from peakfit.cpp)
+# FIVE-STAGE MULTI-PEAK FITTER (
 # ============================================================================
 
 class Ps2dMultiPeakFitter:
     """
-    Five-stage multi-peak Voigt fitter (EXACT from peakfit.cpp)
+    Five-stage multi-peak Voigt fitter 
 
-    Stages (from peakfit.cpp):
-    0. fit_stage_zero (lines 231-248): Fix pos/lw, fit intensity only (VOIGT warm-up)
-    1. fit_stage_one (lines 251-272): Fix pos, float lw+intensity
-    2. fit_stage_two (lines 275-289): Float positions
-    3. fit_stage_three (lines 292-319): Global intensity refinement (multi-plane only)
-    4. fit_stage_four (lines 321-345): Final global optimization
+    Stages :
+    0. fit_stage_zero : Fix pos/lw, fit intensity only (VOIGT warm-up)
+    1. fit_stage_one : Fix pos, float lw+intensity
+    2. fit_stage_two : Float positions
+    3. fit_stage_three : Global intensity refinement (multi-plane only)
+    4. fit_stage_four : Final global optimization
 
     Implementation Notes
     --------------------
-    - The original C++ code handles multi-plane (pseudo-3D) data. This 1D version
-      simplifies to single-plane fitting.
+
     - Parameter fixing is implemented via scipy bounds: fixed = (value, value)
     - Uses scipy.optimize.least_squares with 'trf' or 'lm' method
 
@@ -693,7 +677,7 @@ class Ps2dMultiPeakFitter:
         if min_lw is None:
             min_lw = [0.0] * n_peaks
 
-        # Initialize parameter vector (peakfit.cpp lines 106-162) - NO baseline
+        # Initialize parameter vector  - NO baseline
         params_init = self._initialize_parameters(initial_peaks)
 
         # Store for constraint checking
@@ -704,7 +688,7 @@ class Ps2dMultiPeakFitter:
         self.min_lw = min_lw
         self.n_peaks = n_peaks
 
-        # STAGE 0: VOIGT warm-up (optional, peakfit.cpp lines 422-425)
+        # STAGE 0: VOIGT warm-up (optional)
         if self.use_voigt_warmup:
             if self.verbose:
                 print("\n--- Stage 0: Intensity-only warm-up ---")
@@ -712,13 +696,13 @@ class Ps2dMultiPeakFitter:
         else:
             params_current = params_init.copy()
 
-        # STAGE 1: Fit linewidths (positions fixed, peakfit.cpp lines 428-429)
+        # STAGE 1: Fit linewidths (positions fixed)
         if self.verbose:
             print("\n--- Stage 1: Linewidth fitting (positions fixed) ---")
         result_stage1 = self._fit_stage_one(x_data, y_data, params_current, n_peaks)
         params_current = result_stage1.x
 
-        # STAGE 2: Float positions (if not fixed by user, peakfit.cpp lines 432-433)
+        # STAGE 2: Float positions (if not fixed by user)
         if not all(fix_positions):
             if self.verbose:
                 print("\n--- Stage 2: Position refinement ---")
@@ -730,9 +714,9 @@ class Ps2dMultiPeakFitter:
             result_stage2 = result_stage1
 
         # STAGE 3: Skipped for 1D single-plane fitting
-        # (Original C++ only for multi-plane data, peakfit.cpp lines 442-444)
+        # (Original C++ only for multi-plane data)
 
-        # STAGE 4: Final global optimization (peakfit.cpp lines 447-448)
+        # STAGE 4: Final global optimization
         if self.verbose:
             print("\n--- Stage 4: Final global optimization ---")
         result_final = self._fit_stage_four(x_data, y_data, params_current, n_peaks)
@@ -761,7 +745,7 @@ class Ps2dMultiPeakFitter:
             warnings.warn("Could not compute covariance matrix (singular)")
             self.covariance = np.zeros((len(self.fitted_params), len(self.fitted_params)))
 
-        # Validate linewidth constraints (peakfit.cpp lines 1048-1076)
+        # Validate linewidth constraints 
         self._validate_linewidth_constraints()
 
         # Extract individual peak results
@@ -819,7 +803,6 @@ class Ps2dMultiPeakFitter:
         """
         Initialize parameter vector from peak list - EXACT  (NO baseline)
 
-        From peakfit.cpp lines 106-162 (initFitParGlobal)
         """
         n_peaks = len(initial_peaks)
         params = np.zeros(n_peaks * 4)  # NO baseline
@@ -837,7 +820,7 @@ class Ps2dMultiPeakFitter:
             params[base_idx + 2] = max(peak.get('lw_gauss', 0.01), 1e-5)
 
             # Intensity (volume)
-            # If given as height, convert to volume (peakfit.cpp lines 190-193)
+            # If given as height, convert to volume 
             intensity_input = peak.get('intensity', peak.get('height', 1.0))
 
             # Normalize by Voigt peak height to get volume
@@ -883,7 +866,6 @@ class Ps2dMultiPeakFitter:
         """
         Stage 0: Fit intensity only with fixed positions and linewidths
 
-        From peakfit.cpp lines 231-248 (fit_stage_zero)
 
         Purpose: VOIGT warm-up to get reasonable intensity estimates
         """
@@ -936,11 +918,9 @@ class Ps2dMultiPeakFitter:
         """
         Stage 1: Fit linewidths and intensity (positions fixed)
 
-        From peakfit.cpp lines 251-272 (fit_stage_one)
-
         Key: Respects fixLW flag (self.fix_linewidths)
         """
-        # Create bounds (peakfit.cpp lines 524-535)
+        # Create bounds 
         lower = np.full_like(params_init, -np.inf)
         upper = np.full_like(params_init, np.inf)
 
@@ -955,12 +935,11 @@ class Ps2dMultiPeakFitter:
         for i in range(n_peaks):
             base_idx = i * 4
 
-            # Position: FIXED (peakfit.cpp lines 525-526)
+            # Position: FIXED 
             lower[base_idx + 0] = params_init[base_idx + 0] - eps
             upper[base_idx + 0] = params_init[base_idx + 0] + eps
 
             # Linewidths: FLOAT or FIXED based on fixLW flag
-            # (peakfit.cpp lines 527-533)
             if self.fix_linewidths[i]:
                 # Fixed linewidths
                 lower[base_idx + 1] = params_init[base_idx + 1] - eps
@@ -1017,11 +996,9 @@ class Ps2dMultiPeakFitter:
         """
         Stage 2: Float positions (if not fixed by user)
 
-        From peakfit.cpp lines 275-289 (fit_stage_two)
-
         Key: Respects fixPos flag (self.fix_positions)
         """
-        # Create bounds (peakfit.cpp lines 562-568)
+        # Create bounds
         lower = np.full_like(params_init, -np.inf)
         upper = np.full_like(params_init, np.inf)
 
@@ -1037,7 +1014,6 @@ class Ps2dMultiPeakFitter:
             base_idx = i * 4
 
             # Position: FLOAT or FIXED based on fixPos flag
-            # (peakfit.cpp lines 563-567)
             if self.fix_positions[i]:
                 # Fixed position
                 lower[base_idx + 0] = params_init[base_idx + 0] - eps
@@ -1071,7 +1047,7 @@ class Ps2dMultiPeakFitter:
             upper[base_idx + 3] = np.inf
 
 
-        # If all positions are fixed, skip optimization (peakfit.cpp lines 576-578)
+        # If all positions are fixed, skip optimization 
         if not any_floating_positions:
             if self.verbose:
                 print("  All positions fixed - stage skipped")
@@ -1120,11 +1096,9 @@ class Ps2dMultiPeakFitter:
         """
         Stage 4: Final global optimization with user constraints
 
-        From peakfit.cpp lines 321-345 (fit_stage_four)
-
         All parameters float unless explicitly fixed by user flags
         """
-        # Create bounds (peakfit.cpp lines 673-689)
+        # Create bounds 
         lower = np.full_like(params_init, -np.inf)
         upper = np.full_like(params_init, np.inf)
 
@@ -1138,7 +1112,7 @@ class Ps2dMultiPeakFitter:
         for i in range(n_peaks):
             base_idx = i * 4
 
-            # Position: respect fixPos flag (peakfit.cpp lines 674-675)
+            # Position: respect fixPos flag 
             if self.fix_positions[i]:
                 lower[base_idx + 0] = params_init[base_idx + 0] - eps
                 upper[base_idx + 0] = params_init[base_idx + 0] + eps
@@ -1150,7 +1124,7 @@ class Ps2dMultiPeakFitter:
                 lower[base_idx + 0] = initial_pos - pos_bound
                 upper[base_idx + 0] = initial_pos + pos_bound
 
-            # Linewidths: respect fixLW flag (peakfit.cpp lines 676-688)
+            # Linewidths: respect fixLW flag
             if self.fix_linewidths[i]:
                 lower[base_idx + 1] = params_init[base_idx + 1] - eps
                 upper[base_idx + 1] = params_init[base_idx + 1] + eps
@@ -1205,8 +1179,6 @@ class Ps2dMultiPeakFitter:
         """
         Validate fitted linewidths against max/min constraints
 
-        From peakfit.cpp lines 1048-1076 (calcConvFlag)
-
         Sets convergence_flag to indicate constraint violations:
         0 = Success
         4 = Linewidth exceeds maximum
@@ -1220,7 +1192,7 @@ class Ps2dMultiPeakFitter:
             lw_lorentz = self.fitted_params[base_idx + 1]
             lw_gauss = self.fitted_params[base_idx + 2]
 
-            # Check against maximum (peakfit.cpp lines 760-764)
+            # Check against maximum 
             if lw_lorentz > self.max_lw[i] and self.max_lw[i] > 0:
                 self.convergence_flag = 4
                 warnings.warn(
@@ -1235,7 +1207,7 @@ class Ps2dMultiPeakFitter:
                     f"maximum {self.max_lw[i]:.6f}"
                 )
 
-            # Check against minimum (peakfit.cpp lines 770-774)
+            # Check against minimum 
             if lw_lorentz < self.min_lw[i] and self.min_lw[i] > 0:
                 self.convergence_flag = 6
                 warnings.warn(

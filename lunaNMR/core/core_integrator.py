@@ -2283,7 +2283,8 @@ class VoigtIntegrator(BaseIntegrator):
             'fitted_curve': fitted_curve
         }
 
-    def fit_overlap_group_2d(self, overlap_group, assignment="Unknown", peak_assignments=None):
+    def fit_overlap_group_2d(self, overlap_group, assignment="Unknown", peak_assignments=None,
+                             fix_positions=False, fix_linewidths=False):
         """
         Fit overlap group using 2D simultaneous multi-peak fitting
 
@@ -2299,6 +2300,10 @@ class VoigtIntegrator(BaseIntegrator):
             Assignment name for logging (primary peak)
         peak_assignments : list of str, optional
             Assignment names for each peak in overlap_group (for table display)
+        fix_positions : bool
+            If True, peak positions are held constant during fitting (Stage 2 skipped)
+        fix_linewidths : bool
+            If True, linewidths are held constant during fitting (Stage 1 skipped)
 
         Returns:
         --------
@@ -2349,14 +2354,25 @@ class VoigtIntegrator(BaseIntegrator):
             fwhm_f1 = self._estimate_fwhm_from_slice(f1_cross, region['f1_ppm'], y_ppm)
             fwhm_f2 = self._estimate_fwhm_from_slice(f2_cross, region['f2_ppm'], x_ppm)
 
+            # FIXED 2025-10-13: Correct FWHM storage convention
+            # Bug: Was storing FWHM/2 in lw_gau, but rest of codebase expects full FWHM
+            # The variable lw_gau_f1 should contain the Gaussian FWHM, not half of it
+            # Use nucleus-adaptive minimum constraints from centralized config
+            config = get_ps2d_config()
+
+            # NEW (CORRECT): Store full FWHM in lw_gau, small Lorentzian initial guess
+            #lw_gau_f1 = max(fwhm_f1, config.min_linewidth_f1)  # lw_gau IS the Gaussian FWHM
+            #lw_lor_f1 = max(fwhm_f1 / 10.0, config.min_linewidth_f1 / 5.0)  # Start with small Lorentzian
+            #lw_gau_f2 = max(fwhm_f2, config.min_linewidth_f2)  # lw_gau IS the Gaussian FWHM
+            #lw_lor_f2 = max(fwhm_f2 / 10.0, config.min_linewidth_f2 / 5.0)  # Start with small Lorentzian
+
+            # OLD (BUG - COMMENTED OUT): Stored FWHM/2, causing confusion throughout codebase
             # Convert FWHM to Gaussian/Lorentzian components (assume 50/50 mix)
             # For Voigt: FWHM ≈ 0.5346*fL + sqrt(0.2166*fL² + fG²)
             # Approximate: set lw_gau ≈ fwhm/2, lw_lor ≈ fwhm/2
-            # Use nucleus-adaptive minimum constraints from centralized config
-            config = get_ps2d_config()
-            lw_gau_f1 = max(fwhm_f1 / 2.0, config.min_linewidth_f1)  # Nucleus-adaptive minimum
+            lw_gau_f1 = max(fwhm_f1 / 2.0, config.min_linewidth_f1)  # BUG: Stores FWHM/2
             lw_lor_f1 = max(fwhm_f1 / 2.0, config.min_linewidth_f1)
-            lw_gau_f2 = max(fwhm_f2 / 2.0, config.min_linewidth_f2)  # Nucleus-adaptive minimum
+            lw_gau_f2 = max(fwhm_f2 / 2.0, config.min_linewidth_f2)  # BUG: Stores FWHM/2
             lw_lor_f2 = max(fwhm_f2 / 2.0, config.min_linewidth_f2)
 
             # Use detected intensity if available, otherwise fall back to re-measurement
@@ -2379,8 +2395,11 @@ class VoigtIntegrator(BaseIntegrator):
         # Log estimated linewidths for diagnostic purposes
         print(f"   📏 Initial linewidth estimates (FWHM from 1D cross-sections):")
         for i, peak in enumerate(initial_peaks):
-            fwhm_f1 = 2.0 * peak['lw_gau_f1']  # Approximate FWHM
-            fwhm_f2 = 2.0 * peak['lw_gau_f2']
+            # FIXED 2025-10-13: lw_gau IS the Gaussian FWHM (not half-width)
+            #fwhm_f1 = peak['lw_gau_f1']  # NEW: lw_gau IS the FWHM (no compensation needed)
+            #fwhm_f2 = peak['lw_gau_f2']  # NEW: lw_gau IS the FWHM (no compensation needed)
+            fwhm_f1 = 2.0 * peak['lw_gau_f1']  # OLD: Compensated for FWHM/2 storage bug
+            fwhm_f2 = 2.0 * peak['lw_gau_f2']  # OLD: Compensated for FWHM/2 storage bug
             print(f"      Peak {i+1}: F1={fwhm_f1:.3f} ppm ({config.nucleus_type}), F2={fwhm_f2:.4f} ppm (1H)")
 
         # Log initial intensity estimates
@@ -2419,9 +2438,11 @@ class VoigtIntegrator(BaseIntegrator):
         SQRT_8LN2 = 2.3548200450309493  # 2 * sqrt(2 * ln(2))
         for peak in initial_peaks:
             # Convert FWHM to sigma (Gaussian width parameter)
-            # Initial peaks have lw_gau which is FWHM/2, so multiply by 2 to get FWHM
-            fwhm_f1 = 2.0 * peak['lw_gau_f1']
-            fwhm_f2 = 2.0 * peak['lw_gau_f2']
+            # FIXED 2025-10-13: lw_gau IS the Gaussian FWHM (not half-width)
+            #fwhm_f1 = peak['lw_gau_f1']  # NEW: lw_gau IS the FWHM (no compensation needed)
+            #fwhm_f2 = peak['lw_gau_f2']  # NEW: lw_gau IS the FWHM (no compensation needed)
+            fwhm_f1 = 2.0 * peak['lw_gau_f1']  # OLD: Compensated for FWHM/2 storage bug
+            fwhm_f2 = 2.0 * peak['lw_gau_f2']  # OLD: Compensated for FWHM/2 storage bug
             sigma_f1 = fwhm_f1 / SQRT_8LN2
             sigma_f2 = fwhm_f2 / SQRT_8LN2
 
@@ -2466,7 +2487,10 @@ class VoigtIntegrator(BaseIntegrator):
         fitter = Ps2dMultiPeakFitter2D(verbose=True)
         result = fitter.fit_multi_peak_2d(
             region['f1_grid'], region['f2_grid'], normalized_data,
-            initial_peaks, data_mask=data_mask
+            initial_peaks,
+            fix_positions=fix_positions,    # Pass GUI checkbox state
+            fix_linewidths=fix_linewidths,  # Pass GUI checkbox state
+            data_mask=data_mask
         )
 
         # Denormalize fitted intensities AND derived quantities
@@ -2553,8 +2577,15 @@ class VoigtIntegrator(BaseIntegrator):
                         break
                 peak_assignments.append(matched_assignment or 'Unknown')
 
+            # Extract fix_positions and fix_linewidths from GUI parameters
+            fix_positions = self.gui_params.get('fix_positions', False)
+            fix_linewidths = self.gui_params.get('fix_linewidths', False)
+
             # Fit entire overlap group using 2D multi-peak fitter
-            result_2d = self.fit_overlap_group_2d(overlap_group, assignment, peak_assignments=peak_assignments)
+            result_2d = self.fit_overlap_group_2d(overlap_group, assignment,
+                                                   peak_assignments=peak_assignments,
+                                                   fix_positions=fix_positions,
+                                                   fix_linewidths=fix_linewidths)
 
             if result_2d and result_2d['success']:
                 # Find the result for the target peak
@@ -2600,8 +2631,8 @@ class VoigtIntegrator(BaseIntegrator):
                         'success': True,
                         'method': '2d_simultaneous'
                     },
-                    'fitting_quality': 'Excellent' if result_2d['r_squared'] > 0.9 else 'Good',
-                    'quality': 'Excellent' if result_2d['r_squared'] > 0.9 else 'Good',
+                    'fitting_quality': self._assign_quality_from_r2(result_2d['r_squared']),
+                    'quality': self._assign_quality_from_r2(result_2d['r_squared']),
                     'avg_r_squared': result_2d['r_squared'],
                     'method': '2d_simultaneous_multi_peak',
                     'overlap_group_size': len(overlap_group),
@@ -2920,14 +2951,8 @@ class VoigtIntegrator(BaseIntegrator):
         y_r_squared = y_params.get('quality_metrics', {}).get('r_squared_local', y_params['r_squared'])
         avg_r_squared = (x_r_squared + y_r_squared) / 2
 
-        if avg_r_squared >= 0.9:
-            quality = "Excellent"
-        elif avg_r_squared >= 0.8:
-            quality = "Good"
-        elif avg_r_squared >= 0.7:
-            quality = "Fair"
-        else:
-            quality = "Poor"
+        # Assign quality using centralized method (updated thresholds 2025-10-14)
+        quality = self._assign_quality_from_r2(avg_r_squared)
 
         # Store detailed results with both local and global quality metrics
         result = {
@@ -4259,6 +4284,28 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
         if total > 0:
             current_avg = self.statistics['average_quality']
             self.statistics['average_quality'] = ((current_avg * (total - 1)) + quality) / total
+
+    def _assign_quality_from_r2(self, r_squared):
+        """
+        Assign quality label based on R² value
+
+        Updated thresholds (2025-10-14):
+        - Excellent: R² >= 0.9
+        - Good: 0.8 <= R² < 0.9
+        - Fair: 0.5 <= R² < 0.8
+        - Poor: 0.2 <= R² < 0.5
+        - Failed: R² < 0.2
+        """
+        if r_squared >= 0.9:
+            return "Excellent"
+        elif r_squared >= 0.8:
+            return "Good"
+        elif r_squared >= 0.5:
+            return "Fair"
+        elif r_squared >= 0.2:
+            return "Poor"
+        else:
+            return "Failed"
 
     def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown", linewidth_constraints=None, all_peaks_context=None, use_dynamic_optimization=True):
         """

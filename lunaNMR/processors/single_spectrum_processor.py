@@ -75,15 +75,13 @@ class SingleSpectrumProcessor:
             # Choose processing strategy
             if processing_options.get('use_global_optimization', False):
                 return self._process_with_global_optimization(peak_list)
-            #elif processing_options.get('use_parallel', False):
-                #return self._process_with_parallel_fitting(peak_list)
             elif processing_options.get('use_parallel', False):
-                  # Check if we're in a test environment with Mock objects
+                # Check if we're in a test environment with Mock objects
                 if hasattr(self.integrator, '__class__') and 'Mock' in str(type(self.integrator)):
-                      print("🧪 Test environment detected (Mock integrator), forcing sequential processing")
-                      return self._process_with_sequential_fitting(peak_list)
+                    print("🧪 Test environment detected (Mock integrator), forcing sequential processing")
+                    return self._process_with_sequential_fitting(peak_list)
                 else:
-                      return self._process_with_parallel_fitting(peak_list)
+                    return self._process_with_parallel_fitting(peak_list)
             else:
                 return self._process_with_sequential_fitting(peak_list)
 ##
@@ -288,11 +286,17 @@ class SingleSpectrumProcessor:
 
                 print(f"   🔍 DEBUG cluster_dicts[0] = {cluster_dicts[0]}")
 
+                # Extract fix_positions and fix_linewidths from GUI parameters
+                fix_positions = self.integrator.gui_params.get('fix_positions', False)
+                fix_linewidths = self.integrator.gui_params.get('fix_linewidths', False)
+
                 # Call 2D overlap fitting with dictionary format
                 group_result = self.integrator.fit_overlap_group_2d(
                     cluster_dicts,
                     target_assignment,
-                    peak_assignments=cluster_assignments
+                    peak_assignments=cluster_assignments,
+                    fix_positions=fix_positions,
+                    fix_linewidths=fix_linewidths
                 )
 
                 if group_result and group_result.get('success', False):
@@ -402,6 +406,8 @@ class SingleSpectrumProcessor:
             time.sleep(0.01)
 
         # STEP 4: Return results in original peak_list order
+        # CRITICAL: Add placeholders for failed fits to maintain 1:1 index mapping
+        # This ensures navigator clicking works correctly even when some peaks fail
         for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
             peak_x = float(peak_row['Position_X'])
             peak_y = float(peak_row['Position_Y'])
@@ -409,9 +415,39 @@ class SingleSpectrumProcessor:
             result = results_cache.get((peak_x, peak_y))
             if result:
                 fitted_results.append(result)
+            else:
+                # Fitting failed - add placeholder to maintain index alignment
+                assignment = peak_row.get('Assignment', f'Peak_{i+1}')
+                placeholder = {
+                    'assignment': assignment,
+                    'peak_number': i + 1,
+                    'peak_position': (peak_x, peak_y),
+                    'peak_x': peak_x,
+                    'peak_y': peak_y,
+                    'amplitude': 0.0,
+                    'height': 0.0,
+                    'volume': 0.0,
+                    'r_squared': 0.0,
+                    'avg_r_squared': 0.0,
+                    'center_x': peak_x,
+                    'center_y': peak_y,
+                    'sigma_x': 0.0,
+                    'gamma_x': 0.0,
+                    'sigma_y': 0.0,
+                    'gamma_y': 0.0,
+                    'fitting_quality': 'Failed',
+                    'quality': 'Failed',
+                    'success': False,
+                    'fitted': False,
+                    'method': 'none',
+                    'failure_reason': 'Fitting did not converge or failed acceptance criteria'
+                }
+                fitted_results.append(placeholder)
 
-        success_rate = (len(fitted_results) / total_count * 100) if total_count > 0 else 0
-        print(f"✅ Sequential fitting complete: {len(fitted_results)}/{total_count} successful ({success_rate:.1f}%)")
+        # Calculate actual success rate from stats (not all results, since we add placeholders)
+        successful_count = self.stats.get('successful_fits', 0)
+        success_rate = (successful_count / total_count * 100) if total_count > 0 else 0
+        print(f"✅ Sequential fitting complete: {successful_count}/{total_count} successful ({success_rate:.1f}%)")
 
         return fitted_results
 

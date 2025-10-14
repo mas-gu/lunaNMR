@@ -231,6 +231,7 @@ $RECYCLE.BIN/
 # NMR-specific files
 *.ft2
 *.ft1
+*.ft
 *.ser
 *.fid
 *.dx
@@ -300,7 +301,7 @@ debug_*.py
 .local/
 .config/
 
-# Development artifacts  
+# Development artifacts
 .coverage
 .pytest_cache/
 .hypothesis/

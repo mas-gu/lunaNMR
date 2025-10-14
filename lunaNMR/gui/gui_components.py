@@ -1453,7 +1453,11 @@ class PeakNavigator(ttk.Frame):
         fitting_status = {}
 
         for result in fitted_results:
-            assignment = result.get('assignment', result.get('Assignment', ''))
+            assignment_raw = result.get('assignment', result.get('Assignment', ''))
+            # CRITICAL: Convert assignment to string for consistent comparison
+            # Assignments can be floats (4.0) or strings ("4") depending on source
+            assignment = str(assignment_raw) if assignment_raw else ''
+
             height = result.get('height', result.get('amplitude', result.get('intensity', '')))
             r_squared = result.get('r_squared', result.get('R_squared', 0.0))
             fitted_flag = result.get('fitted', True)  # Default to fitted unless explicitly marked as failed
@@ -1474,7 +1478,9 @@ class PeakNavigator(ttk.Frame):
 
         # Update detected peaks data structure with assignment preservation
         for i, peak in enumerate(self.detected_peaks):
-            assignment = peak[0]
+            assignment_raw = peak[0]
+            # CRITICAL: Convert assignment to string for consistent comparison
+            assignment = str(assignment_raw) if assignment_raw else ''
 
             if assignment in height_map:
                 # Peak was processed (successfully or unsuccessfully)
@@ -1507,7 +1513,9 @@ class PeakNavigator(ttk.Frame):
         failed_fit_count = 0
 
         for i, peak in enumerate(self.reference_peaks):
-            assignment = peak[0]
+            assignment_raw = peak[0]
+            # CRITICAL: Convert assignment to string for consistent comparison
+            assignment = str(assignment_raw) if assignment_raw else ''
 
             if assignment in height_map:
                 # Peak was processed (successfully or unsuccessfully)

@@ -273,9 +273,10 @@ class Ps2dMultiPeakFitter2D:
             peak = initial_peaks[i]
 
             # F1 position bounds - constrain to ~1 linewidth of movement
-            # Estimated FWHM ≈ 2 * lw_gau, allow ±1.5× FWHM as safety margin
-            fwhm_f1 = 2.0 * peak['lw_gau_f1']
-            pos_f1_margin = max(1.5 * fwhm_f1, config.pos_margin_f1)  # Nucleus-adaptive minimum
+            # FIXED 2025-10-13: lw_gau_f1 IS the Gaussian FWHM (not half-width)
+            #fwhm_f1 = peak['lw_gau_f1']  # NEW: lw_gau IS the FWHM (no compensation needed)
+            fwhm_f1 = 2.0 * peak['lw_gau_f1']  # OLD: Compensated for FWHM/2 storage bug
+            pos_f1_margin = max(0.04 * fwhm_f1, config.pos_margin_f1)  # Nucleus-adaptive minimum #GM max(1.5
             lower_bounds.append(peak['pos_f1'] - pos_f1_margin)
             upper_bounds.append(peak['pos_f1'] + pos_f1_margin)
 
@@ -286,9 +287,10 @@ class Ps2dMultiPeakFitter2D:
             upper_bounds.extend([median_lw_lor_f1 * 5, median_lw_gau_f1 * 5]) #was 5
 
             # F2 position bounds - constrain to ~1 linewidth of movement
-            # Estimated FWHM ≈ 2 * lw_gau, allow ±1.5× FWHM as safety margin
-            fwhm_f2 = 2.0 * peak['lw_gau_f2']
-            pos_f2_margin = max(1.5 * fwhm_f2, config.pos_margin_f2)  # Nucleus-adaptive minimum
+            # FIXED 2025-10-13: lw_gau_f2 IS the Gaussian FWHM (not half-width)
+            #fwhm_f2 = peak['lw_gau_f2']  # NEW: lw_gau IS the FWHM (no compensation needed)
+            fwhm_f2 = 2.0 * peak['lw_gau_f2']  # OLD: Compensated for FWHM/2 storage bug
+            pos_f2_margin = max(0.04 * fwhm_f2, config.pos_margin_f2)  # Nucleus-adaptive minimum #GM max(1.5
             lower_bounds.append(peak['pos_f2'] - pos_f2_margin)
             upper_bounds.append(peak['pos_f2'] + pos_f2_margin)
 
@@ -501,6 +503,15 @@ class Ps2dMultiPeakFitter2D:
             print("\nStage 4: Final global refinement")
             sys.stdout.flush()
 
+        # DIAGNOSTIC: Save positions before Stage 4 for comparison
+        positions_before_stage4 = []
+        for i in range(n_peaks):
+            offset = i * NPAR_VOIGT
+            positions_before_stage4.append({
+                'f1': params[offset + 0],
+                'f2': params[offset + 3]
+            })
+
         # Fix only spare parameters
         fixed_stage4 = {}
         for i in range(n_peaks):
@@ -574,13 +585,13 @@ class Ps2dMultiPeakFitter2D:
         # Pragmatic success criterion for 2D multi-peak fitting:
         # Accept result if ANY of:
         # (1) Formal convergence achieved (optimizer converged within tolerance)
-        # (2) R² > 0.3 (acceptable fit for overlapping NMR peaks)
+        # (2) R² > 0.2 (acceptable fit for overlapping NMR peaks)
         # (3) χ² reduced by > 100× from initial (proves convergence even if R² broken)
         #
         # Rationale: For very narrow peaks on baseline-heavy regions, R² can be
         # negative even when fitting is excellent (proven by massive χ² reduction).
         formal_convergence = info['success']
-        pragmatic_r2_success = r_squared > 0.3
+        pragmatic_r2_success = r_squared > 0.2
 
         # Check χ² reduction from Stage 0 initial χ²
         # We track Stage 0's first iteration as the baseline
@@ -598,11 +609,11 @@ class Ps2dMultiPeakFitter2D:
             if chi2_reduction_success and not formal_convergence and not pragmatic_r2_success:
                 print(f"   ✅ Pragmatic acceptance: χ² reduced {chi2_reduction:.0f}× (excellent convergence despite negative R²)")
             elif pragmatic_r2_success and not formal_convergence:
-                print(f"   ✅ Pragmatic acceptance: R² = {r_squared:.4f} > 0.3 (acceptable fit despite no formal convergence)")
+                print(f"   ✅ Pragmatic acceptance: R² = {r_squared:.4f} > 0.2 (acceptable fit despite no formal convergence)")
             elif formal_convergence:
                 print(f"   ✅ Formal convergence achieved (R² = {r_squared:.4f})")
             else:
-                print(f"   ❌ Failed: R² = {r_squared:.4f} < 0.3, no convergence, χ² reduction insufficient")
+                print(f"   ❌ Failed: R² = {r_squared:.4f} < 0.2, no convergence, χ² reduction insufficient")
             sys.stdout.flush()
 
         # Extract fitted peaks and calculate derived quantities

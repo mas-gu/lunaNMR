@@ -354,10 +354,24 @@ class SpectrumPlotter:
             return
 
         # Get peak positions - try multiple sources
+        # PRIORITY: Detected peaks first, reference peaks as fallback
         peaks_to_plot = []
 
-        # Try 1: Reference peak list (DataFrame)
-        if hasattr(integrator, 'peak_list') and integrator.peak_list is not None:
+        # Try 1: Detected/fitted peaks (list of dicts) - HIGHEST PRIORITY
+        if hasattr(integrator, 'fitted_peaks') and integrator.fitted_peaks:
+            try:
+                for peak in integrator.fitted_peaks:
+                    peaks_to_plot.append({
+                        'x': peak.get('ppm_x', peak.get('x_ppm', 0)),
+                        'y': peak.get('ppm_y', peak.get('y_ppm', 0)),
+                        'label': peak.get('assignment', peak.get('Assignment', 'Unknown'))
+                    })
+                print(f"✅ Using {len(peaks_to_plot)} detected peak positions for ellipses")
+            except Exception as e:
+                print(f"⚠️  Could not extract peaks from fitted_peaks: {e}")
+
+        # Try 2: Reference peak list (DataFrame) - FALLBACK ONLY
+        if not peaks_to_plot and hasattr(integrator, 'peak_list') and integrator.peak_list is not None:
             try:
                 peak_df = integrator.peak_list
 
@@ -380,20 +394,9 @@ class SpectrumPlotter:
                             'y': float(row[y_col]),
                             'label': row.get('Assignment', f'Peak_{idx+1}')
                         })
+                    print(f"⚠️  No detected peaks - using {len(peaks_to_plot)} reference peak positions for ellipses")
             except Exception as e:
                 print(f"⚠️  Could not extract peaks from peak_list: {e}")
-
-        # Try 2: Detected/fitted peaks (list of dicts)
-        if not peaks_to_plot and hasattr(integrator, 'fitted_peaks') and integrator.fitted_peaks:
-            try:
-                for peak in integrator.fitted_peaks:
-                    peaks_to_plot.append({
-                        'x': peak.get('ppm_x', peak.get('x_ppm', 0)),
-                        'y': peak.get('ppm_y', peak.get('y_ppm', 0)),
-                        'label': peak.get('assignment', peak.get('Assignment', 'Unknown'))
-                    })
-            except Exception as e:
-                print(f"⚠️  Could not extract peaks from fitted_peaks: {e}")
 
         if not peaks_to_plot:
             print("⚠️  No peaks available for ellipse visualization")
@@ -732,6 +735,15 @@ class VoigtAnalysisPlotter:
         all_peaks = voigt_result.get('all_peaks', [])
         r_squared = voigt_result.get('avg_r_squared', 0)
 
+        # DEBUG: Print what positions are actually in all_peaks
+        print(f"🐛 DEBUG visualization.py: all_peaks positions:")
+        for i, peak in enumerate(all_peaks):
+            print(f"   Peak {i}: pos_f2={peak.get('pos_f2', 'N/A'):.4f}, pos_f1={peak.get('pos_f1', 'N/A'):.4f}")
+
+        # DEBUG: Print region axes to check for misalignment
+        print(f"🐛 DEBUG: Region f2_ppm range: {region_2d['f2_ppm'].min():.4f} - {region_2d['f2_ppm'].max():.4f}")
+        print(f"🐛 DEBUG: Region f1_ppm range: {region_2d['f1_ppm'].min():.4f} - {region_2d['f1_ppm'].max():.4f}")
+
         if region_2d is None or fitted_surface is None:
             self._plot_no_data()
             return
@@ -773,7 +785,10 @@ class VoigtAnalysisPlotter:
 
         # Mark peak positions
         for i, peak in enumerate(all_peaks):
-            ax_exp.plot(peak['pos_f2'], peak['pos_f1'], 'r+', markersize=12, markeredgewidth=2)
+            pos_f2 = peak['pos_f2']
+            pos_f1 = peak['pos_f1']
+            print(f"🐛 DEBUG: Plotting crosshair for peak {i} at f2={pos_f2:.4f}, f1={pos_f1:.4f}")
+            ax_exp.plot(pos_f2, pos_f1, 'r+', markersize=12, markeredgewidth=2)
             # Use assignment if available, otherwise show peak number
             peak_label = peak.get('assignment', str(i+1))
             ax_exp.text(peak['pos_f2'], peak['pos_f1'], f"  {peak_label}",
