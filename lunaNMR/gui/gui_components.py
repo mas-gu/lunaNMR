@@ -1389,52 +1389,100 @@ class PeakNavigator(ttk.Frame):
             messagebox.showerror("Error", f"Failed to add peak: {str(e)}")
 
     def save_peak_changes(self):
-        """Save changes back to the integrator"""
+        """Export detected peaks to text file in standard peak list format"""
         from tkinter import messagebox
+        from datetime import datetime
 
         if self.selected_peak_type != "detected":
             messagebox.showinfo("Nothing to Save", "Only detected peaks can be saved.")
             return
 
+        if not self.detected_peaks:
+            messagebox.showwarning("No Data", "No detected peaks to save.")
+            return
+
         try:
-            if hasattr(self, 'spectrum_controller') and self.spectrum_controller:
-                # Convert detected peaks back to dictionary format
-                updated_peaks = []
-                for i, peak in enumerate(self.detected_peaks):
-                    assignment, x_coord, y_coord = peak[0], peak[1], peak[2]
-                    height = peak[3] if len(peak) > 3 else ""
-                    peak_dict = {
-                        'assignment': assignment,
-                        'ppm_x': x_coord,
-                        'ppm_y': y_coord,
-                        'intensity': 1000,  # Default value
-                        'snr': 3.0,  # Default value
-                        'detected': True,
-                        'detection_quality': 'Manual'
-                    }
-                    updated_peaks.append(peak_dict)
+            # Open file dialog for saving
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"detected_peaks_{timestamp}.txt"
 
-                # Update integrator fitted_peaks
-                if hasattr(self.spectrum_controller, 'integrator'):
-                    self.spectrum_controller.integrator.fitted_peaks = updated_peaks
-                    print(f"Peak Navigator: Saved {len(updated_peaks)} peaks to integrator")
+            filename = filedialog.asksaveasfilename(
+                title="Export Detected Peak List",
+                defaultextension=".txt",
+                initialfile=default_filename,
+                filetypes=[
+                    ("Text files", "*.txt"),
+                    ("CSV files", "*.csv"),
+                    ("All files", "*.*")
+                ]
+            )
 
-                    # Trigger plot update
-                    if hasattr(self.spectrum_controller, 'update_main_plot'):
-                        self.spectrum_controller.update_main_plot()
+            if not filename:
+                return  # User cancelled
 
-                    # Update statistics
-                    if hasattr(self.spectrum_controller, 'update_statistics'):
-                        self.spectrum_controller.update_statistics()
+            # Prepare peak data for export
+            peak_data = []
+            for i, peak in enumerate(self.detected_peaks):
+                assignment = peak[0]
+                x_coord = peak[1]
+                y_coord = peak[2]
+                height = peak[3] if len(peak) > 3 else ""
 
-                    messagebox.showinfo("Success", f"Saved {len(updated_peaks)} peaks to integrator.")
+                # Extract numeric height if available (strip formatting like "Failed Fit", "R²:", etc.)
+                if isinstance(height, (int, float)):
+                    height_value = height
+                elif isinstance(height, str):
+                    # Try to extract numeric value from formatted strings like "2.45e+05 (R²:0.85)"
+                    if height and height not in ["", "Failed Fit", "No Signal", "Not Fitted"]:
+                        try:
+                            # Extract first part before space or parenthesis
+                            height_str = height.split()[0].split('(')[0]
+                            height_value = float(height_str)
+                        except (ValueError, IndexError):
+                            height_value = ""
+                    else:
+                        height_value = ""
                 else:
-                    messagebox.showerror("Error", "No integrator available to save peaks.")
-            else:
-                messagebox.showerror("Error", "No connection to main GUI controller.")
+                    height_value = ""
+
+                peak_data.append({
+                    'Assignment': str(assignment),
+                    'Position_X': float(x_coord),
+                    'Position_Y': float(y_coord),
+                    'Height': height_value
+                })
+
+            # Write to file in standard peak list format
+            with open(filename, 'w', encoding='utf-8') as f:
+                # Write header
+                f.write("Assignment, Position_X, Position_Y, Height\n")
+
+                # Write peak data
+                for peak in peak_data:
+                    assignment = peak['Assignment']
+                    x = peak['Position_X']
+                    y = peak['Position_Y']
+                    h = peak['Height']
+
+                    if h and h != "":
+                        # Include height if available
+                        f.write(f"{assignment}, {x:.6f}, {y:.6f}, {h:.6e}\n")
+                    else:
+                        # No height available
+                        f.write(f"{assignment}, {x:.6f}, {y:.6f}\n")
+
+            print(f"Peak Navigator: Exported {len(peak_data)} peaks to {filename}")
+            messagebox.showinfo(
+                "Export Successful",
+                f"Exported {len(peak_data)} detected peaks to:\n{filename}\n\n"
+                f"This file can be loaded as a reference peak list in new projects."
+            )
 
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save peaks: {str(e)}")
+            print(f"Peak Navigator: Export error: {e}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Export Error", f"Failed to export peaks:\n{str(e)}")
 
 
     def update_heights_from_results(self, fitted_results):

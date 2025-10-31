@@ -51,24 +51,15 @@ class PS2DConfig:
             'radF2_selector': 0.06,    # ps2d_data_selector default (PS2D original)
 
             # ================================================================
-            # Overlap detection thresholds (geometric ellipse intersection)
+            # Overlap detection thresholds (elliptical region radii)
             # ================================================================
-            # Used in identify_overlap_clusters() and check_if_peaks_need_2d_fitting()
-            # Larger thresholds = more aggressive overlap detection
-            'overlap_threshold_x': 0.10,  # 1H dimension (~8× typical FWHM)
-            'overlap_threshold_y': 0.8,   # 15N dimension (~8× typical FWHM)
-
-            # Used in peaks_overlap_elliptical() (simpler overlap check)
-            'overlap_threshold_x_simple': 0.06,  # 1H dimension
-            'overlap_threshold_y_simple': 0.6,   # 15N dimension
-
-            # ================================================================
-            # Gap detection thresholds (cluster splitting)
-            # ================================================================
-            # Used in _split_cluster_by_gaps() to find spatial gaps
-            # Smaller thresholds = more aggressive splitting
-            'gap_threshold_x': 0.05,      # 1H dimension (~4× typical FWHM)
-            'gap_threshold_y': 0.4,       # 15N dimension (~4× typical FWHM)
+            # Used in identify_overlap_clusters() for hierarchical clustering
+            # Each peak has an elliptical region with these radii
+            # Overlap distance multiplier controls aggressiveness (1.0 = strict, 2.0 = very aggressive)
+            # Gap thresholds are computed as 0.5 × overlap thresholds
+            'overlap_threshold_x': 0.04,  # 1H dimension - radius of orange circle
+            'overlap_threshold_y': 0.4,   # 15N dimension - radius of orange circle
+            'overlap_distance_multiplier': 1.0,  # Aggressiveness: increase to catch more diagonal overlaps (try 1.5-2.0)
 
             # ================================================================
             # Linewidth constraints (CRITICAL for convergence)
@@ -112,17 +103,13 @@ class PS2DConfig:
             'radF1_selector': 0.20,       # ~1.3× radF1
             'radF2_selector': 0.06,       # ~1.5× radF2
 
-            # Overlap thresholds (more permissive to catch true overlaps)
-            'overlap_threshold_x': 0.10,  # 1H dimension (~8× FWHM)
-            'overlap_threshold_y': 0.2,  # 13C dimension (~2× typical FWHM, permissive)
-
-            # Simple overlap check (moderate)
-            'overlap_threshold_x_simple': 0.06,  # 1H dimension
-            'overlap_threshold_y_simple': 0.08,  # 13C dimension (~1.5× FWHM)
-
-            # Gap thresholds (aggressive splitting for complex clusters)
-            'gap_threshold_x': 0.05,      # 1H dimension (~4× FWHM)
-            'gap_threshold_y': 0.05,      # 13C dimension (~0.8× FWHM, splits tight clusters)
+            # Overlap thresholds (elliptical region radii)
+            # Each peak has an elliptical region with these radii
+            # Overlap distance multiplier controls aggressiveness (1.0 = strict, 2.0 = very aggressive)
+            # Gap thresholds are computed as 0.5 × overlap thresholds
+            'overlap_threshold_x': 0.04,  # 1H dimension - radius of orange circle
+            'overlap_threshold_y': 0.1,   # 13C dimension - radius of orange circle
+            'overlap_distance_multiplier': 1.0,  # Aggressiveness: increase to catch more diagonal overlaps (try 1.5-2.0)
 
             # Linewidth constraints (realistic minimums based on actual peak widths)
             'min_linewidth_f1': 0.025,    # Minimum 13C linewidth (~half of typical 0.05-0.08 ppm FWHM)
@@ -175,6 +162,34 @@ class PS2DConfig:
         for key, value in params.items():
             setattr(self, key, value)
 
+    @property
+    def gap_threshold_x(self):
+        """
+        Gap threshold for 1H dimension (computed as 0.5 × overlap threshold).
+
+        A significant gap is defined as half the overlap detection radius.
+        This ensures consistent splitting behavior across nucleus types.
+
+        Returns:
+        --------
+        float : Gap threshold in ppm (1H dimension)
+        """
+        return self.overlap_threshold_x * 0.5
+
+    @property
+    def gap_threshold_y(self):
+        """
+        Gap threshold for indirect dimension (computed as 0.5 × overlap threshold).
+
+        A significant gap is defined as half the overlap detection radius.
+        This ensures consistent splitting behavior across nucleus types.
+
+        Returns:
+        --------
+        float : Gap threshold in ppm (15N or 13C dimension)
+        """
+        return self.overlap_threshold_y * 0.5
+
     def __repr__(self):
         """String representation for debugging"""
         return f"PS2DConfig(nucleus_type='{self.nucleus_type}')"
@@ -192,7 +207,7 @@ class PS2DConfig:
 
     def to_dict(self) -> Dict[str, Any]:
         """
-        Return all parameters as dictionary.
+        Return all parameters as dictionary (including computed gap thresholds).
 
         Returns:
         --------
@@ -204,9 +219,18 @@ class PS2DConfig:
         >>> params = config.to_dict()
         >>> params['radF1']
         0.4
+        >>> params['gap_threshold_x']  # Computed property
+        0.05
         """
-        return {k: getattr(self, k)
-                for k in self.NUCLEUS_PARAMS[self.nucleus_type].keys()}
+        # Get base parameters from config dictionary
+        result = {k: getattr(self, k)
+                  for k in self.NUCLEUS_PARAMS[self.nucleus_type].keys()}
+
+        # Add computed properties
+        result['gap_threshold_x'] = self.gap_threshold_x
+        result['gap_threshold_y'] = self.gap_threshold_y
+
+        return result
 
     def get_scaling_factor(self) -> float:
         """

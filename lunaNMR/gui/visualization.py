@@ -233,8 +233,19 @@ class SpectrumPlotter:
             if show_detected:
                 # Show ALL peaks in fitted_peaks list as "detected" (red circles)
                 # This includes both matched peaks and reference-retained peaks
-                detected_x = [p['ppm_x'] for p in peak_list]
-                detected_y = [p['ppm_y'] for p in peak_list]
+                # Use flexible field name lookup to handle different data sources
+                # Detection results use 'ppm_x'/'ppm_y', fitting results use 'peak_x'/'peak_y'
+                detected_x = []
+                detected_y = []
+                for p in peak_list:
+                    # Try multiple possible field names for X coordinate
+                    x = p.get('ppm_x') or p.get('x_ppm') or p.get('peak_x') or p.get('center_x')
+                    # Try multiple possible field names for Y coordinate
+                    y = p.get('ppm_y') or p.get('y_ppm') or p.get('peak_y') or p.get('center_y')
+                    if x is not None and y is not None:
+                        detected_x.append(float(x))
+                        detected_y.append(float(y))
+
                 if detected_x:
                     self.ax.scatter(detected_x, detected_y, c='red', marker='o', s=60,
                                   alpha=0.8, edgecolors='white', linewidth=1, zorder=5,
@@ -244,14 +255,18 @@ class SpectrumPlotter:
                         assignment_label = (peak.get('assignment') or
                                           peak.get('Assignment') or
                                           str(peak.get('peak_number', '')))
-                        annotation = self.ax.annotate(
-                            assignment_label,
-                            (peak['ppm_x'], peak['ppm_y']),
-                            xytext=(5, 5), textcoords='offset points',
-                            fontsize='small', color='red', fontweight='bold',
-                            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8)
-                        )
-                        self.peak_annotations.append(annotation)
+                        # Use flexible field name lookup for coordinates
+                        x = peak.get('ppm_x') or peak.get('x_ppm') or peak.get('peak_x') or peak.get('center_x')
+                        y = peak.get('ppm_y') or peak.get('y_ppm') or peak.get('peak_y') or peak.get('center_y')
+                        if x is not None and y is not None:
+                            annotation = self.ax.annotate(
+                                assignment_label,
+                                (float(x), float(y)),
+                                xytext=(5, 5), textcoords='offset points',
+                                fontsize='small', color='red', fontweight='bold',
+                                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8)
+                            )
+                            self.peak_annotations.append(annotation)
 
         # ENHANCED: Plot reference peaks (blue crosses) - ROBUST VERSION
         if show_assigned and hasattr(integrator, 'peak_list') and integrator.peak_list is not None:
@@ -348,6 +363,8 @@ class SpectrumPlotter:
             radF2 = config.radF2
             radF1_selector = config.radF1_selector
             radF2_selector = config.radF2_selector
+            overlap_threshold_x = config.overlap_threshold_x
+            overlap_threshold_y = config.overlap_threshold_y
 
         except Exception as e:
             print(f"⚠️  Could not load PS2D config: {e}")
@@ -438,9 +455,25 @@ class SpectrumPlotter:
                 )
                 self.ax.add_patch(fitting_ellipse)
 
+                # Overlap threshold ellipse (outermost, orange solid)
+                overlap_ellipse = EllipsePatch(
+                    (peak_x, peak_y),
+                    width=2 * overlap_threshold_x,  # diameter in 1H dimension
+                    height=2 * overlap_threshold_y,  # diameter in 15N/13C dimension
+                    fill=False,
+                    edgecolor='orange',
+                    linestyle='-',
+                    linewidth=2,
+                    alpha=0.7,
+                    zorder=5,
+                    label='Overlap Threshold' if idx == 0 else ''
+                )
+                self.ax.add_patch(overlap_ellipse)
+
             print(f"✅ Plotted PS2D ellipses for {len(peaks_to_plot)} peaks")
             print(f"   Fitting region: {radF1:.3f} × {radF2:.3f} ppm")
             print(f"   Data selector: {radF1_selector:.3f} × {radF2_selector:.3f} ppm")
+            print(f"   Overlap threshold: {overlap_threshold_y:.3f} × {overlap_threshold_x:.3f} ppm")
 
         except Exception as e:
             print(f"❌ Error plotting PS2D ellipses: {e}")
@@ -801,20 +834,21 @@ class VoigtAnalysisPlotter:
         colors = ['red', 'orange', 'purple', 'brown', 'pink', 'olive', 'cyan', 'magenta']
 
         if individual_surfaces is not None and len(individual_surfaces) > 0:
-            # Plot each individual peak with a different color
-            for i, (peak_surface, peak) in enumerate(zip(individual_surfaces, all_peaks)):
+            # Calculate global contour levels across ALL peaks for true volume comparison
+            baseline = region_2d['intensity'].min()
+            all_peaks_with_baseline = [surf + baseline for surf in individual_surfaces]
+
+            # Global min/max across all peaks
+            global_min = min(np.min(surf) for surf in all_peaks_with_baseline)
+            global_max = max(np.max(surf) for surf in all_peaks_with_baseline)
+            global_levels = np.linspace(global_min + (global_max - global_min) * 0.4, global_max, 15)
+
+            # Plot each peak with same global levels
+            for i, (peak_with_baseline, peak) in enumerate(zip(all_peaks_with_baseline, all_peaks)):
                 color = colors[i % len(colors)]  # Cycle through colors if more than 8 peaks
 
-                # Add baseline to individual surface for proper visualization
-                peak_with_baseline = peak_surface + region_2d['intensity'].min()
-
-                # Calculate adaptive levels for this peak (40-100% of its max)
-                peak_min = np.min(peak_with_baseline)
-                peak_max = np.max(peak_with_baseline)
-                peak_levels = np.linspace(peak_min + (peak_max - peak_min) * 0.4, peak_max, 15)
-
-                # Plot contour lines for this peak
-                ax_fit.contour(f2_ppm, f1_ppm, peak_with_baseline, levels=peak_levels,
+                # Plot contour lines for this peak using global levels
+                ax_fit.contour(f2_ppm, f1_ppm, peak_with_baseline, levels=global_levels,
                              colors=color, linewidths=1.2, alpha=0.7)
 
             ax_fit.set_title(f'Individual Fitted Peaks (R²={r_squared:.3f})', fontsize=9, fontweight='bold')
@@ -902,26 +936,27 @@ class VoigtAnalysisPlotter:
             # Use assignment if available, otherwise fall back to "Peak N"
             peak_label = peak.get('assignment', f'Peak {i+1}')
 
-            # Get volume (use intensity as fallback for backward compatibility)
+            # Get volume and height (intensity parameter in PS2D = volume)
             volume = peak.get('volume', peak.get('intensity', 0.0))
+            height = peak.get('height', peak.get('amplitude', 0.0))
 
             # Line 1: Peak assignment
             table_text += f"{peak_label}\n"
             # Line 2: LW 1H and LW 15N
             table_text += f"LW ¹H: {lw_f2:.4f}  LW ¹⁵N: {lw_f1:.3f}\n"
-            # Line 3: Volume
-            table_text += f"Volume: {volume:.2e}\n"
+            # Line 3: Volume and Height
+            table_text += f"V: {volume:.2e}  I: {height:.2e}\n"
             if i < len(all_peaks) - 1:
                 table_text += "\n"
 
         # Display as monospace text
-        ax_table.text(0.1, 0.95, table_text, transform=ax_table.transAxes,
+        ax_table.text(0.1, 0.85, table_text, transform=ax_table.transAxes,
                      fontsize=8, fontfamily='monospace', verticalalignment='top',
                      bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9, edgecolor='gray'))
 
-        # Add overall statistics
+        # Add overall statistics at top (moved from bottom)
         stats_text = f"Quality: {quality}\nR² = {r_squared:.4f}\n{len(all_peaks)} peaks (simultaneous fit)"
-        ax_table.text(0.5, 0.1, stats_text, ha='center', va='center',
+        ax_table.text(0.5, 0.98, stats_text, ha='center', va='top',
                      fontsize=9, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
         # Set overall title

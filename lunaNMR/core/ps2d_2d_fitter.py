@@ -354,53 +354,51 @@ class Ps2dMultiPeakFitter2D:
         y_pred_initial_masked = y_pred_initial[mask_flat]
         self._stage0_initial_chi2 = np.sum((y_flat_masked - y_pred_initial_masked)**2)
 
-        # STAGE 0 DISABLED - Skip directly to Stage 1
-        # Initialize cov and info for first stage
-        cov = None
-        info = {'success': False, 'iterations': 0, 'final_chi2': self._stage0_initial_chi2}
+        # ====================================================================
+        # STAGE 0: Intensity warm-up (positions/widths fixed)
+        # ====================================================================
+        if self.verbose:
+            print("\nStage 0: Intensity warm-up (positions/widths fixed)")
+            sys.stdout.flush()
 
-        # if self.verbose:
-        #     print("\nStage 0: Intensity warm-up (positions/widths fixed)")
-        #     sys.stdout.flush()
-        #
-        # # Fix all parameters except intensities
-        # fixed_stage0 = {}
-        # for i in range(n_peaks):
-        #     offset = i * NPAR_VOIGT
-        #     for j in range(7):  # Fix first 7 params (all except spare)
-        #         if j != 6:  # Don't fix intensity (index 6)
-        #             fixed_stage0[offset + j] = params[offset + j]
-        #     fixed_stage0[offset + 7] = 0.0  # Fix spare to 0
-        #
-        # params, cov, info = self.optimizer.fit(
-        #     func=model_function,
-        #     jacobian=jacobian_function,
-        #     x=f1_flat,  # Dummy x (not used, grids stored in closure)
-        #     y=y_flat_masked,  # Use masked data (union of elliptical windows)
-        #     p0=params,
-        #     bounds=bounds,
-        #     fixed_params=fixed_stage0
-        # )
-        #
-        # total_iterations += info['iterations']
-        # if self.verbose:
-        #     print(f"  Iterations: {info['iterations']}, χ² = {info['final_chi2']:.6e}")
-        #     # DIAGNOSTIC: Track intensity evolution through stages
-        #     print(f"  📊 Intensity tracking (Stage 0 → normalized values):")
-        #     for i in range(n_peaks):
-        #         offset = i * NPAR_VOIGT
-        #         intensity = params[offset + 6]
-        #         lower = bounds[0][offset + 6]
-        #         upper = bounds[1][offset + 6]
-        #         at_lower = abs(intensity - lower) / max(abs(lower), 1e-10) < 0.01
-        #         at_upper = abs(intensity - upper) / max(abs(upper), 1e-10) < 0.01
-        #         bound_status = ""
-        #         if at_lower:
-        #             bound_status = " ⚠️  AT LOWER BOUND"
-        #         elif at_upper:
-        #             bound_status = " ⚠️  AT UPPER BOUND"
-        #         print(f"     Peak {i+1}: {intensity:.6e} (bounds: [{lower:.6e}, {upper:.6e}]){bound_status}")
-        #     sys.stdout.flush()
+        # Fix all parameters except intensities
+        fixed_stage0 = {}
+        for i in range(n_peaks):
+            offset = i * NPAR_VOIGT
+            for j in range(7):  # Fix first 7 params (all except spare)
+                if j != 6:  # Don't fix intensity (index 6)
+                    fixed_stage0[offset + j] = params[offset + j]
+            fixed_stage0[offset + 7] = 0.0  # Fix spare to 0
+
+        params, cov, info = self.optimizer.fit(
+            func=model_function,
+            jacobian=jacobian_function,
+            x=f1_flat,  # Dummy x (not used, grids stored in closure)
+            y=y_flat_masked,  # Use masked data (union of elliptical windows)
+            p0=params,
+            bounds=bounds,
+            fixed_params=fixed_stage0
+        )
+
+        total_iterations += info['iterations']
+        if self.verbose:
+            print(f"  Iterations: {info['iterations']}, χ² = {info['final_chi2']:.6e}")
+            # DIAGNOSTIC: Track intensity evolution through stages
+            print(f"  📊 Intensity tracking (Stage 0 → normalized values):")
+            for i in range(n_peaks):
+                offset = i * NPAR_VOIGT
+                intensity = params[offset + 6]
+                lower = bounds[0][offset + 6]
+                upper = bounds[1][offset + 6]
+                at_lower = abs(intensity - lower) / max(abs(lower), 1e-10) < 0.01
+                at_upper = abs(intensity - upper) / max(abs(upper), 1e-10) < 0.01
+                bound_status = ""
+                if at_lower:
+                    bound_status = " ⚠️  AT LOWER BOUND"
+                elif at_upper:
+                    bound_status = " ⚠️  AT UPPER BOUND"
+                print(f"     Peak {i+1}: {intensity:.6e} (bounds: [{lower:.6e}, {upper:.6e}]){bound_status}")
+            sys.stdout.flush()
 
         # ====================================================================
         # STAGE 1: Fix positions, float linewidths + intensities

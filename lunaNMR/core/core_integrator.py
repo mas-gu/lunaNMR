@@ -1634,7 +1634,24 @@ class VoigtIntegrator(BaseIntegrator):
                              overlap_threshold_x=None,
                              overlap_threshold_y=None) -> bool:
         """
-        Check if two peaks overlap using elliptical distance test
+        Check if two peaks' elliptical overlap regions touch or overlap
+
+        Each peak has an elliptical region with semi-axes = overlap_threshold_x/y.
+        Two ellipses touch when the normalized elliptical distance <= 2.0.
+
+        Uses proper elliptical distance calculation to handle diagonal overlaps correctly.
+        This matches the orange ellipse visualization where touching ellipses should cluster.
+
+        Algorithm:
+        1. Compute dx = |x2 - x1|, dy = |y2 - y1|
+        2. Normalize: dx_norm = dx/threshold_x, dy_norm = dy/threshold_y
+        3. Elliptical distance = sqrt(dx_norm² + dy_norm²)
+        4. Overlap if distance <= 2.0 (sum of radii in normalized space)
+
+        This correctly handles:
+        - Horizontal overlaps (small dx, large dy OK)
+        - Vertical overlaps (small dy, large dx OK)
+        - Diagonal overlaps (both dx and dy moderate but distance <= 2.0)
 
         Uses centralized PS2D configuration (nucleus-adaptive).
         Values automatically scale for 15N vs 13C spectra.
@@ -1648,24 +1665,43 @@ class VoigtIntegrator(BaseIntegrator):
 
         Returns:
         --------
-        bool : True if peaks overlap
+        bool : True if peaks' elliptical regions overlap
         """
         # Use centralized configuration
-        if overlap_threshold_x is None or overlap_threshold_y is None:
-            config = get_ps2d_config()
-            if overlap_threshold_x is None:
-                overlap_threshold_x = config.overlap_threshold_x_simple
-            if overlap_threshold_y is None:
-                overlap_threshold_y = config.overlap_threshold_y_simple
+        config = get_ps2d_config()
+
+        # Get thresholds (use provided values or read from config)
+        if overlap_threshold_x is None:
+            overlap_threshold_x = config.overlap_threshold_x
+        if overlap_threshold_y is None:
+            overlap_threshold_y = config.overlap_threshold_y
+
+        # ALWAYS read multiplier from config (CRITICAL for diagonal overlap detection)
+        multiplier = getattr(config, 'overlap_distance_multiplier', 1.0)
 
         x1, y1 = peak1_pos
         x2, y2 = peak2_pos
 
-        # Elliptical overlap test (normalized distance)
-        normalized_dist_sq = ((x2 - x1) / overlap_threshold_x) ** 2 + \
-                             ((y2 - y1) / overlap_threshold_y) ** 2
+        # Two ellipses touch when elliptical distance <= 2.0 * multiplier
+        # Uses normalized elliptical distance to handle diagonal overlaps correctly
+        # This matches the orange ellipse visualization (proper elliptical regions)
+        # Multiplier > 1.0 makes overlap detection more aggressive (catches more diagonal overlaps)
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
 
-        return normalized_dist_sq <= 1.0
+        # Normalize distances by threshold radii (convert to "radius units")
+        dx_normalized = dx / overlap_threshold_x
+        dy_normalized = dy / overlap_threshold_y
+
+        # Compute elliptical distance
+        elliptical_distance = (dx_normalized**2 + dy_normalized**2)**0.5
+
+        # Two ellipses of radius 1.0 each touch when distance <= 2.0
+        # Apply multiplier to make detection more/less aggressive
+        distance_threshold = 2.0 * multiplier
+        overlaps = elliptical_distance <= distance_threshold
+
+        return overlaps
 
     def identify_overlap_clusters(self, all_peaks_context,
                                    overlap_threshold_x=None,
@@ -1712,6 +1748,17 @@ class VoigtIntegrator(BaseIntegrator):
                 overlap_threshold_y = config.overlap_threshold_y
             if max_cluster_size is None:
                 max_cluster_size = config.max_cluster_size
+
+        # DIAGNOSTIC: Show overlap threshold values being used for clustering
+        config = get_ps2d_config()
+        multiplier = getattr(config, 'overlap_distance_multiplier', 1.0)
+        print(f"🔍 OVERLAP DETECTION CONFIGURATION:")
+        print(f"   overlap_threshold_x (1H): {overlap_threshold_x:.4f} ppm")
+        print(f"   overlap_threshold_y (15N/13C): {overlap_threshold_y:.4f} ppm")
+        print(f"   overlap_distance_multiplier: {multiplier:.2f} {'(default)' if multiplier == 1.0 else '(INCREASED for diagonal overlaps)'}")
+        print(f"   Elliptical distance threshold: {2.0 * multiplier:.2f} (2.0 × {multiplier:.2f})")
+        print(f"   max_cluster_size: {max_cluster_size}")
+
         if not all_peaks_context or len(all_peaks_context) == 0:
             return []
 
@@ -1726,11 +1773,19 @@ class VoigtIntegrator(BaseIntegrator):
         if len(peak_positions) == 0:
             return []
 
+        # DIAGNOSTIC: Show first few peaks being clustered
+        print(f"📍 Peak positions for clustering (showing first 5 of {len(peak_positions)}):")
+        for i, (x, y) in enumerate(peak_positions[:5]):
+            print(f"   Peak {i+1}: ({x:.4f}, {y:.3f}) ppm")
+        if len(peak_positions) > 5:
+            print(f"   ... and {len(peak_positions)-5} more peaks")
+
         # Start with each peak as its own cluster
         clusters = [[peak] for peak in peak_positions]
 
         # Hierarchical merging with diameter constraints
         while True:
+
             # Find closest pair of overlapping clusters
             best_pair = None
             best_distance = float('inf')
@@ -1751,28 +1806,30 @@ class VoigtIntegrator(BaseIntegrator):
                                 dist = ((peak_i[0] - peak_j[0])**2 + (peak_i[1] - peak_j[1])**2)**0.5
                                 min_dist = min(min_dist, dist)
 
-                    if overlaps and min_dist < best_distance:
-                        best_distance = min_dist
-                        best_pair = (i, j)
+                    # CRITICAL FIX: Check diameter constraint BEFORE selecting as best pair
+                    # This prevents blocking all merges when one pair violates diameter
+                    if overlaps:
+                        # Test if merge would violate diameter
+                        merged = clusters[i] + clusters[j]
+                        x_coords = [p[0] for p in merged]
+                        y_coords = [p[1] for p in merged]
+                        diameter_x = max(x_coords) - min(x_coords)
+                        diameter_y = max(y_coords) - min(y_coords)
 
-            # No more mergeable clusters
+                        # Only accept as candidate if diameter is OK
+                        if (diameter_x <= max_cluster_diameter_x and
+                            diameter_y <= max_cluster_diameter_y and
+                            min_dist < best_distance):
+                            best_distance = min_dist
+                            best_pair = (i, j)
+
+            # No more mergeable clusters (that satisfy diameter constraint)
             if best_pair is None:
                 break
 
+            # Accept merge (diameter already verified during pair selection)
             i, j = best_pair
             merged = clusters[i] + clusters[j]
-
-            # Check diameter constraint
-            x_coords = [p[0] for p in merged]
-            y_coords = [p[1] for p in merged]
-            diameter_x = max(x_coords) - min(x_coords)
-            diameter_y = max(y_coords) - min(y_coords)
-
-            if diameter_x > max_cluster_diameter_x or diameter_y > max_cluster_diameter_y:
-                # Cluster too spread out - stop merging this pair
-                break
-
-            # Accept merge
             clusters[i] = merged
             clusters.pop(j)
 

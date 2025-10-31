@@ -253,6 +253,8 @@ class NMRPeaksSeriesGUI:
         self.ps2d_radF1 = tk.DoubleVar(value=ps2d_config.radF1)
         self.ps2d_radF2 = tk.DoubleVar(value=ps2d_config.radF2)
         self.ps2d_max_iterations = tk.IntVar(value=ps2d_config.max_iterations)
+        self.ps2d_overlap_x = tk.DoubleVar(value=ps2d_config.overlap_threshold_x)
+        self.ps2d_overlap_y = tk.DoubleVar(value=ps2d_config.overlap_threshold_y)
 
         # Series options
         series_options = self.proc_params.get_series_options()
@@ -818,17 +820,17 @@ class NMRPeaksSeriesGUI:
         # Row 0: Labels and spinboxes
         ttk.Label(radii_frame, text="Ellipse Radii:", font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
 
-        ttk.Label(radii_frame, text="radF1:").grid(row=0, column=1, sticky=tk.W)
+        ttk.Label(radii_frame, text="F1:").grid(row=0, column=1, sticky=tk.W)
         radF1_spin = tk.Spinbox(radii_frame, from_=0.01, to=2.0, increment=0.01,
-                                textvariable=self.ps2d_radF1, width=6, format="%.3f")
-        radF1_spin.grid(row=0, column=2, sticky=tk.W, padx=(2, 15))
+                                textvariable=self.ps2d_radF1, width=4, format="%.3f")
+        radF1_spin.grid(row=0, column=2, sticky=tk.W, padx=(2, 4))
         # Remove command from spinbox - we'll use explicit Apply button only
         radF1_spin.bind('<Return>', lambda e: self.on_ps2d_radii_change())
 
-        ttk.Label(radii_frame, text="radF2:").grid(row=0, column=3, sticky=tk.W)
+        ttk.Label(radii_frame, text="F2:").grid(row=0, column=3, sticky=tk.W)
         radF2_spin = tk.Spinbox(radii_frame, from_=0.001, to=0.5, increment=0.005,
-                                textvariable=self.ps2d_radF2, width=6, format="%.3f")
-        radF2_spin.grid(row=0, column=4, sticky=tk.W, padx=(2, 15))
+                                textvariable=self.ps2d_radF2, width=4, format="%.3f")
+        radF2_spin.grid(row=0, column=4, sticky=tk.W, padx=(2, 4))
         # Remove command from spinbox - we'll use explicit Apply button only
         radF2_spin.bind('<Return>', lambda e: self.on_ps2d_radii_change())
 
@@ -838,24 +840,41 @@ class NMRPeaksSeriesGUI:
         show_ellipses_check = ttk.Checkbutton(radii_frame, text="Show Ellipses",
                                               variable=self.show_ellipses,
                                               command=self.update_main_plot)
-        show_ellipses_check.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(8, 0))
+        show_ellipses_check.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
 
-        # Row 2: Max iterations control
-        ttk.Label(radii_frame, text="Max Iterations:", font=('TkDefaultFont', 9, 'bold')).grid(row=2, column=0, sticky=tk.W, padx=(0, 10), pady=(10, 0))
+        # Row 2: Overlap Thresholds
+        ttk.Label(radii_frame, text="Overlap Thresholds:", font=('TkDefaultFont', 9, 'bold')).grid(row=2, column=0, sticky=tk.W, padx=(0, 6), pady=(8, 0))
+
+        ttk.Label(radii_frame, text="X:").grid(row=2, column=1, sticky=tk.W, pady=(8, 0))
+        overlap_x_spin = tk.Spinbox(radii_frame, from_=0.01, to=1.0, increment=0.01,
+                                    textvariable=self.ps2d_overlap_x, width=4, format="%.3f")
+        overlap_x_spin.grid(row=2, column=2, sticky=tk.W, padx=(2, 4), pady=(10, 0))
+        overlap_x_spin.bind('<Return>', lambda e: self.on_ps2d_params_change())
+
+        ttk.Label(radii_frame, text="Y:").grid(row=2, column=3, sticky=tk.W, pady=(8, 0))
+        overlap_y_spin = tk.Spinbox(radii_frame, from_=0.01, to=2.0, increment=0.05,
+                                    textvariable=self.ps2d_overlap_y, width=4, format="%.3f")
+        overlap_y_spin.grid(row=2, column=4, sticky=tk.W, padx=(2, 4), pady=(10, 0))
+        overlap_y_spin.bind('<Return>', lambda e: self.on_ps2d_params_change())
+
+        ttk.Label(radii_frame, text="(ppm)", font=('TkDefaultFont', 8), foreground='gray').grid(row=2, column=5, sticky=tk.W, pady=(10, 0))
+
+        # Row 3: Max iterations control
+        ttk.Label(radii_frame, text="Max Iterations:", font=('TkDefaultFont', 9, 'bold')).grid(row=3, column=0, sticky=tk.W, padx=(0, 10), pady=(10, 0))
 
         max_iter_spin = tk.Spinbox(radii_frame, from_=50, to=2000, increment=50,
                                    textvariable=self.ps2d_max_iterations, width=6)
-        max_iter_spin.grid(row=2, column=1, sticky=tk.W, padx=(2, 15), pady=(10, 0))
+        max_iter_spin.grid(row=3, column=2, sticky=tk.W, padx=(2, 15), pady=(10, 0))
         max_iter_spin.bind('<Return>', lambda e: self.on_ps2d_params_change())
 
-        ttk.Label(radii_frame, text="(per LM stage)", font=('TkDefaultFont', 8), foreground='gray').grid(row=2, column=2, sticky=tk.W, pady=(10, 0))
+        #ttk.Label(radii_frame, text="(per LM stage)", font=('TkDefaultFont', 8), foreground='gray').grid(row=3, column=3, sticky=tk.W, pady=(10, 0))
 
-        # Row 3: Apply button and helper text
+        # Row 4: Apply button and helper text
         apply_params_btn = ttk.Button(radii_frame, text="Apply Changes", command=self.on_ps2d_params_change, width=15)
-        apply_params_btn.grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+        apply_params_btn.grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
 
-        ttk.Label(radii_frame, text="← Click to update parameters",
-                 font=('TkDefaultFont', 8), foreground='gray').grid(row=3, column=2, columnspan=4, sticky=tk.W, pady=(5, 0), padx=(5, 0))
+        #ttk.Label(radii_frame, text="← Click to update parameters",
+        #         font=('TkDefaultFont', 8), foreground='gray').grid(row=4, column=2, columnspan=4, sticky=tk.W, pady=(5, 0), padx=(5, 0))
 
         # =================== SPECTRUM CONTROLS SECTION ===================
         spectrum_frame = ttk.LabelFrame(parent, text="🖼️ Spectrum Display Controls", padding=10)
@@ -2774,12 +2793,15 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
         self.ps2d_radF1.set(config.radF1)
         self.ps2d_radF2.set(config.radF2)
         self.ps2d_max_iterations.set(config.max_iterations)
+        self.ps2d_overlap_x.set(config.overlap_threshold_x)
+        self.ps2d_overlap_y.set(config.overlap_threshold_y)
 
         # Log the change
         print(f"⚙️ PS2D configuration switched to: {nucleus}")
         print(f"   radF1={config.radF1:.3f} ppm, radF2={config.radF2:.4f} ppm")
         print(f"   max_iterations={config.max_iterations}")
-        print(f"   overlap_threshold_y={config.overlap_threshold_y:.3f} ppm, overlap_threshold_x={config.overlap_threshold_x:.3f} ppm")
+        print(f"   overlap_threshold_x={config.overlap_threshold_x:.3f} ppm, overlap_threshold_y={config.overlap_threshold_y:.3f} ppm")
+        print(f"   gap_threshold_x={config.gap_threshold_x:.3f} ppm (computed), gap_threshold_y={config.gap_threshold_y:.3f} ppm (computed)")
 
         # Update status bar
         self.update_status(f"⚙️ PS2D configuration: {nucleus}-HSQC (radF1={config.radF1:.2f}, radF2={config.radF2:.3f})")
@@ -2789,11 +2811,13 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             self.update_main_plot()
 
     def on_ps2d_params_change(self):
-        """Handle manual change of PS2D parameters (radii and max_iterations)"""
+        """Handle manual change of PS2D parameters (radii, overlap thresholds, and max_iterations)"""
         try:
             radF1 = self.ps2d_radF1.get()
             radF2 = self.ps2d_radF2.get()
             max_iterations = self.ps2d_max_iterations.get()
+            overlap_x = self.ps2d_overlap_x.get()
+            overlap_y = self.ps2d_overlap_y.get()
 
             # Validate values
             if radF1 <= 0 or radF2 <= 0:
@@ -2806,12 +2830,19 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 self.update_status("⚠️  PS2D max iterations must be ≥ 50")
                 return
 
+            if overlap_x <= 0 or overlap_y <= 0:
+                print("⚠️  Overlap thresholds must be positive values")
+                self.update_status("⚠️  PS2D overlap thresholds must be positive")
+                return
+
             # CRITICAL: Update ps2d_config global instance
             # This ensures all PS2D functions use the new values
             config = get_ps2d_config()
             config.radF1 = radF1
             config.radF2 = radF2
             config.max_iterations = max_iterations
+            config.overlap_threshold_x = overlap_x
+            config.overlap_threshold_y = overlap_y
 
             # Also update selector radii proportionally to maintain safety margin
             # Typically selector radii are ~1.5× fitting radii
@@ -2821,6 +2852,8 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             print(f"✅ PS2D parameters updated:")
             print(f"   Fitting region: radF1={radF1:.4f}, radF2={radF2:.4f} ppm")
             print(f"   Data selector:  radF1_selector={config.radF1_selector:.4f}, radF2_selector={config.radF2_selector:.4f} ppm")
+            print(f"   Overlap thresholds: overlap_x={overlap_x:.4f}, overlap_y={overlap_y:.4f} ppm")
+            print(f"   Gap thresholds: gap_x={config.gap_threshold_x:.4f} (computed), gap_y={config.gap_threshold_y:.4f} (computed)")
             print(f"   Max iterations: {max_iterations} per LM stage")
 
             # ALWAYS refresh the spectrum plot to show updated ellipses
@@ -2828,7 +2861,7 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             self.update_main_plot()
 
             # Update status bar
-            self.update_status(f"✅ PS2D params: radF1={radF1:.3f}, radF2={radF2:.4f} ppm, max_iter={max_iterations}")
+            self.update_status(f"✅ PS2D params: radF1={radF1:.3f}, radF2={radF2:.4f}, overlap_x={overlap_x:.3f}, overlap_y={overlap_y:.3f} ppm")
 
         except tk.TclError:
             # Invalid number entered, ignore silently
@@ -5333,99 +5366,122 @@ Total Peaks Processed: {total_peaks}
             pass
         return 0
 
+    def _extract_intensity_at_position(self, x_ppm, y_ppm, window=3):
+        """
+        Extract intensity at specified position using local maximum.
+
+        Parameters:
+        -----------
+        x_ppm, y_ppm : float
+            Peak position in ppm
+        window : int
+            Number of points to search around position (default: 3)
+
+        Returns:
+        --------
+        float : Maximum intensity in local window
+        """
+        try:
+            if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
+                return 0.0
+
+            # Find indices closest to clicked position
+            x_idx = np.argmin(np.abs(self.integrator.ppm_x_axis - x_ppm))
+            y_idx = np.argmin(np.abs(self.integrator.ppm_y_axis - y_ppm))
+
+            # Extract local region (window around click point)
+            x_slice = slice(max(0, x_idx - window), min(len(self.integrator.ppm_x_axis), x_idx + window + 1))
+            y_slice = slice(max(0, y_idx - window), min(len(self.integrator.ppm_y_axis), y_idx + window + 1))
+
+            local_data = self.integrator.nmr_data[y_slice, x_slice]
+
+            # Return maximum absolute intensity in local region
+            return float(np.max(np.abs(local_data)))
+
+        except Exception as e:
+            print(f"⚠️ Could not extract intensity: {e}")
+            return 0.0
+
     def add_new_peak(self, click_x, click_y):
-        """Add a new peak at the clicked position (workflow-aware)"""
+        """
+        Add a new peak at the clicked position.
+
+        NEW BEHAVIOR: Always adds to BOTH reference AND detected peak lists
+        with automatic intensity extraction from spectrum.
+        """
         import pandas as pd
 
         try:
-            # WORKFLOW-AWARE LOGIC:
-            # - S/N Threshold mode → always add to detected peaks (user is building detected list)
-            # - Peak List mode → prefer reference peaks (traditional workflow with reference file)
+            # Extract intensity from spectrum at clicked position
+            intensity = self._extract_intensity_at_position(click_x, click_y)
+            print(f"📍 Adding peak at ({click_x:.3f}, {click_y:.1f})")
+            print(f"   Extracted intensity: {intensity:.2e}")
 
-            workflow_mode = getattr(self, 'workflow_mode', tk.StringVar(value="peak_list")).get()
+            # Find the highest assignment number from BOTH lists
+            max_assignment_ref = 0
+            max_assignment_det = 0
 
-            if workflow_mode == "sn_threshold":
-                # S/N mode: always add to detected peaks
-                add_to_reference = False
-                print(f"📍 S/N Threshold mode: adding peak to detected peaks list")
+            if hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None and len(self.integrator.peak_list) > 0:
+                max_assignment_ref = self._find_max_assignment_number(self.integrator.peak_list, 'Assignment')
+
+            if hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
+                max_assignment_det = self._find_max_assignment_number(self.integrator.fitted_peaks, 'assignment')
+
+            # Use the highest assignment number from either list
+            max_assignment = max(max_assignment_ref, max_assignment_det)
+            new_assignment = str(max_assignment + 1)
+
+            # ============================================================
+            # ADD TO REFERENCE PEAK LIST (DataFrame)
+            # ============================================================
+            new_peak_ref = pd.DataFrame([{
+                'Assignment': new_assignment,
+                'Position_X': click_x,
+                'Position_Y': click_y,
+                'Height': intensity  # Store extracted intensity
+            }])
+
+            if hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
+                self.integrator.peak_list = pd.concat([self.integrator.peak_list, new_peak_ref], ignore_index=True)
             else:
-                # Peak list mode: use checkbox selection
-                ref_enabled = self.edit_reference_peaks.get()
-                det_enabled = self.edit_detected_peaks.get()
+                self.integrator.peak_list = new_peak_ref
 
-                if not ref_enabled and not det_enabled:
-                    print("❌ No peak list selected for addition. Enable Reference or Detected peaks first.")
-                    self.selected_peak_label.config(text="Error: No peak list selected for addition")
-                    return
+            print(f"✅ Added to reference peak list: '{new_assignment}'")
 
-                # Prefer reference peaks if both are enabled
-                add_to_reference = ref_enabled
-                print(f"📍 Peak List mode: adding to {'reference' if add_to_reference else 'detected'} peaks")
+            # ============================================================
+            # ADD TO DETECTED PEAK LIST (list of dicts)
+            # ============================================================
+            new_peak_det = {
+                'assignment': new_assignment,
+                'ppm_x': click_x,
+                'ppm_y': click_y,
+                'height': intensity,
+                'intensity': intensity,
+                'r_squared': 0.0,  # Will be updated when fitted
+                'status': 'manual_add',
+                'manual_add': True,
+                'detected': True
+            }
 
-            if add_to_reference:
-                # Add to reference peak list (DataFrame)
-                # Find the highest assignment number
-                max_assignment = 0
-                if hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None and len(self.integrator.peak_list) > 0:
-                    max_assignment = self._find_max_assignment_number(self.integrator.peak_list, 'Assignment')
-
-                # Create new assignment number
-                new_assignment = str(max_assignment + 1)
-
-                # Create new peak row
-                new_peak = pd.DataFrame([{
-                    'Assignment': new_assignment,
-                    'Position_X': click_x,
-                    'Position_Y': click_y
-                }])
-
-                # Add to peak list
-                if hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
-                    self.integrator.peak_list = pd.concat([self.integrator.peak_list, new_peak], ignore_index=True)
-                else:
-                    self.integrator.peak_list = new_peak
-
-                print(f"✅ Added reference peak '{new_assignment}' at ({click_x:.3f}, {click_y:.1f})")
-
-                # Update peak navigator if showing reference peaks
-                if hasattr(self, 'peak_navigator') and hasattr(self.peak_navigator, 'selected_peak_type') and self.peak_navigator.selected_peak_type == 'reference':
-                    self.peak_navigator.load_reference_peaks(self.integrator.peak_list)
-
-                self.selected_peak_label.config(text=f"Added reference peak '{new_assignment}' at ({click_x:.3f}, {click_y:.1f})")
-
+            if hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
+                self.integrator.fitted_peaks.append(new_peak_det)
             else:
-                # Add to detected peak list (list of dictionaries)
-                # Find the highest assignment number from detected peaks
-                max_assignment = 0
-                if hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
-                    max_assignment = self._find_max_assignment_number(self.integrator.fitted_peaks, 'assignment')
+                self.integrator.fitted_peaks = [new_peak_det]
 
-                # Create new assignment number
-                new_assignment = str(max_assignment + 1)
+            print(f"✅ Added to detected peak list: '{new_assignment}'")
 
-                # Create new detected peak
-                new_peak = {
-                    'assignment': new_assignment,
-                    'ppm_x': click_x,
-                    'ppm_y': click_y,
-                    'height': 0.0,  # Will be updated if fitted
-                    'r_squared': 0.0,  # Will be updated if fitted
-                    'status': 'manual_add'
-                }
+            # Update peak navigator (refresh both lists)
+            if hasattr(self, 'peak_navigator'):
+                if hasattr(self.peak_navigator, 'selected_peak_type'):
+                    if self.peak_navigator.selected_peak_type == 'reference':
+                        self.peak_navigator.load_reference_peaks(self.integrator.peak_list)
+                    elif self.peak_navigator.selected_peak_type == 'detected':
+                        self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
 
-                # Add to fitted peaks list
-                if hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
-                    self.integrator.fitted_peaks.append(new_peak)
-                else:
-                    self.integrator.fitted_peaks = [new_peak]
-
-                print(f"✅ Added detected peak '{new_assignment}' at ({click_x:.3f}, {click_y:.1f})")
-
-                # Update peak navigator if showing detected peaks
-                if hasattr(self, 'peak_navigator') and hasattr(self.peak_navigator, 'selected_peak_type') and self.peak_navigator.selected_peak_type == 'detected':
-                    self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
-
-                self.selected_peak_label.config(text=f"Added detected peak '{new_assignment}' at ({click_x:.3f}, {click_y:.1f})")
+            # Update status label
+            self.selected_peak_label.config(
+                text=f"Added peak '{new_assignment}' at ({click_x:.3f}, {click_y:.1f}) | Intensity: {intensity:.2e}"
+            )
 
             # Refresh the main plot
             self.update_main_plot()
@@ -5433,7 +5489,7 @@ Total Peaks Processed: {total_peaks}
             # Update statistics
             self.update_statistics()
 
-            print(f"✅ Peak addition completed successfully")
+            print(f"✅ Peak addition completed: added to BOTH lists with intensity extraction")
 
         except Exception as e:
             from tkinter import messagebox
@@ -5950,9 +6006,43 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
         # EXACT same logic as show_selected_peak_analysis but use direct index instead of peak_number matching
         selected_result = None
 
-        # Get the peak result directly by index (since we're working with detected peaks list)
-        if peak_index < len(self.integrator.fitted_peaks):
-            selected_result = self.integrator.fitted_peaks[peak_index]
+        # DIAGNOSTIC: Check if fitted_peaks matches navigator order
+        print(f"\n🐛 VOIGT ANALYSIS INDEX DIAGNOSTIC:")
+        print(f"   Clicked peak_index = {peak_index} in Peak Navigator")
+        print(f"   fitted_peaks has {len(self.integrator.fitted_peaks)} total peaks")
+
+        # Show the navigator's displayed data for this row
+        if hasattr(self, 'peak_navigator') and hasattr(self.peak_navigator, 'detected_peaks'):
+            if peak_index < len(self.peak_navigator.detected_peaks):
+                nav_data = self.peak_navigator.detected_peaks[peak_index]
+                print(f"   Navigator row {peak_index}: assignment='{nav_data[0]}', x={nav_data[1]}, y={nav_data[2]}, height={nav_data[3] if len(nav_data) > 3 else 'N/A'}")
+
+        # FIX: Search by assignment instead of using direct index
+        # Navigator and fitted_peaks may have different orders (especially with failed peaks)
+        if peak_index < len(self.peak_navigator.detected_peaks):
+            nav_assignment = str(self.peak_navigator.detected_peaks[peak_index][0])
+            print(f"   Searching for assignment='{nav_assignment}' in fitted_peaks...")
+
+            for result in self.integrator.fitted_peaks:
+                if str(result.get('assignment', '')) == nav_assignment:
+                    selected_result = result
+                    print(f"   ✅ Found matching result:")
+                    print(f"      assignment = '{selected_result.get('assignment', 'N/A')}'")
+                    print(f"      peak_number = {selected_result.get('peak_number', 'N/A')}")
+                    print(f"      position = ({selected_result.get('peak_x', 'N/A'):.4f}, {selected_result.get('peak_y', 'N/A'):.2f})")
+                    print(f"      fitted = {selected_result.get('fitted', 'N/A')}")
+                    print(f"      height = {selected_result.get('height', 'N/A')}")
+                    break
+
+            if selected_result is None:
+                print(f"   ❌ No matching result found for assignment '{nav_assignment}' in fitted_peaks")
+        else:
+            print(f"   ❌ ERROR: peak_index {peak_index} is out of bounds for navigator!")
+
+        print(f"   First 5 peaks in fitted_peaks for reference:")
+        for i in range(min(5, len(self.integrator.fitted_peaks))):
+            pk = self.integrator.fitted_peaks[i]
+            print(f"      [{i}] assignment='{pk.get('assignment', 'N/A')}', peak_number={pk.get('peak_number', 'N/A')}, fitted={pk.get('fitted', 'N/A')}")
 
         # EXACT same display logic as navigation button
         if selected_result:
@@ -5969,10 +6059,15 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
             self.update_status(f"✅ Showing Voigt analysis for {assignment} (Quality: {quality})")
         else:
             # Peak not fitted yet - offer to fit it (same as navigation button)
-            assignment = f'Det_{peak_index+1}'
+            # Use actual assignment from navigator instead of peak_index
+            if peak_index < len(self.peak_navigator.detected_peaks):
+                assignment = str(self.peak_navigator.detected_peaks[peak_index][0])
+            else:
+                assignment = f'Det_{peak_index+1}'
+
             response = messagebox.askyesno(
                 "Peak Not Fitted",
-                f"Detected peak {peak_index+1} ({assignment}) has not been fitted yet.\n\nWould you like to fit all peaks now?"
+                f"Peak {assignment} has not been fitted yet or fitting failed.\n\nWould you like to fit all peaks now?"
             )
             if response:
                 self.fit_all_peaks()
