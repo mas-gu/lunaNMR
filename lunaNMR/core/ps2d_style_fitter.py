@@ -607,6 +607,12 @@ class Ps2dStyleLevenbergMarquardt:
             if bounds is not None:
                 params_new = np.clip(params_new, bounds[0], bounds[1])
 
+                # CRITICAL FIX: Restore fixed parameters after bounds clipping
+                # This ensures fixed params are ABSOLUTELY fixed, even if bounds would change them
+                # USER EXPECTATION: Fixed parameters are inviolable constraints
+                for param_idx, fixed_value in fixed_params.items():
+                    params_new[param_idx] = fixed_value
+
             # Evaluate new chi-squared
             y_new = func(x, *params_new)
             chi2_new = np.sum((y - y_new)**2)

@@ -510,11 +510,25 @@ class Ps2dMultiPeakFitter2D:
                 'f2': params[offset + 3]
             })
 
-        # Fix only spare parameters
+        # Fix spare parameters + respect fix_positions/fix_linewidths flags
+        # USER EXPECTATION: fix_positions/fix_linewidths are ABSOLUTE constraints
+        # Positions/linewidths must remain unchanged regardless of χ² improvement potential
         fixed_stage4 = {}
         for i in range(n_peaks):
             offset = i * NPAR_VOIGT
-            fixed_stage4[offset + 7] = 0.0
+            fixed_stage4[offset + 7] = 0.0  # Always fix spare parameter
+
+            # CRITICAL: Respect fix_positions flag (user's absolute constraint)
+            if fix_positions:
+                fixed_stage4[offset + 0] = params[offset + 0]  # Fix pos_f1
+                fixed_stage4[offset + 3] = params[offset + 3]  # Fix pos_f2
+
+            # CRITICAL: Respect fix_linewidths flag (user's absolute constraint)
+            if fix_linewidths:
+                fixed_stage4[offset + 1] = params[offset + 1]  # Fix lw_lor_f1
+                fixed_stage4[offset + 2] = params[offset + 2]  # Fix lw_gau_f1
+                fixed_stage4[offset + 4] = params[offset + 4]  # Fix lw_lor_f2
+                fixed_stage4[offset + 5] = params[offset + 5]  # Fix lw_gau_f2
 
         params, cov, info = self.optimizer.fit(
             func=model_function,
