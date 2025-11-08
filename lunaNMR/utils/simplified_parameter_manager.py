@@ -1,3 +1,5 @@
+# ABOUTME: 3-5 slider interface mapping to 25+ legacy parameters via nucleus-specific adaptive thresholds.
+# ABOUTME: Reduces complexity for users while maintaining full parameter control for advanced workflows.
 """
 Simplified Parameter Manager for Automated NMR Fitting
 =====================================================
@@ -269,6 +271,7 @@ class SimplifiedParameterManager:
             'residual_analysis_threshold': 1.5,  # Keep constant
 
             # Advanced Parameters (keep defaults for stability)
+            # NOTE: These are overridden by GUI values in ParameterManager.get_effective_parameters()
             'centroid_window_x_ppm': nucleus_params['typical_linewidth'] * 2,
             'centroid_window_y_ppm': nucleus_params['typical_linewidth'] * 10,
             'centroid_noise_multiplier': 2.0

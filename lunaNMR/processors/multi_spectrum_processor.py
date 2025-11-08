@@ -38,14 +38,32 @@ class MultiSpectrumProcessor:
         self.progress_callback = None
 
         # Configure the internal integrator with provided parameters
-        self.integrator.fitting_parameters.update(self.voigt_params)
-        self.integrator.gui_params = self.voigt_params.copy()
+        # OPTION C FIX: Extract gui_params correctly from nested structure
+        if isinstance(self.voigt_params, dict) and 'gui_params' in self.voigt_params:
+            # Nested structure from get_effective_parameters()
+            self.integrator.gui_params = self.voigt_params['gui_params'].copy()
+            self.integrator.fitting_parameters.update(
+                self.voigt_params.get('fitting_params', {})
+            )
+            print("✅ MultiSpectrumProcessor: Extracted gui_params from nested structure")
+            print(f"   fix_positions={self.integrator.gui_params.get('fix_positions', False)}")
+            print(f"   fix_linewidths={self.integrator.gui_params.get('fix_linewidths', False)}")
+            print(f"   use_parallel_processing={self.integrator.gui_params.get('use_parallel_processing', False)}")
+        else:
+            # Flat structure (backward compatibility)
+            self.integrator.gui_params = self.voigt_params.copy()
+            self.integrator.fitting_parameters.update(self.voigt_params)
+            print("✅ MultiSpectrumProcessor: Using flat parameter structure")
 
         # Initialize output folder for retrocompatibility
         self.output_folder = None
 
         # PS2D linewidth reuse configuration (C++ peakfit.cpp:586-607 logic)
-        self.use_ps2d_linewidth_reuse = voigt_params.get('use_ps2d_linewidth_reuse', False)
+        self.use_ps2d_linewidth_reuse = self.voigt_params.get('use_ps2d_linewidth_reuse', False)
+        if not self.use_ps2d_linewidth_reuse and 'gui_params' in self.voigt_params:
+            # Try nested structure
+            self.use_ps2d_linewidth_reuse = self.voigt_params['gui_params'].get('use_ps2d_linewidth_reuse', False)
+
         self.reference_linewidths = {}  # Stores {assignment: {x_sigma, x_gamma, y_sigma, y_gamma}}
         if self.use_ps2d_linewidth_reuse:
             print("   🔒 PS2D Linewidth Reuse ENABLED in MultiSpectrumProcessor")
@@ -236,7 +254,18 @@ class MultiSpectrumProcessor:
         # USE SHARED SingleSpectrumProcessor LOGIC (NO DUPLICATION)
         # Create a temporary parameter manager with current voigt_params
         param_manager = NMRParameterManager()
-        param_manager.current_params = self.voigt_params.copy()
+
+        # OPTION C FIX: Set current_params correctly based on structure
+        if 'gui_params' in self.voigt_params:
+            # Nested structure - flatten for parameter manager
+            param_manager.current_params = {}
+            param_manager.current_params.update(self.voigt_params.get('detection_params', {}))
+            param_manager.current_params.update(self.voigt_params.get('fitting_params', {}))
+            param_manager.current_params.update(self.voigt_params.get('gui_params', {}))
+            param_manager.current_params.update(self.voigt_params.get('processing_options', {}))
+        else:
+            # Flat structure
+            param_manager.current_params = self.voigt_params.copy()
 
         # Create SingleSpectrumProcessor instance
         single_processor = SingleSpectrumProcessor(self.integrator, param_manager)
@@ -255,15 +284,31 @@ class MultiSpectrumProcessor:
                     log_msg or task
                 )
 
-        # Call THE SAME cluster-based fitting logic as "Fit All Peaks"
-        print(f"🔄 Using SingleSpectrumProcessor for spectrum {spectrum_number}/{total_spectra}")
+        # OPTION C FIX: Use PUBLIC API - same path as "Fit All Peaks"
+        print(f"🔄 Using SingleSpectrumProcessor.process_peak_list() for spectrum {spectrum_number}/{total_spectra}")
 
-        # Conditional routing: use parallel or sequential based on parameter
-        if self.voigt_params.get('use_parallel_processing', False):
-            print(f"🚀 Using parallel processing for spectrum {spectrum_number}")
-            fitted_results = single_processor._process_with_parallel_fitting(self.reference_peaks)
+        # Extract parameters from appropriate level
+        if 'gui_params' in self.voigt_params:
+            use_parallel = self.voigt_params['gui_params'].get('use_parallel_processing', False)
+            use_voigt = self.voigt_params.get('use_voigt_fitting', True)
         else:
-            fitted_results = single_processor._process_with_sequential_fitting(self.reference_peaks)
+            use_parallel = self.voigt_params.get('use_parallel_processing', False)
+            use_voigt = self.voigt_params.get('use_voigt_fitting', True)
+
+        processing_options = {
+            'use_parallel': use_parallel,
+            'use_global_optimization': False,
+            'use_voigt_fitting': use_voigt
+        }
+
+        print(f"   Processing options: parallel={use_parallel}, voigt={use_voigt}")
+
+        # This calls _sync_parameters_to_integrator() internally, ensuring proper parameter flow
+        fitted_results = single_processor.process_peak_list(
+            self.reference_peaks,
+            processing_options,
+            series_progress_callback
+        )
 
         # Post-process results: Add spectrum metadata and handle linewidth reuse
         successful_fits = 0

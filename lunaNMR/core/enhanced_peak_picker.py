@@ -1,3 +1,5 @@
+# ABOUTME: Prominence-based peak detection with graph clustering and adaptive windows for 2D NMR spectra.
+# ABOUTME: Uses scipy.ndimage.maximum_filter, networkx clustering, and S/N analysis for robust candidate detection.
 #!/usr/bin/env python3
 """
 Enhanced Peak Picker Module
@@ -45,7 +47,13 @@ class EnhancedPeakPicker:
             'noise_estimation_percentile': 10,  # Percentile for noise estimation
             'smoothing_sigma': 1.0,       # Gaussian smoothing parameter
             'overlap_threshold': 0.8,     # Threshold for detecting overlapping peaks
-            'validation_fit_threshold': 0.5  # Minimum R² for peak validation
+            'validation_fit_threshold': 0.5,  # Minimum R² for peak validation
+            'use_centroid': True,         # Use centroid instead of pixel maximum
+            'centroid_method': 'top_contour',  # 'top_contour' or 'window'
+            'centroid_window_size': 3,    # Half-width of window for 'window' method (in pixels)
+            'centroid_intensity_band': 0.05,  # Intensity band for 'top_contour' method (±5%)
+            'centroid_window_x_ppm': 0.04,    # Max shift X in ppm (from GUI, default)
+            'centroid_window_y_ppm': 0.14     # Max shift Y in ppm (from GUI, default)
         }
 
         # NMR-specific parameters (corrected ranges)
@@ -254,12 +262,40 @@ class EnhancedPeakPicker:
         # Convert to peak list with coordinates and intensities
         initial_peaks = []
         for i, (y_idx, x_idx) in enumerate(zip(peak_indices[0], peak_indices[1])):
+            # Calculate centroid position (geometric center) if enabled
+            if self.detection_parameters.get('use_centroid', True):
+                centroid_method = self.detection_parameters.get('centroid_method', 'top_contour')
+
+                if centroid_method == 'top_contour':
+                    # Use top contour method (center of pixels near maximum)
+                    centroid_x, centroid_y = self.calculate_top_contour_center(
+                        smoothed_data, y_idx, x_idx, ppm_y_axis, ppm_x_axis,
+                        intensity_band=self.detection_parameters.get('centroid_intensity_band', 0.05),
+                        max_shift_x=self.detection_parameters.get('centroid_window_x_ppm', 0.04),
+                        max_shift_y=self.detection_parameters.get('centroid_window_y_ppm', 0.14)
+                    )
+                else:
+                    # Use window method (traditional center of mass in fixed window)
+                    centroid_x, centroid_y = self.calculate_peak_centroid(
+                        smoothed_data, y_idx, x_idx, ppm_y_axis, ppm_x_axis,
+                        window_size=self.detection_parameters.get('centroid_window_size', 3)
+                    )
+
+                ppm_x = centroid_x
+                ppm_y = centroid_y
+            else:
+                # Use pixel maximum (original behavior)
+                ppm_x = ppm_x_axis[x_idx]
+                ppm_y = ppm_y_axis[y_idx]
+
             peak_info = {
                 'id': i,
-                'x_idx': x_idx,
+                'x_idx': x_idx,  # Keep original pixel index for reference
                 'y_idx': y_idx,
-                'ppm_x': ppm_x_axis[x_idx],
-                'ppm_y': ppm_y_axis[y_idx],
+                'ppm_x': ppm_x,  # Use centroid or pixel position
+                'ppm_y': ppm_y,  # Use centroid or pixel position
+                'ppm_x_pixel': ppm_x_axis[x_idx],  # Store original pixel position
+                'ppm_y_pixel': ppm_y_axis[y_idx],
                 'intensity': smoothed_data[y_idx, x_idx],
                 'snr': smoothed_data[y_idx, x_idx] / noise_level,
                 'nucleus_type': nucleus_type
@@ -270,6 +306,152 @@ class EnhancedPeakPicker:
         initial_peaks.sort(key=lambda x: x['intensity'], reverse=True)
 
         return initial_peaks
+
+    def calculate_peak_centroid(self, data_2d, y_idx, x_idx, ppm_y_axis, ppm_x_axis, window_size=3):
+        """
+        Calculate the centroid (center of mass) of a peak in a local window.
+
+        This provides sub-pixel accuracy by computing the weighted average position
+        using intensities as weights. More accurate than using the maximum pixel.
+
+        Parameters:
+        -----------
+        data_2d : ndarray
+            2D NMR data
+        y_idx, x_idx : int
+            Pixel indices of detected maximum
+        ppm_y_axis, ppm_x_axis : ndarray
+            PPM axes
+        window_size : int, optional
+            Half-width of window around peak (in pixels), default=3
+
+        Returns:
+        --------
+        centroid_x, centroid_y : float
+            Centroid position in ppm
+        """
+        import numpy as np
+
+        # Extract local region around peak
+        y_start = max(0, y_idx - window_size)
+        y_end = min(data_2d.shape[0], y_idx + window_size + 1)
+        x_start = max(0, x_idx - window_size)
+        x_end = min(data_2d.shape[1], x_idx + window_size + 1)
+
+        local_data = data_2d[y_start:y_end, x_start:x_end]
+        local_y_ppm = ppm_y_axis[y_start:y_end]
+        local_x_ppm = ppm_x_axis[x_start:x_end]
+
+        # Use only positive intensities for centroid calculation
+        local_data = np.maximum(local_data, 0)
+
+        # Calculate total intensity
+        total_intensity = np.sum(local_data)
+
+        if total_intensity == 0:
+            # Fallback to pixel position if no signal
+            return ppm_x_axis[x_idx], ppm_y_axis[y_idx]
+
+        # Create 2D grids for centroid calculation
+        y_grid, x_grid = np.meshgrid(local_y_ppm, local_x_ppm, indexing='ij')
+
+        # Calculate weighted average (center of mass)
+        centroid_y = np.sum(y_grid * local_data) / total_intensity
+        centroid_x = np.sum(x_grid * local_data) / total_intensity
+
+        return centroid_x, centroid_y
+
+    def calculate_top_contour_center(self, data_2d, y_idx, x_idx, ppm_y_axis, ppm_x_axis,
+                                     intensity_band=0.05, max_shift_x=0.04, max_shift_y=0.14):
+        """
+        Calculate geometric center of pixels within top contour (near maximum intensity).
+
+        This method finds the center of all pixels with intensity close to the maximum
+        (within intensity_band), providing a more accurate center than the single maximum
+        pixel. Useful for peaks with flat tops or multiple pixels at similar intensity.
+
+        Parameters:
+        -----------
+        data_2d : ndarray
+            2D NMR data
+        y_idx, x_idx : int
+            Pixel indices of detected maximum
+        ppm_y_axis, ppm_x_axis : ndarray
+            PPM axes
+        intensity_band : float, optional
+            Fractional intensity band around maximum (default 0.05 = ±5%)
+            Uses pixels with intensity in range [max×(1-band), max×(1+band)]
+        max_shift_x, max_shift_y : float, optional
+            Maximum allowed shift from original position in ppm (safety constraint)
+            Default values should come from GUI centroid_window parameters
+
+        Returns:
+        --------
+        center_x, center_y : float
+            Geometric center position in ppm
+        """
+        import numpy as np
+
+        # Get original position
+        original_x = ppm_x_axis[x_idx]
+        original_y = ppm_y_axis[y_idx]
+        peak_max = data_2d[y_idx, x_idx]
+
+        # Define search window based on max_shift constraints
+        x_ppm_per_pixel = abs(ppm_x_axis[1] - ppm_x_axis[0]) if len(ppm_x_axis) > 1 else 0.004
+        y_ppm_per_pixel = abs(ppm_y_axis[1] - ppm_y_axis[0]) if len(ppm_y_axis) > 1 else 0.08
+
+        search_radius_x = int(np.ceil(max_shift_x / x_ppm_per_pixel))
+        search_radius_y = int(np.ceil(max_shift_y / y_ppm_per_pixel))
+
+        x_start = max(0, x_idx - search_radius_x)
+        x_end = min(data_2d.shape[1], x_idx + search_radius_x + 1)
+        y_start = max(0, y_idx - search_radius_y)
+        y_end = min(data_2d.shape[0], y_idx + search_radius_y + 1)
+
+        # Extract search region
+        search_region = data_2d[y_start:y_end, x_start:x_end]
+
+        # Define intensity range for "top contour"
+        # intensity_band = 0.05 means use pixels with 95%-105% of maximum
+        intensity_min = peak_max * (1.0 - intensity_band)
+        intensity_max = peak_max * (1.0 + intensity_band)  # Allow slight overshoot due to noise
+
+        # Find all pixels within intensity band (the "top contour")
+        mask = (search_region >= intensity_min) & (search_region <= intensity_max)
+
+        if not np.any(mask):
+            # Fallback to original position if no pixels in band
+            return original_x, original_y
+
+        # Get coordinates and intensities of top contour pixels
+        local_y_indices, local_x_indices = np.where(mask)
+        global_y_indices = local_y_indices + y_start
+        global_x_indices = local_x_indices + x_start
+
+        intensities = data_2d[global_y_indices, global_x_indices]
+
+        # Convert to ppm coordinates
+        ppm_x_vals = ppm_x_axis[global_x_indices]
+        ppm_y_vals = ppm_y_axis[global_y_indices]
+
+        # Calculate intensity-weighted geometric center
+        total_intensity = np.sum(intensities)
+        center_x = np.sum(ppm_x_vals * intensities) / total_intensity
+        center_y = np.sum(ppm_y_vals * intensities) / total_intensity
+
+        # Apply safety constraint: limit maximum shift
+        shift_x = center_x - original_x
+        shift_y = center_y - original_y
+
+        # Clip shifts to maximum allowed values
+        shift_x = np.clip(shift_x, -max_shift_x, max_shift_x)
+        shift_y = np.clip(shift_y, -max_shift_y, max_shift_y)
+
+        final_x = original_x + shift_x
+        final_y = original_y + shift_y
+
+        return final_x, final_y
 
     def filter_peaks_by_snr(self, peaks, min_snr=None):
         """Filter peaks based on signal-to-noise ratio"""

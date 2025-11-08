@@ -1,3 +1,5 @@
+# ABOUTME: Cluster-based parallel processing distributor using multiprocessing.Pool for 2.7× speedup.
+# ABOUTME: Distributes entire overlap clusters (not individual peaks) across workers with deterministic clustering.
 #!/usr/bin/env python3
 """
 Complete Parallel Voigt Fitting Implementation

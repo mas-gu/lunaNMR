@@ -1,3 +1,5 @@
+# ABOUTME: GUI parameter synchronization and validation with simplified/legacy mode support.
+# ABOUTME: Overrides calculated defaults with GUI spinbox values (critical for centroid windows in simplified mode).
 """
 Centralized Parameter Management for NMR Processing
 Handles all parameter validation, conversion, and synchronization
@@ -356,6 +358,18 @@ class NMRParameterManager:
             params['detection_params']['search_window_x'] = self.current_params['search_window_x']
             params['detection_params']['search_window_y'] = self.current_params['search_window_y']
             params['detection_params']['noise_threshold'] = self.current_params['noise_threshold']
+
+            # CRITICAL FIX: GUI control parameters must ALWAYS use GUI values
+            # Simplified mode should NOT override fix_positions, fix_linewidths, use_parallel_processing
+            params['gui_params']['fix_positions'] = self.current_params.get('fix_positions', False)
+            params['gui_params']['fix_linewidths'] = self.current_params.get('fix_linewidths', False)
+            params['gui_params']['use_parallel_processing'] = self.current_params.get('use_parallel_processing', False)
+
+            # CRITICAL FIX: Centroid parameters must ALWAYS use GUI values
+            # Simplified mode should NOT override user-specified centroid window sizes
+            params['gui_params']['centroid_window_x_ppm'] = self.current_params.get('centroid_window_x_ppm', 0.01)
+            params['gui_params']['centroid_window_y_ppm'] = self.current_params.get('centroid_window_y_ppm', 0.1)
+            params['gui_params']['centroid_noise_multiplier'] = self.current_params.get('centroid_noise_multiplier', 2.0)
 
             return params
         else:

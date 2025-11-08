@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ABOUTME: Main integration engine coordinating peak detection, centroid refinement, overlap clustering, and PS2D 2D fitting.
+# ABOUTME: Entry point for all spectrum processing workflows (single, batch, series, GUI, CLI).
 """
 Core NMR Integration Module
 
@@ -4170,6 +4172,84 @@ class VoigtIntegrator(BaseIntegrator):
 
         return noise_level
 
+    def _calculate_top_contour_center(self, y_idx, x_idx, intensity_band=0.05,
+                                       max_shift_x=0.04, max_shift_y=0.14):
+        """
+        Calculate geometric center of pixels within top contour (near maximum intensity).
+
+        Parameters:
+        -----------
+        y_idx, x_idx : int
+            Pixel indices of detected maximum
+        intensity_band : float
+            Fractional intensity band around maximum (default 0.05 = ±5%)
+        max_shift_x, max_shift_y : float
+            Maximum allowed shift from original position in ppm
+
+        Returns:
+        --------
+        center_x, center_y : float
+            Geometric center position in ppm
+        """
+        # Get original position
+        original_x = self.ppm_x_axis[x_idx]
+        original_y = self.ppm_y_axis[y_idx]
+        peak_max = self.nmr_data[y_idx, x_idx]
+
+        # Define search window based on max_shift constraints
+        x_ppm_per_pixel = abs(self.ppm_x_axis[1] - self.ppm_x_axis[0]) if len(self.ppm_x_axis) > 1 else 0.004
+        y_ppm_per_pixel = abs(self.ppm_y_axis[1] - self.ppm_y_axis[0]) if len(self.ppm_y_axis) > 1 else 0.08
+
+        search_radius_x = int(np.ceil(max_shift_x / x_ppm_per_pixel))
+        search_radius_y = int(np.ceil(max_shift_y / y_ppm_per_pixel))
+
+        x_start = max(0, x_idx - search_radius_x)
+        x_end = min(self.nmr_data.shape[1], x_idx + search_radius_x + 1)
+        y_start = max(0, y_idx - search_radius_y)
+        y_end = min(self.nmr_data.shape[0], y_idx + search_radius_y + 1)
+
+        # Extract search region
+        search_region = self.nmr_data[y_start:y_end, x_start:x_end]
+
+        # Define intensity range for "top contour"
+        intensity_min = peak_max * (1.0 - intensity_band)
+        intensity_max = peak_max * (1.0 + intensity_band)
+
+        # Find all pixels within intensity band
+        mask = (search_region >= intensity_min) & (search_region <= intensity_max)
+
+        if not np.any(mask):
+            # Fallback to original position
+            return original_x, original_y
+
+        # Get coordinates and intensities of top contour pixels
+        local_y_indices, local_x_indices = np.where(mask)
+        global_y_indices = local_y_indices + y_start
+        global_x_indices = local_x_indices + x_start
+
+        intensities = self.nmr_data[global_y_indices, global_x_indices]
+
+        # Convert to ppm coordinates
+        ppm_x_vals = self.ppm_x_axis[global_x_indices]
+        ppm_y_vals = self.ppm_y_axis[global_y_indices]
+
+        # Calculate intensity-weighted geometric center
+        total_intensity = np.sum(intensities)
+        center_x = np.sum(ppm_x_vals * intensities) / total_intensity
+        center_y = np.sum(ppm_y_vals * intensities) / total_intensity
+
+        # Apply safety constraint: limit maximum shift
+        shift_x = center_x - original_x
+        shift_y = center_y - original_y
+
+        shift_x = np.clip(shift_x, -max_shift_x, max_shift_x)
+        shift_y = np.clip(shift_y, -max_shift_y, max_shift_y)
+
+        final_x = original_x + shift_x
+        final_y = original_y + shift_y
+
+        return final_x, final_y
+
     def _detect_peaks_by_threshold(self, signal_threshold):
         """Detect peaks using signal threshold"""
         from scipy.ndimage import maximum_filter, label
@@ -4201,9 +4281,36 @@ class VoigtIntegrator(BaseIntegrator):
             y_idx = peak_indices[0][max_idx]
             x_idx = peak_indices[1][max_idx]
 
-            # Convert to ppm
-            x_ppm = self.ppm_x_axis[x_idx]
-            y_ppm = self.ppm_y_axis[y_idx]
+            # Apply top contour centroid (always enabled)
+            gui_params = getattr(self, 'gui_params', {})
+
+            # Get pixel position first
+            pixel_x_ppm = self.ppm_x_axis[x_idx]
+            pixel_y_ppm = self.ppm_y_axis[y_idx]
+
+            # Calculate top contour centroid using GUI parameters
+            max_shift_x = gui_params.get('centroid_window_x_ppm', 0.01)
+            max_shift_y = gui_params.get('centroid_window_y_ppm', 0.06)
+
+            centroid_x_ppm, centroid_y_ppm = self._calculate_top_contour_center(
+                y_idx, x_idx,
+                intensity_band=0.05,  # ±5% around maximum
+                max_shift_x=max_shift_x,
+                max_shift_y=max_shift_y
+            )
+
+            # Calculate shift distance
+            shift_x = centroid_x_ppm - pixel_x_ppm
+            shift_y = centroid_y_ppm - pixel_y_ppm
+            shift_distance = np.sqrt(shift_x**2 + shift_y**2)
+
+            # Only print if significant shift (>0.001 ppm)
+            if shift_distance > 0.001:
+                print(f"   Centroid shift: Δ={shift_distance:.4f} ppm from pixel max")
+
+            x_ppm = centroid_x_ppm
+            y_ppm = centroid_y_ppm
+
             intensity = self.nmr_data[y_idx, x_idx]
 
             # Calculate S/N ratio

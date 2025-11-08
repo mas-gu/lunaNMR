@@ -1,3 +1,5 @@
+# ABOUTME: Elliptical mask constructor for PS2D data extraction around overlap clusters.
+# ABOUTME: Builds union of elliptical windows (radF1×radF2) centered on each peak in cluster for 2D fitting.
 """
 PS2D Data Selection Module - Exact Clone of
 ===============================================================================

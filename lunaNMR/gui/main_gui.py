@@ -1,3 +1,5 @@
+# ABOUTME: Main GUI window with tkinter for interactive NMR spectrum analysis, peak detection, and PS2D fitting.
+# ABOUTME: Coordinates left panel controls, center spectrum plot, right Peak Navigator, and Voigt Analysis tab.
 #!/usr/bin/env python3
 """
 NMR Peaks Series GUI - Main Application
@@ -262,9 +264,9 @@ class NMRPeaksSeriesGUI:
         self.save_individual_results = tk.BooleanVar(value=series_options['save_individual_results'])
         self.create_summary_plots = tk.BooleanVar(value=series_options['create_summary_plots'])
 
-        # Series integration advanced options (Voigt fitting for series)
-        self.series_use_voigt_fitting = tk.BooleanVar(value=series_options.get('use_voigt_fitting', True))
-        self.series_use_parallel_processing = tk.BooleanVar(value=series_options.get('use_parallel_processing', True))  # Default enabled
+        # Series integration advanced options
+        # OPTION 1: Removed series_use_voigt_fitting and series_use_parallel_processing
+        # These now use values from Voigt Analysis Options panel (self.use_voigt_fitting, self.use_parallel_processing)
         self.series_use_global_optimization = tk.BooleanVar(value=series_options.get('use_global_optimization', False))
         self.series_num_integrations = tk.IntVar(value=series_options.get('num_integrations', 3))  # Default: 3 integrations
 
@@ -1434,71 +1436,15 @@ class NMRPeaksSeriesGUI:
         ttk.Checkbutton(options_frame, text="Create comprehensive summary plots",
                        variable=self.create_summary_plots).pack(anchor=tk.W)
 
-        # Advanced Voigt fitting options for series integration
+        # OPTION 1: Series Integration uses parameters from Voigt Analysis Options
         ttk.Separator(options_frame, orient='horizontal').pack(fill=tk.X, pady=5)
-        ttk.Label(options_frame, text="🔬 Advanced Fitting Options:", font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W)
+        ttk.Label(options_frame, text="🔬 Series-Specific Options:", font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W)
 
-        series_voigt_check = ttk.Checkbutton(options_frame, text="Voigt profile fitting",
-                       variable=self.series_use_voigt_fitting, command=self._toggle_series_voigt_params)
-        series_voigt_check.pack(anchor=tk.W, padx=10)
-
-        # Detailed Voigt parameters (shown when checkbox is enabled)
-        self.series_voigt_params_frame = ttk.LabelFrame(options_frame, text="Advanced Voigt Parameters", padding=5)
-
-        # Create parameter grid similar to Peak Detection section
-        series_params_grid = ttk.Frame(self.series_voigt_params_frame)
-        series_params_grid.pack(fill=tk.X)
-
-        # Row 0: Fitting Windows
-        #ttk.Label(series_params_grid, text="X-Window:").grid(row=0, column=0, sticky=tk.W)
-        #ttk.Label(series_params_grid, text=f"{self.fitting_window_x.get():.1f}", name="x_window_display").grid(row=0, column=1, sticky=tk.W, padx=(5,15))
-
-        #ttk.Label(series_params_grid, text="Y-Window:").grid(row=0, column=2, sticky=tk.W)
-        #ttk.Label(series_params_grid, text=f"{self.fitting_window_y.get():.1f}", name="y_window_display").grid(row=0, column=3, sticky=tk.W, padx=5)
-
-        # Row 1: Quality parameters
-        #ttk.Label(series_params_grid, text="Min R²:").grid(row=1, column=0, sticky=tk.W)
-        #ttk.Label(series_params_grid, text=f"{self.min_r_squared.get():.2f}", name="r_squared_display").grid(row=1, column=1, sticky=tk.W, padx=(5,15))
-
-        #ttk.Label(series_params_grid, text="Max Iter:").grid(row=1, column=2, sticky=tk.W)
-        #ttk.Label(series_params_grid, text=f"{self.max_iterations.get()}", name="max_iter_display").grid(row=1, column=3, sticky=tk.W, padx=5)
-
-        # Row 2: Peak Detection Parameters
-        #ttk.Label(series_params_grid, text="🔍 Peak Detection:", font=('TkDefaultFont', 8, 'bold')).grid(
-        #    row=2, column=0, columnspan=4, sticky=tk.W, pady=(10,5))
-
-        # Row 3: Height and Distance
-        #ttk.Label(series_params_grid, text="Height %:").grid(row=3, column=0, sticky=tk.W)
-        #ttk.Label(series_params_grid, text=f"{self.peak_height_threshold.get():.3f}", name="height_display").grid(row=3, column=1, sticky=tk.W, padx=(5,15))
-
-        #ttk.Label(series_params_grid, text="Distance:").grid(row=3, column=2, sticky=tk.W)
-        #ttk.Label(series_params_grid, text=f"{self.peak_distance_factor.get():.0f}", name="distance_display").grid(row=3, column=3, sticky=tk.W, padx=5)
-
-        # Row 4: Prominence and Smoothing
-        #ttk.Label(series_params_grid, text="Prominence:").grid(row=4, column=0, sticky=tk.W)
-        #ttk.Label(series_params_grid, text=f"{self.peak_prominence_threshold.get():.3f}", name="prominence_display").grid(row=4, column=1, sticky=tk.W, padx=(5,15))
-
-        #ttk.Label(series_params_grid, text="Smoothing:").grid(row=4, column=2, sticky=tk.W)
-        #ttk.Label(series_params_grid, text=f"{self.smoothing_sigma.get():.1f}", name="smoothing_display").grid(row=4, column=3, sticky=tk.W, padx=5)
-
-        # Row 5: Max peaks and optimization iterations
-        #ttk.Label(series_params_grid, text="Max Peaks:").grid(row=5, column=0, sticky=tk.W)
-        #ttk.Label(series_params_grid, text=f"{self.max_peaks_fit.get()}", name="max_peaks_display").grid(row=5, column=1, sticky=tk.W, padx=(5,15))
-
-        #ttk.Label(series_params_grid, text="Opt Iter:").grid(row=5, column=2, sticky=tk.W)
-        #ttk.Label(series_params_grid, text=f"{self.max_optimization_iterations.get()}", name="opt_iter_display").grid(row=5, column=3, sticky=tk.W, padx=5)
-
-        # Info text
-        #ttk.Label(self.series_voigt_params_frame, text="ℹ️ Parameters are synchronized from Peak Detection section",
-        #         font=('TkDefaultFont', 8), foreground='blue').pack(pady=(5,0))
-
-        # Initially hide the parameter frame
-        self._toggle_series_voigt_params()
-
-        ttk.Checkbutton(options_frame, text="Multicore parallel optimisation",
-                       variable=self.series_use_parallel_processing).pack(anchor=tk.W, padx=10)
-        #ttk.Checkbutton(options_frame, text="Use global optimization)",
-        #               variable=self.series_use_global_optimization).pack(anchor=tk.W, padx=10)
+        # Informational label - settings inherited from Voigt Analysis Options
+        info_label = ttk.Label(options_frame,
+                              text="ℹ️ Fitting parameters (Voigt, parallel, fix positions/linewidths) use settings from Voigt Analysis Options above",
+                              font=('TkDefaultFont', 8), foreground='blue', wraplength=400)
+        info_label.pack(anchor=tk.W, padx=10, pady=(0,5))
 
         # PS2D Linewidth Reuse option
         ps2d_lw_check = ttk.Checkbutton(options_frame, text="🔒 PS2D Linewidth Reuse (Fix LW from reference, ~40% speedup)",
@@ -2218,56 +2164,24 @@ class NMRPeaksSeriesGUI:
         self._update_fit_all_button_text()
 
     def _toggle_series_voigt_params(self):
-        """Toggle visibility of series Voigt parameter frame based on checkbox state"""
-        if self.series_use_voigt_fitting.get():
-            self.series_voigt_params_frame.pack(fill=tk.X, padx=10, pady=(5,0))
-            # Update parameter displays when shown
-            self._update_series_voigt_param_displays()
-        else:
-            self.series_voigt_params_frame.pack_forget()
-
-        # Update the series integration button text
-        self._update_series_button_text()
+        """OPTION 1: No longer needed - series uses Voigt panel settings"""
+        # Method kept for backward compatibility but does nothing
+        pass
 
     def _update_series_button_text(self):
         """Update the series integration button text based on Voigt fitting mode"""
+        # OPTION 1: Now uses self.use_voigt_fitting from Voigt Analysis Options panel
         if hasattr(self, 'series_button'):
-            if self.series_use_voigt_fitting.get():
+            if self.use_voigt_fitting.get():
                 self.series_button.configure(text="🚀 START SERIES INTEGRATION")
             else:
                 self.series_button.configure(text="📊 EXTRACT HEIGHTS (SERIES)")
 
     def _update_series_voigt_param_displays(self):
-        """Update the parameter display labels in the series Voigt parameters section"""
-        if not hasattr(self, 'series_voigt_params_frame'):
-            return
-
-        # Find all child frames and update displays
-        for widget in self.series_voigt_params_frame.winfo_children():
-            if isinstance(widget, ttk.Frame):
-                for child in widget.winfo_children():
-                    if isinstance(child, ttk.Label):
-                        name = str(child)
-                        if 'x_window_display' in name:
-                            child.config(text=f"{self.fitting_window_x.get():.1f}")
-                        elif 'y_window_display' in name:
-                            child.config(text=f"{self.fitting_window_y.get():.1f}")
-                        elif 'r_squared_display' in name:
-                            child.config(text=f"{self.min_r_squared.get():.2f}")
-                        elif 'max_iter_display' in name:
-                            child.config(text=f"{self.max_iterations.get()}")
-                        elif 'height_display' in name:
-                            child.config(text=f"{self.peak_height_threshold.get():.3f}")
-                        elif 'distance_display' in name:
-                            child.config(text=f"{self.peak_distance_factor.get():.0f}")
-                        elif 'prominence_display' in name:
-                            child.config(text=f"{self.peak_prominence_threshold.get():.3f}")
-                        elif 'smoothing_display' in name:
-                            child.config(text=f"{self.smoothing_sigma.get():.1f}")
-                        elif 'max_peaks_display' in name:
-                            child.config(text=f"{self.max_peaks_fit.get()}")
-                        elif 'opt_iter_display' in name:
-                            child.config(text=f"{self.max_optimization_iterations.get()}")
+        """OPTION 1: No longer needed - series uses Voigt panel settings"""
+        # Method kept for backward compatibility but does nothing
+        # Early return to avoid accessing removed series_voigt_params_frame
+        return
 
     def _on_ps2d_linewidth_reuse_toggle(self):
         """Handle PS2D linewidth reuse toggle"""
@@ -4176,7 +4090,11 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
         Run the new independent multi-spectrum processing in background thread.
         """
         try:
-            # 1. Sync simplified mode before getting parameters
+            # 1. Update parameter manager from GUI (CRITICAL - must be in background thread)
+            self.param_manager.update_from_gui_variables(self)
+            print("✅ Updated parameter manager from GUI in background thread")
+
+            # 2. Sync simplified mode before getting parameters
             if hasattr(self, 'use_simplified_parameters'):
                 self.param_manager.use_simplified_mode = self.use_simplified_parameters.get()
                 if self.use_simplified_parameters.get():
@@ -4191,27 +4109,30 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                     )
                     print("🤖 Using simplified parameters for series integration")
 
-            # 2. Get effective parameters (will use simplified if enabled)
+            # 3. Get effective parameters (will use simplified if enabled)
             all_params = self.param_manager.get_effective_parameters()
 
-            # CRITICAL FIX: Override with series-specific Voigt fitting setting
-            all_params['use_voigt_fitting'] = self.series_use_voigt_fitting.get()
-            print(f"   ✅ Applied series Voigt fitting setting: {self.series_use_voigt_fitting.get()}")
+            # OPTION 1: Use parameters from Voigt Analysis Options panel
+            # Add use_voigt_fitting (GUI-only parameter, not in param_manager)
+            all_params['use_voigt_fitting'] = self.use_voigt_fitting.get()
 
-            # PS2D Linewidth Reuse: Override with GUI setting
-            all_params['use_ps2d_linewidth_reuse'] = self.use_ps2d_linewidth_reuse.get()
+            # Log what parameters are being used
+            print(f"   ✅ Using Voigt fitting from main panel: {self.use_voigt_fitting.get()}")
+            print(f"   ✅ Using parallel processing from main panel: {all_params.get('gui_params', {}).get('use_parallel_processing', self.use_parallel_processing.get())}")
+            print(f"   ✅ Using fix_positions from main panel: {all_params.get('gui_params', {}).get('fix_positions', self.fix_positions.get())}")
+            print(f"   ✅ Using fix_linewidths from main panel: {all_params.get('gui_params', {}).get('fix_linewidths', self.fix_linewidths.get())}")
+
+            # Add series-specific parameter: PS2D Linewidth Reuse
+            if 'gui_params' in all_params:
+                all_params['gui_params']['use_ps2d_linewidth_reuse'] = self.use_ps2d_linewidth_reuse.get()
+            else:
+                all_params['use_ps2d_linewidth_reuse'] = self.use_ps2d_linewidth_reuse.get()
+
             if self.use_ps2d_linewidth_reuse.get():
-                print(f"   ✅ PS2D Linewidth Reuse: ENABLED")
+                print(f"   ✅ PS2D Linewidth Reuse: ENABLED (series-specific)")
                 print(f"      Reference linewidths will be fixed for all series spectra")
             else:
                 print(f"   ℹ️  PS2D Linewidth Reuse: DISABLED (independent full optimization)")
-
-            # Series Parallel Processing: Override with GUI setting
-            all_params['use_parallel_processing'] = self.series_use_parallel_processing.get()
-            if self.series_use_parallel_processing.get():
-                print(f"   ✅ Series Parallel Processing: ENABLED (3-7× speedup per spectrum)")
-            else:
-                print(f"   ℹ️  Series Parallel Processing: DISABLED (sequential fitting)")
 
             # 2. Create the new independent processor
             multi_processor = MultiSpectrumProcessor(all_params)

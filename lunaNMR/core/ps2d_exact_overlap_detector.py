@@ -1,3 +1,5 @@
+# ABOUTME: Two-circle touching test for overlap detection using circular overlap thresholds.
+# ABOUTME: Implements geometric overlap check: (|Δx| ≤ 2R_x) AND (|Δy| ≤ 2R_y) for hierarchical clustering.
 """
 PS2D Exact Overlap Detector - EXACT Port from C++ 
 ===========================================================

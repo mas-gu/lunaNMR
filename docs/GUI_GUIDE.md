@@ -1,95 +1,259 @@
-# GUI User Guide – lunaNMR v0.9
+# GUI User Guide
 
-This guide walks through the graphical application that ships with `lunaNMR_v0o9`, highlighting PS2D fitting controls, overlap diagnostics, batch entry points, and the Voigt analysis dashboards.
+**TL;DR**: Launch with `python3 launch_lunaNMR.py`. Main workflow: Load Spectrum → Detect Peaks → Fit All Peaks. PS2D 2D fitting is automatic for overlaps. Use simplified mode (3 sliders) for easy parameter control. Quality color coding: Green (Excellent/Good), Yellow (Fair), Red (Poor/Failed).
 
-## 1. Launching the Application
+---
 
+## 1. Launch
 ```bash
 cd lunaNMR_v0o9
 python3 launch_lunaNMR.py
 ```
 
-Choose **LunaNMR** in the launcher dialog. The optional **DynamiXs** module appears if present in `modules/`.
+Choose **LunaNMR**. (DynamiXs module appears if installed in `modules/`.)
+
+---
 
 ## 2. Main Window Layout
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Menu bar (File, Analysis, View, Tools, Help)                │
-├─────────────────────────────────────────────────────────────┤
-│ Shortcut tiles: Single Spectrum | Series Analysis | Browser │
-│                       | Configuration | Batch ML            │
-├─────────────────────────────────────────────────────────────┤
-│ Status cards, recent files, and quick-start hints           │
-├─────────────────────────────────────────────────────────────┤
-│ Status bar: current project, PS2D state, fitting quality    │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│ Menu Bar: File, Analysis, View, Tools, Help         │
+├─────────────────────────────────────────────────────┤
+│ Left:  Controls (detection, fitting, parameters)    │
+│ Center: Spectrum plot (2D contours + peak markers)  │
+│ Right:  Peak Navigator (browse peaks 1-N)           │
+├─────────────────────────────────────────────────────┤
+│ Status Bar: Project | Nucleus | Quality | Progress  │
+└─────────────────────────────────────────────────────┘
 ```
 
-Key navigation tiles open dedicated workflows:
-- **Single Spectrum Analysis** – interactive detection + PS2D fitting.
-- **Series Analysis / Batch Processing** – multi-sample automation.
-- **Spectrum Browser** – tabbed Voigt analysis, spectroscopy view.
+---
 
-## 3. Core Controls & Toggles
+## 3. Core Controls
 
-### Detection & Fitting Panel
+### 3.1 Detection Parameters
 
-Located on the right-hand side of the single spectrum workspace.
+| Control | Default | Purpose |
+|---------|---------|---------|
+| `1H/15N (ppm)` | 0.03 / 0.2 | Search window size |
+| `Noise Threshold` | 0.5 | S/N multiplier for detection |
+| `X×Y (pixels)` | 3 × 1 | Minimum peak separation |
 
-| Control | Purpose |
-|---------|---------|
-| `Detect Peaks` | Runs the enhanced peak picker. |
-| `PS2D multi-peak` (toggle) | Enables the simultaneous 2D fitter for overlap clusters. Leave enabled for all 2D HSQC/HMQC work. |
-| `PS2D linewidth reuse` | Reuses reference linewidths across a spectrum/series for increased stability. |
-| `Simplified mode` | Activates the 3-parameter control surface (sensitivity, window scale, quality). |
-| `Baseline Method` | Switch between automatic ArPLS, polynomial, or manual settings. |
-| `Window X/Y` | Adjust fitting windows (affects both PS2D mask radii and staged 1D fallback bounds). |
+### 3.2 Peak Centroid Detection
 
-PS2D status indicators in the status bar confirm when the multi-peak engine is active.
+| Control | Default | Purpose |
+|---------|---------|---------|
+| `Centroid Window X (ppm)` | 0.01 | Max shift in F2 (1H) for top contour centroid |
+| `Centroid Window Y (ppm)` | 0.10 | Max shift in F1 (15N/13C) for top contour centroid |
 
-### Overlap Diagnostics
+**Effect**: Peak positions refined to geometric center of ±5% intensity band. Console shows "Centroid shift: Δ=X.XXXX ppm from pixel max" for shifts >0.001 ppm.
 
-When PS2D is enabled, detected peaks are clustered by ellipsoidal overlap. The UI displays:
-- Number of peaks in each cluster.
-- Estimated separation in F1/F2.
-- Whether the cluster was routed through PS2D or the staged 1D fallback.
+**Recommended values**:
+- Tight (default): 0.01 / 0.10 ppm — prevents jumping to wrong peaks
+- Moderate: 0.02 / 0.20 ppm — allows more correction for flat-top peaks
+- Loose: 0.04 / 0.40 ppm — maximum correction (use with caution)
 
-## 4. Running a Single Spectrum Fit
+### 3.3 Fitting Toggles
 
-1. **Load data** (File → Open Spectrum) and optionally a peak list (File → Open Peak List).
-2. **Configure parameters** in the detection panel. For most HSQC datasets, leave PS2D toggled on and use simplified mode defaults.
-3. **Detect peaks**. Review the table for assignments, detected coordinates, S/N.
-4. **Fit selected peaks** using the “Fit Peaks” or context-menu actions. The GUI routes overlapping groups to PS2D automatically.
-5. **Inspect results** in the results table and Voigt analysis tab (see below).
+| Toggle | Purpose |
+|--------|---------|
+| `PS2D multi-peak` | Enables 2D simultaneous fitting for overlaps (default: ON) |
+| `Fix Positions` | **Absolute constraint**: zero position drift during fitting |
+| `Fix Linewidths` | Locks linewidths to reference values |
+| `Use Parallel Processing` | Distributes clusters across 75% of CPU cores |
+| `Simplified Mode` | 3-slider control (sensitivity, window scale, quality target) |
 
-## 5. Voigt Analysis Dashboard
+**Fix Positions behavior**:
+- Stage 2 (position refinement) is **skipped entirely**
+- Stage 4 locks positions to fixed_params dictionary
+- After bounds clipping, positions are restored to exact values
+- **Result**: Zero drift (within float precision ~10⁻¹⁵)
+- **Use case**: Series integration with consistent peak positions across spectra
 
-Open the Voigt Analysis tab (via toolbar or the Spectrum Browser). Two display modes exist:
+---
 
-- **1D mode** (when a staged fit is returned): stacked plots of ¹H and ¹⁵N cross sections, fitted curves, residuals, and window annotations.
-- **2D PS2D mode**: 2×2 layout showing experimental contours (top left), individual fitted peaks (top right), residual heatmap (bottom left), and a parameter summary (bottom right). The peak markers in both top panels use the fitted coordinates (`pos_f2`, `pos_f1`) so you can compare centre shifts directly; the original detection coordinates remain in the results table for reference.
+## 4. Workflow
 
-Tooltips and legends indicate R² values, window sizes, and colour coding per peak. Use the navigator controls to step through peaks or clusters.
+### Single Spectrum
+1. **File → Open Spectrum** (Bruker `.2ii`, NMRPipe `.ft`, SPARKY `.ucsf`)
+2. **File → Open Peak List** (optional reference peaks)
+3. Click **Detect Peaks** → wait for console completion
+4. Click **Fit All Peaks** → PS2D routes overlaps to 2D simultaneous fitting
+5. Review **Peak Navigator** → click peaks to inspect Voigt analysis
 
-## 6. Spectrum Browser Highlights
+### Series Analysis
+1. **Analysis → Start Series Integration**
+2. Select folder containing multiple spectra
+3. Configure first spectrum parameters (PS2D, fix positions, etc.)
+4. Click **Process Series** → identical fitting applied to all spectra
+5. Export results: `File → Export Series Results`
 
-- Presents a tabbed interface (Peak Table, Voigt Analysis, Metadata) for quick inspections.
-- Accepts the same result dictionaries as the main GUI; PS2D contour plots are available here as well.
-- Handy for reviewing batch outputs: load a `.json` export and browse without re-running fits.
+---
 
-## 7. Batch & Series Workflows
+## 5. Peak Navigator
 
-- **Batch Processing** tile opens a wizard for folder selection, nucleus presets, S/N thresholds, and output destinations. Batch runs reuse the interactive engines (PS2D, consensus, simplified manager) ensuring parity.
-- **Series Analysis** supports relaxation or titration series. Enable PS2D linewidth reuse if you need consistent linewidths across time points.
+**Location**: Right panel in main window, right panel in Voigt Analysis tab (Spectrum Browser)
 
-Progress indicators, log panes, and export buttons are shared across workflows for a consistent experience.
+**Features**:
+- List of all detected peaks with assignment, coordinates, height
+- Quality color coding:
+  - **Green**: Excellent (R²≥0.9) or Good (R²≥0.8)
+  - **Yellow**: Fair (R²≥0.5)
+  - **Red**: Poor (R²≥0.2) or Failed (R²<0.2)
+- Navigation buttons: **◀ Previous** | **🔬 Analyze** | **Next ▶**
+- Click peak → auto-centers spectrum and switches to Voigt Analysis tab
 
-## 8. Tips & Troubleshooting
+---
 
-- If PS2D fails to converge, the system falls back to staged 1D fitting. Warnings appear in the log panel; you can retry with adjusted windows or temporarily disable PS2D for that peak.
-- Use the simplified parameter mode when onboarding new users—only three sliders control the full parameter set.
-- The status bar shows the active nucleus, current parameter preset, and the last fit quality. Clicking the status widgets opens the underlying configuration dialogs.
-- Need raw numbers? Use `File → Export Results…` to write CSV/JSON files containing both detection coordinates and final fitted centres/widths.
+## 6. Voigt Analysis Tab
 
-Keeping the GUI in sync with the underlying processors ensures reproducible results between interactive and automated analyses.
+**Access**: Toolbar button or double-click peak in Navigator
+
+### 1D Mode (staged fitting)
+- Top: 1H cross-section (experimental + fitted)
+- Middle: 15N cross-section
+- Bottom: Residuals
+- Annotations: R², window sizes, linewidths
+
+### 2D Mode (PS2D multi-peak)
+```
+┌───────────────┬───────────────┐
+│ Experimental  │ Fitted Peaks  │ ← Contour plots
+│ Contours      │ (individual)  │
+├───────────────┼───────────────┤
+│ Residual      │ Peak          │ ← Residual heatmap
+│ Heatmap       │ Navigator     │    + navigator
+└───────────────┴───────────────┘
+```
+
+**Peak markers**: Use fitted coordinates (`pos_f2`, `pos_f1`) for direct comparison with experimental contours.
+
+---
+
+## 7. Quality Indicators
+
+### Color Coding
+| Quality | R² Range | Color | Meaning |
+|---------|----------|-------|---------|
+| Excellent | ≥ 0.9 | Green | High confidence |
+| Good | [0.8, 0.9) | Green | Acceptable |
+| Fair | [0.5, 0.8) | Yellow | Review recommended |
+| Poor | [0.2, 0.5) | Red | Low confidence |
+| Failed | < 0.2 | Red | Fitting failed |
+
+### Console Messages
+- `Centroid shift: Δ=0.0123 ppm from pixel max` — Position refined by centroid
+- `✅ 125 peaks detected` — Detection complete
+- `116/125 matched, 9 references retained` — Reference peak matching summary
+- `Cluster 5: 3 peaks → PS2D 2D fitting` — Overlap resolved via PS2D
+
+---
+
+## 8. Overlap Visualization
+
+**Enable**: Check **"Show Ellipses"** in Detection panel
+
+**Ellipse Colors**:
+- **Cyan dashed**: Data selector region (PS2D extracts data from this area)
+- **Orange solid**: Overlap threshold (two circles touch = peaks will be clustered)
+- **Magenta solid**: Fitting region (PS2D optimizes parameters within this window)
+
+**Overlap threshold defaults** (two-circle touching test):
+- **15N**: ±0.04 ppm (F2), ±0.4 ppm (F1)
+- **13C**: ±0.04 ppm (F2), ±0.1 ppm (F1)
+
+Adjust in **PS2D Configuration** menu if needed.
+
+---
+
+## 9. Simplified Mode
+
+**Toggle**: `Simplified Mode` checkbox
+
+**Controls** (3 sliders replace 25+ parameters):
+- `Sensitivity` (0.1-0.9): Lower = more sensitive detection
+- `Window Scale` (0.1-10.0): Fitting window size multiplier
+- `Quality Target` (0.5-0.95): Target R² for acceptance
+
+Maps to nucleus-specific adaptive thresholds internally. **GUI centroid parameters always override** calculated defaults.
+
+---
+
+## 10. Parallel Processing
+
+**Enable**: Check **"Use Parallel Processing (75% cores)"**
+
+**Behavior**:
+- Calls `identify_overlap_clusters()` **once** (deterministic, same as sequential)
+- Distributes clusters (not individual peaks) across workers
+- Results **identical** to sequential mode
+- Performance: 2.7× speedup with 6 cores
+
+**Note**: All GUI parameters (fix positions, fix linewidths, centroid windows) are synchronized to workers.
+
+---
+
+## 11. Batch Processing
+
+**Access**: **Tools → Batch Processing** menu
+
+**Features**:
+- Process folder of spectra with same parameters
+- Supports all file formats (Bruker, NMRPipe, SPARKY, Varian)
+- Parallel processing supported
+- ML training data collection (optional)
+- Export: CSV, JSON, NMRPipe peak lists
+
+---
+
+## 12. Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+O` | Open Spectrum |
+| `Ctrl+L` | Open Peak List |
+| `Ctrl+D` | Detect Peaks |
+| `Ctrl+F` | Fit All Peaks |
+| `Ctrl+S` | Save Results |
+| `Ctrl+E` | Export Results |
+| `←/→` | Navigate Previous/Next Peak |
+| `Enter` | Analyze Selected Peak |
+
+---
+
+## 13. Troubleshooting
+
+**Problem**: PS2D fitting fails (R² < 0.2)
+- **Solution**: Check overlap ellipses (may be too tight), increase window scale, or temporarily disable PS2D for that peak.
+
+**Problem**: Peaks detected at wrong positions
+- **Solution**: Tighten centroid windows (decrease X/Y ppm values) to prevent jumping.
+
+**Problem**: Parallel mode slower than sequential
+- **Solution**: Small datasets (<50 peaks) have overhead. Use parallel only for >100 peaks.
+
+**Problem**: "Fix Positions" not working
+- **Solution**: Ensure checkbox is checked before clicking "Fit All Peaks". Console should show Stage 2 skipped.
+
+---
+
+## 14. Export Formats
+
+**CSV**: Peak table with assignment, coordinates, linewidths, intensities, quality
+**JSON**: Full result dictionaries (including fitted surfaces, residuals)
+**NMRPipe**: `.tab` peak list for use in NMRDraw/NMRView
+**SPARKY**: `.list` assignment file
+
+---
+
+## 15. File Formats Supported
+
+| Format | Extension | Software |
+|--------|-----------|----------|
+| Bruker TopSpin | `.2ii`, `.2rr` | TopSpin |
+| NMRPipe | `.ft`, `.pipe` | NMRPipe |
+| Varian/Agilent | `.fid`, `.ft` | VnmrJ |
+| SPARKY | `.ucsf` | SPARKY |
+
+Loaded via `nmrglue` with automatic axis ordering detection.

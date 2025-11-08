@@ -1,3 +1,5 @@
+# ABOUTME: Nucleus-specific configuration for PS2D overlap detection and fitting (15N, 13C defaults).
+# ABOUTME: Defines overlap thresholds, window sizes, and max cluster size for hierarchical clustering.
 """
 ABOUTME: Centralized PS2D algorithm configuration for different nucleus types
 ABOUTME: Single source of truth for all radii, thresholds, and constraints

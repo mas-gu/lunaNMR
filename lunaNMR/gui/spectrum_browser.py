@@ -41,6 +41,7 @@ except ImportError:
 try:
     from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
     from lunaNMR.gui.visualization import SpectrumPlotter, VoigtAnalysisPlotter
+    from lunaNMR.gui.gui_components import PeakNavigator
     from lunaNMR.utils.file_manager import NMRFileManager
     CORE_MODULES_AVAILABLE = True
 except ImportError:
@@ -784,11 +785,9 @@ class SpectrumViewer:
         contour_frame.pack(fill=tk.X, pady=(0, 0))
         self.setup_contour_controls(contour_frame)
 
-        # Right panel contents - Peak analysis (now on the right side next to spectrum)
+        # Right panel contents - Peak analysis panel (restored to original)
         analysis_container = ttk.LabelFrame(right_panel, text="🔬 Peak Analysis", padding=5)
         analysis_container.pack(fill=tk.BOTH, expand=True)
-
-        # Setup peak analysis panel on the right
         self.setup_peak_analysis_panel(analysis_container)
 
         # Bottom control panel
@@ -799,55 +798,30 @@ class SpectrumViewer:
 
     def setup_voigt_analysis_tab(self):
         """Setup the Voigt analysis tab (integrated directly instead of popup)"""
-        # ENHANCED: Add navigation controls similar to main GUI
-        # Enhanced Peak Navigation Controls (like main GUI)
-        nav_frame = ttk.LabelFrame(self.voigt_tab, text="🎯 Enhanced Peak Navigation", padding=10)
-        nav_frame.pack(fill=tk.X, pady=(0, 10))
+        # Create horizontal paned window for plot (left) and peak navigator (right)
+        voigt_paned = ttk.PanedWindow(self.voigt_tab, orient='horizontal')
+        voigt_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Peak selector with enhanced info
-        peak_select_frame = ttk.Frame(nav_frame)
-        peak_select_frame.pack(fill=tk.X, pady=2)
+        # Left panel: Voigt analysis plots
+        left_panel = ttk.Frame(voigt_paned)
+        voigt_paned.add(left_panel, weight=3)  # 75% of space
 
-        # Peak number selector (will be set by peak selection)
-        ttk.Label(peak_select_frame, text="Peak Number:").pack(side=tk.LEFT)
-        self.voigt_peak_number = tk.IntVar(value=1)
-        self.voigt_peak_spin = tk.Spinbox(peak_select_frame, from_=1, to=500, width=8,
-                                         textvariable=self.voigt_peak_number,
-                                         command=self.voigt_navigate_to_peak)
-        self.voigt_peak_spin.pack(side=tk.LEFT, padx=5)
+        # Right panel: Peak Navigator
+        right_panel = ttk.Frame(voigt_paned)
+        voigt_paned.add(right_panel, weight=1)  # 25% of space
 
-        # Peak info display
-        self.voigt_peak_info_label = ttk.Label(peak_select_frame, text="Peak: -/-",
-                                              font=('TkDefaultFont', 9, 'bold'))
-        self.voigt_peak_info_label.pack(side=tk.LEFT, padx=20)
-
-        # Enhanced navigation buttons
-        nav_button_frame = ttk.Frame(nav_frame)
-        nav_button_frame.pack(fill=tk.X, pady=5)
-
-        ttk.Button(nav_button_frame, text="◀◀ Prev",
-                  command=self.voigt_prev_peak, width=8).pack(side=tk.LEFT, padx=2)
-        ttk.Button(nav_button_frame, text="🎯 Center",
-                  command=self.voigt_center_on_peak, width=8).pack(side=tk.LEFT, padx=2)
-        ttk.Button(nav_button_frame, text="Next ▶▶",
-                  command=self.voigt_next_peak, width=8).pack(side=tk.LEFT, padx=2)
-        ttk.Button(nav_button_frame, text="🔍 Zoom",
-                  command=self.voigt_zoom_to_peak, width=8).pack(side=tk.LEFT, padx=2)
-        ttk.Button(nav_button_frame, text="🔬 Analysis",
-                  command=self.voigt_show_peak_analysis, width=10).pack(side=tk.LEFT, padx=2)
-
-        # Create 2x2 grid for Voigt analysis plots like main GUI
-        plot_container = ttk.Frame(self.voigt_tab)
+        # Left panel contents - Voigt analysis plot
+        plot_container = ttk.LabelFrame(left_panel, text="📈 Voigt Analysis", padding=5)
         plot_container.pack(fill=tk.BOTH, expand=True)
 
-        #self.fig_voigt, self.axes_voigt = plt.subplots(2, 2, figsize=(12, 8))
+        # Create 2x2 grid for Voigt analysis plots like main GUI
         self.fig_voigt, self.axes_voigt = plt.subplots(2, 1, figsize=(8, 6))
 
         self.canvas_voigt = FigureCanvasTkAgg(self.fig_voigt, plot_container)
         self.canvas_voigt.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         # Add toolbar for navigation
-        toolbar_voigt = NavigationToolbar2Tk(self.canvas_voigt, self.voigt_tab)
+        toolbar_voigt = NavigationToolbar2Tk(self.canvas_voigt, plot_container)
         toolbar_voigt.update()
 
         # Create VoigtAnalysisPlotter instance (SHARED with main GUI)
@@ -860,6 +834,13 @@ class SpectrumViewer:
             ax.set_title('Voigt Analysis - No Peak Selected')
 
         self.canvas_voigt.draw()
+
+        # Right panel contents - Peak Navigator (like main GUI)
+        self.voigt_peak_navigator = PeakNavigator(right_panel)
+        self.voigt_peak_navigator.pack(fill=tk.BOTH, expand=True)
+
+        # Set this spectrum viewer as the controller for peak navigator
+        self.voigt_peak_navigator.set_spectrum_controller(self)
 
     def populate_voigt_analysis_tab(self):
         """Populate the Voigt analysis tab with current peak data (reused from existing logic)"""
@@ -1667,6 +1648,11 @@ class SpectrumViewer:
             self.peak_info_text.insert(tk.END, info_text)
             self.peak_info_text.config(state=tk.DISABLED)
 
+            # Populate peak navigator in Voigt analysis tab only
+            if hasattr(self, 'voigt_peak_navigator'):
+                print("📊 Populating Voigt tab peak navigator with detected peaks")
+                self.voigt_peak_navigator.load_detected_peaks(integration_results)
+                self.voigt_peak_navigator.refresh_peak_list()
 
         except Exception as e:
             print(f"Error populating peak list: {e}")
@@ -2599,6 +2585,63 @@ Detection: {self.result_data.get('detected_peaks', 0)}/{self.result_data.get('to
             self.ax.set_xlim(self.original_xlim)
             self.ax.set_ylim(self.original_ylim)
             self.canvas.draw_idle()
+
+    # ============================================================================
+    # Peak Navigator Controller Methods
+    # ============================================================================
+
+    def center_on_coordinates(self, x, y, window_x=0.5, window_y=5.0):
+        """Center spectrum view on specified coordinates (called by peak navigator)"""
+        if not hasattr(self, 'ax'):
+            return
+
+        # Set view limits centered on peak with specified window
+        self.ax.set_xlim(x + window_x/2, x - window_x/2)  # X-axis reversed
+        self.ax.set_ylim(y - window_y/2, y + window_y/2)
+
+        # Redraw canvas
+        if hasattr(self, 'canvas'):
+            self.canvas.draw_idle()
+
+        print(f"📍 Centered spectrum on ({x:.3f}, {y:.1f})")
+
+    def center_on_selected_peak(self):
+        """Center spectrum on currently selected peak (fallback method)"""
+        if hasattr(self, 'selected_peak') and self.selected_peak:
+            peak_x = self.selected_peak.get('Position_X', self.selected_peak.get('ppm_x', 0))
+            peak_y = self.selected_peak.get('Position_Y', self.selected_peak.get('ppm_y', 0))
+            if peak_x and peak_y:
+                self.center_on_coordinates(peak_x, peak_y)
+
+    def set_selected_peak(self, peak_index, peak_type, source="navigator"):
+        """Set the currently selected peak (called by peak navigator)"""
+        print(f"🎯 SpectrumViewer: set_selected_peak({peak_index}, {peak_type}, source={source})")
+
+        # Get integration results
+        integration_results = self.result_data.get('integration_results', [])
+
+        if 0 <= peak_index < len(integration_results):
+            self.selected_peak = integration_results[peak_index]
+            self.selected_peak_index = peak_index
+
+            # Update Voigt analysis tab if peak selected from navigator
+            if source == "navigator":
+                # Switch to Voigt analysis tab automatically
+                if hasattr(self, 'notebook'):
+                    self.notebook.select(1)  # Switch to Voigt Analysis tab
+
+                # Populate Voigt analysis for selected peak
+                self.populate_voigt_analysis_tab()
+
+    def navigator_show_peak_analysis(self, peak_index=None):
+        """Show Voigt analysis for selected peak (called by peak navigator analyze button)"""
+        if peak_index is None and hasattr(self, 'selected_peak_index'):
+            peak_index = self.selected_peak_index
+
+        if peak_index is not None:
+            self.set_selected_peak(peak_index, "detected", source="navigator")
+
+    # ============================================================================
 
     def select_peak_by_data(self, peak_data):
         """Select a peak and update displays"""

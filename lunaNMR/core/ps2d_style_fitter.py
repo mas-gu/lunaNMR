@@ -1,3 +1,5 @@
+# ABOUTME: Faddeeva-based 2D Voigt profile primitives with Numba JIT acceleration (3-5× speedup).
+# ABOUTME: Provides analytical intensity derivatives and finite-difference parameter Jacobians for PS2D optimizer.
 """
 PS2D-Style High-Performance Voigt Fitter for LunaNMR
 =====================================================

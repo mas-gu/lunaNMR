@@ -1,3 +1,5 @@
+# ABOUTME: PS2D 2D simultaneous multi-peak Voigt fitter using 5-stage Levenberg-Marquardt optimization.
+# ABOUTME: Handles overlapping peak clusters with elliptical data selection and absolute position/linewidth constraints.
 """
 PS2D 2D Multi-Peak Fitter - Simultaneous 2D Voigt Fitting
 ==========================================================
