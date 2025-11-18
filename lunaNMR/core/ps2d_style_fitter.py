@@ -62,17 +62,17 @@ SQRT_2 = 1.4142135624
 SQRT_2PI = np.sqrt(2.0 * np.pi)
 SQRT_8LN2 = np.sqrt(8.0 * np.log(2.0))
 
-# Levenberg-Marquardt parameters 
+# Levenberg-Marquardt parameters
 LAMBDA_INIT = 0.0001      # Initial damping (line 40)
 LAMBDA_UP = 10.0         # Increase factor on rejection (line 135)
 LAMBDA_DOWN = 0.05        # Decrease factor on acceptance #was 0.1
 MAX_ITER = 500           # Default max iterations was 250
-CONV_TOL = 1e-9          # Convergence tolerance (EPS_CONV) #was 1e-6 
+CONV_TOL = 1e-5          # Convergence tolerance (EPS_CONV) #was 1e-9
 NDONE = 1                # Must converge for 1 consecutive iteration
 SLOW_PROGRESS_TOL = 1e-7 # Slow progress threshold: Δχ²/χ² < 1e-7 (0.00001%)
 SLOW_PROGRESS_LIMIT = 15 # Exit after 15 consecutive slow-progress iterations
 
-# Derivative step size 
+# Derivative step size
 DERIV_STEP_MULTIPLIER = 1.00001  # Relative step = 1e-6 was 1.000001
 
 

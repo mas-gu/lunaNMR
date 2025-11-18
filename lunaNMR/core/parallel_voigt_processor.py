@@ -577,10 +577,15 @@ class ParallelVoigtProcessor:
         print(f"   Available peak_numbers: {sorted(results_by_number.keys())[:10]}... (showing first 10)")
 
         # Return results in original peak_list order using peak_number match
+        # CRITICAL: Add placeholders for failed fits to maintain 1:1 index mapping (same as sequential mode)
         consolidated_results = []
+        failed_count = 0
+
         for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
             peak_number = i + 1
             assignment = str(peak_row.get('Assignment', f'Peak_{peak_number}'))
+            peak_x = float(peak_row['Position_X'])
+            peak_y = float(peak_row['Position_Y'])
 
             # Try matching by peak_number first, then assignment
             result = results_by_number.get(peak_number)
@@ -592,12 +597,51 @@ class ParallelVoigtProcessor:
                 result['processing_mode'] = 'parallel'
                 result['peak_number'] = peak_number  # Ensure correct peak_number
                 consolidated_results.append(result)
+            else:
+                # Fitting failed - add placeholder to maintain index alignment (matches sequential mode)
+                placeholder = {
+                    'assignment': assignment,
+                    'peak_number': peak_number,
+                    'peak_position': (peak_x, peak_y),
+                    'peak_x': peak_x,
+                    'peak_y': peak_y,
+                    'amplitude': 0.0,
+                    'height': 0.0,
+                    'volume': 0.0,
+                    'r_squared': 0.0,
+                    'avg_r_squared': 0.0,
+                    'center_x': peak_x,
+                    'center_y': peak_y,
+                    'sigma_x': 0.0,
+                    'gamma_x': 0.0,
+                    'sigma_y': 0.0,
+                    'gamma_y': 0.0,
+                    'fitting_quality': 'Failed',
+                    'quality': 'Failed',
+                    'success': False,
+                    'fitted': False,
+                    'method': 'none',
+                    'processing_mode': 'parallel',
+                    'failure_reason': 'Fitting did not converge or failed acceptance criteria'
+                }
+                consolidated_results.append(placeholder)
+                failed_count += 1
 
+        successful_count = len(consolidated_results) - failed_count
         print(f"📋 Consolidated {len(consolidated_results)} peaks in original order (from {len(peak_list)} total peaks)")
+        print(f"   ✅ Successful fits: {successful_count}")
+        print(f"   ❌ Failed fits (placeholders): {failed_count}")
 
-        if len(consolidated_results) < len(peak_list) * 0.5:
-            print(f"⚠️ WARNING: Only {len(consolidated_results)}/{len(peak_list)} peaks consolidated")
-            print(f"   This suggests a matching problem between cluster results and peak_list")
+        # Verify 1:1 mapping maintained
+        if len(consolidated_results) != len(peak_list):
+            print(f"⚠️ WARNING: Peak count mismatch! {len(consolidated_results)} != {len(peak_list)}")
+            print(f"   This suggests a logic error in consolidation")
+
+        # Warn if success rate is very low
+        if successful_count < len(peak_list) * 0.5:
+            success_rate = (successful_count / len(peak_list) * 100) if len(peak_list) > 0 else 0
+            print(f"⚠️ WARNING: Low success rate: {successful_count}/{len(peak_list)} ({success_rate:.1f}%)")
+            print(f"   Many peaks failed to fit - check parameters or data quality")
 
         return consolidated_results
         
@@ -718,7 +762,7 @@ def _parallel_cluster_worker(cluster_task):
                     }
 
                 # Reconstruct 2D fitted surface
-                fitted_2d_surface, individual_surfaces = worker_integrator._reconstruct_2d_surface(
+                fitted_2d_surface, individual_surfaces, baseline = worker_integrator._reconstruct_2d_surface(
                     region_2d, group_result['peaks']
                 )
 
@@ -784,7 +828,8 @@ def _parallel_cluster_worker(cluster_task):
                             'region_2d': region_2d,
                             'fitted_2d_surface': fitted_2d_surface,
                             'individual_surfaces': individual_surfaces,
-                            'all_peaks': group_result['peaks']
+                            'all_peaks': group_result['peaks'],
+                            'baseline': baseline  # Baseline offset for visualization
                         }
                         peak_results.append(result)
 

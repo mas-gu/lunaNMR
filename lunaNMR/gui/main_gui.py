@@ -53,6 +53,7 @@ from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
 from lunaNMR.processors.multi_spectrum_processor import MultiSpectrumProcessor
 
 from lunaNMR.gui.gui_components import AdvancedProgressDialog
+from lunaNMR.gui.multi_spectrum_viewer import open_multi_spectrum_viewer
 
 # Import our modular components
 try:
@@ -447,6 +448,19 @@ class NMRPeaksSeriesGUI:
             residual_analysis_threshold=self.residual_analysis_threshold.get()
         )
 
+    def _on_intensity_scale_change_3d(self, value):
+        """Handle intensity scale slider change for 3D Voigt plot"""
+        # Update label
+        self.intensity_scale_label_3d.config(text=f"{int(float(value))}%")
+
+        # Cancel pending update if exists (debouncing)
+        if hasattr(self, '_scale_update_id_3d'):
+            self.root.after_cancel(self._scale_update_id_3d)
+
+        # Schedule update after 100ms of no slider movement
+        self._scale_update_id_3d = self.root.after(100,
+            lambda: self.voigt_plotter_3d.set_intensity_scale(float(value)))
+
     def on_simplified_fitting_mode_change(self):
         """Handle simplified fitting mode toggle - affects only Voigt fitting, not peak detection"""
         use_simplified = self.use_simplified_parameters.get()
@@ -550,11 +564,16 @@ class NMRPeaksSeriesGUI:
         main_frame = ttk.Frame(self.root)
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
 
-        # Configure main frame grid weights for 3-column layout
-        main_frame.columnconfigure(0, weight=0, minsize=400)  # Left panel - controls (fixed minimum)
-        main_frame.columnconfigure(1, weight=1)              # Center panel - spectrum (expandable)
-        main_frame.columnconfigure(2, weight=0, minsize=200)  # Right panel - peak navigator (fixed minimum)
+        # Configure main frame grid weights for 3-column layout with adaptive sizing
+        # Col 0: Controls - small weight for adaptive sizing, sufficient minimum for content
+        # Col 1: Plot area - main weight for primary expansion
+        # Col 2: Navigator - small weight for adaptive sizing
+        main_frame.columnconfigure(0, weight=1, minsize=350)  # Left panel - adaptive (min 350px for content)
+        main_frame.columnconfigure(1, weight=3)               # Center panel - primary expansion (3× weight)
+        main_frame.columnconfigure(2, weight=1, minsize=200)  # Right panel - adaptive (min 200px)
         main_frame.rowconfigure(0, weight=1)
+
+        print("📐 Main GUI using adaptive grid layout: Col 0 (controls, min 350px, weight=1), Col 1 (plot, weight=3), Col 2 (navigator, min 200px, weight=1)")
 
         # Left panel for controls
         left_panel_frame = ttk.Frame(main_frame)
@@ -647,6 +666,7 @@ class NMRPeaksSeriesGUI:
         menubar.add_cascade(label="Results Analysis", menu=results_menu)
         results_menu.add_command(label="Browse Series Results...", command=self.open_results_browser)
         results_menu.add_command(label="Browse Individual Spectra...", command=self.open_spectrum_browser)
+        results_menu.add_command(label="Multi-Spectrum Overlay Viewer...", command=self.open_multi_spectrum_viewer)
         results_menu.add_command(label="Peak Evolution Analysis", command=self.show_peak_evolution)
         results_menu.add_command(label="Comparison Dashboard", command=self.open_comparison_dashboard)
         results_menu.add_separator()
@@ -1485,8 +1505,16 @@ class NMRPeaksSeriesGUI:
                        variable=self.series_peak_source, value="detected").pack(anchor=tk.W)
         ttk.Radiobutton(peak_source_frame, text="Use reference peak list",
                        variable=self.series_peak_source, value="reference").pack(anchor=tk.W)
-        #ttk.Radiobutton(peak_source_frame, text="Cascade results (0 → 1 → 2)",
-        #               variable=self.series_peak_source, value="cascade").pack(anchor=tk.W)
+        ttk.Radiobutton(peak_source_frame, text="Cascade mode (propagate positions: n→n+1→n+2)",
+                       variable=self.series_peak_source, value="cascade").pack(anchor=tk.W)
+
+        # Cascade mode explanation
+        cascade_info_frame = ttk.Frame(series_frame)
+        cascade_info_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
+        ttk.Label(cascade_info_frame,
+                 text="   ℹ️ Cascade: Uses top contour centroid to find local maximum for each peak\n"
+                      "      before fitting (spectrum N positions → refine for spectrum N+1)",
+                 font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W)
 
         # Peak detection toggle
         detection_frame = ttk.Frame(series_frame)
@@ -1812,7 +1840,8 @@ class NMRPeaksSeriesGUI:
         self.viz_notebook.add(voigt_tab, text="📈 Voigt Analysis")
 
         # Create responsive Voigt analysis figure - 2x1 layout with backward compatibility
-        self.fig_voigt, axes_1d = plt.subplots(2, 1, figsize=(4, 8))
+        # Reduced from (4, 8) to (4, 5) for better fit in window
+        self.fig_voigt, axes_1d = plt.subplots(2, 1, figsize=(4, 5))
 
         # CRITICAL: Convert 1D axes array to 2D structure for backward compatibility
         # This preserves all existing nested loop access patterns
@@ -1845,12 +1874,141 @@ class NMRPeaksSeriesGUI:
             toolbar_voigt.pack_configure(side=tk.TOP, fill=tk.X)
             toolbar_frame_voigt.after(10, lambda: toolbar_frame_voigt.update_idletasks())
 
-        # Tab 3: Series overview
+        # Tab 3: 3D Voigt Analysis (new - supplementary visualization)
+        voigt_3d_tab = ttk.Frame(self.viz_notebook)
+        self.viz_notebook.add(voigt_3d_tab, text="🎨 3D Voigt Analysis")
+
+        # Create control frame at top
+        control_frame_3d = ttk.Frame(voigt_3d_tab)
+        control_frame_3d.pack(side=tk.TOP, fill=tk.X, padx=5, pady=3)
+
+        # Row 1: Layer toggling checkboxes
+        layer_frame = ttk.LabelFrame(control_frame_3d, text="Layer Visibility", padding=3)
+        layer_frame.pack(side=tk.LEFT, padx=3)
+
+        self.show_exp_3d_var = tk.BooleanVar(value=True)
+        self.show_fit_3d_var = tk.BooleanVar(value=True)
+        self.show_resid_3d_var = tk.BooleanVar(value=True)
+        # self.show_cross_3d_var = tk.BooleanVar(value=True)  # Disabled - code kept for future use
+
+        ttk.Checkbutton(layer_frame, text="Experimental", variable=self.show_exp_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_experimental(self.show_exp_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
+        ttk.Checkbutton(layer_frame, text="Fitted", variable=self.show_fit_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_fitted(self.show_fit_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
+        ttk.Checkbutton(layer_frame, text="Residuals", variable=self.show_resid_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_residuals(self.show_resid_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
+        # ttk.Checkbutton(layer_frame, text="Cross-Sections", variable=self.show_cross_3d_var,
+        #                 command=lambda: self.voigt_plotter_3d.toggle_cross_sections(self.show_cross_3d_var.get())
+        #                 ).pack(side=tk.LEFT, padx=2)  # Disabled - code kept for future use
+
+        # Row 2: Residual mode radio buttons
+        residual_frame = ttk.LabelFrame(control_frame_3d, text="Residual Mode", padding=3)
+        residual_frame.pack(side=tk.LEFT, padx=3)
+
+        self.residual_mode_3d_var = tk.StringVar(value='overlay')
+        ttk.Radiobutton(residual_frame, text="Separate Panel", variable=self.residual_mode_3d_var,
+                        value='separate',
+                        command=lambda: self.voigt_plotter_3d.set_residual_mode('separate')
+                        ).pack(side=tk.LEFT, padx=2)
+        ttk.Radiobutton(residual_frame, text="Overlay", variable=self.residual_mode_3d_var,
+                        value='overlay',
+                        command=lambda: self.voigt_plotter_3d.set_residual_mode('overlay')
+                        ).pack(side=tk.LEFT, padx=2)
+
+        # Row 3: Intensity scaling slider
+        intensity_frame = ttk.LabelFrame(control_frame_3d, text="Intensity Scale", padding=3)
+        intensity_frame.pack(side=tk.LEFT, padx=3, fill=tk.X, expand=True)
+
+        ttk.Label(intensity_frame, text="50%").pack(side=tk.LEFT, padx=2)
+
+        self.intensity_scale_3d_var = tk.DoubleVar(value=100.0)
+        intensity_slider_3d = tk.Scale(
+            intensity_frame,
+            from_=50,
+            to=200,
+            orient=tk.HORIZONTAL,
+            variable=self.intensity_scale_3d_var,
+            command=self._on_intensity_scale_change_3d,
+            resolution=5,
+            showvalue=0,
+            length=200
+        )
+        intensity_slider_3d.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+
+        self.intensity_scale_label_3d = ttk.Label(intensity_frame, text="100%", width=5)
+        self.intensity_scale_label_3d.pack(side=tk.LEFT, padx=2)
+
+        ttk.Label(intensity_frame, text="200%").pack(side=tk.LEFT, padx=2)
+
+        # Create 3D Voigt analysis figure - responsive sizing to match canvas
+        # Reduced from (10, 6) to (8, 4) for better fit in window
+        self.fig_voigt_3d = plt.figure(figsize=(8, 4))
+        self.canvas_voigt_3d = FigureCanvasTkAgg(self.fig_voigt_3d, voigt_3d_tab)
+        self.canvas_voigt_3d.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Enable tight layout for automatic centering
+        self.fig_voigt_3d.set_tight_layout(True)
+
+        # Create toolbar with dedicated frame
+        toolbar_frame_voigt_3d = ttk.Frame(voigt_3d_tab)
+        toolbar_frame_voigt_3d.pack(fill=tk.X, pady=(2, 0))
+
+        toolbar_voigt_3d = NavigationToolbar2Tk(self.canvas_voigt_3d, toolbar_frame_voigt_3d)
+        toolbar_voigt_3d.pack(side=tk.TOP, fill=tk.X)
+        toolbar_voigt_3d.update()
+        toolbar_frame_voigt_3d.update_idletasks()
+        if not toolbar_voigt_3d.winfo_ismapped():
+            toolbar_voigt_3d.pack_configure(side=tk.TOP, fill=tk.X)
+            toolbar_frame_voigt_3d.after(10, lambda: toolbar_frame_voigt_3d.update_idletasks())
+
+        # Tab 4: Peak Parameters (synchronized with 2D and 3D Voigt tabs)
+        peak_params_tab = ttk.Frame(self.viz_notebook)
+        self.viz_notebook.add(peak_params_tab, text="📋 Peak Parameters")
+
+        # Create scrollable text widget for peak parameters
+        params_scroll_frame = ttk.Frame(peak_params_tab)
+        params_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Add scrollbar
+        params_scrollbar = ttk.Scrollbar(params_scroll_frame)
+        params_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Create text widget with monospace font
+        self.peak_params_text = tk.Text(
+            params_scroll_frame,
+            wrap=tk.WORD,
+            font=('Courier', 10),
+            yscrollcommand=params_scrollbar.set,
+            relief=tk.SOLID,
+            borderwidth=1,
+            padx=15,
+            pady=15
+        )
+        self.peak_params_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        params_scrollbar.config(command=self.peak_params_text.yview)
+
+        # Configure text tags for color-coded quality display
+        self.peak_params_text.tag_configure('header', font=('Courier', 12, 'bold'))
+        self.peak_params_text.tag_configure('excellent', background='lightgreen')
+        self.peak_params_text.tag_configure('good', background='lightblue')
+        self.peak_params_text.tag_configure('fair', background='lightyellow')
+        self.peak_params_text.tag_configure('poor', background='lightcoral')
+        self.peak_params_text.tag_configure('separator', font=('Courier', 10, 'bold'))
+
+        # Initialize with placeholder text
+        self.peak_params_text.insert('1.0', 'No peak selected.\n\nNavigate to a peak using 2D or 3D Voigt Analysis tabs.')
+        self.peak_params_text.config(state=tk.DISABLED)
+
+        # Tab 5: Series overview
         series_tab = ttk.Frame(self.viz_notebook)
         self.viz_notebook.add(series_tab, text="📊 Series Overview")
 
         # Create responsive series overview figure
-        self.fig_series, self.ax_series = plt.subplots(1, 1, figsize=(8, 6))
+        # Reduced from (8, 6) to (6, 4) for better fit in window
+        self.fig_series, self.ax_series = plt.subplots(1, 1, figsize=(6, 4))
         self.fig_series.tight_layout()
         self.canvas_series = FigureCanvasTkAgg(self.fig_series, series_tab)
         self.canvas_series.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -1872,8 +2030,9 @@ class NMRPeaksSeriesGUI:
         self.viz_notebook.add(stats_tab, text="📈 Statistics")
 
         # Create responsive statistics figure
+        # Reduced from (10, 7) to (7, 5) for better fit in window
         self.fig_stats, ((self.ax_stats_1, self.ax_stats_2),
-                         (self.ax_stats_3, self.ax_stats_4)) = plt.subplots(2, 2, figsize=(10, 7))
+                         (self.ax_stats_3, self.ax_stats_4)) = plt.subplots(2, 2, figsize=(7, 5))
         self.fig_stats.tight_layout()
         self.canvas_stats = FigureCanvasTkAgg(self.fig_stats, stats_tab)
         self.canvas_stats.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -1902,8 +2061,9 @@ class NMRPeaksSeriesGUI:
         plots_frame = ttk.Frame(diagnostics_paned)
         diagnostics_paned.add(plots_frame, weight=2)
 
+        # Reduced from (10, 8) to (7, 5) for better fit in window
         self.fig_diagnostics, ((self.ax_diag_quality, self.ax_diag_convergence),
-                              (self.ax_diag_aic, self.ax_diag_timing)) = plt.subplots(2, 2, figsize=(10, 8))
+                              (self.ax_diag_aic, self.ax_diag_timing)) = plt.subplots(2, 2, figsize=(7, 5))
         self.canvas_diagnostics = FigureCanvasTkAgg(self.fig_diagnostics, plots_frame)
         self.canvas_diagnostics.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
@@ -1973,6 +2133,7 @@ class NMRPeaksSeriesGUI:
         """Setup plot manager to coordinate all visualizations"""
         self.spectrum_plotter = SpectrumPlotter(self.fig_main, self.ax_main)
         self.voigt_plotter = VoigtAnalysisPlotter(self.fig_voigt, self.axes_voigt)
+        self.voigt_plotter_3d = VoigtAnalysisPlotter(self.fig_voigt_3d, None)  # 3D plotter (axes created dynamically)
         self.series_plotter = SeriesPlotter(self.fig_series, self.ax_series)
 
         self.plot_manager = PlotManager()
@@ -3415,8 +3576,15 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 self.voigt_plotter.plot_voigt_analysis(result)
                 self.canvas_voigt.draw()
 
-                # Switch to Voigt tab
-                self.viz_notebook.select(1)
+                # Also update 3D view
+                self.voigt_plotter_3d.plot_voigt_analysis_3d(result)
+                self.canvas_voigt_3d.draw()
+
+                # Update peak parameters tab
+                self.update_peak_parameters(result)
+
+                # Switch to 3D Voigt tab
+                self.viz_notebook.select(2)
 
                 quality = result.get('fitting_quality', 'Unknown')
                 self.update_status(f"✅ Voigt fit: {assignment} - Quality: {quality}")
@@ -4182,6 +4350,12 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
 
             # 5. Run the independent processing
             print("🎯 Starting independent multi-spectrum processing...")
+            print(f"   📋 Peak source mode: {peak_source_mode}")
+            if peak_source_mode == 'cascade':
+                print(f"   🔄 Cascade centroid parameters:")
+                print(f"      centroid_window_x_ppm: {all_params.get('gui_params', {}).get('centroid_window_x_ppm', 'NOT FOUND')}")
+                print(f"      centroid_window_y_ppm: {all_params.get('gui_params', {}).get('centroid_window_y_ppm', 'NOT FOUND')}")
+
             new_batch_results = multi_processor.process_nmr_series(
                 nmr_files=nmr_files,
                 reference_peaks=reference_peaks,
@@ -5816,14 +5990,121 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
         self.canvas_stats.draw()
 
     def show_voigt_analysis(self):
-        """Show Voigt analysis tab (legacy method)"""
-        self.viz_notebook.select(1)
+        """Show 3D Voigt analysis tab"""
+        self.viz_notebook.select(2)
 
         if self.current_voigt_result:
             self.voigt_plotter.plot_voigt_analysis(self.current_voigt_result)
             self.canvas_voigt.draw()
+
+            # Also update 3D view
+            self.voigt_plotter_3d.plot_voigt_analysis_3d(self.current_voigt_result)
+            self.canvas_voigt_3d.draw()
+
+            # Update peak parameters tab
+            self.update_peak_parameters(self.current_voigt_result)
         else:
             messagebox.showinfo("No Data", "No Voigt fitting results available.\nFit a peak to view analysis.")
+
+    def update_peak_parameters(self, voigt_result):
+        """
+        Update Peak Parameters tab with detailed peak information
+        Synchronized with 2D and 3D Voigt Analysis tabs
+        """
+        if not voigt_result:
+            return
+
+        # Extract data
+        assignment = voigt_result.get('assignment', 'Unknown')
+        quality = voigt_result.get('fitting_quality', 'Unknown')
+        method = voigt_result.get('method', '')
+        all_peaks = voigt_result.get('all_peaks', [])
+        r_squared = voigt_result.get('avg_r_squared', voigt_result.get('r_squared', 0.0))
+
+        # Color palette matching visualization.py
+        colors = ['red', 'orange', 'purple', 'brown', 'pink', 'olive', 'cyan', 'magenta']
+
+        # Enable text widget for editing
+        self.peak_params_text.config(state=tk.NORMAL)
+        self.peak_params_text.delete('1.0', tk.END)
+
+        # Build header
+        header = f"Peak Parameters - {assignment}\n"
+        self.peak_params_text.insert(tk.END, header, 'header')
+        self.peak_params_text.insert(tk.END, "=" * 60 + "\n\n")
+
+        # Overall quality info
+        quality_bg = 'excellent' if quality == 'Excellent' else \
+                     'good' if quality == 'Good' else \
+                     'fair' if quality == 'Fair' else 'poor'
+
+        quality_line_start = self.peak_params_text.index(tk.END)
+        self.peak_params_text.insert(tk.END, f"Overall Quality: {quality}\n")
+        quality_line_end = self.peak_params_text.index(tk.END)
+        self.peak_params_text.tag_add(quality_bg, quality_line_start, quality_line_end)
+
+        self.peak_params_text.insert(tk.END, f"R² = {r_squared:.4f}\n")
+        self.peak_params_text.insert(tk.END, f"Fitting Method: {method}\n")
+        self.peak_params_text.insert(tk.END, f"Number of Peaks: {len(all_peaks)}\n\n")
+
+        # Individual peak parameters
+        if len(all_peaks) > 0:
+            self.peak_params_text.insert(tk.END, "Individual Peak Details:\n", 'separator')
+            self.peak_params_text.insert(tk.END, "=" * 60 + "\n\n")
+
+            for i, peak in enumerate(all_peaks):
+                color = colors[i % len(colors)]
+                peak_assignment = peak.get('assignment', f'Peak {i+1}')
+
+                # Extract parameters
+                pos_f2 = peak.get('pos_f2', peak.get('center_x', 0.0))
+                pos_f1 = peak.get('pos_f1', peak.get('center_y', 0.0))
+                volume = peak.get('volume', peak.get('intensity', 0.0))
+                height = peak.get('height', peak.get('amplitude', 0.0))
+
+                # Linewidths
+                lw_gau_f2 = peak.get('lw_gau_f2', peak.get('sigma_x', 0.0))
+                lw_lor_f2 = peak.get('lw_lor_f2', peak.get('gamma_x', 0.0))
+                lw_gau_f1 = peak.get('lw_gau_f1', peak.get('sigma_y', 0.0))
+                lw_lor_f1 = peak.get('lw_lor_f1', peak.get('gamma_y', 0.0))
+
+                lw_f2 = lw_gau_f2 + lw_lor_f2
+                lw_f1 = lw_gau_f1 + lw_lor_f1
+
+                # Lorentz/Gauss ratio
+                lg_ratio_f2 = lw_lor_f2 / lw_f2 if lw_f2 > 0 else 0.0
+                lg_ratio_f1 = lw_lor_f1 / lw_f1 if lw_f1 > 0 else 0.0
+
+                # Peak header
+                self.peak_params_text.insert(tk.END, f"{peak_assignment} ({color}):\n", 'separator')
+                self.peak_params_text.insert(tk.END, "-" * 50 + "\n")
+
+                # Position
+                self.peak_params_text.insert(tk.END, f"  Position (F2, F1):     ({pos_f2:.4f}, {pos_f1:.2f}) ppm\n")
+
+                # Intensity
+                self.peak_params_text.insert(tk.END, f"  Height:                {height:.3e}\n")
+                self.peak_params_text.insert(tk.END, f"  Volume:                {volume:.3e}\n\n")
+
+                # Linewidths F2 (1H)
+                self.peak_params_text.insert(tk.END, f"  Linewidth F2 (¹H):     {lw_f2:.4f} ppm\n")
+                self.peak_params_text.insert(tk.END, f"    - Gaussian (σ):      {lw_gau_f2:.4f} ppm\n")
+                self.peak_params_text.insert(tk.END, f"    - Lorentzian (γ):    {lw_lor_f2:.4f} ppm\n")
+                self.peak_params_text.insert(tk.END, f"    - L/G Ratio:         {lg_ratio_f2:.2%}\n\n")
+
+                # Linewidths F1 (15N/13C)
+                self.peak_params_text.insert(tk.END, f"  Linewidth F1 (¹⁵N):    {lw_f1:.3f} ppm\n")
+                self.peak_params_text.insert(tk.END, f"    - Gaussian (σ):      {lw_gau_f1:.3f} ppm\n")
+                self.peak_params_text.insert(tk.END, f"    - Lorentzian (γ):    {lw_lor_f1:.3f} ppm\n")
+                self.peak_params_text.insert(tk.END, f"    - L/G Ratio:         {lg_ratio_f1:.2%}\n")
+
+                if i < len(all_peaks) - 1:
+                    self.peak_params_text.insert(tk.END, "\n")
+        else:
+            self.peak_params_text.insert(tk.END, "No peak details available.\n")
+
+        # Disable editing
+        self.peak_params_text.config(state=tk.DISABLED)
 
     def show_selected_peak_analysis(self):
         """Show Voigt analysis for the currently selected peak"""
@@ -5862,12 +6143,19 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
                     break
 
         if selected_result:
-            # Switch to Voigt analysis tab
-            self.viz_notebook.select(1)
+            # Switch to 3D Voigt analysis tab
+            self.viz_notebook.select(2)
 
             # Show the analysis for the selected peak
             self.voigt_plotter.plot_voigt_analysis(selected_result)
             self.canvas_voigt.draw()
+
+            # Also update 3D view
+            self.voigt_plotter_3d.plot_voigt_analysis_3d(selected_result)
+            self.canvas_voigt_3d.draw()
+
+            # Update peak parameters tab
+            self.update_peak_parameters(selected_result)
 
             # Update status
             assignment = selected_result.get('assignment', f'Peak_{peak_number}')
@@ -5967,12 +6255,19 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
 
         # EXACT same display logic as navigation button
         if selected_result:
-            # Switch to Voigt analysis tab
-            self.viz_notebook.select(1)
+            # Switch to 3D Voigt analysis tab
+            self.viz_notebook.select(2)
 
             # Show the analysis for the selected peak
             self.voigt_plotter.plot_voigt_analysis(selected_result)
             self.canvas_voigt.draw()
+
+            # Also update 3D view
+            self.voigt_plotter_3d.plot_voigt_analysis_3d(selected_result)
+            self.canvas_voigt_3d.draw()
+
+            # Update peak parameters tab
+            self.update_peak_parameters(selected_result)
 
             # Update status
             assignment = selected_result.get('assignment', f'Det_{peak_index+1}')
@@ -6831,6 +7126,60 @@ Detection Rate Statistics:
             print(f"❌ {error_msg}\n{traceback.format_exc()}")
             messagebox.showerror("Error", error_msg)
 
+    def open_multi_spectrum_viewer(self):
+        """Open multi-spectrum overlay viewer for simultaneous visualization"""
+        # Validate that we have batch results
+        if not hasattr(self, 'new_batch_results') or not self.new_batch_results:
+            if not hasattr(self, 'batch_results') or not self.batch_results:
+                messagebox.showwarning("No Data",
+                    "No series results available. Run series integration first.")
+                return
+            # Fall back to legacy format if new format not available
+            results_to_use = self.batch_results
+        else:
+            results_to_use = self.new_batch_results.get('results', {})
+
+        try:
+            # Convert results dict to list format expected by viewer
+            all_results = []
+            for spectrum_name, result_data in results_to_use.items():
+                # Add spectrum name and file path to result data
+                result_dict = result_data.copy() if isinstance(result_data, dict) else {}
+                result_dict['spectrum_name'] = spectrum_name
+
+                # Get file path from result data or construct it
+                # CRITICAL: result_data may contain 'spectrum_file' but it's just a filename, not full path
+                # Check if spectrum_file is missing OR is not an absolute path
+                if 'spectrum_file' not in result_dict or not os.path.isabs(result_dict.get('spectrum_file', '')):
+                    # spectrum_file is missing or is relative path - construct full path
+                    data_folder = self.nmr_file_list.get_current_folder()
+                    result_dict['spectrum_file'] = os.path.join(data_folder, spectrum_name)
+                    print(f"   🔧 Constructed full path for {spectrum_name}: {result_dict['spectrum_file']}")
+
+                all_results.append(result_dict)
+
+            # Sort by spectrum name for consistent ordering
+            all_results.sort(key=lambda x: x.get('spectrum_name', ''))
+
+            print(f"🎨 Opening multi-spectrum viewer with {len(all_results)} spectra...")
+
+            # Create a simple series processor for loading spectra
+            # The viewer will use this to load spectrum data on demand
+            from lunaNMR.utils.file_manager import NMRFileManager
+            file_manager = NMRFileManager()
+
+            # Pass file_manager as series_processor (it has the load methods we need)
+            viewer = open_multi_spectrum_viewer(self.root, file_manager, all_results)
+
+            if viewer:
+                print("✅ Multi-spectrum overlay viewer opened successfully")
+
+        except Exception as e:
+            import traceback
+            error_msg = f"Failed to open multi-spectrum viewer: {e}"
+            print(f"❌ {error_msg}\n{traceback.format_exc()}")
+            messagebox.showerror("Error", error_msg)
+
     def show_help(self):
         """Show help dialog"""
         help_text = """
@@ -7371,21 +7720,30 @@ def main():
     # Create root window
     root = tk.Tk()
 
-    # Set responsive window configuration
+    # Set responsive window configuration with adaptive sizing
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
 
-    # Calculate window size as percentage of screen (80% width, 90% height)
-    window_width = int(screen_width * 0.8)
-    window_height = int(screen_height * 0.9)
+    # Adaptive window sizing (similar to multi-spectrum viewer)
+    # Use 80% of screen dimensions but cap at reasonable maximums
+    window_width = min(int(screen_width * 0.8), 1600)
+    window_height = min(int(screen_height * 0.85), 1000)
+
+    # Adaptive minimum size based on screen resolution
+    # For small screens (<1400px wide), reduce minimum to ensure usability
+    min_width = 900 if screen_width < 1400 else 1000
+    min_height = 550 if screen_height < 900 else 600
 
     # Center window on screen
     x = (screen_width - window_width) // 2
     y = (screen_height - window_height) // 2
 
-    # Set geometry with minimum size constraints
+    # Set geometry with adaptive minimum size constraints
     root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-    root.minsize(1000, 600)  # Minimum usable size
+    root.minsize(min_width, min_height)
+
+    print(f"📐 Main GUI window size: {window_width}×{window_height} (screen: {screen_width}×{screen_height})")
+    print(f"   Minimum size: {min_width}×{min_height}")
 
     # Make window resizable
     root.resizable(True, True)

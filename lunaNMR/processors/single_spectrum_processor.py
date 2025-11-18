@@ -310,7 +310,7 @@ class SingleSpectrumProcessor:
                         continue
 
                     # Reconstruct 2D fitted surface from PS2D parameters
-                    fitted_2d_surface, individual_surfaces = self.integrator._reconstruct_2d_surface(
+                    fitted_2d_surface, individual_surfaces, baseline = self.integrator._reconstruct_2d_surface(
                         region_2d, group_result['peaks']
                     )
 
@@ -383,7 +383,8 @@ class SingleSpectrumProcessor:
                                 'region_2d': region_2d,
                                 'fitted_2d_surface': fitted_2d_surface,
                                 'individual_surfaces': individual_surfaces,
-                                'all_peaks': group_result['peaks']
+                                'all_peaks': group_result['peaks'],
+                                'baseline': baseline  # Baseline offset for visualization
                             }
 
                             results_cache[(peak_x, peak_y)] = result

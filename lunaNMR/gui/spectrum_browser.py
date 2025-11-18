@@ -662,10 +662,17 @@ class SpectrumViewer:
         self.current_zoom = None
         self.plot_cache = None
 
-        # Create viewer window
+        # Create viewer window with dynamic screen scaling
         self.window = tk.Toplevel(parent)
         self.window.title(f"Spectrum Viewer - {spectrum_name}")
-        self.window.geometry("1400x900")
+
+        # Dynamic sizing: 80% of screen width, 75% of screen height
+        screen_width = parent.winfo_screenwidth()
+        screen_height = parent.winfo_screenheight()
+        window_width = max(int(screen_width * 0.8), 1200)  # Min 1200px
+        window_height = max(int(screen_height * 0.75), 800)  # Min 800px
+
+        self.window.geometry(f"{window_width}x{window_height}")
         self.window.minsize(1200, 800)
         # Make spectrum viewer independent - not transient to allow button interaction
         # self.window.transient(parent)  # This was preventing button clicks
@@ -699,6 +706,11 @@ class SpectrumViewer:
         self.voigt_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.voigt_tab, text="📈 Voigt Analysis")
         self.setup_voigt_analysis_tab()
+
+        # Tab 3: 3D Voigt Analysis (supplementary visualization)
+        self.voigt_3d_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.voigt_3d_tab, text="🎨 3D Voigt Analysis")
+        self.setup_voigt_3d_analysis_tab()
 
     def setup_main_spectrum_tab(self):
         """Setup the main spectrum tab (preserves current functionality)"""
@@ -862,7 +874,6 @@ class SpectrumViewer:
             # CRITICAL FIX: Use stored results from series processing
             assignment_key = self.selected_peak.get('Assignment', self.selected_peak.get('assignment', assignment))
             stored_result = self.find_stored_voigt_result(assignment_key)
-            print(f"🔍 Using stored result for Voigt analysis tab: {stored_result is not None}")
 
             # USE SHARED VoigtAnalysisPlotter (SAME AS MAIN GUI)
             # This automatically shows 4-panel 2D visualization for 2D simultaneous fits
@@ -889,6 +900,173 @@ class SpectrumViewer:
                 ax.text(0.5, 0.5, f"Error: {str(e)[:50]}",
                        ha='center', va='center', transform=ax.transAxes, fontsize='small')
             self.canvas_voigt.draw()
+
+    def setup_voigt_3d_analysis_tab(self):
+        """Setup the 3D Voigt analysis tab with Peak Navigator (like 2D tab and main GUI)"""
+        # Create horizontal paned window (like 2D Voigt tab)
+        voigt_3d_paned = ttk.PanedWindow(self.voigt_3d_tab, orient='horizontal')
+        voigt_3d_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Left panel (75%): 3D plot with controls
+        left_panel_3d = ttk.Frame(voigt_3d_paned)
+        voigt_3d_paned.add(left_panel_3d, weight=3)
+
+        # Right panel (25%): Peak Navigator
+        right_panel_3d = ttk.Frame(voigt_3d_paned)
+        voigt_3d_paned.add(right_panel_3d, weight=1)
+
+        # Left panel: 3D plot container
+        plot_container = ttk.LabelFrame(left_panel_3d, text="🎨 3D Voigt Surface Analysis", padding=5)
+        plot_container.pack(fill=tk.BOTH, expand=True)
+
+        # Create control frame at top
+        control_frame_3d = ttk.Frame(plot_container)
+        control_frame_3d.pack(side=tk.TOP, fill=tk.X, padx=5, pady=3)
+
+        # Row 1: Layer toggling checkboxes
+        layer_frame = ttk.LabelFrame(control_frame_3d, text="Layer Visibility", padding=3)
+        layer_frame.pack(side=tk.LEFT, padx=3)
+
+        self.show_exp_3d_var = tk.BooleanVar(value=True)
+        self.show_fit_3d_var = tk.BooleanVar(value=True)
+        self.show_resid_3d_var = tk.BooleanVar(value=True)
+        # self.show_cross_3d_var = tk.BooleanVar(value=True)  # Disabled - code kept for future use
+
+        ttk.Checkbutton(layer_frame, text="Experimental", variable=self.show_exp_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_experimental(self.show_exp_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
+        ttk.Checkbutton(layer_frame, text="Fitted", variable=self.show_fit_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_fitted(self.show_fit_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
+        ttk.Checkbutton(layer_frame, text="Residuals", variable=self.show_resid_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_residuals(self.show_resid_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
+        # ttk.Checkbutton(layer_frame, text="Cross-Sections", variable=self.show_cross_3d_var,
+        #                 command=lambda: self.voigt_plotter_3d.toggle_cross_sections(self.show_cross_3d_var.get())
+        #                 ).pack(side=tk.LEFT, padx=2)  # Disabled - code kept for future use
+
+        # Row 2: Residual mode radio buttons
+        residual_frame = ttk.LabelFrame(control_frame_3d, text="Residual Mode", padding=3)
+        residual_frame.pack(side=tk.LEFT, padx=3)
+
+        self.residual_mode_3d_var = tk.StringVar(value='overlay')
+        ttk.Radiobutton(residual_frame, text="Separate Panel", variable=self.residual_mode_3d_var,
+                        value='separate',
+                        command=lambda: self.voigt_plotter_3d.set_residual_mode('separate')
+                        ).pack(side=tk.LEFT, padx=2)
+        ttk.Radiobutton(residual_frame, text="Overlay", variable=self.residual_mode_3d_var,
+                        value='overlay',
+                        command=lambda: self.voigt_plotter_3d.set_residual_mode('overlay')
+                        ).pack(side=tk.LEFT, padx=2)
+
+        # Row 3: Intensity scaling slider
+        intensity_frame = ttk.LabelFrame(control_frame_3d, text="Intensity Scale", padding=3)
+        intensity_frame.pack(side=tk.LEFT, padx=3, fill=tk.X, expand=True)
+
+        ttk.Label(intensity_frame, text="50%").pack(side=tk.LEFT, padx=2)
+
+        self.intensity_scale_3d_var = tk.DoubleVar(value=100.0)
+        intensity_slider_3d = tk.Scale(
+            intensity_frame,
+            from_=50,
+            to=200,
+            orient=tk.HORIZONTAL,
+            variable=self.intensity_scale_3d_var,
+            command=self._on_intensity_scale_change_3d,
+            resolution=5,
+            showvalue=0,
+            length=200
+        )
+        intensity_slider_3d.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+
+        self.intensity_scale_label_3d = ttk.Label(intensity_frame, text="100%", width=5)
+        self.intensity_scale_label_3d.pack(side=tk.LEFT, padx=2)
+
+        ttk.Label(intensity_frame, text="200%").pack(side=tk.LEFT, padx=2)
+
+        # Create 3D Voigt analysis figure - will be dynamically resized by plotter
+        self.fig_voigt_3d = plt.figure(figsize=(15, 5))
+
+        self.canvas_voigt_3d = FigureCanvasTkAgg(self.fig_voigt_3d, plot_container)
+        self.canvas_voigt_3d.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Add toolbar for navigation
+        toolbar_voigt_3d = NavigationToolbar2Tk(self.canvas_voigt_3d, plot_container)
+        toolbar_voigt_3d.update()
+
+        # Create VoigtAnalysisPlotter instance for 3D (SHARED with main GUI)
+        self.voigt_plotter_3d = VoigtAnalysisPlotter(self.fig_voigt_3d, None)
+
+        # Initialize with placeholder
+        ax = self.fig_voigt_3d.add_subplot(111)
+        ax.axis('off')
+        ax.text(0.5, 0.5, 'Select a peak to view 3D Voigt analysis',
+               ha='center', va='center', transform=ax.transAxes, fontsize=12,
+               bbox=dict(boxstyle='round,pad=1.0', facecolor='lightgray', alpha=0.9))
+        ax.set_title('3D Voigt Analysis - No Peak Selected', fontsize=12, fontweight='bold')
+
+        self.canvas_voigt_3d.draw()
+
+        # Right panel: Peak Navigator (reuse from 2D Voigt tab)
+        navigator_frame_3d = ttk.LabelFrame(right_panel_3d, text="📋 Peak Navigator", padding=5)
+        navigator_frame_3d.pack(fill=tk.BOTH, expand=True)
+
+        # Reuse existing Peak Navigator from 2D Voigt tab (same instance)
+        # Pack it into the 3D tab's navigator frame
+        self.voigt_peak_navigator.pack(in_=navigator_frame_3d, fill=tk.BOTH, expand=True)
+
+        print("✅ 3D Voigt tab: Sharing Peak Navigator with 2D tab")
+
+    def populate_voigt_3d_analysis_tab(self):
+        """Populate the 3D Voigt analysis tab with current peak data"""
+        try:
+            # Get peak assignment
+            assignment = self.selected_peak.get('Assignment', self.selected_peak.get('assignment', 'Unknown'))
+
+            # CRITICAL: Find stored Voigt result with full analysis data
+            assignment_key = self.selected_peak.get('Assignment', self.selected_peak.get('assignment', assignment))
+            stored_result = self.find_stored_voigt_result(assignment_key)
+
+            # USE SHARED VoigtAnalysisPlotter for 3D
+            if stored_result:
+                self.voigt_plotter_3d.plot_voigt_analysis_3d(stored_result)
+            else:
+                # No stored result - show placeholder
+                self.fig_voigt_3d.clear()
+                ax = self.fig_voigt_3d.add_subplot(111)
+                ax.axis('off')
+                ax.text(0.5, 0.5, "❌ No Voigt fitting results available",
+                       ha='center', va='center', transform=ax.transAxes, fontsize=12,
+                       bbox=dict(boxstyle='round,pad=1.0', facecolor='lightcoral', alpha=0.9))
+                ax.set_title('3D Voigt Analysis - No Results', fontsize=12, fontweight='bold')
+
+            self.canvas_voigt_3d.draw()
+
+        except Exception as e:
+            print(f"Error populating 3D Voigt analysis tab: {e}")
+            import traceback
+            traceback.print_exc()
+
+            # Show error in plot
+            self.fig_voigt_3d.clear()
+            ax = self.fig_voigt_3d.add_subplot(111)
+            ax.axis('off')
+            ax.text(0.5, 0.5, f"Error: {str(e)[:100]}",
+                   ha='center', va='center', transform=ax.transAxes, fontsize=10)
+            self.canvas_voigt_3d.draw()
+
+    def _on_intensity_scale_change_3d(self, value):
+        """Handle intensity scale slider change for 3D Voigt plot"""
+        # Update label
+        self.intensity_scale_label_3d.config(text=f"{int(float(value))}%")
+
+        # Cancel pending update if exists (debouncing)
+        if hasattr(self, '_scale_update_id_3d'):
+            self.window.after_cancel(self._scale_update_id_3d)
+
+        # Schedule update after 100ms of no slider movement
+        self._scale_update_id_3d = self.window.after(100,
+            lambda: self.voigt_plotter_3d.set_intensity_scale(float(value)))
 
     def setup_spectrum_plot(self, parent):
         """Setup the spectrum plotting area with constrained height for scrollability"""
@@ -1909,6 +2087,7 @@ class SpectrumViewer:
             if current_tab == voigt_tab_id:
                 # If Voigt analysis tab is currently active, update it with the new peak
                 self.populate_voigt_analysis_tab()
+                self.populate_voigt_3d_analysis_tab()
         except Exception:
             # Gracefully handle any tab selection errors
             pass
@@ -2034,16 +2213,17 @@ Line Width: {peak_data.get('Line_Width', 'N/A')}
             self.canvas.draw()
 
     def switch_to_voigt_analysis(self):
-        """Switch to Voigt analysis tab and populate with current peak data"""
+        """Switch to 3D Voigt analysis tab and populate with current peak data"""
         if not self.selected_peak:
             messagebox.showwarning("No Peak Selected", "Please select a peak first by clicking on the spectrum or selecting from the peak list.")
             return
 
-        # Switch to Voigt analysis tab
-        self.notebook.select(self.voigt_tab)
+        # Switch to 3D Voigt analysis tab
+        self.notebook.select(self.voigt_3d_tab)
 
         # Populate the Voigt analysis tab with current peak data
         self.populate_voigt_analysis_tab()
+        self.populate_voigt_3d_analysis_tab()
 
     def show_voigt_analysis_old(self):
         """Show detailed Voigt analysis with proper tab system like main window"""
@@ -2181,7 +2361,6 @@ Line Width: {peak_data.get('Line_Width', 'N/A')}
                     # CRITICAL FIX: Use stored results from series processing
                     assignment_key = self.selected_peak.get('Assignment', self.selected_peak.get('assignment', assignment))
                     stored_result = self.find_stored_voigt_result(assignment_key)
-                    print(f"🔍 Using stored result for Voigt analysis: {stored_result is not None}")
 
                     self.populate_1d_voigt_analysis(axes_voigt, zoom_data, zoom_ppm_x, zoom_ppm_y,
                                                    peak_x, peak_y, assignment, stored_voigt_result=stored_result)
@@ -2626,12 +2805,13 @@ Detection: {self.result_data.get('detected_peaks', 0)}/{self.result_data.get('to
 
             # Update Voigt analysis tab if peak selected from navigator
             if source == "navigator":
-                # Switch to Voigt analysis tab automatically
+                # Switch to 3D Voigt analysis tab automatically
                 if hasattr(self, 'notebook'):
-                    self.notebook.select(1)  # Switch to Voigt Analysis tab
+                    self.notebook.select(2)  # Switch to 3D Voigt Analysis tab
 
                 # Populate Voigt analysis for selected peak
                 self.populate_voigt_analysis_tab()
+                self.populate_voigt_3d_analysis_tab()
 
     def navigator_show_peak_analysis(self, peak_index=None):
         """Show Voigt analysis for selected peak (called by peak navigator analyze button)"""
@@ -2795,6 +2975,7 @@ Analysis Notes:
 
                 # Update the Voigt analysis display
                 self.populate_voigt_analysis_tab()
+                self.populate_voigt_3d_analysis_tab()
 
                 print(f"🎯 Navigated to peak {peak_number}: {assignment}")
             else:

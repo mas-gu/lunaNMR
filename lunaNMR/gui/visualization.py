@@ -626,6 +626,198 @@ class VoigtAnalysisPlotter:
         self.fig = figure
         self.axes = axes  # Should be 2x2 grid: [[ax_x, ax_y], [ax_2d, ax_residuals]]
 
+        # Feature 1: Layer toggling
+        self.show_experimental = True
+        self.show_fitted = True
+        self.show_residuals = True
+
+        # Feature 2: Cross-sections (disabled by default, code kept for future use)
+        self.show_cross_sections = False
+        self.ax_f1_cross = None
+        self.ax_f2_cross = None
+        self.click_position = None
+
+        # Feature 3: Residual mode (separate panel vs overlay)
+        self.residual_mode = 'overlay'  # Default to overlay mode
+
+        # Feature 4: Intensity scaling
+        self.intensity_scale_factor = 1.0  # 100% by default
+        self.auto_z_min = None
+        self.auto_z_max = None
+
+        # Store current result for refresh operations
+        self.current_result = None
+        self.ax_data = None
+        self.ax_resid = None
+
+        # Store event connection ID to prevent accumulation
+        self.click_event_cid = None
+
+    # ===== Feature Control Methods =====
+
+    def toggle_experimental(self, visible):
+        """Toggle experimental data layer visibility"""
+        self.show_experimental = visible
+        self.refresh_plot()
+
+    def toggle_fitted(self, visible):
+        """Toggle fitted peaks layer visibility"""
+        self.show_fitted = visible
+        self.refresh_plot()
+
+    def toggle_residuals(self, visible):
+        """Toggle residuals layer visibility"""
+        self.show_residuals = visible
+        self.refresh_plot()
+
+    def toggle_cross_sections(self, visible):
+        """Toggle cross-sections display"""
+        self.show_cross_sections = visible
+        self.refresh_plot()
+
+    def set_residual_mode(self, mode):
+        """Set residual visualization mode
+
+        Args:
+            mode: 'separate' or 'overlay'
+        """
+        if mode not in ['separate', 'overlay']:
+            raise ValueError(f"Invalid residual mode: {mode}. Must be 'separate' or 'overlay'")
+        self.residual_mode = mode
+        self.refresh_plot()
+
+    def set_intensity_scale(self, scale_percent):
+        """Set intensity scale factor from percentage (50-200%)
+
+        Args:
+            scale_percent: Scale as percentage (100 = normal, 50 = half, 200 = double)
+        """
+        self.intensity_scale_factor = scale_percent / 100.0
+        self.apply_intensity_scale(self.intensity_scale_factor)
+
+    def apply_intensity_scale(self, factor):
+        """Apply intensity scaling to Z-axis limits"""
+        if not hasattr(self, 'ax_data') or self.ax_data is None:
+            return  # No plot yet
+
+        if self.auto_z_min is None or self.auto_z_max is None:
+            return  # No auto-limits stored yet
+
+        # Calculate scaled limits
+        z_center = (self.auto_z_max + self.auto_z_min) / 2
+        z_half_range = (self.auto_z_max - self.auto_z_min) / 2
+
+        scaled_half_range = z_half_range * factor
+        new_z_min = z_center - scaled_half_range
+        new_z_max = z_center + scaled_half_range
+
+        # Update data panel
+        self.ax_data.set_zlim(new_z_min, new_z_max)
+
+        # Update residuals panel if in separate mode
+        if self.residual_mode == 'separate' and self.ax_resid is not None:
+            self.ax_resid.set_zlim(new_z_min, new_z_max)
+
+        # Redraw canvas
+        if hasattr(self.fig, 'canvas') and self.fig.canvas is not None:
+            self.fig.canvas.draw_idle()
+
+    def refresh_plot(self):
+        """Redraw current plot with new settings"""
+        if self.current_result is not None:
+            self.plot_voigt_analysis_3d(self.current_result)
+
+    def update_cross_sections(self, x_ppm, y_ppm, result):
+        """Update F1 and F2 cross-section plots
+
+        Args:
+            x_ppm: F2 (1H) position in ppm
+            y_ppm: F1 (15N/13C) position in ppm
+            result: Voigt analysis result dictionary
+        """
+        if not self.show_cross_sections:
+            return
+
+        if self.ax_f1_cross is None or self.ax_f2_cross is None:
+            return  # Cross-section axes not created yet
+
+        import numpy as np
+
+        region_2d = result.get('region_2d')
+        if region_2d is None:
+            return
+
+        f1_ppm = region_2d['f1_ppm']  # (M,)
+        f2_ppm = region_2d['f2_ppm']  # (N,)
+        experimental = region_2d['intensity']  # (M, N)
+        fitted = result.get('fitted_2d_surface')  # (M, N)
+
+        if fitted is None:
+            return
+
+        # Find nearest indices
+        f2_idx = np.argmin(np.abs(f2_ppm - x_ppm))
+        f1_idx = np.argmin(np.abs(f1_ppm - y_ppm))
+
+        # Extract 1D slices
+        f1_exp_slice = experimental[:, f2_idx]  # Vertical slice at x_ppm
+        f1_fit_slice = fitted[:, f2_idx]
+
+        f2_exp_slice = experimental[f1_idx, :]  # Horizontal slice at y_ppm
+        f2_fit_slice = fitted[f1_idx, :]
+
+        # --- Plot F1 cross-section ---
+        self.ax_f1_cross.clear()
+        self.ax_f1_cross.plot(f1_ppm, f1_exp_slice, 'o',
+                              color='gray', markersize=3, label='Exp')
+        self.ax_f1_cross.plot(f1_ppm, f1_fit_slice, '-',
+                              color='red', linewidth=2, label='Fit')
+
+        # Add individual peak components if available
+        individual_surfaces = result.get('individual_surfaces', [])
+        if individual_surfaces:
+            colors = ['orange', 'purple', 'brown', 'pink', 'olive']
+            for i, surf in enumerate(individual_surfaces):
+                component_slice = surf[:, f2_idx]
+                color = colors[i % len(colors)]
+                self.ax_f1_cross.plot(f1_ppm, component_slice, '--',
+                                      color=color, linewidth=1, alpha=0.7,
+                                      label=f"Peak {i+1}")
+
+        self.ax_f1_cross.set_xlabel('F1 (ppm)', fontsize=8)
+        self.ax_f1_cross.set_ylabel('Intensity', fontsize=8)
+        self.ax_f1_cross.set_title(f'F1 Cross-Section at F2={x_ppm:.3f} ppm', fontsize=9)
+        self.ax_f1_cross.invert_xaxis()  # NMR convention
+        self.ax_f1_cross.legend(fontsize=6, loc='best')
+        self.ax_f1_cross.grid(True, alpha=0.3)
+
+        # --- Plot F2 cross-section ---
+        self.ax_f2_cross.clear()
+        self.ax_f2_cross.plot(f2_ppm, f2_exp_slice, 'o',
+                              color='gray', markersize=3, label='Exp')
+        self.ax_f2_cross.plot(f2_ppm, f2_fit_slice, '-',
+                              color='blue', linewidth=2, label='Fit')
+
+        if individual_surfaces:
+            colors = ['orange', 'purple', 'brown', 'pink', 'olive']
+            for i, surf in enumerate(individual_surfaces):
+                component_slice = surf[f1_idx, :]
+                color = colors[i % len(colors)]
+                self.ax_f2_cross.plot(f2_ppm, component_slice, '--',
+                                      color=color, linewidth=1, alpha=0.7,
+                                      label=f"Peak {i+1}")
+
+        self.ax_f2_cross.set_xlabel('F2 (ppm)', fontsize=8)
+        self.ax_f2_cross.set_ylabel('Intensity', fontsize=8)
+        self.ax_f2_cross.set_title(f'F2 Cross-Section at F1={y_ppm:.2f} ppm', fontsize=9)
+        self.ax_f2_cross.invert_xaxis()
+        self.ax_f2_cross.legend(fontsize=6, loc='best')
+        self.ax_f2_cross.grid(True, alpha=0.3)
+
+        # Redraw canvas
+        if hasattr(self.fig, 'canvas') and self.fig.canvas is not None:
+            self.fig.canvas.draw_idle()
+
     def plot_voigt_analysis(self, voigt_result):
         """Plot comprehensive Voigt analysis results"""
         if not voigt_result:
@@ -769,13 +961,6 @@ class VoigtAnalysisPlotter:
         r_squared = voigt_result.get('avg_r_squared', 0)
 
         # DEBUG: Print what positions are actually in all_peaks
-        print(f"🐛 DEBUG visualization.py: all_peaks positions:")
-        for i, peak in enumerate(all_peaks):
-            print(f"   Peak {i}: pos_f2={peak.get('pos_f2', 'N/A'):.4f}, pos_f1={peak.get('pos_f1', 'N/A'):.4f}")
-
-        # DEBUG: Print region axes to check for misalignment
-        print(f"🐛 DEBUG: Region f2_ppm range: {region_2d['f2_ppm'].min():.4f} - {region_2d['f2_ppm'].max():.4f}")
-        print(f"🐛 DEBUG: Region f1_ppm range: {region_2d['f1_ppm'].min():.4f} - {region_2d['f1_ppm'].max():.4f}")
 
         if region_2d is None or fitted_surface is None:
             self._plot_no_data()
@@ -820,7 +1005,6 @@ class VoigtAnalysisPlotter:
         for i, peak in enumerate(all_peaks):
             pos_f2 = peak['pos_f2']
             pos_f1 = peak['pos_f1']
-            print(f"🐛 DEBUG: Plotting crosshair for peak {i} at f2={pos_f2:.4f}, f1={pos_f1:.4f}")
             ax_exp.plot(pos_f2, pos_f1, 'r+', markersize=12, markeredgewidth=2)
             # Use assignment if available, otherwise show peak number
             peak_label = peak.get('assignment', str(i+1))
@@ -1077,6 +1261,355 @@ Fit Timestamp: {str(timestamp)[:19] if timestamp != 'Unknown' else 'Unknown'}
                     transform=ax.transAxes, ha='center', va='center',
                     fontsize='small', bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray"))
                 ax.axis('off')
+
+    def plot_voigt_analysis_3d(self, voigt_result):
+        """
+        Plot 3D surface visualization of Voigt analysis results
+
+        Layout (full-width for high-quality visualization):
+        - Data + Fitted Peaks (full width)
+        - Residuals (optional, separate panel below)
+
+        Peak parameters displayed in dedicated "Peak Parameters" tab.
+        This is a supplementary view - the standard 2D contour view remains
+        the primary quantitative analysis tool.
+        """
+        from mpl_toolkits.mplot3d import Axes3D
+
+        # CRITICAL: Clear figure at the very start to prevent overlay issues
+        # This ensures previous plots (including initialization placeholder) are removed
+        self.fig.clear()
+
+        if not voigt_result:
+            self._plot_no_data_3d()
+            return
+
+        # Extract data
+        assignment = voigt_result.get('assignment', 'Unknown')
+        quality = voigt_result.get('fitting_quality', 'Unknown')
+        method = voigt_result.get('method', '')
+
+        # Check if this is 2D simultaneous fitting
+        if '2d_simultaneous' in method and 'region_2d' in voigt_result:
+            # Use 3D surface visualization for 2D simultaneous fits
+            self._plot_2d_surface_3d(voigt_result, assignment, quality)
+        else:
+            # For 1D cross-sections, show message that 3D view is only for 2D fits
+            self._plot_1d_not_applicable_3d(voigt_result, assignment, quality)
+
+    def _plot_2d_surface_3d(self, voigt_result, assignment, quality):
+        """
+        Plot 3D surface visualization for 2D simultaneous multi-peak fitting
+
+        Features:
+        - Layer toggling (experimental/fitted/residuals)
+        - Cross-sections (F1 and F2 slices)
+        - Residual mode (separate panel or overlay)
+        - Intensity scaling
+        """
+        import numpy as np
+        from matplotlib.colors import LinearSegmentedColormap
+
+        # Store result for refresh operations
+        self.current_result = voigt_result
+
+        # Extract 2D data
+        region_2d = voigt_result.get('region_2d')
+        fitted_surface = voigt_result.get('fitted_2d_surface')
+        individual_surfaces = voigt_result.get('individual_surfaces', None)
+        all_peaks = voigt_result.get('all_peaks', [])
+        r_squared = voigt_result.get('avg_r_squared', 0)
+        baseline = voigt_result.get('baseline', 0.0)  # Get baseline for visualization
+
+        if region_2d is None or fitted_surface is None:
+            self._plot_no_data_3d()
+            return
+
+        f1_ppm = region_2d['f1_ppm']
+        f2_ppm = region_2d['f2_ppm']
+        experimental = region_2d['intensity']
+        residuals = experimental - fitted_surface
+
+        # CRITICAL: Create 2D meshgrids for 3D plotting
+        F2_ppm, F1_ppm = np.meshgrid(f2_ppm, f1_ppm)
+
+        # CRITICAL: Clear figure completely to prevent ghost artifacts
+        self.fig.clear()
+
+        # Force canvas to clear any cached drawing
+        if hasattr(self.fig, 'canvas') and self.fig.canvas is not None:
+            try:
+                self.fig.canvas.draw_idle()
+                self.fig.canvas.flush_events()
+            except:
+                pass  # Ignore if canvas not ready
+
+        # Determine layout based on features (NO text panel - peak parameters moved to dedicated tab)
+        # Use tight_layout for automatic centering and responsive sizing
+        if self.show_cross_sections:
+            # 3 rows: 3D plots, cross-sections
+            if self.residual_mode == 'separate':
+                # 3x1: Data (top), Residuals (middle), Cross sections (bottom)
+                gs = self.fig.add_gridspec(3, 2, height_ratios=[2, 2, 1.5], hspace=0.3, wspace=0.2)
+            else:  # overlay mode
+                # 2x2: Data (top), Cross sections (bottom)
+                gs = self.fig.add_gridspec(2, 2, height_ratios=[2, 1.5], hspace=0.3, wspace=0.2)
+        else:
+            # No cross-sections
+            if self.residual_mode == 'separate':
+                # 2x1: Data (top), Residuals (bottom)
+                gs = self.fig.add_gridspec(2, 1, height_ratios=[1, 1], hspace=0.3)
+            else:  # overlay mode
+                # 1x1: Data only (full width for high-quality visualization, auto-centered via tight_layout)
+                gs = self.fig.add_gridspec(1, 1)
+
+        # Create axes (NO ax_text - peak parameters moved to dedicated tab)
+        ax_data = self.fig.add_subplot(gs[0, 0] if self.show_cross_sections or self.residual_mode == 'separate' else gs[0], projection='3d')
+        self.ax_data = ax_data  # Store for intensity scaling
+        self.ax_resid = None
+
+        if self.residual_mode == 'separate' and self.show_residuals:
+            ax_resid = self.fig.add_subplot(gs[1, 0], projection='3d')
+            self.ax_resid = ax_resid
+
+        if self.show_cross_sections:
+            if self.residual_mode == 'separate':
+                self.ax_f1_cross = self.fig.add_subplot(gs[2, 0])
+                self.ax_f2_cross = self.fig.add_subplot(gs[2, 1])
+            else:
+                self.ax_f1_cross = self.fig.add_subplot(gs[1, 0])
+                self.ax_f2_cross = self.fig.add_subplot(gs[1, 1])
+
+        # Panel 1: Experimental data + Individual fitted peaks
+        colors = ['red', 'orange', 'purple', 'brown', 'pink', 'olive', 'cyan', 'magenta']
+
+        # Plot experimental data as blue wireframe (background) if enabled
+        if self.show_experimental:
+            ax_data.plot_wireframe(F2_ppm, F1_ppm, experimental,
+                                   color='blue', alpha=0.3, linewidth=0.5,
+                                   label='Experimental')
+
+        # Plot total fitted surface WITHOUT baseline (green, semi-transparent middle layer)
+        # This shows the sum of all individual peaks (no baseline offset)
+        # So it's directly comparable to individual peak surfaces (red, orange, etc.)
+        if self.show_fitted and fitted_surface is not None:
+            fitted_surface_no_baseline = fitted_surface - baseline
+            ax_data.plot_surface(F2_ppm, F1_ppm, fitted_surface_no_baseline,
+                                color='green', alpha=0.4,
+                                edgecolor='darkgreen', linewidth=0.3,
+                                antialiased=True, shade=True,
+                                label='Total Fit')
+
+        # Overlay individual fitted peaks with different colors if enabled
+        if self.show_fitted and individual_surfaces is not None and len(individual_surfaces) > 0:
+            for i, (surf, peak) in enumerate(zip(individual_surfaces, all_peaks)):
+                color = colors[i % len(colors)]
+                peak_assignment = peak.get('assignment', f'Peak {i+1}')
+
+                # Plot pure Voigt profile (starts at 0, rises to peak maximum)
+                ax_data.plot_wireframe(F2_ppm, F1_ppm, surf,
+                                       color=color, alpha=0.8, linewidth=1.0,
+                                       label=peak_assignment)
+
+        # Overlay residuals if in overlay mode
+        if self.residual_mode == 'overlay' and self.show_residuals:
+            # Calculate quality map using hybrid signal+noise normalization
+            # Absolute scale: comparable between peaks, works in baseline and peak regions
+            abs_residuals = np.abs(residuals)
+
+            # Estimate noise from edge regions (assumed no signal)
+            edge_pixels = np.concatenate([
+                experimental[0, :],   # Top edge
+                experimental[-1, :],  # Bottom edge
+                experimental[:, 0],   # Left edge
+                experimental[:, -1]   # Right edge
+            ])
+            noise_std = np.std(edge_pixels)
+
+            # Adaptive threshold: max(1% of peak signal, 3σ noise)
+            # This handles both high-signal regions (signal-limited) and baseline (noise-limited)
+            max_intensity = np.max(experimental)
+            adaptive_threshold = np.maximum(0.01 * max_intensity, 3.0 * noise_std)
+
+            # Quality map: 1.0 at zero residual, 0.0 at threshold
+            # Residuals > threshold are clipped to 0.0 (poor)
+            quality_map = 1.0 - np.clip(abs_residuals / adaptive_threshold, 0, 1)
+
+            # Height encoding: position residuals below zero for visibility
+            # Place baseline at 0 - 20% of max intensity, residual range spans 10% (from -20% to -10%)
+            # This ensures no overlap with main data (which starts at 0 or above)
+            residual_baseline = 0 - (0.2 * max_intensity)
+            residual_heights = residual_baseline + np.clip(abs_residuals / adaptive_threshold, 0, 1) * (0.1 * max_intensity)
+
+            # Create custom colormap: green → yellow → red
+            colors_list = ['darkred', 'red', 'yellow', 'lightgreen', 'darkgreen']
+            positions = [0.0, 0.15, 0.50, 0.90, 1.0]
+            cmap = LinearSegmentedColormap.from_list('quality',
+                                                     list(zip(positions, colors_list)))
+
+            # Plot residual map overlay
+            from matplotlib.cm import ScalarMappable
+            residual_surf = ax_data.plot_surface(
+                F2_ppm, F1_ppm, residual_heights,
+                facecolors=cmap(quality_map),
+                alpha=0.6,
+                edgecolor='none',
+                antialiased=True,
+                shade=False
+            )
+
+            # Add colorbar (50% smaller, positioned under 3D graph)
+            sm = ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
+            sm.set_array([])
+            cbar = self.fig.colorbar(sm, ax=ax_data, orientation='horizontal',
+                                    shrink=0.3, aspect=10, pad=0.05)
+            cbar.set_label('Fit Quality (1=perfect, 0=error > max(1% signal, 3σ noise))', fontsize=7)
+
+        # Configure axes (NMR convention)
+        ax_data.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
+        ax_data.set_ylabel('¹⁵N/¹³C Chemical Shift (ppm)', fontsize=9)
+        ax_data.set_zlabel('Intensity', fontsize=9)
+        ax_data.invert_xaxis()
+        ax_data.invert_yaxis()
+        ax_data.view_init(elev=25, azim=45)  # Optimal viewing angle
+
+        # Limit X and Y axis to max 2 tick labels (cleaner display)
+        from matplotlib.ticker import MaxNLocator
+        ax_data.xaxis.set_major_locator(MaxNLocator(nbins=2))
+        ax_data.yaxis.set_major_locator(MaxNLocator(nbins=2))
+
+        # Make plot 50% taller in intensity (Z) dimension for better visibility
+        ax_data.set_box_aspect([1, 1, 1.5])
+
+        title = f'Data + Fitted Peaks - {assignment}'
+        if self.residual_mode == 'overlay':
+            title += ' (with Residual Map)'
+        ax_data.set_title(title, fontsize=10, fontweight='bold')
+
+        # Add legend (limit to 6 peaks to avoid crowding)
+        if len(all_peaks) <= 6 and (self.show_experimental or self.show_fitted):
+            ax_data.legend(loc='upper right', fontsize=7, framealpha=0.9)
+
+        # CRITICAL: Calculate and store auto Z-axis scale
+        z_max_data = np.max(experimental)
+        z_min_data = np.min(experimental)
+        self.auto_z_min = z_min_data
+        self.auto_z_max = z_max_data
+
+        # Apply intensity scaling
+        self.apply_intensity_scale(self.intensity_scale_factor)
+
+        # Panel 2: Residuals in separate panel (if enabled)
+        if self.residual_mode == 'separate' and self.show_residuals and self.ax_resid is not None:
+            z_max_resid = np.max(np.abs(residuals))
+
+            surf_resid = self.ax_resid.plot_surface(F2_ppm, F1_ppm, residuals,
+                                                    cmap='RdBu_r', alpha=0.8,
+                                                    vmin=-z_max_resid, vmax=z_max_resid,
+                                                    antialiased=True)
+
+            # Add colorbar
+            cbar = self.fig.colorbar(surf_resid, ax=self.ax_resid, shrink=0.6, aspect=10)
+            cbar.set_label('Residuals', fontsize=8)
+
+            # Configure axes
+            self.ax_resid.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
+            self.ax_resid.set_ylabel('¹⁵N/¹³C Chemical Shift (ppm)', fontsize=9)
+            self.ax_resid.set_zlabel('Residuals', fontsize=9)
+            self.ax_resid.invert_xaxis()
+            self.ax_resid.invert_yaxis()
+            self.ax_resid.view_init(elev=25, azim=45)
+
+            # Limit X and Y axis to max 2 tick labels (cleaner display)
+            self.ax_resid.xaxis.set_major_locator(MaxNLocator(nbins=2))
+            self.ax_resid.yaxis.set_major_locator(MaxNLocator(nbins=2))
+
+            # CRITICAL: Set same Z-axis scale as data plot
+            self.ax_resid.set_zlim(z_min_data, z_max_data)
+
+            self.ax_resid.set_title(f'Residuals (R²={r_squared:.3f})', fontsize=10, fontweight='bold')
+
+        # Peak parameters moved to dedicated "Peak Parameters" tab for better organization
+        # Text panel removed from 3D visualization to focus on high-quality graphics
+
+        # Panel 4 & 5: Cross-sections (if enabled)
+        if self.show_cross_sections and self.ax_f1_cross is not None:
+            # Initialize at peak maximum
+            peak_x = voigt_result.get('peak_x', f2_ppm[len(f2_ppm)//2])
+            peak_y = voigt_result.get('peak_y', f1_ppm[len(f1_ppm)//2])
+            self.update_cross_sections(peak_x, peak_y, voigt_result)
+
+            # Connect click event for interactive cross-sections
+            # CRITICAL: Disconnect old handler first to prevent accumulation
+            if self.click_event_cid is not None:
+                self.fig.canvas.mpl_disconnect(self.click_event_cid)
+
+            def on_click(event):
+                if event.inaxes == ax_data or (self.ax_resid and event.inaxes == self.ax_resid):
+                    if event.xdata and event.ydata:
+                        self.update_cross_sections(event.xdata, event.ydata, voigt_result)
+
+            # Store connection ID for cleanup
+            self.click_event_cid = self.fig.canvas.mpl_connect('button_press_event', on_click)
+        else:
+            # Cross-sections disabled - disconnect event handler if exists
+            if self.click_event_cid is not None:
+                self.fig.canvas.mpl_disconnect(self.click_event_cid)
+                self.click_event_cid = None
+
+        # Set overall figure title
+        self.fig.suptitle(f'3D Voigt Analysis: {assignment}',
+                         fontsize=12, fontweight='bold')
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96])  # Leave space for suptitle
+
+    def _plot_1d_not_applicable_3d(self, voigt_result, assignment, quality):
+        """
+        Show message that 3D view is only applicable for 2D simultaneous fits
+        For 1D cross-section fits, the 2D contour view is more appropriate
+        """
+        # Clear figure
+        self.fig.clear()
+
+        # Create single axis
+        ax = self.fig.add_subplot(111)
+        ax.axis('off')
+
+        message_text = f"""
+3D Surface View
+
+This view is only available for 2D simultaneous
+multi-peak fitting results.
+
+The current peak ({assignment}) was fitted using
+1D cross-section fitting, which is best visualized
+in the standard 2D Contour view.
+
+Quality: {quality}
+
+Please use the "2D Voigt Analysis" tab for
+detailed 1D cross-section visualization.
+"""
+
+        ax.text(0.5, 0.5, message_text, transform=ax.transAxes,
+               ha='center', va='center', fontsize=11,
+               bbox=dict(boxstyle='round,pad=1.0', facecolor='lightyellow',
+                        alpha=0.9, edgecolor='gray'))
+
+        self.fig.suptitle('3D Voigt Analysis - Not Applicable',
+                         fontsize=12, fontweight='bold')
+
+    def _plot_no_data_3d(self):
+        """Plot message when no data is available for 3D view"""
+        self.fig.clear()
+
+        ax = self.fig.add_subplot(111)
+        ax.axis('off')
+
+        ax.text(0.5, 0.5, 'No Voigt analysis data\nFit a peak to view 3D results',
+               transform=ax.transAxes, ha='center', va='center',
+               fontsize=12, bbox=dict(boxstyle="round,pad=1.0",
+                                     facecolor="lightgray", alpha=0.9))
 
 class SeriesPlotter:
     """Series analysis and statistics visualization"""

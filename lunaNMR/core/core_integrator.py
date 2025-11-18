@@ -827,7 +827,7 @@ class VoigtIntegrator(BaseIntegrator):
 
     def fit_peak_1d_ps2d_style(self, x_data, y_data, target_position, dimension='x', verbose=False):
         """
-        Fit 1D Voigt peak using PS2D-style multi-stage fitting 
+        Fit 1D Voigt peak using PS2D-style multi-stage fitting
 
         maximum quality and reliability. This is the RECOMMENDED fitting method.
 
@@ -838,7 +838,7 @@ class VoigtIntegrator(BaseIntegrator):
         x_data : np.ndarray
             Frequency axis (ppm)
         y_data : np.ndarray
-            Intensity data 
+            Intensity data
         target_position : float
             Expected peak position (ppm)
         dimension : str
@@ -1407,7 +1407,7 @@ class VoigtIntegrator(BaseIntegrator):
                     # Check if exact overlap detection is available
                     if PS2D_EXACT_OVERLAP_INTEGRATION_AVAILABLE:
                         print(f"   [EXACT OVERLAP] Using PS2D exact overlap detector (C++ algorithm)")
-                        
+
                         # Call EXACT overlap detection + fitting
                         print(f"   [DEBUG] Passing target_position={target_position:.4f} to PS2D")
                         ps2d_multi_result = fit_peaks_with_exact_overlap_detection(
@@ -1425,7 +1425,7 @@ class VoigtIntegrator(BaseIntegrator):
                             use_exact_overlap_detection=True,  # ENABLE exact C++ algorithm
                             verbose=True  # Enable debug output
                         )
-                        
+
                         # Show overlap detection results
                         if ps2d_multi_result.get('n_overlap_groups', 0) > 0:
                             print(f"      ✅ Found {ps2d_multi_result['n_overlap_groups']} overlap groups")
@@ -2219,7 +2219,8 @@ class VoigtIntegrator(BaseIntegrator):
         for i, peak in enumerate(fitted_peaks):
             # Use PS2D's fitted intensity parameter with EXACT PS2D formula
             # This must match ps2d_style_fitter.py:107 exactly
-            fitted_intensity = peak['intensity']
+            # For single peaks from 1D fitting, 'intensity' may not exist - use 'amplitude' as fallback
+            fitted_intensity = peak.get('intensity', peak.get('amplitude', 1000))
 
             # Convert FWHM to sigma/gamma (EXACT PS2D formula)
             SQRT_8LN2 = np.sqrt(8 * np.log(2))
@@ -2247,6 +2248,12 @@ class VoigtIntegrator(BaseIntegrator):
             peak_max = np.max(peak_surface)
             print(f"      Peak {i+1}: PS2D intensity={fitted_intensity:.2e}, reconstructed max={peak_max:.2e}")
 
+            # CRITICAL FIX: Override the height field with reconstructed max
+            # The calculate_peak_height formula doesn't match actual peak height
+            # Use the actual reconstructed maximum as the true height
+            fitted_peaks[i]['height'] = peak_max
+            fitted_peaks[i]['amplitude'] = peak_max  # Amplitude = height in NMR convention
+
             # Store individual peak surface (without baseline)
             individual_surfaces.append(peak_surface.copy())
 
@@ -2254,7 +2261,7 @@ class VoigtIntegrator(BaseIntegrator):
             fitted_surface += peak_surface
 
         print(f"   ✅ Fitted surface: min={np.min(fitted_surface):.2e}, max={np.max(fitted_surface):.2e}")
-        return fitted_surface, individual_surfaces
+        return fitted_surface, individual_surfaces, baseline
 
     def _extract_cross_section_for_display(self, peak_x_ppm, peak_y_ppm, dimension, peak_params):
         """
@@ -2405,19 +2412,60 @@ class VoigtIntegrator(BaseIntegrator):
             x_idx = np.argmin(np.abs(region['f2_ppm'] - x_ppm))
             y_idx = np.argmin(np.abs(region['f1_ppm'] - y_ppm))
 
-            # Estimate linewidths from 1D cross-sections FWHM
-            f1_cross = region['intensity'][:, x_idx]  # F1 slice at peak F2 position
-            f2_cross = region['intensity'][y_idx, :]  # F2 slice at peak F1 position
+            # ====================================================================
+            # HEAVY OVERLAP DETECTION FOR ADAPTIVE LINEWIDTH ESTIMATION
+            # ====================================================================
+            # For heavily overlapping peaks, 1D cross-sections are contaminated by
+            # neighbors, leading to biased FWHM estimates. Detect heavy overlap and
+            # use typical linewidths instead.
+            # ====================================================================
+            config = get_ps2d_config()
+            heavily_overlapping = False
 
-            # Estimate FWHM by measuring width at half maximum
-            fwhm_f1 = self._estimate_fwhm_from_slice(f1_cross, region['f1_ppm'], y_ppm)
-            fwhm_f2 = self._estimate_fwhm_from_slice(f2_cross, region['f2_ppm'], x_ppm)
+            # Check pairwise distances to all other peaks in cluster
+            for other_peak in overlap_group:
+                if other_peak is peak_dict:
+                    continue  # Skip self-comparison
 
+                other_x = other_peak.get('x_ppm') or other_peak.get('pos_x')
+                other_y = other_peak.get('y_ppm') or other_peak.get('pos_y')
+
+                # Calculate elliptical distance (normalized by fitting ellipse radii)
+                dx = abs(x_ppm - other_x) / config.radF2
+                dy = abs(y_ppm - other_y) / config.radF1
+                elliptical_distance = np.sqrt(dx**2 + dy**2)
+
+                # Heavy overlap threshold: within 1.5× ellipse radius
+                # This catches peaks whose 1D cross-sections are significantly contaminated
+                if elliptical_distance < 1.5:
+                    heavily_overlapping = True
+                    break
+
+            # ====================================================================
+            # CONDITIONAL LINEWIDTH ESTIMATION
+            # ====================================================================
+            if heavily_overlapping:
+                # Use spectrum-typical linewidths (not contaminated by overlap)
+                print(f"      ⚠️  Heavy overlap detected for peak at ({x_ppm:.3f}, {y_ppm:.3f})")
+                print(f"         Using typical linewidths instead of measured FWHM")
+                fwhm_f1 = config.typical_linewidth_f1
+                fwhm_f2 = config.typical_linewidth_f2
+            else:
+                # Estimate linewidths from 1D cross-sections FWHM (accurate for separated peaks)
+                f1_cross = region['intensity'][:, x_idx]  # F1 slice at peak F2 position
+                f2_cross = region['intensity'][y_idx, :]  # F2 slice at peak F1 position
+
+                # Estimate FWHM by measuring width at half maximum
+                fwhm_f1 = self._estimate_fwhm_from_slice(f1_cross, region['f1_ppm'], y_ppm)
+                fwhm_f2 = self._estimate_fwhm_from_slice(f2_cross, region['f2_ppm'], x_ppm)
+
+            # ====================================================================
+            # CONVERT FWHM TO VOIGT COMPONENTS
+            # ====================================================================
             # FIXED 2025-10-13: Correct FWHM storage convention
             # Bug: Was storing FWHM/2 in lw_gau, but rest of codebase expects full FWHM
             # The variable lw_gau_f1 should contain the Gaussian FWHM, not half of it
             # Use nucleus-adaptive minimum constraints from centralized config
-            config = get_ps2d_config()
 
             # NEW (CORRECT): Store full FWHM in lw_gau, small Lorentzian initial guess
             #lw_gau_f1 = max(fwhm_f1, config.min_linewidth_f1)  # lw_gau IS the Gaussian FWHM
@@ -2430,9 +2478,9 @@ class VoigtIntegrator(BaseIntegrator):
             # For Voigt: FWHM ≈ 0.5346*fL + sqrt(0.2166*fL² + fG²)
             # Approximate: set lw_gau ≈ fwhm/2, lw_lor ≈ fwhm/2
             lw_gau_f1 = max(fwhm_f1 / 2.0, config.min_linewidth_f1)  # BUG: Stores FWHM/2
-            lw_lor_f1 = max(fwhm_f1 / 2.0, config.min_linewidth_f1)
+            lw_lor_f1 = max(fwhm_f1 / 25.0, config.min_linewidth_f1) #/2#10
             lw_gau_f2 = max(fwhm_f2 / 2.0, config.min_linewidth_f2)  # BUG: Stores FWHM/2
-            lw_lor_f2 = max(fwhm_f2 / 2.0, config.min_linewidth_f2)
+            lw_lor_f2 = max(fwhm_f2 / 25.0, config.min_linewidth_f2) #10
 
             # Use detected intensity if available, otherwise fall back to re-measurement
             if detected_intensity is not None and detected_intensity > 0:
@@ -2660,11 +2708,22 @@ class VoigtIntegrator(BaseIntegrator):
 
                 target_peak = result_2d['peaks'][best_match_idx]
 
+                # Extract detected intensity from all_peaks_context by matching position
+                detected_intensity = None
+                if all_peaks_context is not None:
+                    for peak_ctx in all_peaks_context:
+                        ctx_x = peak_ctx.get('x_ppm') or peak_ctx.get('pos_x')
+                        ctx_y = peak_ctx.get('y_ppm') or peak_ctx.get('pos_y')
+                        # Match by position (within 0.001 ppm tolerance)
+                        if abs(ctx_x - peak_x_ppm) < 0.001 and abs(ctx_y - peak_y_ppm) < 0.01:
+                            detected_intensity = peak_ctx.get('intensity')
+                            break
+
                 # Extract 2D region data for proper 2D contour visualization
                 region_2d = self.extract_2d_region_for_overlap_group(overlap_group)
 
                 # Reconstruct 2D fitted surface from PS2D parameters
-                fitted_2d_surface, individual_surfaces = self._reconstruct_2d_surface(
+                fitted_2d_surface, individual_surfaces, baseline = self._reconstruct_2d_surface(
                     region_2d, result_2d['peaks']
                 )
 
@@ -2699,11 +2758,13 @@ class VoigtIntegrator(BaseIntegrator):
                     'volume': target_peak['volume'],
                     'height': target_peak['height'],
                     'amplitude': target_peak['amplitude'],
+                    'detected_intensity': detected_intensity,  # Intensity from peak detection (before fitting)
                     # 2D visualization data
                     'region_2d': region_2d,
                     'fitted_2d_surface': fitted_2d_surface,
                     'individual_surfaces': individual_surfaces,  # Individual peaks for multi-color visualization
-                    'all_peaks': result_2d['peaks']
+                    'all_peaks': result_2d['peaks'],
+                    'baseline': baseline  # Baseline offset for visualization
                 }
             else:
                 print(f"   ❌ 2D fitting failed - peak not fitted")
@@ -2724,7 +2785,7 @@ class VoigtIntegrator(BaseIntegrator):
 
         if use_dynamic_optimization and self.enhanced_fitter is not None:
             print(f"   🔄 Using dynamic optimization for {assignment}")
-            
+
             # ENHANCEMENT: Pass GUI parameters to enhanced fitter for consistent display
             if hasattr(self.enhanced_fitter, 'set_gui_parameters'):
                 self.enhanced_fitter.set_gui_parameters(self.fitting_parameters)
@@ -2738,17 +2799,17 @@ class VoigtIntegrator(BaseIntegrator):
                     max_iterations=50,  # Enhanced: Up to 50 tests for comprehensive exploration
                     r2_improvement_threshold=0.01  # More sensitive to improvements
                 )
-                
+
                 if window_optimization.get('success') and window_optimization.get('improvement', 0) > 0.03:
                     # Use optimized windows for this peak
-                    optimized_x_window = window_optimization['optimized_x_window'] 
+                    optimized_x_window = window_optimization['optimized_x_window']
                     optimized_y_window = window_optimization['optimized_y_window']
-                    
+
                     print(f"   🎯 Window optimization successful:")
                     print(f"      GUI → Optimized: X={self.fitting_parameters['fitting_window_x']:.3f}→{optimized_x_window:.3f} ppm")
-                    print(f"      GUI → Optimized: Y={self.fitting_parameters['fitting_window_y']:.1f}→{optimized_y_window:.1f} ppm") 
+                    print(f"      GUI → Optimized: Y={self.fitting_parameters['fitting_window_y']:.1f}→{optimized_y_window:.1f} ppm")
                     print(f"      R² improvement: {window_optimization['improvement']:.3f}")
-                    
+
                     # Extract regions with optimized windows
                     regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm,
                                                      optimized_x_window, optimized_y_window)
@@ -2757,11 +2818,11 @@ class VoigtIntegrator(BaseIntegrator):
                     regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
             else:
                 regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
-                
+
             # ENSURE REGIONS VARIABLE EXISTS for existing code flow:
             if 'regions' not in locals() or regions is None:
                 regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
-                
+
             # Final check that regions extraction succeeded
             if regions is None:
                 print(f"   ❌ Failed to extract peak regions for {assignment}")
@@ -3013,6 +3074,17 @@ class VoigtIntegrator(BaseIntegrator):
         # Assign quality using centralized method (updated thresholds 2025-10-14)
         quality = self._assign_quality_from_r2(avg_r_squared)
 
+        # Extract detected intensity from all_peaks_context by matching position
+        detected_intensity = None
+        if all_peaks_context is not None:
+            for peak_ctx in all_peaks_context:
+                ctx_x = peak_ctx.get('x_ppm') or peak_ctx.get('pos_x')
+                ctx_y = peak_ctx.get('y_ppm') or peak_ctx.get('pos_y')
+                # Match by position (within 0.001 ppm tolerance)
+                if abs(ctx_x - peak_x_ppm) < 0.001 and abs(ctx_y - peak_y_ppm) < 0.01:
+                    detected_intensity = peak_ctx.get('intensity')
+                    break
+
         # Store detailed results with both local and global quality metrics
         result = {
             'assignment': assignment,
@@ -3060,6 +3132,7 @@ class VoigtIntegrator(BaseIntegrator):
             'avg_r_squared_local': (x_r_squared + y_r_squared) / 2,
             'avg_r_squared_global': (x_params.get('quality_metrics', {}).get('r_squared_global', x_params['r_squared']) +
                                    y_params.get('quality_metrics', {}).get('r_squared_global', y_params['r_squared'])) / 2,
+            'detected_intensity': detected_intensity,  # Intensity from peak detection (before fitting)
             'gui_window_x': self.fitting_parameters.get('fitting_window_x', 'unknown'),
             'gui_window_y': self.fitting_parameters.get('fitting_window_y', 'unknown'),
             'window_source': window_optimization.get('optimization_type', 'gui_parameters') if window_optimization else 'gui_parameters',
@@ -3073,17 +3146,17 @@ class VoigtIntegrator(BaseIntegrator):
         print(f"Voigt fitting completed: {quality} (R² = {avg_r_squared:.3f})")
         return result
 
-    def optimize_window_dynamically(self, peak_x_ppm, peak_y_ppm, assignment, 
+    def optimize_window_dynamically(self, peak_x_ppm, peak_y_ppm, assignment,
                                    initial_x_window=None, initial_y_window=None,
                                    max_iterations=5, r2_improvement_threshold=0.05):
         """
         Intelligent window size optimization starting from GUI parameters.
-        
+
         Uses iterative refinement to find optimal window size balancing:
         - Statistical precision (more data points)
-        - Peak isolation (avoiding interference)  
+        - Peak isolation (avoiding interference)
         - Fitting quality (maximizing R²)
-        
+
         Parameters:
         -----------
         peak_x_ppm, peak_y_ppm : float
@@ -3096,26 +3169,26 @@ class VoigtIntegrator(BaseIntegrator):
             Maximum optimization rounds
         r2_improvement_threshold : float
             Minimum R² improvement required to accept new window size
-            
+
         Returns:
         --------
         dict : Optimized window parameters and quality metrics
         """
         import numpy as np
-        
+
         # Phase 1: Initialize with GUI parameters
         base_x_window = initial_x_window or self.fitting_parameters['fitting_window_x']
         base_y_window = initial_y_window or self.fitting_parameters['fitting_window_y']
-        
+
         print(f"🔄 Dynamic window optimization for {assignment}")
         print(f"   Starting windows: X={base_x_window:.3f} ppm, Y={base_y_window:.1f} ppm")
-        
+
         # Phase 2: Baseline quality assessment
-        baseline_regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm, 
+        baseline_regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm,
                                                    base_x_window, base_y_window)
         if not baseline_regions:
             return {'success': False, 'reason': 'baseline_extraction_failed'}
-        
+
         # Perform baseline fit to establish reference quality (with PS2D fix)
         # Get gui_params from self if available
         gui_params = getattr(self, 'gui_params', None)
@@ -3154,20 +3227,20 @@ class VoigtIntegrator(BaseIntegrator):
 
         if not baseline_y_fit.get('success'):
             return {'success': False, 'reason': 'baseline_y_fitting_failed'}
-            
+
         # Extract baseline quality metrics
-        baseline_x_r2 = baseline_x_fit.get('quality_metrics', {}).get('r_squared_local', 
+        baseline_x_r2 = baseline_x_fit.get('quality_metrics', {}).get('r_squared_local',
                                                                      baseline_x_fit.get('r_squared', 0))
-        baseline_y_r2 = baseline_y_fit.get('quality_metrics', {}).get('r_squared_local', 
+        baseline_y_r2 = baseline_y_fit.get('quality_metrics', {}).get('r_squared_local',
                                                                      baseline_y_fit.get('r_squared', 0))
         baseline_avg_r2 = (baseline_x_r2 + baseline_y_r2) / 2
-        
+
         print(f"   Baseline quality: R²={baseline_avg_r2:.3f} (X={baseline_x_r2:.3f}, Y={baseline_y_r2:.3f})")
-        
+
         # Phase 3: Analyze spectral crowding
-        interference_analysis = self._analyze_peak_interference(peak_x_ppm, peak_y_ppm, 
+        interference_analysis = self._analyze_peak_interference(peak_x_ppm, peak_y_ppm,
                                                               base_x_window, base_y_window)
-        
+
         # Phase 4: Enhanced comprehensive optimization strategy
         print(f"   Peak interference: {interference_analysis['isolation_level']}")
 
@@ -3180,7 +3253,7 @@ class VoigtIntegrator(BaseIntegrator):
 
         # Add interference analysis to results
         optimization_result['interference_analysis'] = interference_analysis
-        
+
         return optimization_result
 
     def _enhanced_window_optimization(self, peak_x_ppm, peak_y_ppm, assignment,
@@ -3492,69 +3565,69 @@ class VoigtIntegrator(BaseIntegrator):
     def _analyze_peak_interference(self, peak_x_ppm, peak_y_ppm, x_window, y_window):
         """
         Analyze spectral crowding around target peak.
-        
+
         Returns:
         --------
         dict : Interference analysis with isolation classification
         """
         import numpy as np
-        
+
         # Extract larger region for neighbor analysis (3x current window)
         analysis_x_window = x_window * 3
         analysis_y_window = y_window * 3
-        
+
         analysis_regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm,
                                                    analysis_x_window, analysis_y_window)
-        
+
         if not analysis_regions:
             return {'isolation_level': 'unknown', 'nearby_peaks': []}
-        
+
         # CORRECTED: detect_peaks_1d returns a LIST, not a dict
         try:
-            x_peaks_list = self.detect_peaks_1d(analysis_regions['x_ppm_scale'], 
+            x_peaks_list = self.detect_peaks_1d(analysis_regions['x_ppm_scale'],
                                               analysis_regions['x_cross_section'],
                                               target_position=peak_x_ppm)
-            y_peaks_list = self.detect_peaks_1d(analysis_regions['y_ppm_scale'], 
+            y_peaks_list = self.detect_peaks_1d(analysis_regions['y_ppm_scale'],
                                               analysis_regions['y_cross_section'],
                                               target_position=peak_y_ppm)
-            
+
             # Extract positions from peak detection results
             x_peak_positions = []
             y_peak_positions = []
-            
+
             # Handle list of peak dictionaries (actual return format)
             if isinstance(x_peaks_list, list):
-                x_peak_positions = [peak.get('position', peak.get('center', 0)) for peak in x_peaks_list 
+                x_peak_positions = [peak.get('position', peak.get('center', 0)) for peak in x_peaks_list
                                    if isinstance(peak, dict)]
-            
+
             if isinstance(y_peaks_list, list):
-                y_peak_positions = [peak.get('position', peak.get('center', 0)) for peak in y_peaks_list 
+                y_peak_positions = [peak.get('position', peak.get('center', 0)) for peak in y_peaks_list
                                    if isinstance(peak, dict)]
-            
+
         except Exception as e:
             print(f"   Warning: Peak detection failed during interference analysis: {e}")
             x_peak_positions = []
             y_peak_positions = []
-        
+
         # Count peaks within current window boundaries
         x_window_half = x_window / 2
         y_window_half = y_window / 2
-        
-        x_interferers = [pos for pos in x_peak_positions 
+
+        x_interferers = [pos for pos in x_peak_positions
                          if abs(pos - peak_x_ppm) < x_window_half and abs(pos - peak_x_ppm) > 0.005]
-        y_interferers = [pos for pos in y_peak_positions 
+        y_interferers = [pos for pos in y_peak_positions
                          if abs(pos - peak_y_ppm) < y_window_half and abs(pos - peak_y_ppm) > 0.1]
-        
+
         # Classify isolation level
         total_interferers = len(x_interferers) + len(y_interferers)
-        
+
         if total_interferers == 0:
             isolation_level = 'isolated'
         elif total_interferers <= 2:
-            isolation_level = 'moderate_interference'  
+            isolation_level = 'moderate_interference'
         else:
             isolation_level = 'heavy_interference'
-        
+
         return {
             'isolation_level': isolation_level,
             'x_interferers': x_interferers,
@@ -3571,7 +3644,7 @@ class VoigtIntegrator(BaseIntegrator):
         Optimize windows for isolated peaks by progressive expansion.
         """
         import numpy as np
-        
+
         print(f"   🔍 Strategy: Expanding windows for isolated peak {assignment}")
         print(f"   📊 Baseline: X={base_x_window:.2f}, Y={base_y_window:.2f}, R²={baseline_r2:.3f}")
 
@@ -3579,24 +3652,24 @@ class VoigtIntegrator(BaseIntegrator):
         best_y_window = base_y_window
         best_r2 = baseline_r2
         iteration_data = []
-        
+
         # Test progressive window expansions
         expansion_factors = [1.0, 1.5, 2.0, 2.5, 3.0]  # Start with GUI size
-        
+
         for iteration, factor in enumerate(expansion_factors):
             if iteration >= max_iterations:
                 break
-                
+
             test_x_window = base_x_window * factor
             test_y_window = base_y_window * factor
-            
+
             # Test this window size
             test_regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm,
                                                    test_x_window, test_y_window)
-            
+
             if not test_regions:
                 continue
-                
+
             # Fit with test windows
             # Get gui_params from self if available
             gui_params = getattr(self, 'gui_params', None)
@@ -3606,15 +3679,15 @@ class VoigtIntegrator(BaseIntegrator):
             y_fit = self.adaptive_fit_1d(test_regions['y_ppm_scale'],
                                        test_regions['y_cross_section'],
                                        peak_y_ppm, dimension='y', gui_params=gui_params)
-            
+
             if not (x_fit.get('success') and y_fit.get('success')):
                 continue
-                
+
             # Calculate quality metrics
             x_r2 = x_fit.get('quality_metrics', {}).get('r_squared_local', x_fit.get('r_squared', 0))
             y_r2 = y_fit.get('quality_metrics', {}).get('r_squared_local', y_fit.get('r_squared', 0))
             avg_r2 = (x_r2 + y_r2) / 2
-            
+
             iteration_data.append({
                 'factor': factor,
                 'x_window': test_x_window,
@@ -3623,7 +3696,7 @@ class VoigtIntegrator(BaseIntegrator):
                 'x_points': len(test_regions['x_cross_section']),
                 'y_points': len(test_regions['y_cross_section'])
             })
-            
+
             print(f"   🧪 Test {iteration+1}: Factor={factor:.1f}x, Windows=({test_x_window:.2f}, {test_y_window:.2f}), "
                   f"R²={avg_r2:.3f}, Points=({len(test_regions['x_cross_section'])}, {len(test_regions['y_cross_section'])})")
 
@@ -3637,9 +3710,9 @@ class VoigtIntegrator(BaseIntegrator):
                 # No significant improvement, stop expansion
                 print(f"   ⏹ No improvement: R²={avg_r2:.3f}, stopping expansion")
                 break
-        
+
         optimization_improvement = best_r2 - baseline_r2
-        
+
         return {
             'success': True,
             'optimization_type': 'isolated_expansion',
@@ -3660,7 +3733,7 @@ class VoigtIntegrator(BaseIntegrator):
         Optimize windows for crowded peaks by progressive contraction.
         """
         import numpy as np
-        
+
         interferer_count = interference_analysis['total_interferers']
         print(f"   🔍 Strategy: Contracting windows for crowded peak {assignment} ({interferer_count} interferers)")
         print(f"   📊 Baseline: X={base_x_window:.2f}, Y={base_y_window:.2f}, R²={baseline_r2:.3f}")
@@ -3669,33 +3742,33 @@ class VoigtIntegrator(BaseIntegrator):
         best_y_window = base_y_window
         best_r2 = baseline_r2
         iteration_data = []
-        
-        # Test progressive window contractions  
+
+        # Test progressive window contractions
         contraction_factors = [1.0, 0.8, 0.6, 0.5, 0.4]  # Start with GUI size
-        
+
         for iteration, factor in enumerate(contraction_factors):
             if iteration >= max_iterations:
                 break
-                
+
             test_x_window = base_x_window * factor
             test_y_window = base_y_window * factor
-            
+
             # Don't contract below minimum reasonable size
             if test_x_window < 0.015 or test_y_window < 0.5:  # Minimum thresholds
                 print(f"   ⏹ Minimum window size reached")
                 break
-                
+
             test_regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm,
                                                    test_x_window, test_y_window)
-            
+
             if not test_regions:
                 continue
-                
+
             # Check if we still have enough data points for reliable fitting
             if len(test_regions['x_cross_section']) < 10 or len(test_regions['y_cross_section']) < 10:
                 print(f"   ⏹ Insufficient data points for reliable fitting")
                 continue
-                
+
             # Fit with contracted windows
             # Get gui_params from self if available
             gui_params = getattr(self, 'gui_params', None)
@@ -3705,14 +3778,14 @@ class VoigtIntegrator(BaseIntegrator):
             y_fit = self.adaptive_fit_1d(test_regions['y_ppm_scale'],
                                        test_regions['y_cross_section'],
                                        peak_y_ppm, dimension='y', gui_params=gui_params)
-            
+
             if not (x_fit.get('success') and y_fit.get('success')):
                 continue
-                
+
             x_r2 = x_fit.get('quality_metrics', {}).get('r_squared_local', x_fit.get('r_squared', 0))
             y_r2 = y_fit.get('quality_metrics', {}).get('r_squared_local', y_fit.get('r_squared', 0))
             avg_r2 = (x_r2 + y_r2) / 2
-            
+
             iteration_data.append({
                 'factor': factor,
                 'x_window': test_x_window,
@@ -3721,7 +3794,7 @@ class VoigtIntegrator(BaseIntegrator):
                 'x_points': len(test_regions['x_cross_section']),
                 'y_points': len(test_regions['y_cross_section'])
             })
-            
+
             print(f"   🧪 Test {iteration+1}: Factor={factor:.1f}x, Windows=({test_x_window:.2f}, {test_y_window:.2f}), "
                   f"R²={avg_r2:.3f}, Points=({len(test_regions['x_cross_section'])}, {len(test_regions['y_cross_section'])})")
 
@@ -3731,9 +3804,9 @@ class VoigtIntegrator(BaseIntegrator):
                 best_y_window = test_y_window
                 best_r2 = avg_r2
                 print(f"   ✅ Improvement by interference removal: R²={avg_r2:.3f} (Δ={avg_r2-baseline_r2:.3f})")
-            
+
         optimization_improvement = best_r2 - baseline_r2
-        
+
         return {
             'success': True,
             'optimization_type': 'crowded_contraction',
@@ -4634,17 +4707,28 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             x_fit = voigt2d_result.get('x_fit', {})
             y_fit = voigt2d_result.get('y_fit', {})
 
-            # Extract key parameters from x_fit
+            # Extract key parameters from x_fit and y_fit
             amplitude = x_fit.get('amplitude', 1000)
             center_x = x_fit.get('center', 0)
             center_y = y_fit.get('center', 0)
-            sigma = x_fit.get('sigma', 0.01)
-            gamma = x_fit.get('gamma', 0.01)
+            sigma_x = x_fit.get('sigma', 0.01)
+            gamma_x = x_fit.get('gamma', 0.01)
+            sigma_y = y_fit.get('sigma', 0.01)
+            gamma_y = y_fit.get('gamma', 0.01)
             baseline = x_fit.get('baseline', 0)
-            width = sigma + gamma
+            width = sigma_x + gamma_x
 
             # Get peak positions from original result
             peak_position = voigt2d_result.get('peak_position', (center_x, center_y))
+
+            # CRITICAL FIX: Calculate proper height using PS2D formula
+            # For single peak 1D fits, calculate height from fitted Voigt parameters
+            # Height = maximum value at peak center, not amplitude
+            from lunaNMR.core.ps2d_2d_fitter import calculate_peak_height
+
+            # Calculate proper height (maximum value at peak center)
+            # Note: calculate_peak_height expects (lw_lor_f1, lw_gau_f1, lw_lor_f2, lw_gau_f2, intensity)
+            height = calculate_peak_height(gamma_y, sigma_y, gamma_x, sigma_x, amplitude)
 
             # Create flat result dictionary
             avg_r2 = voigt2d_result.get('avg_r_squared', 0)
@@ -4656,10 +4740,10 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
                 'volume': amplitude * width * np.pi,  # Approximate volume
                 'avg_r_squared': avg_r2,
                 'r_squared': avg_r2,  # Alias for GUI compatibility
-                'height': amplitude,
+                'height': height,  # FIXED: Use calculated height instead of amplitude
                 'width': width,
-                'sigma': sigma,
-                'gamma': gamma,
+                'sigma': sigma_x,
+                'gamma': gamma_x,
                 'baseline': baseline,
                 'center_x': center_x,
                 'center_y': center_y,

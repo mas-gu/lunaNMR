@@ -71,6 +71,12 @@ class PS2DConfig:
             'min_linewidth_f1': 0.05,     # Minimum 15N linewidth (ppm)
             'min_linewidth_f2': 0.001,    # Minimum 1H linewidth (ppm)
 
+            # Typical linewidths for initial guesses in heavy overlap situations
+            # Used when measured FWHM is unreliable due to contamination from neighbors
+            # Based on typical high-quality 15N-HSQC spectra at 600-800 MHz
+            'typical_linewidth_f1': 0.4,    # Typical 15N FWHM (ppm) - matched to user's spectrum
+            'typical_linewidth_f2': 0.04,   # Typical 1H FWHM (ppm) - matched to user's spectrum
+
             # ================================================================
             # Position bounds (fitting movement limits)
             # ================================================================
@@ -116,6 +122,11 @@ class PS2DConfig:
             # Linewidth constraints (realistic minimums based on actual peak widths)
             'min_linewidth_f1': 0.025,    # Minimum 13C linewidth (~half of typical 0.05-0.08 ppm FWHM)
             'min_linewidth_f2': 0.005,    # Minimum 1H linewidth
+
+            # Typical linewidths for initial guesses in heavy overlap situations
+            # Used when measured FWHM is unreliable due to contamination from neighbors
+            'typical_linewidth_f1': 0.06,   # Typical 13C FWHM (ppm)
+            'typical_linewidth_f2': 0.04,   # Typical 1H FWHM (ppm) - matched to typical spectra
 
             # Position bounds (moderate for peak movement)
             'pos_margin_f1': 0.05,        # Allow ±0.04 ppm movement (relaxed)

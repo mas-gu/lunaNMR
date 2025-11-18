@@ -20,6 +20,7 @@ from tkinter import ttk, filedialog, messagebox
 import os
 import glob
 import json
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -32,6 +33,22 @@ except ImportError:
         return text
     def configure_emoji_support(widget):
         pass
+
+def natural_sort_key(path):
+    """
+    Generate sort key for natural/alphanumeric sorting
+    Splits filename into text and numeric parts for proper numeric ordering
+
+    Example:
+        file_8.ft → ['file_', 8, '.ft']
+        file_100.ft → ['file_', 100, '.ft']
+        Sorted: file_8.ft, file_34.ft, file_100.ft (not file_100.ft first)
+    """
+    basename = os.path.basename(path)
+    # Split into alternating text and numeric parts
+    parts = re.split(r'(\d+)', basename)
+    # Convert numeric parts to integers for proper comparison
+    return [int(part) if part.isdigit() else part.lower() for part in parts]
 
 class ScrollableFrame(ttk.Frame):
     """Enhanced scrollable frame widget for control panels"""
@@ -47,14 +64,22 @@ class ScrollableFrame(ttk.Frame):
             lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
 
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        # Bind canvas resize to update scrollable frame width
+        self.canvas.bind('<Configure>', self._on_canvas_configure)
 
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
         # Enhanced mouse wheel scrolling
         self.bind_mousewheel()
+
+    def _on_canvas_configure(self, event):
+        """Update the scrollable frame width when canvas is resized"""
+        canvas_width = event.width
+        self.canvas.itemconfig(self.canvas_window, width=canvas_width)
 
     def bind_mousewheel(self):
         def _on_mousewheel(event):
@@ -270,7 +295,7 @@ class EnhancedFileListFrame(ttk.Frame):
         return self.current_folder
 
     def get_all_files(self):
-        """Get all files in current folder"""
+        """Get all files in current folder with natural sorting"""
         if not self.current_folder:
             return []
 
@@ -279,7 +304,9 @@ class EnhancedFileListFrame(ttk.Frame):
             pattern = os.path.join(self.current_folder, f"*.{file_type}")
             files.extend(glob.glob(pattern))
 
-        return sorted(files)
+        # Use natural sorting to handle numeric suffixes correctly
+        # (e.g., file_8.ft, file_34.ft, file_100.ft instead of file_100.ft, file_34.ft, file_8.ft)
+        return sorted(files, key=natural_sort_key)
 
 class AdvancedProgressDialog:
     """Enhanced progress dialog with detailed logging and statistics"""
@@ -736,12 +763,12 @@ class PeakNavigator(ttk.Frame):
         # Configure columns
         self.tree.heading("assignment", text="Assignment", anchor="center")
         self.tree.heading("x_coord", text="X (1H)", anchor="center")
-        self.tree.heading("y_coord", text="Y (15N/13C)", anchor="center")
+        self.tree.heading("y_coord", text="Y", anchor="center")
         self.tree.heading("height", text="Height", anchor="center")
 
         self.tree.column("assignment", width=80, anchor="center", minwidth=60)
-        self.tree.column("x_coord", width=80, anchor="center", minwidth=60)
-        self.tree.column("y_coord", width=80, anchor="center", minwidth=60)
+        self.tree.column("x_coord", width=40, anchor="center", minwidth=30)
+        self.tree.column("y_coord", width=40, anchor="center", minwidth=30)
         self.tree.column("height", width=80, anchor="center", minwidth=60)
 
         # Scrollbar for table
@@ -776,8 +803,8 @@ class PeakNavigator(ttk.Frame):
         button_frame = ttk.Frame(self)
         button_frame.pack(fill=tk.X)
 
-        self.refresh_btn = ttk.Button(button_frame, text="🔄 Refresh",
-                                     command=self.refresh_peak_list, width=12)
+        self.refresh_btn = ttk.Button(button_frame, text="🔄",
+                                     command=self.refresh_peak_list, width=3)
         self.refresh_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         # Navigation sub-frame for Previous/Analyze/Next buttons
@@ -791,8 +818,8 @@ class PeakNavigator(ttk.Frame):
         self.prev_btn.pack(side=tk.LEFT, padx=(0, 2))
 
         # Main analyze button (unchanged functionality)
-        self.analysis_btn = ttk.Button(nav_frame, text="🔬 Analyze",
-                                      command=self.analyze_selected_peak, width=10)
+        self.analysis_btn = ttk.Button(nav_frame, text="🔬",
+                                      command=self.analyze_selected_peak, width=3)
         self.analysis_btn.pack(side=tk.LEFT)
 
         # Next peak button (small)
@@ -805,20 +832,20 @@ class PeakNavigator(ttk.Frame):
         self.edit_frame = ttk.Frame(self)
         self.edit_frame.pack(fill=tk.X, pady=(5, 0))
 
-        self.edit_btn = ttk.Button(self.edit_frame, text="✏️ Edit Peak",
-                                  command=self.edit_selected_peak, width=12)
+        self.edit_btn = ttk.Button(self.edit_frame, text="✏️",
+                                  command=self.edit_selected_peak, width=3)
         self.edit_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.delete_btn = ttk.Button(self.edit_frame, text="🗑️ Delete",
-                                    command=self.delete_selected_peak, width=12)
+        self.delete_btn = ttk.Button(self.edit_frame, text="🗑️",
+                                    command=self.delete_selected_peak, width=3)
         self.delete_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.add_btn = ttk.Button(self.edit_frame, text="➕ Add Peak",
-                                 command=self.add_new_peak, width=12)
+        self.add_btn = ttk.Button(self.edit_frame, text="➕",
+                                 command=self.add_new_peak, width=3)
         self.add_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.save_btn = ttk.Button(self.edit_frame, text="💾 Save",
-                                  command=self.save_peak_changes, width=12)
+        self.save_btn = ttk.Button(self.edit_frame, text="💾",
+                                  command=self.save_peak_changes, width=3)
         self.save_btn.pack(side=tk.LEFT)
 
         # Initialize button states
@@ -1067,7 +1094,7 @@ class PeakNavigator(ttk.Frame):
                 else:
                     assignment_display = assignment
 
-                self.tree.insert("", "end", values=(assignment_display, f"{x_coord:.3f}", f"{y_coord:.1f}", height_str))
+                self.tree.insert("", "end", values=(assignment_display, f"{x_coord:.2f}", f"{y_coord:.1f}", height_str))
                 print(f"Peak Navigator: Added peak {i+1}: {assignment} ({x_coord:.3f}, {y_coord:.1f}) - Status: {height_str}")
 
         # Update status
@@ -1377,7 +1404,7 @@ class PeakNavigator(ttk.Frame):
                 self.detected_peaks.append([new_assignment, new_x, new_y, ""])
 
                 # Add to tree (with empty height column)
-                self.tree.insert("", "end", values=(new_assignment, f"{new_x:.3f}", f"{new_y:.1f}", ""))
+                self.tree.insert("", "end", values=(new_assignment, f"{new_x:.2f}", f"{new_y:.1f}", ""))
 
                 # Update status
                 count = len(self.detected_peaks)
