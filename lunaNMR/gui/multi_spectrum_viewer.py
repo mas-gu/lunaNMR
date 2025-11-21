@@ -3,6 +3,7 @@
 
 import tkinter as tk
 from tkinter import ttk, colorchooser, messagebox
+import customtkinter as ctk
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
@@ -15,6 +16,45 @@ from pathlib import Path
 from lunaNMR.gui.gui_components import PeakNavigator, natural_sort_key
 from lunaNMR.gui.visualization import VoigtAnalysisPlotter
 
+# CustomTkinter color theme (light grey)
+BG_COLOR = "#F0F0F0"  # Very light grey background
+BUTTON_FG_COLOR = "#D3D3D3"  # Light grey
+BUTTON_HOVER_COLOR = "#B0B0B0"  # Darker grey for hover
+BUTTON_TEXT_COLOR = "#000000"  # Black text
+
+class CTkLabelFrame(ctk.CTkFrame):
+    """Custom labeled frame with rounded corners using CustomTkinter"""
+    def __init__(self, parent, text="", padding=10, corner_radius=10, **kwargs):
+        # Extract padding value (can be int or tuple)
+        if isinstance(padding, (tuple, list)):
+            pad_x, pad_y = padding[0], padding[1] if len(padding) > 1 else padding[0]
+        elif isinstance(padding, str):
+            # Handle string padding like "10" or "(10, 5)"
+            padding = padding.strip("()")
+            parts = [p.strip() for p in padding.split(",")]
+            pad_x = int(parts[0])
+            pad_y = int(parts[1]) if len(parts) > 1 else pad_x
+        else:
+            pad_x = pad_y = int(padding)
+
+        # Set fg_color to match background if not provided
+        if 'fg_color' not in kwargs:
+            kwargs['fg_color'] = BG_COLOR  # Match background color
+
+        # Create rounded frame
+        super().__init__(parent, corner_radius=corner_radius, **kwargs)
+
+        # Add label at top if text provided
+        if text:
+            label = ctk.CTkLabel(self, text=text, font=("TkDefaultFont", 10, "bold"))
+            label.pack(anchor="w", padx=pad_x, pady=(pad_y//2, 0))
+
+        # Store padding for child widgets
+        self._padding = (pad_x, pad_y)
+
+    def get_content_frame(self):
+        """Return self as the content frame (for compatibility with usage patterns)"""
+        return self
 
 class SpectrumData:
     """Data container for individual spectrum in multi-spectrum viewer"""
@@ -120,6 +160,17 @@ class MultiSpectrumViewer:
 
         self.window.geometry(f"{window_width}x{window_height}")
         self.window.minsize(min_width, min_height)
+
+        # Set window background color
+        self.window.configure(bg=BG_COLOR)
+
+        # Configure ttk styles for consistent background
+        style = ttk.Style()
+        style.configure("TFrame", background=BG_COLOR)
+        style.configure("TLabelframe", background=BG_COLOR)
+        style.configure("TLabelframe.Label", background=BG_COLOR)
+        style.configure("TLabel", background=BG_COLOR)
+        style.configure("TCheckbutton", background=BG_COLOR)
 
         print(f"📐 Multi-spectrum viewer window size: {window_width}×{window_height} (screen: {screen_width}×{screen_height})")
         print(f"   Minimum size: {min_width}×{min_height}")
@@ -236,17 +287,17 @@ class MultiSpectrumViewer:
 
         # Tab 1: Main Spectrum Overlay
         self.main_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.main_tab, text="📊 Spectrum Overlay")
+        self.notebook.add(self.main_tab, text="Spectrum Overlay")
         self.setup_main_overlay_tab()
 
         # Tab 2: Voigt Analysis
         self.voigt_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.voigt_tab, text="📈 Voigt Analysis")
+        self.notebook.add(self.voigt_tab, text="Voigt Analysis")
         self.setup_voigt_analysis_tab()
 
         # Tab 3: 3D Voigt Analysis (supplementary visualization)
         self.voigt_3d_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.voigt_3d_tab, text="🎨 3D Voigt Analysis")
+        self.notebook.add(self.voigt_3d_tab, text="3D Voigt Analysis")
         self.setup_voigt_3d_analysis_tab()
 
     def setup_main_overlay_tab(self):
@@ -308,7 +359,7 @@ class MultiSpectrumViewer:
         left_panel = ttk.Frame(content_paned)
         content_paned.add(left_panel, weight=3)
 
-        plot_container = ttk.LabelFrame(left_panel, text="📈 Spectrum Overlay", padding=5)
+        plot_container = CTkLabelFrame(left_panel, text="📈 Spectrum Overlay", padding=5)
         plot_container.pack(fill=tk.BOTH, expand=True)
 
         # Create matplotlib figure for overlay plot with compact size
@@ -328,14 +379,14 @@ class MultiSpectrumViewer:
         right_panel = ttk.Frame(content_paned)
         content_paned.add(right_panel, weight=1)
 
-        peak_list_container = ttk.LabelFrame(right_panel, text="📋 Peak List (Reference)", padding=5)
+        peak_list_container = CTkLabelFrame(right_panel, text="📋 Peak List (Reference)", padding=5)
         peak_list_container.pack(fill=tk.BOTH, expand=True)
 
         # Create peak list treeview
         self.setup_main_peak_list(peak_list_container)
 
         # Row 2: Contour controls (fixed height, always visible)
-        contour_frame = ttk.LabelFrame(self.main_tab, text="🎨 Contour Controls (Applied to All Spectra)", padding=5)
+        contour_frame = CTkLabelFrame(self.main_tab, text="🎨 Contour Controls (Applied to All Spectra)", padding=5)
         contour_frame.grid(row=2, column=0, sticky='ew', padx=5, pady=5)
         self.setup_contour_controls(contour_frame)
 
@@ -547,30 +598,38 @@ class MultiSpectrumViewer:
 
     def setup_contour_controls(self, parent):
         """Setup contour control widgets"""
+        # Create inner frame for grid layout (CTkLabelFrame uses pack for label)
+        controls_frame = ttk.Frame(parent)
+        controls_frame.pack(fill=tk.X, padx=5, pady=5)
+
         # Levels
-        ttk.Label(parent, text="Levels:").grid(row=0, column=0, padx=5, sticky='w')
-        levels_spin = ttk.Spinbox(parent, from_=5, to=100, width=8,
+        ttk.Label(controls_frame, text="Levels:").grid(row=0, column=0, padx=5, sticky='w')
+        levels_spin = ttk.Spinbox(controls_frame, from_=5, to=100, width=8,
                                  textvariable=self.contour_levels)
         levels_spin.grid(row=0, column=1, padx=5, sticky='w')
 
         # Min level
-        ttk.Label(parent, text="Min Level:").grid(row=0, column=2, padx=5, sticky='w')
-        min_spin = ttk.Spinbox(parent, from_=0.01, to=10.0, increment=0.01, width=8,
+        ttk.Label(controls_frame, text="Min Level:").grid(row=0, column=2, padx=5, sticky='w')
+        min_spin = ttk.Spinbox(controls_frame, from_=0.01, to=10.0, increment=0.01, width=8,
                               textvariable=self.contour_min)
         min_spin.grid(row=0, column=3, padx=5, sticky='w')
 
         # Increment
-        ttk.Label(parent, text="Increment:").grid(row=0, column=4, padx=5, sticky='w')
-        inc_spin = ttk.Spinbox(parent, from_=1.01, to=2.0, increment=0.01, width=8,
+        ttk.Label(controls_frame, text="Increment:").grid(row=0, column=4, padx=5, sticky='w')
+        inc_spin = ttk.Spinbox(controls_frame, from_=1.01, to=2.0, increment=0.01, width=8,
                               textvariable=self.contour_increment)
         inc_spin.grid(row=0, column=5, padx=5, sticky='w')
 
         # Update button
-        update_btn = ttk.Button(parent, text="Update Plot", command=self.update_overlay_plot)
+        update_btn = ctk.CTkButton(controls_frame, text="Update Plot", command=self.update_overlay_plot,
+                                   corner_radius=8, fg_color=BUTTON_FG_COLOR,
+                                   hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
         update_btn.grid(row=0, column=6, padx=20)
 
         # Export button
-        export_btn = ttk.Button(parent, text="Export PNG", command=self.export_overlay_plot)
+        export_btn = ctk.CTkButton(controls_frame, text="Export PNG", command=self.export_overlay_plot,
+                                  corner_radius=8, fg_color=BUTTON_FG_COLOR,
+                                  hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
         export_btn.grid(row=0, column=7, padx=5)
 
     def update_overlay_plot(self):
@@ -760,7 +819,7 @@ class MultiSpectrumViewer:
         voigt_paned.add(right_panel, weight=1)
 
         # Left panel: Voigt plots
-        plot_container = ttk.LabelFrame(left_panel, text="📈 Voigt Analysis", padding=5)
+        plot_container = CTkLabelFrame(left_panel, text="📈 Voigt Analysis", padding=5)
         plot_container.pack(fill=tk.BOTH, expand=True)
 
         # Create 2x1 grid for Voigt analysis plots with compact size
@@ -787,7 +846,7 @@ class MultiSpectrumViewer:
 
         # Right panel: Spectrum selector + Peak navigator
         # Spectrum selector at top
-        selector_frame = ttk.LabelFrame(right_panel, text="🔬 Select Spectrum", padding=5)
+        selector_frame = CTkLabelFrame(right_panel, text="🔬 Select Spectrum", padding=5)
         selector_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(selector_frame, text="Spectrum:").pack(anchor='w')
@@ -803,7 +862,7 @@ class MultiSpectrumViewer:
             self.spectrum_selector.current(0)
 
         # Peak navigator below
-        navigator_frame = ttk.LabelFrame(right_panel, text="📋 Peak Navigator", padding=5)
+        navigator_frame = CTkLabelFrame(right_panel, text="📋 Peak Navigator", padding=5)
         navigator_frame.pack(fill=tk.BOTH, expand=True)
 
         self.voigt_peak_navigator = PeakNavigator(navigator_frame)
@@ -844,7 +903,7 @@ class MultiSpectrumViewer:
         voigt_3d_paned.add(right_panel_3d, weight=1)
 
         # Left panel: 3D plot container
-        plot_container = ttk.LabelFrame(left_panel_3d, text="🎨 3D Voigt Surface Analysis", padding=5)
+        plot_container = CTkLabelFrame(left_panel_3d, text="🎨 3D Voigt Surface Analysis", padding=5)
         plot_container.pack(fill=tk.BOTH, expand=True)
 
         # Create control frame at top
@@ -852,11 +911,13 @@ class MultiSpectrumViewer:
         control_frame_3d.pack(side=tk.TOP, fill=tk.X, padx=5, pady=3)
 
         # Row 1: Layer toggling checkboxes
-        layer_frame = ttk.LabelFrame(control_frame_3d, text="Layer Visibility", padding=3)
+        layer_frame = CTkLabelFrame(control_frame_3d, text="Layer Visibility", padding=3)
         layer_frame.pack(side=tk.LEFT, padx=3)
 
         self.show_exp_3d_var = tk.BooleanVar(value=True)
         self.show_fit_3d_var = tk.BooleanVar(value=True)
+        self.show_individual_3d_var = tk.BooleanVar(value=True)
+        self.show_peak_labels_3d_var = tk.BooleanVar(value=True)
         self.show_resid_3d_var = tk.BooleanVar(value=True)
         # self.show_cross_3d_var = tk.BooleanVar(value=True)  # Disabled - code kept for future use
 
@@ -866,6 +927,12 @@ class MultiSpectrumViewer:
         ttk.Checkbutton(layer_frame, text="Fitted", variable=self.show_fit_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_fitted(self.show_fit_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
+        ttk.Checkbutton(layer_frame, text="Individual Peaks", variable=self.show_individual_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_individual_peaks(self.show_individual_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
+        ttk.Checkbutton(layer_frame, text="Peak Labels", variable=self.show_peak_labels_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_peak_labels(self.show_peak_labels_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
         ttk.Checkbutton(layer_frame, text="Residuals", variable=self.show_resid_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_residuals(self.show_resid_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
@@ -874,7 +941,7 @@ class MultiSpectrumViewer:
         #                 ).pack(side=tk.LEFT, padx=2)  # Disabled - code kept for future use
 
         # Row 2: Residual mode radio buttons
-        residual_frame = ttk.LabelFrame(control_frame_3d, text="Residual Mode", padding=3)
+        residual_frame = CTkLabelFrame(control_frame_3d, text="Residual Mode", padding=3)
         residual_frame.pack(side=tk.LEFT, padx=3)
 
         self.residual_mode_3d_var = tk.StringVar(value='overlay')
@@ -888,7 +955,7 @@ class MultiSpectrumViewer:
                         ).pack(side=tk.LEFT, padx=2)
 
         # Row 3: Intensity scaling slider
-        intensity_frame = ttk.LabelFrame(control_frame_3d, text="Intensity Scale", padding=3)
+        intensity_frame = CTkLabelFrame(control_frame_3d, text="Intensity Scale", padding=3)
         intensity_frame.pack(side=tk.LEFT, padx=3, fill=tk.X, expand=True)
 
         ttk.Label(intensity_frame, text="50%").pack(side=tk.LEFT, padx=2)
@@ -938,7 +1005,7 @@ class MultiSpectrumViewer:
 
         # Right panel: Spectrum selector + Peak Navigator (same as 2D Voigt tab)
         # Spectrum selector at top
-        selector_frame_3d = ttk.LabelFrame(right_panel_3d, text="🔬 Select Spectrum", padding=5)
+        selector_frame_3d = CTkLabelFrame(right_panel_3d, text="🔬 Select Spectrum", padding=5)
         selector_frame_3d.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(selector_frame_3d, text="Spectrum:").pack(anchor='w')
@@ -954,7 +1021,7 @@ class MultiSpectrumViewer:
             self.spectrum_selector_3d.current(0)
 
         # Peak Navigator below
-        navigator_frame_3d = ttk.LabelFrame(right_panel_3d, text="📋 Peak Navigator", padding=5)
+        navigator_frame_3d = CTkLabelFrame(right_panel_3d, text="📋 Peak Navigator", padding=5)
         navigator_frame_3d.pack(fill=tk.BOTH, expand=True)
 
         # Create Peak Navigator instance (share same navigator as 2D tab)

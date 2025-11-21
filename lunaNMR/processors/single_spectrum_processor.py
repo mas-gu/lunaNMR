@@ -123,8 +123,8 @@ class SingleSpectrumProcessor:
         fitted_results = []
         total_count = len(peak_list)
         
-        print(f"   🔍 DEBUG peak_list columns: {list(peak_list.columns)}")
-        print(f"   🔍 DEBUG first row: {peak_list.iloc[0].to_dict()}")
+        #print(f"   🔍 DEBUG peak_list columns: {list(peak_list.columns)}")
+        #print(f"   🔍 DEBUG first row: {peak_list.iloc[0].to_dict()}")
 
         # CRITICAL: Measure intensities if missing
         if 'Height' not in peak_list.columns and 'Intensity' not in peak_list.columns:
@@ -173,7 +173,7 @@ class SingleSpectrumProcessor:
             })
 
         print(f"🔄 Starting cluster-based sequential fitting of {total_count} peaks")
-        print(f"   🎯 2D overlap detection enabled with {len(all_peaks_context)} peaks context")
+        #print(f"   🎯 2D overlap detection enabled with {len(all_peaks_context)} peaks context")
 
         # STEP 1: Identify overlap clusters (graph-based, finds transitive overlaps)
         clusters = self.integrator.identify_overlap_clusters(all_peaks_context)
@@ -284,7 +284,7 @@ class SingleSpectrumProcessor:
 
                     cluster_dicts.append(peak_dict)
 
-                print(f"   🔍 DEBUG cluster_dicts[0] = {cluster_dicts[0]}")
+                #print(f"   🔍 DEBUG cluster_dicts[0] = {cluster_dicts[0]}")
 
                 # Extract fix_positions and fix_linewidths from GUI parameters
                 fix_positions = self.integrator.gui_params.get('fix_positions', False)
@@ -341,9 +341,9 @@ class SingleSpectrumProcessor:
                                 'peak_position': (best_match['pos_f2'], best_match['pos_f1']),
                                 'peak_x': peak_x,
                                 'peak_y': peak_y,
-                                'amplitude': best_match['intensity'],
-                                'height': best_match['intensity'],  # Peak Navigator uses 'height'
-                                'volume': best_match['intensity'],  # Approximate
+                                'amplitude': best_match['amplitude'],  # Use PS2D calculated amplitude (= height)
+                                'height': best_match['height'],  # Use PS2D calculated height (not intensity!)
+                                'volume': best_match['volume'],  # Use PS2D volume (= intensity for normalized Voigt)
                                 'r_squared': group_result['r_squared'],  # Peak Navigator uses 'r_squared'
                                 'avg_r_squared': group_result['r_squared'],
                                 'center_x': best_match['pos_f2'],
@@ -365,7 +365,7 @@ class SingleSpectrumProcessor:
                                     'center': best_match['pos_f2'],
                                     'sigma': best_match['lw_gau_f2'],
                                     'gamma': best_match['lw_lor_f2'],
-                                    'amplitude': best_match['intensity'],
+                                    'amplitude': best_match['amplitude'],  # Use amplitude (= height), not intensity
                                     'r_squared': group_result['r_squared'],
                                     'success': True,
                                     'method': '2d_simultaneous'
@@ -374,7 +374,7 @@ class SingleSpectrumProcessor:
                                     'center': best_match['pos_f1'],
                                     'sigma': best_match['lw_gau_f1'],
                                     'gamma': best_match['lw_lor_f1'],
-                                    'amplitude': best_match['intensity'],
+                                    'amplitude': best_match['amplitude'],  # Use amplitude (= height), not intensity
                                     'r_squared': group_result['r_squared'],
                                     'success': True,
                                     'method': '2d_simultaneous'
@@ -461,7 +461,7 @@ class SingleSpectrumProcessor:
         if (hasattr(self.integrator, 'enhanced_fitter') and 
             hasattr(self.integrator.enhanced_fitter, 'enhanced_peak_fitting_parallel')):
             
-            print("✨ Using enhanced parallel Voigt fitting")
+            #print("✨ Using enhanced parallel Voigt fitting")
             
             # Define progress callback for parallel processing  
             def parallel_progress_callback(progress, status, current_item):

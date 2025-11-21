@@ -37,11 +37,11 @@ from functools import partial
 # On Mac, 'spawn' is already the default, so this has no effect there
 try:
     mp.set_start_method('spawn', force=False)
-    print(f"✅ Multiprocessing start method set to 'spawn' (Linux deadlock fix)")
+    #print(f"✅ Multiprocessing start method set to 'spawn' (Linux deadlock fix)")
 except RuntimeError:
     # Already set (can only be called once)
     current_method = mp.get_start_method()
-    print(f"ℹ️  Multiprocessing start method already set to '{current_method}'")
+    #print(f"ℹ️  Multiprocessing start method already set to '{current_method}'")
 
 class ParallelVoigtProcessor:
     """
@@ -75,7 +75,7 @@ class ParallelVoigtProcessor:
         else:
             self.max_workers = max_workers
             
-        print(f"🚀 ParallelVoigtProcessor initialized with {self.max_workers} workers")
+        #print(f"🚀 ParallelVoigtProcessor initialized with {self.max_workers} workers")
         
     def fit_all_peaks_parallel(self, peak_list, progress_callback=None):
         """
@@ -113,9 +113,9 @@ class ParallelVoigtProcessor:
             print(f"   🎯 2D overlap detection enabled with {len(all_peaks_context)} peaks context")
 
             # STEP 2: Call identify_overlap_clusters() ONCE (CRITICAL for deterministic clustering)
-            print(f"   🔍 Identifying overlap clusters using hierarchical algorithm...")
+            #print(f"   🔍 Identifying overlap clusters using hierarchical algorithm...")
             clusters = self.original_fitter.parent.identify_overlap_clusters(all_peaks_context)
-            print(f"   ✅ Found {len(clusters)} clusters from {len(peak_list)} peaks")
+            #print(f"   ✅ Found {len(clusters)} clusters from {len(peak_list)} peaks")
 
             # Build peak metadata mapping (peak position → metadata)
             peak_metadata = {}
@@ -129,21 +129,75 @@ class ParallelVoigtProcessor:
                     'list_index': i
                 }
 
-            # Phase 1: Data preparation and sharing
-            shared_context = self._prepare_shared_context(all_peaks_context)
+            # STEP 3: Separate clusters into isolated peaks vs multi-peak clusters
+            isolated_clusters = [c for c in clusters if len(c) == 1]
+            multi_peak_clusters = [c for c in clusters if len(c) > 1]
 
-            # Phase 2: Create cluster-based tasks (not peak-based!)
-            cluster_tasks = self._create_cluster_tasks(clusters, peak_metadata, peak_list, shared_context)
+            print(f"   📊 Cluster breakdown: {len(isolated_clusters)} isolated, {len(multi_peak_clusters)} multi-peak")
 
-            # Phase 3: Parallel execution (process clusters in parallel)
-            cluster_results = self._execute_parallel_cluster_fitting(cluster_tasks, progress_callback)
+            # ========== PASS 1: Fit isolated peaks to collect linewidth statistics ==========
+            spectrum_statistics = None
 
-            # Phase 4: Consolidate and return in original peak order
-            consolidated_results = self._consolidate_cluster_results(cluster_results, peak_list, peak_metadata)
+            if len(isolated_clusters) > 0:
+                print(f"\n   🔬 PASS 1: Fitting {len(isolated_clusters)} isolated peaks to learn linewidth statistics...")
+                pass1_start = time.time()
+
+                # Prepare shared context WITHOUT spectrum_statistics (Pass 1)
+                shared_context_pass1 = self._prepare_shared_context(all_peaks_context, spectrum_statistics=None)
+
+                # Create tasks for isolated peaks only
+                isolated_tasks = self._create_cluster_tasks(isolated_clusters, peak_metadata, peak_list, shared_context_pass1)
+
+                # Execute Pass 1 fitting in parallel
+                isolated_results = self._execute_parallel_cluster_fitting(isolated_tasks, progress_callback, pass_name="PASS 1")
+
+                # Collect spectrum-wide linewidth statistics from Pass 1 results
+                spectrum_statistics = self._collect_linewidth_statistics(isolated_results)
+
+                pass1_time = time.time() - pass1_start
+
+                if spectrum_statistics:
+                    print(f"   ✅ PASS 1 completed in {pass1_time:.1f}s")
+                    print(f"      📊 Learned statistics from {spectrum_statistics['n_samples']} good fits:")
+                    print(f"         F1: {spectrum_statistics['lw_f1_median']:.4f} ± {spectrum_statistics['lw_f1_mad']:.4f} ppm")
+                    print(f"         F2: {spectrum_statistics['lw_f2_median']:.5f} ± {spectrum_statistics['lw_f2_mad']:.5f} ppm")
+                    #print(f"         L/G ratios: F1={spectrum_statistics['lg_f1_median']:.2f}, F2={spectrum_statistics['lg_f2_median']:.2f}")
+                else:
+                    print(f"   ⚠️  PASS 1 completed but insufficient data for statistics (fallback to config)")
+            else:
+                print(f"   ⚠️  No isolated peaks found - skipping Pass 1, using config defaults")
+                isolated_results = []
+
+            # ========== PASS 2: Fit multi-peak clusters using learned statistics ==========
+            multi_peak_results = []
+
+            if len(multi_peak_clusters) > 0:
+                print(f"\n   🔬 PASS 2: Fitting {len(multi_peak_clusters)} multi-peak clusters with learned statistics...")
+                pass2_start = time.time()
+
+                # Prepare shared context WITH spectrum_statistics (Pass 2)
+                shared_context_pass2 = self._prepare_shared_context(all_peaks_context, spectrum_statistics=spectrum_statistics)
+
+                # Create tasks for multi-peak clusters
+                multi_peak_tasks = self._create_cluster_tasks(multi_peak_clusters, peak_metadata, peak_list, shared_context_pass2)
+
+                # Execute Pass 2 fitting in parallel
+                multi_peak_results = self._execute_parallel_cluster_fitting(multi_peak_tasks, progress_callback, pass_name="PASS 2")
+
+                pass2_time = time.time() - pass2_start
+                print(f"   ✅ PASS 2 completed in {pass2_time:.1f}s")
+            else:
+                print(f"   ⚠️  No multi-peak clusters found - skipping Pass 2")
+
+            # ========== Consolidate results from both passes ==========
+            all_cluster_results = isolated_results + multi_peak_results
+            consolidated_results = self._consolidate_cluster_results(all_cluster_results, peak_list, peak_metadata)
 
             elapsed_time = time.time() - start_time
-            print(f"✅ Parallel cluster-based fitting completed in {elapsed_time:.1f}s")
+            print(f"\n✅ Two-pass parallel fitting completed in {elapsed_time:.1f}s")
             print(f"   Results: {len(consolidated_results)} successful fits from {len(clusters)} clusters")
+            if spectrum_statistics:
+                print(f"   Improvement: Multi-peak clusters fitted with data-driven linewidth priors")
 
             return consolidated_results
 
@@ -167,18 +221,118 @@ class ParallelVoigtProcessor:
             except Exception:
                 pass  # Already cleaned or invalid
         self.shared_memory_blocks.clear()
-        
+
         # Force garbage collection to clear references
         import gc
         gc.collect()
-    
-    def _prepare_shared_context(self, all_peaks_context=None):
+
+    def _collect_linewidth_statistics(self, fitting_results):
+        """
+        Collect spectrum-wide linewidth statistics from isolated peak fits.
+
+        Used in Pass 1 to learn typical linewidths for Pass 2 cluster fitting.
+
+        Args:
+            fitting_results: List of fitting results from isolated peaks
+
+        Returns:
+            dict with keys:
+                'lw_f1_median': Median total linewidth F1 (ppm)
+                'lw_f2_median': Median total linewidth F2 (ppm)
+                'lg_f1_median': Median L/G ratio F1
+                'lg_f2_median': Median L/G ratio F2
+                'n_samples': Number of good fits used for statistics
+                'lw_f1_mad': Median absolute deviation F1 (uncertainty)
+                'lw_f2_mad': Median absolute deviation F2 (uncertainty)
+            or None if insufficient data
+        """
+        import numpy as np
+
+        linewidth_stats = {
+            'lw_f1': [],  # Total linewidth F1 (Lorentz + Gauss)
+            'lw_f2': [],  # Total linewidth F2
+            'lg_f1': [],  # L/G ratio F1
+            'lg_f2': []   # L/G ratio F2
+        }
+
+        successful_fits = 0
+
+        # Extract linewidths from successful fits
+        # fitting_results is a list of cluster results, each containing peak_results array
+        for cluster_result in fitting_results:
+            if not cluster_result or not cluster_result.get('success'):
+                continue
+
+            # Extract individual peak results from cluster
+            for peak_result in cluster_result.get('peak_results', []):
+                if not peak_result or not peak_result.get('success'):
+                    continue
+
+                # Quality threshold: only use fits with good R²
+                r_squared = peak_result.get('r_squared', 0)
+                if r_squared < 0.85:
+                    continue
+
+                successful_fits += 1
+
+                # Extract linewidth components from x_fit and y_fit sub-dicts
+                # (parallel worker stores linewidths in nested structure)
+                x_fit = peak_result.get('x_fit', {})
+                y_fit = peak_result.get('y_fit', {})
+
+                lw_gau_f2 = x_fit.get('sigma', 0)  # F2 Gaussian (1H)
+                lw_lor_f2 = x_fit.get('gamma', 0)  # F2 Lorentzian (1H)
+                lw_gau_f1 = y_fit.get('sigma', 0)  # F1 Gaussian (15N)
+                lw_lor_f1 = y_fit.get('gamma', 0)  # F1 Lorentzian (15N)
+
+                # Total linewidth = Lorentz + Gauss (both contribute to FWHM)
+                lw_f1_total = lw_lor_f1 + lw_gau_f1
+                lw_f2_total = lw_lor_f2 + lw_gau_f2
+
+                # Sanity checks before adding to statistics
+                if lw_f1_total > 0.05:  # Minimum reasonable F1 linewidth (50 ppb)
+                    linewidth_stats['lw_f1'].append(lw_f1_total)
+                    if lw_gau_f1 > 0.01:  # Avoid division by near-zero
+                        linewidth_stats['lg_f1'].append(lw_lor_f1 / lw_gau_f1)
+
+                if lw_f2_total > 0.005:  # Minimum reasonable F2 linewidth (5 ppb)
+                    linewidth_stats['lw_f2'].append(lw_f2_total)
+                    if lw_gau_f2 > 0.001:  # Avoid division by near-zero
+                        linewidth_stats['lg_f2'].append(lw_lor_f2 / lw_gau_f2)
+
+        # Need at least 3 good fits for reliable statistics
+        if len(linewidth_stats['lw_f1']) < 3:
+            print(f"   ⚠️  Insufficient isolated peaks for statistics ({successful_fits} good fits, {len(linewidth_stats['lw_f1'])} valid LW)")
+            return None
+
+        # Compute robust statistics using median (resistant to outliers)
+        spectrum_lw_f1 = np.median(linewidth_stats['lw_f1'])
+        spectrum_lw_f2 = np.median(linewidth_stats['lw_f2'])
+        spectrum_lg_f1 = np.median(linewidth_stats['lg_f1']) if len(linewidth_stats['lg_f1']) > 0 else 1.0
+        spectrum_lg_f2 = np.median(linewidth_stats['lg_f2']) if len(linewidth_stats['lg_f2']) > 0 else 1.0
+
+        # Calculate MAD (Median Absolute Deviation) for uncertainty estimate
+        mad_f1 = np.median(np.abs(np.array(linewidth_stats['lw_f1']) - spectrum_lw_f1))
+        mad_f2 = np.median(np.abs(np.array(linewidth_stats['lw_f2']) - spectrum_lw_f2))
+
+        return {
+            'lw_f1_median': spectrum_lw_f1,
+            'lw_f2_median': spectrum_lw_f2,
+            'lg_f1_median': spectrum_lg_f1,
+            'lg_f2_median': spectrum_lg_f2,
+            'n_samples': successful_fits,
+            'lw_f1_mad': mad_f1,
+            'lw_f2_mad': mad_f2
+        }
+
+    def _prepare_shared_context(self, all_peaks_context=None, spectrum_statistics=None):
         """
         Create shared memory context containing all data needed
         by worker processes without breaking current logic.
 
         Args:
             all_peaks_context: List of all peaks for overlap detection
+            spectrum_statistics: Optional dict with spectrum-wide linewidth stats from Pass 1
         """
         
         # 1. Create shared memory for spectral data
@@ -230,6 +384,9 @@ class ParallelVoigtProcessor:
             # NEW: PS2D configuration synchronization
             'ps2d_config': self._serialize_ps2d_config(),
 
+            # NEW: Spectrum-wide linewidth statistics from Pass 1
+            'spectrum_statistics': spectrum_statistics,
+
             # Path information for worker imports
             'lunaNMR_path': os.path.dirname(os.path.dirname(__file__)),
         }
@@ -248,14 +405,14 @@ class ParallelVoigtProcessor:
         if parent and hasattr(parent, 'gui_params') and parent.gui_params:
             gui_params = parent.gui_params
             use_ps2d = gui_params.get('use_ps2d_multi_peak', False)
-            print(f"📋 Parallel: gui_params from parent integrator (use_ps2d_multi_peak={use_ps2d})")
+            #print(f"📋 Parallel: gui_params from parent integrator (use_ps2d_multi_peak={use_ps2d})")
             return gui_params
 
         # Fall back to fitter's gui_params
         if hasattr(self.original_fitter, 'gui_params') and self.original_fitter.gui_params:
             gui_params = self.original_fitter.gui_params
             use_ps2d = gui_params.get('use_ps2d_multi_peak', False)
-            print(f"📋 Parallel: gui_params from fitter (use_ps2d_multi_peak={use_ps2d})")
+            #print(f"📋 Parallel: gui_params from fitter (use_ps2d_multi_peak={use_ps2d})")
             return gui_params
 
         # Last resort: empty dict
@@ -366,8 +523,8 @@ class ParallelVoigtProcessor:
                 'radF1': getattr(config, 'radF1', 0.6),
                 'radF2': getattr(config, 'radF2', 0.06)
             }
-            print(f"📋 Parallel: PS2D config serialized:")
-            print(f"   nucleus={ps2d_dict['nucleus_type']}, radF1={ps2d_dict['radF1']:.3f}, radF2={ps2d_dict['radF2']:.4f}")
+            #print(f"📋 Parallel: PS2D config serialized:")
+            #print(f"   nucleus={ps2d_dict['nucleus_type']}, radF1={ps2d_dict['radF1']:.3f}, radF2={ps2d_dict['radF2']:.4f}")
             print(f"   max_iterations={ps2d_dict['max_iterations']}")
             return ps2d_dict
         except ImportError:
@@ -460,11 +617,16 @@ class ParallelVoigtProcessor:
         print(f"   Overlap groups: {sum(1 for t in cluster_tasks if t['cluster_size'] > 1)}")
         return cluster_tasks
         
-    def _execute_parallel_cluster_fitting(self, cluster_tasks, progress_callback):
+    def _execute_parallel_cluster_fitting(self, cluster_tasks, progress_callback, pass_name=None):
         """
         Execute cluster-based fitting in parallel (IDENTICAL logic to sequential mode).
 
         Each worker fits ONE cluster and returns results for ALL peaks in that cluster.
+
+        Args:
+            cluster_tasks: List of cluster task dictionaries
+            progress_callback: Optional progress callback function
+            pass_name: Optional pass indicator ('PASS 1', 'PASS 2') for progress reporting
         """
 
         cluster_results = []
@@ -472,7 +634,8 @@ class ParallelVoigtProcessor:
         failed_clusters = 0
         total_peaks_processed = 0
 
-        print(f"⚡ Starting parallel cluster execution with {self.max_workers} workers")
+        pass_prefix = f"{pass_name}: " if pass_name else ""
+        #print(f"⚡ Starting parallel cluster execution with {self.max_workers} workers")
 
         try:
             # Test multiprocessing capability first
@@ -516,7 +679,7 @@ class ParallelVoigtProcessor:
                             progress = ((successful_clusters + failed_clusters) / len(async_results)) * 100
                             progress_callback(
                                 progress,
-                                f"Parallel cluster fitting: {successful_clusters + failed_clusters}/{len(async_results)} clusters",
+                                f"{pass_prefix}Parallel cluster fitting: {successful_clusters + failed_clusters}/{len(async_results)} clusters",
                                 f"{total_peaks_processed} peaks fitted"
                             )
 
@@ -573,8 +736,8 @@ class ParallelVoigtProcessor:
                     results_by_assignment[str(assignment)] = peak_result
 
         # DEBUG: Print what we have
-        print(f"📋 Consolidation: {len(results_by_number)} results by peak_number, {len(results_by_assignment)} by assignment")
-        print(f"   Available peak_numbers: {sorted(results_by_number.keys())[:10]}... (showing first 10)")
+        #print(f"📋 Consolidation: {len(results_by_number)} results by peak_number, {len(results_by_assignment)} by assignment")
+        #print(f"   Available peak_numbers: {sorted(results_by_number.keys())[:10]}... (showing first 10)")
 
         # Return results in original peak_list order using peak_number match
         # CRITICAL: Add placeholders for failed fits to maintain 1:1 index mapping (same as sequential mode)
@@ -871,7 +1034,7 @@ def _initialize_worker_fitter(shared_context):
     try:
         from lunaNMR.core.ps2d_2d_fitter import Ps2dMultiPeakFitter2D
         from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
-        print(f"✅ Worker: PS2D 2D fitter modules imported successfully")
+        #print(f"✅ Worker: PS2D 2D fitter modules imported successfully")
     except ImportError as e:
         print(f"❌ Worker: PS2D 2D fitter imports failed - {e}")
         print(f"   Workers will fall back to 1D fitting for overlapping peaks")
@@ -905,6 +1068,13 @@ def _initialize_worker_fitter(shared_context):
     # CRITICAL: Set gui_params on integrator (needed for PS2D multi-peak activation)
     worker_integrator.gui_params = shared_context['gui_params']
 
+    # NEW: Set spectrum-wide linewidth statistics (Pass 2 only)
+    spectrum_statistics = shared_context.get('spectrum_statistics', None)
+    if spectrum_statistics:
+        worker_integrator.spectrum_statistics = spectrum_statistics
+        #print(f"✅ Worker: Spectrum statistics available (n={spectrum_statistics.get('n_samples', 0)} isolated peaks)")
+        #print(f"   F1={spectrum_statistics.get('lw_f1_median', 0):.4f} ppm, F2={spectrum_statistics.get('lw_f2_median', 0):.5f} ppm")
+
     # CRITICAL: Synchronize PS2D configuration
     ps2d_config = shared_context.get('ps2d_config', {})
     if ps2d_config:
@@ -921,16 +1091,16 @@ def _initialize_worker_fitter(shared_context):
             radF1 = ps2d_config.get('radF1', 'N/A')
             radF2 = ps2d_config.get('radF2', 'N/A')
             max_iter = ps2d_config.get('max_iterations', 'N/A')
-            print(f"✅ Worker: PS2D config synchronized (nucleus={nucleus})")
-            print(f"   radF1={radF1}, radF2={radF2}, max_iterations={max_iter}")
+            #print(f"✅ Worker: PS2D config synchronized (nucleus={nucleus})")
+            #print(f"   radF1={radF1}, radF2={radF2}, max_iterations={max_iter}")
         except ImportError:
             print(f"⚠️ Worker: Could not synchronize PS2D config (module not available)")
 
     # DEBUG: Verify gui_params were set
-    if worker_integrator.gui_params:
-        print(f"✅ Worker: gui_params set on integrator (use_ps2d_multi_peak={worker_integrator.gui_params.get('use_ps2d_multi_peak', 'N/A')})")
-    else:
-        print(f"❌ Worker: gui_params is None or empty!")
+    #if worker_integrator.gui_params:
+    #    print(f"✅ Worker: gui_params set on integrator (use_ps2d_multi_peak={worker_integrator.gui_params.get('use_ps2d_multi_peak', 'N/A')})")
+    #else:
+    #    print(f"❌ Worker: gui_params is None or empty!")
 
     # 6. Restore enhanced fitter parameters
     if worker_integrator.enhanced_fitter:
@@ -943,7 +1113,7 @@ def _initialize_worker_fitter(shared_context):
         # CRITICAL: Update enhanced_fitter's parent reference to point to worker_integrator
         # This ensures enhanced_fitter calls adaptive_fit_1d on the correct integrator with gui_params
         worker_fitter.parent = worker_integrator
-        print(f"✅ Worker: Enhanced fitter parent updated to worker_integrator")
+        #print(f"✅ Worker: Enhanced fitter parent updated to worker_integrator")
         
         # Advanced settings
         _restore_fitting_windows(worker_fitter, shared_context['fitting_windows'])
@@ -962,11 +1132,11 @@ def _initialize_worker_fitter(shared_context):
     ]
     missing_methods = [m for m in required_methods if not hasattr(worker_integrator, m)]
 
-    if missing_methods:
-        print(f"⚠️ Worker missing PS2D methods: {missing_methods}")
-        print(f"   2D multi-peak fitting may fail, will fall back to 1D")
-    else:
-        print(f"✅ Worker: All PS2D 2D routing methods present")
+    #if missing_methods:
+    #    print(f"⚠️ Worker missing PS2D methods: {missing_methods}")
+    #    print(f"   2D multi-peak fitting may fail, will fall back to 1D")
+    #else:
+        #print(f"✅ Worker: All PS2D 2D routing methods present")
 
     # Cleanup shared memory reference in worker
     try:

@@ -18,6 +18,7 @@ import os
 import sys
 import tkinter as tk
 from tkinter import ttk, messagebox
+import customtkinter as ctk
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -72,6 +73,46 @@ except ImportError:
         def plot_peaks(self, integrator, show_detected=True, show_assigned=True):
             pass
 
+# CustomTkinter color theme (light grey)
+BG_COLOR = "#F0F0F0"  # Very light grey background
+BUTTON_FG_COLOR = "#D3D3D3"  # Light grey
+BUTTON_HOVER_COLOR = "#B0B0B0"  # Darker grey for hover
+BUTTON_TEXT_COLOR = "#000000"  # Black text
+
+class CTkLabelFrame(ctk.CTkFrame):
+    """Custom labeled frame with rounded corners using CustomTkinter"""
+    def __init__(self, parent, text="", padding=10, corner_radius=10, **kwargs):
+        # Extract padding value (can be int or tuple)
+        if isinstance(padding, (tuple, list)):
+            pad_x, pad_y = padding[0], padding[1] if len(padding) > 1 else padding[0]
+        elif isinstance(padding, str):
+            # Handle string padding like "10" or "(10, 5)"
+            padding = padding.strip("()")
+            parts = [p.strip() for p in padding.split(",")]
+            pad_x = int(parts[0])
+            pad_y = int(parts[1]) if len(parts) > 1 else pad_x
+        else:
+            pad_x = pad_y = int(padding)
+
+        # Set fg_color to match background if not provided
+        if 'fg_color' not in kwargs:
+            kwargs['fg_color'] = BG_COLOR  # Match background color
+
+        # Create rounded frame
+        super().__init__(parent, corner_radius=corner_radius, **kwargs)
+
+        # Add label at top if text provided
+        if text:
+            label = ctk.CTkLabel(self, text=text, font=("TkDefaultFont", 10, "bold"))
+            label.pack(anchor="w", padx=pad_x, pady=(pad_y//2, 0))
+
+        # Store padding for child widgets
+        self._padding = (pad_x, pad_y)
+
+    def get_content_frame(self):
+        """Return self as the content frame (for compatibility with usage patterns)"""
+        return self
+
 class SpectrumBrowserDialog:
     """Dialog for browsing and selecting individual spectra from series results"""
 
@@ -89,6 +130,16 @@ class SpectrumBrowserDialog:
         self.dialog.transient(parent)
         # Remove grab_set() to allow interaction with spectrum viewer windows
         # self.dialog.grab_set()  # This was blocking spectrum viewer buttons
+
+        # Set window background color
+        self.dialog.configure(bg=BG_COLOR)
+
+        # Configure ttk styles for consistent background
+        style = ttk.Style()
+        style.configure("TFrame", background=BG_COLOR)
+        style.configure("TLabelframe", background=BG_COLOR)
+        style.configure("TLabelframe.Label", background=BG_COLOR)
+        style.configure("TLabel", background=BG_COLOR)
 
         self.setup_dialog()
         self.populate_spectrum_list()
@@ -113,7 +164,7 @@ class SpectrumBrowserDialog:
                      font=('TkDefaultFont', 10), foreground='blue').pack(side=tk.RIGHT)
 
         # Search and filter frame
-        filter_frame = ttk.LabelFrame(main_frame, text="🔍 Filter & Search", padding=10)
+        filter_frame = CTkLabelFrame(main_frame, text="🔍 Filter & Search", padding=10)
         filter_frame.pack(fill=tk.X, pady=(0, 10))
 
         # Search box
@@ -145,7 +196,7 @@ class SpectrumBrowserDialog:
         status_combo.bind('<<ComboboxSelected>>', self.filter_spectra)
 
         # Spectrum list frame
-        list_frame = ttk.LabelFrame(main_frame, text="📋 Spectrum List", padding=10)
+        list_frame = CTkLabelFrame(main_frame, text="📋 Spectrum List", padding=10)
         list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         # Create treeview for spectrum list
@@ -178,15 +229,15 @@ class SpectrumBrowserDialog:
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X)
 
-        ttk.Button(button_frame, text="📊 Open Spectrum Viewer",
-                  command=self.open_spectrum_viewer).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(button_frame, text="📈 Quick Analysis",
-                  command=self.show_quick_analysis).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(button_frame, text="🔄 Refresh List",
-                  command=self.refresh_list).pack(side=tk.LEFT, padx=(0, 20))
+        ctk.CTkButton(button_frame, text="📊 Open Spectrum Viewer",
+                  command=self.open_spectrum_viewer, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=(0, 10))
+        ctk.CTkButton(button_frame, text="📈 Quick Analysis",
+                  command=self.show_quick_analysis, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=(0, 10))
+        ctk.CTkButton(button_frame, text="🔄 Refresh List",
+                  command=self.refresh_list, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=(0, 20))
 
-        ttk.Button(button_frame, text="Close",
-                  command=self.dialog.destroy).pack(side=tk.RIGHT)
+        ctk.CTkButton(button_frame, text="Close",
+                  command=self.dialog.destroy, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.RIGHT)
 
     def populate_spectrum_list(self):
         """Populate the spectrum list with data from batch results"""
@@ -674,6 +725,17 @@ class SpectrumViewer:
 
         self.window.geometry(f"{window_width}x{window_height}")
         self.window.minsize(1200, 800)
+
+        # Set window background color
+        self.window.configure(bg=BG_COLOR)
+
+        # Configure ttk styles for consistent background
+        style = ttk.Style()
+        style.configure("TFrame", background=BG_COLOR)
+        style.configure("TLabelframe", background=BG_COLOR)
+        style.configure("TLabelframe.Label", background=BG_COLOR)
+        style.configure("TLabel", background=BG_COLOR)
+        style.configure("TCheckbutton", background=BG_COLOR)
         # Make spectrum viewer independent - not transient to allow button interaction
         # self.window.transient(parent)  # This was preventing button clicks
 
@@ -699,17 +761,17 @@ class SpectrumViewer:
 
         # Tab 1: Main Spectrum (current functionality preserved)
         self.main_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.main_tab, text="📊 Main Spectrum")
+        self.notebook.add(self.main_tab, text="Main Spectrum")
         self.setup_main_spectrum_tab()
 
         # Tab 2: Voigt Analysis (integrated directly instead of popup window)
         self.voigt_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.voigt_tab, text="📈 Voigt Analysis")
+        self.notebook.add(self.voigt_tab, text="Voigt Analysis")
         self.setup_voigt_analysis_tab()
 
         # Tab 3: 3D Voigt Analysis (supplementary visualization)
         self.voigt_3d_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.voigt_3d_tab, text="🎨 3D Voigt Analysis")
+        self.notebook.add(self.voigt_3d_tab, text="3D Voigt Analysis")
         self.setup_voigt_3d_analysis_tab()
 
     def setup_main_spectrum_tab(self):
@@ -786,19 +848,19 @@ class SpectrumViewer:
 
         # Left panel contents
         # ENHANCED: Spectrum plot
-        plot_container = ttk.LabelFrame(left_panel, text="📈 Spectrum View", padding=5)
+        plot_container = CTkLabelFrame(left_panel, text="📈 Spectrum View", padding=5)
         plot_container.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         # Setup spectrum plot area
         self.setup_spectrum_plot(plot_container)
 
         # Setup contour controls below the plot in left panel
-        contour_frame = ttk.LabelFrame(left_panel, text="🎨 Contour & Navigation Controls", padding=5)
+        contour_frame = CTkLabelFrame(left_panel, text="🎨 Contour & Navigation Controls", padding=5)
         contour_frame.pack(fill=tk.X, pady=(0, 0))
         self.setup_contour_controls(contour_frame)
 
         # Right panel contents - Peak analysis panel (restored to original)
-        analysis_container = ttk.LabelFrame(right_panel, text="🔬 Peak Analysis", padding=5)
+        analysis_container = CTkLabelFrame(right_panel, text="🔬 Peak Analysis", padding=5)
         analysis_container.pack(fill=tk.BOTH, expand=True)
         self.setup_peak_analysis_panel(analysis_container)
 
@@ -823,7 +885,7 @@ class SpectrumViewer:
         voigt_paned.add(right_panel, weight=1)  # 25% of space
 
         # Left panel contents - Voigt analysis plot
-        plot_container = ttk.LabelFrame(left_panel, text="📈 Voigt Analysis", padding=5)
+        plot_container = CTkLabelFrame(left_panel, text="📈 Voigt Analysis", padding=5)
         plot_container.pack(fill=tk.BOTH, expand=True)
 
         # Create 2x2 grid for Voigt analysis plots like main GUI
@@ -916,7 +978,7 @@ class SpectrumViewer:
         voigt_3d_paned.add(right_panel_3d, weight=1)
 
         # Left panel: 3D plot container
-        plot_container = ttk.LabelFrame(left_panel_3d, text="🎨 3D Voigt Surface Analysis", padding=5)
+        plot_container = CTkLabelFrame(left_panel_3d, text="🎨 3D Voigt Surface Analysis", padding=5)
         plot_container.pack(fill=tk.BOTH, expand=True)
 
         # Create control frame at top
@@ -924,11 +986,13 @@ class SpectrumViewer:
         control_frame_3d.pack(side=tk.TOP, fill=tk.X, padx=5, pady=3)
 
         # Row 1: Layer toggling checkboxes
-        layer_frame = ttk.LabelFrame(control_frame_3d, text="Layer Visibility", padding=3)
+        layer_frame = CTkLabelFrame(control_frame_3d, text="Layer Visibility", padding=3)
         layer_frame.pack(side=tk.LEFT, padx=3)
 
         self.show_exp_3d_var = tk.BooleanVar(value=True)
         self.show_fit_3d_var = tk.BooleanVar(value=True)
+        self.show_individual_3d_var = tk.BooleanVar(value=True)
+        self.show_peak_labels_3d_var = tk.BooleanVar(value=True)
         self.show_resid_3d_var = tk.BooleanVar(value=True)
         # self.show_cross_3d_var = tk.BooleanVar(value=True)  # Disabled - code kept for future use
 
@@ -938,6 +1002,12 @@ class SpectrumViewer:
         ttk.Checkbutton(layer_frame, text="Fitted", variable=self.show_fit_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_fitted(self.show_fit_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
+        ttk.Checkbutton(layer_frame, text="Individual Peaks", variable=self.show_individual_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_individual_peaks(self.show_individual_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
+        ttk.Checkbutton(layer_frame, text="Peak Labels", variable=self.show_peak_labels_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_peak_labels(self.show_peak_labels_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
         ttk.Checkbutton(layer_frame, text="Residuals", variable=self.show_resid_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_residuals(self.show_resid_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
@@ -946,7 +1016,7 @@ class SpectrumViewer:
         #                 ).pack(side=tk.LEFT, padx=2)  # Disabled - code kept for future use
 
         # Row 2: Residual mode radio buttons
-        residual_frame = ttk.LabelFrame(control_frame_3d, text="Residual Mode", padding=3)
+        residual_frame = CTkLabelFrame(control_frame_3d, text="Residual Mode", padding=3)
         residual_frame.pack(side=tk.LEFT, padx=3)
 
         self.residual_mode_3d_var = tk.StringVar(value='overlay')
@@ -960,7 +1030,7 @@ class SpectrumViewer:
                         ).pack(side=tk.LEFT, padx=2)
 
         # Row 3: Intensity scaling slider
-        intensity_frame = ttk.LabelFrame(control_frame_3d, text="Intensity Scale", padding=3)
+        intensity_frame = CTkLabelFrame(control_frame_3d, text="Intensity Scale", padding=3)
         intensity_frame.pack(side=tk.LEFT, padx=3, fill=tk.X, expand=True)
 
         ttk.Label(intensity_frame, text="50%").pack(side=tk.LEFT, padx=2)
@@ -1008,7 +1078,7 @@ class SpectrumViewer:
         self.canvas_voigt_3d.draw()
 
         # Right panel: Peak Navigator (reuse from 2D Voigt tab)
-        navigator_frame_3d = ttk.LabelFrame(right_panel_3d, text="📋 Peak Navigator", padding=5)
+        navigator_frame_3d = CTkLabelFrame(right_panel_3d, text="📋 Peak Navigator", padding=5)
         navigator_frame_3d.pack(fill=tk.BOTH, expand=True)
 
         # Reuse existing Peak Navigator from 2D Voigt tab (same instance)
@@ -1123,7 +1193,7 @@ class SpectrumViewer:
     def setup_peak_analysis_panel(self, parent):
         """Setup the peak analysis panel"""
         # Peak info frame
-        info_frame = ttk.LabelFrame(parent, text="🎯 Peak Information", padding=10)
+        info_frame = CTkLabelFrame(parent, text="🎯 Peak Information", padding=10)
         info_frame.pack(fill=tk.X, pady=(0, 5))
 
         self.peak_info_text = tk.Text(info_frame, height=8, width=40, wrap=tk.WORD,
@@ -1135,7 +1205,7 @@ class SpectrumViewer:
         info_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Peak list frame
-        list_frame = ttk.LabelFrame(parent, text="📋 Peak List", padding=10)
+        list_frame = CTkLabelFrame(parent, text="📋 Peak List", padding=10)
         list_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
 
         # Create peak list treeview
@@ -1213,28 +1283,28 @@ class SpectrumViewer:
     def setup_controls(self, parent):
         """Setup the control panel"""
         # Navigation frame
-        nav_frame = ttk.LabelFrame(parent, text="🧭 Navigation", padding=5)
+        nav_frame = CTkLabelFrame(parent, text="🧭 Navigation", padding=5)
         nav_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
 
-        ttk.Button(nav_frame, text="◀ Previous", command=self.previous_spectrum).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(nav_frame, text="Next ▶", command=self.next_spectrum).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(nav_frame, text="🏠 Center View", command=self.center_view).pack(side=tk.LEFT)
+        ctk.CTkButton(nav_frame, text="◀ Previous", command=self.previous_spectrum, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkButton(nav_frame, text="Next ▶", command=self.next_spectrum, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkButton(nav_frame, text="🏠 Center View", command=self.center_view, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT)
 
         # Analysis frame
-        analysis_frame = ttk.LabelFrame(parent, text="🔬 Analysis", padding=5)
+        analysis_frame = CTkLabelFrame(parent, text="🔬 Analysis", padding=5)
         analysis_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
 
-        ttk.Button(analysis_frame, text="📊 Voigt Analysis", command=self.switch_to_voigt_analysis).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(analysis_frame, text="📈 Peak Summary", command=self.show_peak_summary).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(analysis_frame, text="💾 Export Data", command=self.export_spectrum_data).pack(side=tk.LEFT)
+        ctk.CTkButton(analysis_frame, text="📊 Voigt Analysis", command=self.switch_to_voigt_analysis, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkButton(analysis_frame, text="📈 Peak Summary", command=self.show_peak_summary, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkButton(analysis_frame, text="💾 Export Data", command=self.export_spectrum_data, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT)
 
         # Close button
-        ttk.Button(parent, text="Close", command=self.window.destroy).pack(side=tk.RIGHT)
+        ctk.CTkButton(parent, text="Close", command=self.window.destroy, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.RIGHT)
 
     def setup_contour_controls(self, parent):
         """Setup contour controls (imported from main window)"""
         # Contour controls frame
-        contour_frame = ttk.LabelFrame(parent, text="🎨 Contour Settings", padding=5)
+        contour_frame = CTkLabelFrame(parent, text="🎨 Contour Settings", padding=5)
         contour_frame.pack(fill=tk.X, pady=(5, 0))
 
         # Main contour grid
@@ -1276,10 +1346,10 @@ class SpectrumViewer:
         preset_frame.pack(fill=tk.X, pady=(5, 0))
 
         ttk.Label(preset_frame, text="Quick Presets:").pack(side=tk.LEFT)
-        ttk.Button(preset_frame, text="Low Detail", width=8, command=self.preset_low).pack(side=tk.LEFT, padx=2)
-        ttk.Button(preset_frame, text="Medium", width=8, command=self.preset_medium).pack(side=tk.LEFT, padx=2)
-        ttk.Button(preset_frame, text="High Detail", width=8, command=self.preset_high).pack(side=tk.LEFT, padx=2)
-        ttk.Button(preset_frame, text="Auto", width=8, command=self.preset_auto).pack(side=tk.LEFT, padx=2)
+        ctk.CTkButton(preset_frame, text="Low Detail", width=8, command=self.preset_low, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=2)
+        ctk.CTkButton(preset_frame, text="Medium", width=8, command=self.preset_medium, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=2)
+        ctk.CTkButton(preset_frame, text="High Detail", width=8, command=self.preset_high, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=2)
+        ctk.CTkButton(preset_frame, text="Auto", width=8, command=self.preset_auto, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=2)
 
     def load_spectrum_data_proper(self):
         """Load spectrum data properly like main window with performance optimization"""
@@ -2257,7 +2327,7 @@ Line Width: {peak_data.get('Line_Width', 'N/A')}
 
             # Tab 1: Main spectrum view
             main_tab = ttk.Frame(notebook)
-            notebook.add(main_tab, text="🔬 Main Spectrum")
+            notebook.add(main_tab, text="Main Spectrum")
 
             # Create main spectrum plot
             fig_main, ax_main = plt.subplots(1, 1, figsize=(8, 6))
@@ -2268,7 +2338,7 @@ Line Width: {peak_data.get('Line_Width', 'N/A')}
 
             # Tab 2: Voigt analysis (same layout as main window)
             voigt_tab = ttk.Frame(notebook)
-            notebook.add(voigt_tab, text="📈 Voigt Analysis")
+            notebook.add(voigt_tab, text="Voigt Analysis")
 
             # Create 2x2 subplot layout like main window
             fig_voigt, axes_voigt = plt.subplots(2, 2, figsize=(3, 6))
@@ -3095,8 +3165,8 @@ Analysis Notes:
                 analysis_display.config(state=tk.DISABLED)
 
                 # Close button
-                ttk.Button(analysis_window, text="Close",
-                          command=analysis_window.destroy).pack(pady=10)
+                ctk.CTkButton(analysis_window, text="Close",
+                          command=analysis_window.destroy, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(pady=10)
 
                 print(f"🔬 Showing detailed analysis for {assignment}")
             else:

@@ -17,6 +17,7 @@ Date: 2025
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+import customtkinter as ctk
 import os
 import glob
 import json
@@ -33,6 +34,12 @@ except ImportError:
         return text
     def configure_emoji_support(widget):
         pass
+
+
+# CustomTkinter button color theme (light grey)
+BUTTON_FG_COLOR = "#D3D3D3"  # Light grey
+BUTTON_HOVER_COLOR = "#B0B0B0"  # Darker grey for hover  
+BUTTON_TEXT_COLOR = "#000000"  # Black text
 
 def natural_sort_key(path):
     """
@@ -102,36 +109,36 @@ class EnhancedFileListFrame(ttk.Frame):
         self.current_folder = None
         self.callback = None
         self.file_metadata = {}
-
-        # Title with icon
-        self.title_label = ttk.Label(self, text=get_display_text(f"📁 {title}"), font=('TkDefaultFont', 10, 'bold'))
-        self.title_label.pack(anchor=tk.W, pady=(0, 5))
+        self.title = title  # Store title for button and dialog
 
         # Enhanced folder selection
         folder_frame = ttk.Frame(self)
         folder_frame.pack(fill=tk.X, pady=(0, 5))
 
-        self.folder_button = ttk.Button(folder_frame, text=f"Select {title} Folder",
-                                       command=self.select_folder, width=20)
+        self.folder_button = ctk.CTkButton(folder_frame, text=title,
+                                          command=self.select_folder, width=15*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
         self.folder_button.pack(side=tk.LEFT, padx=(0, 5))
 
         # Refresh button
-        self.refresh_button = ttk.Button(folder_frame, text="🔄", width=3,
-                                       command=self.refresh_file_list, state='disabled')
+        self.refresh_button = ctk.CTkButton(folder_frame, text="🔄", width=3*8,
+                                           command=self.refresh_file_list, state='disabled', corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
         self.refresh_button.pack(side=tk.LEFT)
 
-        # Current folder display
+        # Current folder display - make it non-clickable by binding to nothing
         self.folder_label = ttk.Label(self, text="📂 No folder selected",
-                                     foreground='gray', font=('TkDefaultFont', 9))
-        self.folder_label.pack(anchor=tk.W, pady=(0, 5))
+                                     foreground='gray', font=('TkDefaultFont', 8))  # Smaller font
+        self.folder_label.pack(anchor=tk.W, pady=(0, 2))  # Less padding
 
         # Enhanced file list with metadata
         list_frame = ttk.Frame(self)
         list_frame.pack(fill=tk.BOTH, expand=True)
 
         # File listbox with custom styling
-        self.file_listbox = tk.Listbox(list_frame, height=height,width=width, font=('TkDefaultFont', 8),
-                                      selectmode=tk.SINGLE, activestyle='dotbox')
+        # Increase minimum height to make it easier to click
+        listbox_height = max(height, 6)  # Minimum 6 rows for better clickability
+        self.file_listbox = tk.Listbox(list_frame, height=listbox_height, width=width, font=('TkDefaultFont', 8),
+                                      selectmode=tk.SINGLE, activestyle='dotbox',
+                                      highlightthickness=2, highlightcolor='blue')  # Add highlight for visibility
 
         # Scrollbars
         scrollbar_y = ttk.Scrollbar(list_frame, orient="vertical", command=self.file_listbox.yview)
@@ -161,22 +168,25 @@ class EnhancedFileListFrame(ttk.Frame):
         self.metadata_label = ttk.Label(status_frame, text="", foreground='gray', font=('TkDefaultFont', 8))
         self.metadata_label.pack(side=tk.RIGHT)
 
-        #File info GM added comment
-        #File preview area (optional)
-        self.preview_frame = ttk.LabelFrame(self, text="📋 File Info", padding=5)
-        self.preview_frame.pack(fill=tk.X, pady=(5, 0))
-
-        self.preview_text = tk.Text(self.preview_frame, height=3, width=40, font=('Courier', 8),
-                                   wrap=tk.WORD, state='disabled')
-        self.preview_text.pack(fill=tk.X)
-
     def select_folder(self):
         """Enhanced folder selection with validation"""
         initial_dir = self.current_folder if self.current_folder else os.getcwd()
-        folder = filedialog.askdirectory(
-            title=f"Select {self.title_label['text'].replace(get_display_text('📁 '), '')} Folder",
-            initialdir=initial_dir
-        )
+
+        # Temporarily disable button to prevent re-triggering
+        self.folder_button.configure(state='disabled')
+        self.update_idletasks()
+
+        try:
+            folder = filedialog.askdirectory(
+                title=f"Select {self.title} Folder",
+                initialdir=initial_dir
+            )
+        finally:
+            # Re-enable button after dialog closes
+            self.folder_button.configure(state='normal')
+            # Force focus back to main window to prevent event capture issues
+            self.focus_set()
+            self.update_idletasks()
 
         if folder:
             self.current_folder = folder
@@ -193,7 +203,7 @@ class EnhancedFileListFrame(ttk.Frame):
                     foreground='red'
                 )
 
-            self.refresh_button.config(state='normal')
+            self.refresh_button.configure(state='normal')
             self.refresh_file_list()
 
     def refresh_file_list(self):
@@ -261,9 +271,6 @@ class EnhancedFileListFrame(ttk.Frame):
             mod_time = metadata['modified'].strftime("%Y-%m-%d %H:%M")
             self.metadata_label.config(text=f"Modified: {mod_time}")
 
-            # Update preview
-            self.update_preview(metadata)
-
             # Call callback if set
             if self.callback:
                 self.callback(metadata['path'], filename)
@@ -271,20 +278,6 @@ class EnhancedFileListFrame(ttk.Frame):
     def on_file_double_click(self, event=None):
         """Handle double-click events"""
         self.on_file_select(event)
-
-    def update_preview(self, metadata):
-        """Update file preview area"""
-        self.preview_text.config(state='normal')
-        self.preview_text.delete(1.0, tk.END)
-
-        preview_info = (
-            f"{get_display_text('📁')} Path: {metadata['path']}\n"
-            f"📏 Size: {metadata['size_mb']:.2f} MB\n"
-            f"📅 Modified: {metadata['modified'].strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-
-        self.preview_text.insert(1.0, preview_info)
-        self.preview_text.config(state='disabled')
 
     def set_callback(self, callback):
         """Set callback function for file selection"""
@@ -533,9 +526,9 @@ class StatisticsPanel(ttk.LabelFrame):
         button_frame = ttk.Frame(self)
         button_frame.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(10, 0))
 
-        ttk.Button(button_frame, text="🔄 Refresh", command=self.refresh_display).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(button_frame, text="💾 Export", command=self.export_stats).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(button_frame, text="🗑️ Clear", command=self.clear_stats).pack(side=tk.LEFT)
+        ctk.CTkButton(button_frame, text="🔄 Refresh", command=self.refresh_display, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkButton(button_frame, text="💾 Export", command=self.export_stats, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkButton(button_frame, text="🗑️ Clear", command=self.clear_stats, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT)
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
@@ -764,7 +757,7 @@ class PeakNavigator(ttk.Frame):
         self.tree.heading("assignment", text="Assignment", anchor="center")
         self.tree.heading("x_coord", text="X (1H)", anchor="center")
         self.tree.heading("y_coord", text="Y", anchor="center")
-        self.tree.heading("height", text="Height", anchor="center")
+        self.tree.heading("height", text="Volume", anchor="center")
 
         self.tree.column("assignment", width=80, anchor="center", minwidth=60)
         self.tree.column("x_coord", width=40, anchor="center", minwidth=30)
@@ -803,8 +796,8 @@ class PeakNavigator(ttk.Frame):
         button_frame = ttk.Frame(self)
         button_frame.pack(fill=tk.X)
 
-        self.refresh_btn = ttk.Button(button_frame, text="🔄",
-                                     command=self.refresh_peak_list, width=3)
+        self.refresh_btn = ctk.CTkButton(button_frame, text="🔄",
+                                        command=self.refresh_peak_list, width=3*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
         self.refresh_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         # Navigation sub-frame for Previous/Analyze/Next buttons
@@ -812,40 +805,40 @@ class PeakNavigator(ttk.Frame):
         nav_frame.pack(side=tk.LEFT)
 
         # Previous peak button (small)
-        self.prev_btn = ttk.Button(nav_frame, text="◀", width=3,
-                                  command=self.navigate_to_previous_peak,
-                                  state='disabled')
+        self.prev_btn = ctk.CTkButton(nav_frame, text="◀", width=3*8,
+                                     command=self.navigate_to_previous_peak,
+                                     state='disabled', corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
         self.prev_btn.pack(side=tk.LEFT, padx=(0, 2))
 
         # Main analyze button (unchanged functionality)
-        self.analysis_btn = ttk.Button(nav_frame, text="🔬",
-                                      command=self.analyze_selected_peak, width=3)
+        self.analysis_btn = ctk.CTkButton(nav_frame, text="🔬",
+                                         command=self.analyze_selected_peak, width=3*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
         self.analysis_btn.pack(side=tk.LEFT)
 
         # Next peak button (small)
-        self.next_btn = ttk.Button(nav_frame, text="▶", width=3,
-                                  command=self.navigate_to_next_peak,
-                                  state='disabled')
+        self.next_btn = ctk.CTkButton(nav_frame, text="▶", width=3*8,
+                                     command=self.navigate_to_next_peak,
+                                     state='disabled', corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
         self.next_btn.pack(side=tk.LEFT, padx=(2, 0))
 
         # Interactive editing frame for detected peaks
         self.edit_frame = ttk.Frame(self)
         self.edit_frame.pack(fill=tk.X, pady=(5, 0))
 
-        self.edit_btn = ttk.Button(self.edit_frame, text="✏️",
-                                  command=self.edit_selected_peak, width=3)
+        self.edit_btn = ctk.CTkButton(self.edit_frame, text="✏️",
+                                     command=self.edit_selected_peak, width=3*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
         self.edit_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.delete_btn = ttk.Button(self.edit_frame, text="🗑️",
-                                    command=self.delete_selected_peak, width=3)
+        self.delete_btn = ctk.CTkButton(self.edit_frame, text="🗑️",
+                                       command=self.delete_selected_peak, width=3*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
         self.delete_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.add_btn = ttk.Button(self.edit_frame, text="➕",
-                                 command=self.add_new_peak, width=3)
+        self.add_btn = ctk.CTkButton(self.edit_frame, text="➕",
+                                    command=self.add_new_peak, width=3*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
         self.add_btn.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.save_btn = ttk.Button(self.edit_frame, text="💾",
-                                  command=self.save_peak_changes, width=3)
+        self.save_btn = ctk.CTkButton(self.edit_frame, text="💾",
+                                     command=self.save_peak_changes, width=3*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
         self.save_btn.pack(side=tk.LEFT)
 
         # Initialize button states
@@ -1187,10 +1180,10 @@ class PeakNavigator(ttk.Frame):
         is_detected = (self.selected_peak_type == "detected")
         has_selection = bool(self.tree.selection())
 
-        self.edit_btn.config(state="normal" if is_detected and has_selection else "disabled")
-        self.delete_btn.config(state="normal" if is_detected and has_selection else "disabled")
-        self.add_btn.config(state="normal" if is_detected else "disabled")
-        self.save_btn.config(state="normal" if is_detected else "disabled")
+        self.edit_btn.configure(state="normal" if is_detected and has_selection else "disabled")
+        self.delete_btn.configure(state="normal" if is_detected and has_selection else "disabled")
+        self.add_btn.configure(state="normal" if is_detected else "disabled")
+        self.save_btn.configure(state="normal" if is_detected else "disabled")
 
     def navigate_to_previous_peak(self):
         """Navigate to previous peak in the list - NEW FUNCTIONALITY"""
@@ -1287,17 +1280,17 @@ class PeakNavigator(ttk.Frame):
             self.navigation_enabled = has_multiple_peaks
 
             if has_multiple_peaks:
-                self.prev_btn.config(state='normal')
-                self.next_btn.config(state='normal')
+                self.prev_btn.configure(state='normal')
+                self.next_btn.configure(state='normal')
             else:
-                self.prev_btn.config(state='disabled')
-                self.next_btn.config(state='disabled')
+                self.prev_btn.configure(state='disabled')
+                self.next_btn.configure(state='disabled')
 
         except Exception as e:
             print(f"Error updating navigation button states: {e}")
             # Fallback: disable buttons on error
-            self.prev_btn.config(state='disabled')
-            self.next_btn.config(state='disabled')
+            self.prev_btn.configure(state='disabled')
+            self.next_btn.configure(state='disabled')
 
     def edit_selected_peak(self):
         """Edit the selected peak assignment and coordinates"""
@@ -1533,7 +1526,7 @@ class PeakNavigator(ttk.Frame):
             # Assignments can be floats (4.0) or strings ("4") depending on source
             assignment = str(assignment_raw) if assignment_raw else ''
 
-            height = result.get('height', result.get('amplitude', result.get('intensity', '')))
+            height = result.get('volume', result.get('intensity', result.get('height', '')))
             r_squared = result.get('r_squared', result.get('R_squared', 0.0))
             fitted_flag = result.get('fitted', True)  # Default to fitted unless explicitly marked as failed
 

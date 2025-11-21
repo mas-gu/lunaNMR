@@ -17,7 +17,7 @@ import os
 import matplotlib
 
 matplotlib.use("TkAgg", force=True)
-print(f"🖼️ Matplotlib backend forced to: {matplotlib.get_backend()}")
+#print(f"🖼️ Matplotlib backend forced to: {matplotlib.get_backend()}")
 
 import tkinter as tk
 from tkinter import messagebox, ttk

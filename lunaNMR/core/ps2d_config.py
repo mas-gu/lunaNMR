@@ -78,6 +78,20 @@ class PS2DConfig:
             'typical_linewidth_f2': 0.04,   # Typical 1H FWHM (ppm) - matched to user's spectrum
 
             # ================================================================
+            # Heavy overlap threshold (contaminated cross-sections)
+            # ================================================================
+            # When peaks are within this elliptical distance, their 1D cross-sections
+            # are contaminated by neighbors, so use typical linewidths instead of measured FWHM
+            'heavy_overlap_threshold': 1.5,  # Elliptical distance threshold for contaminated cross-sections
+
+            # ================================================================
+            # Too-close threshold (spectral ambiguity requiring constraints)
+            # ================================================================
+            # When peaks are within this elliptical distance, apply L/G ratio and
+            # intensity ratio constraints to prevent unrealistic decompositions
+            'tooclose_threshold': 0.8,       # Elliptical distance threshold for L/G and intensity constraints
+
+            # ================================================================
             # Position bounds (fitting movement limits)
             # ================================================================
             # Maximum distance peaks can move from initial position during fitting
@@ -87,7 +101,7 @@ class PS2DConfig:
             # ================================================================
             # Cluster size limits
             # ================================================================
-            'max_cluster_size': 6,        # Maximum peaks in overlap group
+            'max_cluster_size': 8,        # Maximum peaks in overlap group
 
             # ================================================================
             # Levenberg-Marquardt optimizer settings
@@ -127,6 +141,20 @@ class PS2DConfig:
             # Used when measured FWHM is unreliable due to contamination from neighbors
             'typical_linewidth_f1': 0.06,   # Typical 13C FWHM (ppm)
             'typical_linewidth_f2': 0.04,   # Typical 1H FWHM (ppm) - matched to typical spectra
+
+            # ================================================================
+            # Heavy overlap threshold (contaminated cross-sections)
+            # ================================================================
+            # When peaks are within this elliptical distance, their 1D cross-sections
+            # are contaminated by neighbors, so use typical linewidths instead of measured FWHM
+            'heavy_overlap_threshold': 1.5,  # Elliptical distance threshold for contaminated cross-sections
+
+            # ================================================================
+            # Too-close threshold (spectral ambiguity requiring constraints)
+            # ================================================================
+            # When peaks are within this elliptical distance, apply L/G ratio and
+            # intensity ratio constraints to prevent unrealistic decompositions
+            'tooclose_threshold': 0.8,       # Elliptical distance threshold for L/G and intensity constraints
 
             # Position bounds (moderate for peak movement)
             'pos_margin_f1': 0.05,        # Allow ±0.04 ppm movement (relaxed)

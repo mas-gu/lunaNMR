@@ -26,6 +26,8 @@ import os
 import time
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+import customtkinter as ctk
+from customtkinter import CTkTabview
 import threading
 import subprocess
 from pathlib import Path
@@ -42,7 +44,7 @@ sys.path.extend([current_dir, parent_dir])
 import matplotlib
 if matplotlib.get_backend() != 'TkAgg':
     matplotlib.use('TkAgg', force=True)
-    print(f"🖼️ Matplotlib backend forced to TkAgg in main_gui.py: {matplotlib.get_backend()}")
+    #print(f"🖼️ Matplotlib backend forced to TkAgg in main_gui.py: {matplotlib.get_backend()}")
 
 
 from lunaNMR.utils.parameter_manager import NMRParameterManager
@@ -64,7 +66,10 @@ try:
         AdvancedProgressDialog,
         StatisticsPanel,
         ModeSelectionFrame,
-        PeakNavigator
+        PeakNavigator,
+        BUTTON_FG_COLOR,
+        BUTTON_HOVER_COLOR,
+        BUTTON_TEXT_COLOR
     )
     from lunaNMR.utils.file_manager import NMRFileManager, DataValidator, FileMetadata
     #from lunaNMR.processors.series_processor import SeriesProcessor, SeriesAnalyzer, BatchResults
@@ -80,8 +85,8 @@ try:
     import numpy as np
     import pandas as pd
 
-    print("✅ All modules imported successfully")
-    print(f"🖼️ Matplotlib backend: {matplotlib.get_backend()}")
+    #print("✅ All modules imported successfully")
+    #print(f"🖼️ Matplotlib backend: {matplotlib.get_backend()}")
 
 except ImportError as e:
     print(f"❌ Import error: {e}")
@@ -90,12 +95,301 @@ except ImportError as e:
         "Please ensure all dependencies are installed and the modules are in the correct location.")
     sys.exit(1)
 
+class CTkLabelFrame(ctk.CTkFrame):
+    """Custom labeled frame with rounded corners using CustomTkinter"""
+    def __init__(self, parent, text="", padding=10, corner_radius=10, **kwargs):
+        # Extract padding value (can be int or tuple)
+        if isinstance(padding, (tuple, list)):
+            pad_x, pad_y = padding[0], padding[1] if len(padding) > 1 else padding[0]
+        elif isinstance(padding, str):
+            # Handle string padding like "10" or "(10, 5)"
+            padding = padding.strip("()")
+            parts = [p.strip() for p in padding.split(",")]
+            pad_x = int(parts[0])
+            pad_y = int(parts[1]) if len(parts) > 1 else pad_x
+        else:
+            pad_x = pad_y = int(padding)
+
+        # Set fg_color to match background if not provided
+        if 'fg_color' not in kwargs:
+            kwargs['fg_color'] = "#F0F0F0"  # Match background color
+
+        # Create rounded frame
+        super().__init__(parent, corner_radius=corner_radius, **kwargs)
+
+        # Add label at top if text provided
+        if text:
+            label = ctk.CTkLabel(self, text=text, font=("TkDefaultFont", 10, "bold"))
+            label.pack(anchor="w", padx=pad_x, pady=(pad_y//2, 0))
+
+        # Store padding for child widgets
+        self._padding = (pad_x, pad_y)
+
+    def get_content_frame(self):
+        """Return self as the content frame (for compatibility with usage patterns)"""
+        return self
+
+
+class DataLoadingDialog(tk.Toplevel):
+    """
+    Elegant popup dialog for loading NMR spectra and peak lists.
+
+    Preserves exact same workflow as original inline file browsers,
+    just moved to a dedicated popup window for better UI organization.
+    """
+
+    def __init__(self, parent, current_nmr_folder=None, current_peak_folder=None):
+        super().__init__(parent)
+        self.title("Load Data - lunaNMR v0.9")
+        self.geometry("1000x650")
+        self.resizable(True, True)
+
+        # Make modal (blocks main window)
+        self.transient(parent)
+        self.grab_set()
+
+        # Store selections
+        self.selected_nmr = None
+        self.selected_peak = None
+        self.result = None  # Will be {'nmr_file': path, 'peak_file': path} or None
+
+        # Build UI
+        self._build_ui(current_nmr_folder, current_peak_folder)
+
+        # Center on parent
+        self._center_on_parent(parent)
+
+        # Bind escape key to cancel
+        self.bind('<Escape>', lambda e: self._on_cancel())
+
+    def _build_ui(self, nmr_folder, peak_folder):
+        """Build the dialog UI - side-by-side file browsers"""
+        # Main container with padding
+        main_frame = ttk.Frame(self, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title label
+        title_label = ttk.Label(
+            main_frame,
+            text="Select NMR Spectrum and Peak List",
+            font=('TkDefaultFont', 14, 'bold')
+        )
+        title_label.grid(row=0, column=0, columnspan=2, pady=(0, 15))
+
+        # Configure two-column layout
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(1, weight=1)  # File browsers expand vertically
+
+        # Left column: NMR Spectra
+        nmr_label_frame = CTkLabelFrame(main_frame, text="  NMR Spectra  ", padding=15)
+        nmr_label_frame.grid(row=1, column=0, sticky='nsew', padx=(0, 10))
+
+        self.nmr_file_list = EnhancedFileListFrame(
+            nmr_label_frame,
+            "Browse Spectra",
+            ["ft", "fid"],
+            height=12  # Taller than original (was 4)
+        )
+        self.nmr_file_list.pack(fill=tk.BOTH, expand=True)
+        self.nmr_file_list.set_callback(self._on_nmr_select)
+
+        # Restore previous folder if provided
+        if nmr_folder:
+            self.nmr_file_list.current_folder = nmr_folder
+            self.nmr_file_list.refresh_file_list()
+
+        # Right column: Peak Lists
+        peak_label_frame = CTkLabelFrame(main_frame, text="  📌 Peak Lists  ", padding=15)
+        peak_label_frame.grid(row=1, column=1, sticky='nsew', padx=(10, 0))
+
+        self.peak_file_list = EnhancedFileListFrame(
+            peak_label_frame,
+            "Browse Peaks",
+            ["txt", "csv"],
+            height=12  # Taller than original (was 4)
+        )
+        self.peak_file_list.pack(fill=tk.BOTH, expand=True)
+        self.peak_file_list.set_callback(self._on_peak_select)
+
+        # Restore previous folder if provided
+        if peak_folder:
+            self.peak_file_list.current_folder = peak_folder
+            self.peak_file_list.refresh_file_list()
+
+        # Status/instruction label
+        self.instruction_label = ttk.Label(
+            main_frame,
+            text="Select files from both panels to enable loading",
+            foreground='gray',
+            font=('TkDefaultFont', 10, 'italic')
+        )
+        self.instruction_label.grid(row=2, column=0, columnspan=2, pady=(15, 0))
+
+        # Selection status
+        self.status_label = ttk.Label(
+            main_frame,
+            text="",
+            foreground='blue',
+            font=('TkDefaultFont', 9)
+        )
+        self.status_label.grid(row=3, column=0, columnspan=2, pady=(5, 15))
+
+        # Button row
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=4, column=0, columnspan=2, sticky='ew')
+
+        # Center buttons
+        button_frame.columnconfigure(0, weight=1)
+        button_frame.columnconfigure(1, weight=0)
+        button_frame.columnconfigure(2, weight=0)
+        button_frame.columnconfigure(3, weight=1)
+
+        self.load_button = ctk.CTkButton(
+            button_frame,
+            text="✓ Load Selected Data",
+            width=180,
+            height=40,
+            font=('TkDefaultFont', 11, 'bold'),
+            command=self._on_load,
+            state='disabled',
+            corner_radius=8,
+            fg_color=BUTTON_FG_COLOR,
+            hover_color=BUTTON_HOVER_COLOR,
+            text_color=BUTTON_TEXT_COLOR
+        )
+        self.load_button.grid(row=0, column=1, padx=5)
+
+        cancel_button = ctk.CTkButton(
+            button_frame,
+            text="Cancel",
+            width=120,
+            height=40,
+            font=('TkDefaultFont', 10),
+            command=self._on_cancel,
+            fg_color='gray',
+            hover_color='darkgray',
+            corner_radius=8
+        )
+        cancel_button.grid(row=0, column=2, padx=5)
+
+    def _on_nmr_select(self, file_path, filename):
+        """Handle NMR file selection (same callback as original)"""
+        self.selected_nmr = file_path
+        self._update_status()
+
+    def _on_peak_select(self, file_path, filename):
+        """Handle peak list file selection (same callback as original)"""
+        self.selected_peak = file_path
+        self._update_status()
+
+    def _update_status(self):
+        """Update status label and enable/disable load button"""
+        status_parts = []
+
+        if self.selected_nmr:
+            nmr_name = os.path.basename(self.selected_nmr)
+            status_parts.append(f"📊 NMR: {nmr_name}")
+
+        if self.selected_peak:
+            peak_name = os.path.basename(self.selected_peak)
+            status_parts.append(f"📌 Peaks: {peak_name}")
+
+        if status_parts:
+            self.status_label.config(text=" | ".join(status_parts))
+        else:
+            self.status_label.config(text="")
+
+        # Enable load button only if BOTH files selected (matches current behavior)
+        if self.selected_nmr and self.selected_peak:
+            self.load_button.configure(state='normal')
+            self.instruction_label.config(
+                text="Ready to load data",
+                foreground='green'
+            )
+        else:
+            self.load_button.configure(state='disabled')
+            if self.selected_nmr and not self.selected_peak:
+                self.instruction_label.config(
+                    text="Please select a peak list",
+                    foreground='orange'
+                )
+            elif self.selected_peak and not self.selected_nmr:
+                self.instruction_label.config(
+                    text="Please select an NMR spectrum",
+                    foreground='orange'
+                )
+            else:
+                self.instruction_label.config(
+                    text="Select files from both panels to enable loading",
+                    foreground='gray'
+                )
+
+    def _on_load(self):
+        """User clicked Load - return selections"""
+        self.result = {
+            'nmr_file': self.selected_nmr,
+            'peak_file': self.selected_peak,
+            'nmr_folder': self.nmr_file_list.current_folder,
+            'peak_folder': self.peak_file_list.current_folder
+        }
+        self.destroy()
+
+    def _on_cancel(self):
+        """User cancelled - return None"""
+        self.result = None
+        self.destroy()
+
+    def _center_on_parent(self, parent):
+        """Center dialog on parent window"""
+        self.update_idletasks()
+
+        parent_x = parent.winfo_rootx()
+        parent_y = parent.winfo_rooty()
+        parent_w = parent.winfo_width()
+        parent_h = parent.winfo_height()
+
+        dialog_w = self.winfo_width()
+        dialog_h = self.winfo_height()
+
+        x = parent_x + (parent_w - dialog_w) // 2
+        y = parent_y + (parent_h - dialog_h) // 2
+
+        # Ensure dialog is on screen
+        x = max(0, x)
+        y = max(0, y)
+
+        self.geometry(f"+{x}+{y}")
+
+
 class NMRPeaksSeriesGUI:
     """Main GUI application class with enhanced features and mode selection"""
 
     def __init__(self, root):
         self.root = root
         self.root.title("lunaNMR v0.9 - Enhanced Multi-Mode Interface")
+
+        # Configure CustomTkinter appearance
+        ctk.set_appearance_mode("light")  # Options: "light", "dark", "system"
+        ctk.set_default_color_theme("blue")  # Options: "blue", "green", "dark-blue"
+
+        # Define consistent color theme (light grey)
+        self.bg_color = "#F0F0F0"  # Very light grey background (lighter than buttons)
+        self.button_fg_color = "#D3D3D3"  # Light grey (darker than background)
+        self.button_hover_color = "#B0B0B0"  # Darker grey for hover
+        self.button_text_color = "#000000"  # Black text
+
+        # Set root window background
+        self.root.configure(bg=self.bg_color)
+
+        # Configure default ttk styles to use light grey background
+        style = ttk.Style()
+        style.configure("TFrame", background=self.bg_color)
+        style.configure("TLabelframe", background=self.bg_color)
+        style.configure("TLabelframe.Label", background=self.bg_color)
+        style.configure("TLabel", background=self.bg_color)
+        style.configure("TCheckbutton", background=self.bg_color)
+        style.configure("TRadiobutton", background=self.bg_color)
 
         # Core components
         self.integrator = EnhancedVoigtIntegrator()
@@ -185,7 +479,7 @@ class NMRPeaksSeriesGUI:
         self.smoothing_sigma = tk.DoubleVar(value=0.5)           # Gaussian smoothing 
         self.max_peaks_fit = tk.IntVar(value=4)                  # Maximum peaks to fit simultaneously
         self.max_optimization_iterations = tk.IntVar(value=100)   # Maximum iterative optimization attempts
-        self.use_parallel_processing = tk.BooleanVar(value=False) # Enable parallel processing #was True
+        self.use_parallel_processing = tk.BooleanVar(value=True) # Enable parallel processing (default: ON)
 
         # Peak Centroid Detection parameters (optional post-processing enhancement)
         self.use_centroid_refinement = tk.BooleanVar(value=False)  # Enable centroid refinement
@@ -215,9 +509,9 @@ class NMRPeaksSeriesGUI:
         self.overlap_resolution_preset = tk.StringVar(value='default')  # 'default', 'fast', or 'thorough'
 
         self.use_ps2d_multi_peak = tk.BooleanVar(value=True)  # Use PS2D multi-peak for 2+ peaks (default ON)
-        print(f"🔧 GUI Init: use_ps2d_multi_peak initialized to {self.use_ps2d_multi_peak.get()}")
+        #print(f"🔧 GUI Init: use_ps2d_multi_peak initialized to {self.use_ps2d_multi_peak.get()}")
         self.fix_linewidths = tk.BooleanVar(value=False)  # fixLW flag (default: linewidths float)
-        self.fix_positions = tk.BooleanVar(value=False)  # fixPos flag (default: positions float)
+        self.fix_positions = tk.BooleanVar(value=True)  # fixPos flag (default: ON - positions fixed)
 
         self.use_custom_linewidths = tk.BooleanVar(value=False)
         self.lw_lorentz_1h = tk.DoubleVar(value=0.001)
@@ -261,9 +555,10 @@ class NMRPeaksSeriesGUI:
 
         # Series options
         series_options = self.proc_params.get_series_options()
-        self.auto_process_series = tk.BooleanVar(value=series_options['auto_process_series'])
-        self.save_individual_results = tk.BooleanVar(value=series_options['save_individual_results'])
-        self.create_summary_plots = tk.BooleanVar(value=series_options['create_summary_plots'])
+        # Always ON (no user control): auto-process folder, save individual results, create plots
+        self.auto_process_series = tk.BooleanVar(value=True)
+        self.save_individual_results = tk.BooleanVar(value=True)
+        self.create_summary_plots = tk.BooleanVar(value=True)
 
         # Series integration advanced options
         # OPTION 1: Removed series_use_voigt_fitting and series_use_parallel_processing
@@ -275,7 +570,7 @@ class NMRPeaksSeriesGUI:
         self.use_ps2d_linewidth_reuse = tk.BooleanVar(value=series_options.get('use_ps2d_linewidth_reuse', False))  # Default OFF for backward compatibility
 
         # NEW: Series peak source and detection options
-        self.series_peak_source = tk.StringVar(value="detected")  # "detected", "reference", "cascade"
+        self.series_peak_source = tk.StringVar(value="cascade")  # "detected", "reference", "cascade" - Default: cascade
         self.series_enable_detection = tk.BooleanVar(value=False)  # Default OFF - direct fitting only
 
         # Integration mode options (initialized here, GUI creation happens later)
@@ -413,7 +708,7 @@ class NMRPeaksSeriesGUI:
             except (AttributeError, Exception) as e:
                 print(f"⚠️ Overlap resolution sync warning: {e}")
 
-        print(f"✅ Parameters synchronized: {len(updated_params)} parameters updated via parameter manager")
+        #print(f"✅ Parameters synchronized: {len(updated_params)} parameters updated via parameter manager")
 
 
     def on_parameter_change(self):
@@ -461,6 +756,11 @@ class NMRPeaksSeriesGUI:
         self._scale_update_id_3d = self.root.after(100,
             lambda: self.voigt_plotter_3d.set_intensity_scale(float(value)))
 
+    def _on_color_scheme_change_3d(self, event=None):
+        """Handle color scheme dropdown change for 3D Voigt plot"""
+        scheme = self.color_scheme_3d_var.get()
+        self.voigt_plotter_3d.set_color_scheme(scheme)
+
     def on_simplified_fitting_mode_change(self):
         """Handle simplified fitting mode toggle - affects only Voigt fitting, not peak detection"""
         use_simplified = self.use_simplified_parameters.get()
@@ -479,7 +779,7 @@ class NMRPeaksSeriesGUI:
             # Show simplified controls and hide complex parameters
             self.simplified_fitting_frame.pack(fill=tk.X, pady=5, after=self.simplified_fitting_frame.master.winfo_children()[0])
             self.voigt_params_frame.pack_forget()
-            print("🎯 Simplified fitting mode active (3-5 parameters)")
+            #print("🎯 Simplified fitting mode active (3-5 parameters)")
         else:
             # Disable simplified mode in parameter manager
             if hasattr(self, 'param_manager') and self.param_manager:
@@ -487,20 +787,17 @@ class NMRPeaksSeriesGUI:
             # Hide simplified controls and show complex parameters
             self.simplified_fitting_frame.pack_forget()
             self.voigt_params_frame.pack(fill=tk.X, pady=5)
-            print("🔧 Advanced fitting mode active (25+ parameters for expert control)")
+            #print("🔧 Advanced fitting mode active (25+ parameters for expert control)")
 
     def on_custom_linewidths_toggle(self, event=None):
-        """Enable/disable custom linewidth input fields"""
-        state = 'normal' if self.use_custom_linewidths.get() else 'disabled'
-        self.lw_lorentz_1h_spin.config(state=state)
-        self.lw_gauss_1h_spin.config(state=state)
-        self.lw_lorentz_15n_spin.config(state=state)
-        self.lw_gauss_15n_spin.config(state=state)
-
+        """Show/hide custom linewidth input fields"""
         if self.use_custom_linewidths.get():
-            print(f"⚙️ Custom linewidths enabled: 1H Lor={self.lw_lorentz_1h.get():.4f}, Gauss={self.lw_gauss_1h.get():.3f}")
+            # Show custom linewidth frame
+            self.lw_custom_frame.pack(fill=tk.X, pady=(5, 5), after=self.simplified_fitting_frame.winfo_children()[0])
+            #print(f"⚙️ Custom linewidths enabled: 1H Lor={self.lw_lorentz_1h.get():.4f}, Gauss={self.lw_gauss_1h.get():.3f}")
         else:
-            print
+            # Hide custom linewidth frame
+            self.lw_custom_frame.pack_forget()
 
         self.on_simplified_parameter_change()
 
@@ -573,7 +870,7 @@ class NMRPeaksSeriesGUI:
         main_frame.columnconfigure(2, weight=1, minsize=200)  # Right panel - adaptive (min 200px)
         main_frame.rowconfigure(0, weight=1)
 
-        print("📐 Main GUI using adaptive grid layout: Col 0 (controls, min 350px, weight=1), Col 1 (plot, weight=3), Col 2 (navigator, min 200px, weight=1)")
+        #print("📐 Main GUI using adaptive grid layout: Col 0 (controls, min 350px, weight=1), Col 1 (plot, weight=3), Col 2 (navigator, min 200px, weight=1)")
 
         # Left panel for controls
         left_panel_frame = ttk.Frame(main_frame)
@@ -697,15 +994,15 @@ class NMRPeaksSeriesGUI:
 
     def setup_workflow_selection(self, parent):
         """Setup workflow selection frame"""
-        workflow_frame = ttk.LabelFrame(parent, text="🎯 Peak Detection Workflow", padding="10")
+        workflow_frame = CTkLabelFrame(parent, text="Peak Detection Workflow", padding="10")
         workflow_frame.pack(fill=tk.X, pady=(0, 10))
 
         # Workflow radio buttons
-        ttk.Radiobutton(workflow_frame, text="📋 With Peak List (Standard)",
+        ttk.Radiobutton(workflow_frame, text="With Peak List (Standard)",
                        variable=self.workflow_mode, value="peak_list",
                        command=self.on_workflow_change).pack(anchor=tk.W, padx=10, pady=2)
 
-        ttk.Radiobutton(workflow_frame, text="🎯 S/N Threshold (Native Detection)",
+        ttk.Radiobutton(workflow_frame, text="S/N Threshold (Native Detection)",
                        variable=self.workflow_mode, value="sn_threshold",
                        command=self.on_workflow_change).pack(anchor=tk.W, padx=10, pady=2)
 
@@ -735,36 +1032,11 @@ class NMRPeaksSeriesGUI:
         if mode == "sn_threshold":
             # Show S/N parameters
             self.sn_params_frame.pack(fill=tk.X, pady=5)
-            # Hide peak list file selection if it exists
-            if hasattr(self, 'peak_file_list'):
-                # Update file list to show only NMR files are required
-                self.update_file_requirements()
         else:
             # Hide S/N parameters
             self.sn_params_frame.pack_forget()
-            # Show peak list file selection
-            if hasattr(self, 'peak_file_list'):
-                self.update_file_requirements()
 
         print(f"🔄 Workflow mode changed to: {mode}")
-        self.update_current_status()
-
-    def update_file_requirements(self):
-        """Update UI to reflect file requirements based on workflow mode"""
-        mode = self.workflow_mode.get()
-
-        if mode == "sn_threshold":
-            # Update labels to indicate peak list is optional
-            if hasattr(self, 'current_status'):
-                if not self.current_nmr_file:
-                    self.current_status.config(text="📋 S/N Mode: Load NMR spectrum to begin")
-                elif not self.current_peak_file:
-                    self.current_status.config(text="📋 S/N Mode: Ready for native detection")
-        else:
-            # Standard mode - both files required
-            if hasattr(self, 'current_status'):
-                if not self.current_nmr_file or not self.current_peak_file:
-                    self.current_status.config(text="📋 Peak List Mode: Load both files")
 
     def setup_enhanced_controls(self, parent):
         """Setup enhanced control panel with all advanced features"""
@@ -774,146 +1046,84 @@ class NMRPeaksSeriesGUI:
         #self.mode_selection_frame.pack(fill=tk.X, pady=(0, 10))
 
         # =================== FILE MANAGEMENT SECTION ===================
-        file_frame = ttk.LabelFrame(parent, text=get_display_text("📁 Enhanced Data Management"), padding=10)
-        file_frame.pack(fill=tk.X, pady=(0, 10))
+        data_load_frame = CTkLabelFrame(parent, text="Data Loading", padding=15)
+        data_load_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Create enhanced file selection panels with responsive grid
-        file_container = ttk.Frame(file_frame)
-        file_container.pack(fill=tk.BOTH, expand=True, pady=5)
+        # Load Data button - opens dialog
+        self.load_data_button = ctk.CTkButton(
+            data_load_frame,
+            text="Load Data (Spectrum + Peaks)",
+            command=self.open_data_loading_dialog,
+            height=45,
+            font=('TkDefaultFont', 12, 'bold'),
+            corner_radius=8,
+            fg_color=BUTTON_FG_COLOR,
+            hover_color=BUTTON_HOVER_COLOR,
+            text_color=BUTTON_TEXT_COLOR
+        )
+        self.load_data_button.pack(fill=tk.X, padx=10, pady=(5, 15))
 
-        # Configure grid for equal width columns
-        file_container.columnconfigure(0, weight=1)
-        file_container.columnconfigure(1, weight=1)
-        file_container.rowconfigure(0, weight=1)
+        # Status display - shows currently loaded files
+        status_container = ttk.Frame(data_load_frame)
+        status_container.pack(fill=tk.X, padx=10, pady=(0, 10))
 
-        # NMR Data folder panel
-        nmr_panel = ttk.Frame(file_container)
-        nmr_panel.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
-        nmr_panel.columnconfigure(0, weight=1)
-        nmr_panel.rowconfigure(0, weight=1)
+        ttk.Label(status_container, text="Current Data:", font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W, pady=(0, 5))
 
-        self.nmr_file_list = EnhancedFileListFrame(nmr_panel, "NMR Spectra", ["ft", "fid"], height=4)
-        self.nmr_file_list.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        self.nmr_file_list.set_callback(self.on_nmr_file_select)
+        self.nmr_status_label = ttk.Label(
+            status_container,
+            text="NMR Spectrum: Not loaded",
+            foreground='gray',
+            font=('TkDefaultFont', 9)
+        )
+        self.nmr_status_label.pack(anchor=tk.W, pady=1)
 
-        # Peak List folder panel
-        peak_panel = ttk.Frame(file_container)
-        peak_panel.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
-        peak_panel.columnconfigure(0, weight=1)
-        peak_panel.rowconfigure(0, weight=1)
+        self.peak_status_label = ttk.Label(
+            status_container,
+            text="Peak List: Not loaded",
+            foreground='gray',
+            font=('TkDefaultFont', 9)
+        )
+        self.peak_status_label.pack(anchor=tk.W, pady=1)
 
-        self.peak_file_list = EnhancedFileListFrame(peak_panel, "Peak Lists", ["txt", "csv"], height=4)
-        self.peak_file_list.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        self.peak_file_list.set_callback(self.on_peak_file_select)
-
-        # Current selection display with validation
-        current_frame = ttk.Frame(file_frame)
-        current_frame.pack(fill=tk.X, pady=5)
-
-        self.current_status = ttk.Label(current_frame, text="📋 No files loaded",
-                                      font=('TkDefaultFont', 9, 'bold'), foreground='gray')
-        self.current_status.pack(anchor=tk.W)
-
-        self.file_validation_label = ttk.Label(current_frame, text="",
-                                             font=('TkDefaultFont', 8), foreground='blue')
-        self.file_validation_label.pack(anchor=tk.W, padx=(20, 0))
-
-        # =================== PS2D CONFIGURATION SECTION ===================
-        ps2d_config_frame = ttk.LabelFrame(parent, text="⚙️ PS2D Algorithm Configuration", padding=10)
-        ps2d_config_frame.pack(fill=tk.X, pady=(0, 10))
-
-        nucleus_frame = ttk.Frame(ps2d_config_frame)
-        nucleus_frame.pack(fill=tk.X, pady=5)
-
-        ttk.Label(nucleus_frame, text="Nucleus Type:", font=('TkDefaultFont', 9, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
-
-        nucleus_combo = ttk.Combobox(nucleus_frame, textvariable=self.nucleus_type,
-                                     values=['15N', '13C'], state='readonly', width=10)
-        nucleus_combo.pack(side=tk.LEFT, padx=(0, 10))
-        nucleus_combo.bind('<<ComboboxSelected>>', self.on_nucleus_type_change)
-
-        ttk.Label(nucleus_frame, text="(for 2D overlap fitting)",
-                 font=('TkDefaultFont', 8), foreground='gray').pack(side=tk.LEFT, padx=(0, 15))
-
-        # PS2D Radii Controls
-        radii_frame = ttk.Frame(ps2d_config_frame)
-        radii_frame.pack(fill=tk.X, pady=5)
-
-        # Row 0: Labels and spinboxes
-        ttk.Label(radii_frame, text="Ellipse Radii:", font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
-
-        ttk.Label(radii_frame, text="F1:").grid(row=0, column=1, sticky=tk.W)
-        radF1_spin = tk.Spinbox(radii_frame, from_=0.01, to=2.0, increment=0.01,
-                                textvariable=self.ps2d_radF1, width=4, format="%.3f")
-        radF1_spin.grid(row=0, column=2, sticky=tk.W, padx=(2, 4))
-        # Remove command from spinbox - we'll use explicit Apply button only
-        radF1_spin.bind('<Return>', lambda e: self.on_ps2d_radii_change())
-
-        ttk.Label(radii_frame, text="F2:").grid(row=0, column=3, sticky=tk.W)
-        radF2_spin = tk.Spinbox(radii_frame, from_=0.001, to=0.5, increment=0.005,
-                                textvariable=self.ps2d_radF2, width=4, format="%.3f")
-        radF2_spin.grid(row=0, column=4, sticky=tk.W, padx=(2, 4))
-        # Remove command from spinbox - we'll use explicit Apply button only
-        radF2_spin.bind('<Return>', lambda e: self.on_ps2d_radii_change())
-
-        ttk.Label(radii_frame, text="(ppm)", font=('TkDefaultFont', 8), foreground='gray').grid(row=0, column=5, sticky=tk.W)
-
-        # Row 1: Show Ellipses checkbox
-        show_ellipses_check = ttk.Checkbutton(radii_frame, text="Show Ellipses",
-                                              variable=self.show_ellipses,
-                                              command=self.update_main_plot)
-        show_ellipses_check.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
-
-        # Row 2: Overlap Thresholds
-        ttk.Label(radii_frame, text="Overlap Thresholds:", font=('TkDefaultFont', 9, 'bold')).grid(row=2, column=0, sticky=tk.W, padx=(0, 6), pady=(8, 0))
-
-        ttk.Label(radii_frame, text="X:").grid(row=2, column=1, sticky=tk.W, pady=(8, 0))
-        overlap_x_spin = tk.Spinbox(radii_frame, from_=0.01, to=1.0, increment=0.01,
-                                    textvariable=self.ps2d_overlap_x, width=4, format="%.3f")
-        overlap_x_spin.grid(row=2, column=2, sticky=tk.W, padx=(2, 4), pady=(10, 0))
-        overlap_x_spin.bind('<Return>', lambda e: self.on_ps2d_params_change())
-
-        ttk.Label(radii_frame, text="Y:").grid(row=2, column=3, sticky=tk.W, pady=(8, 0))
-        overlap_y_spin = tk.Spinbox(radii_frame, from_=0.01, to=2.0, increment=0.05,
-                                    textvariable=self.ps2d_overlap_y, width=4, format="%.3f")
-        overlap_y_spin.grid(row=2, column=4, sticky=tk.W, padx=(2, 4), pady=(10, 0))
-        overlap_y_spin.bind('<Return>', lambda e: self.on_ps2d_params_change())
-
-        ttk.Label(radii_frame, text="(ppm)", font=('TkDefaultFont', 8), foreground='gray').grid(row=2, column=5, sticky=tk.W, pady=(10, 0))
-
-        # Row 3: Max iterations control
-        ttk.Label(radii_frame, text="Max Iterations:", font=('TkDefaultFont', 9, 'bold')).grid(row=3, column=0, sticky=tk.W, padx=(0, 10), pady=(10, 0))
-
-        max_iter_spin = tk.Spinbox(radii_frame, from_=50, to=2000, increment=50,
-                                   textvariable=self.ps2d_max_iterations, width=6)
-        max_iter_spin.grid(row=3, column=2, sticky=tk.W, padx=(2, 15), pady=(10, 0))
-        max_iter_spin.bind('<Return>', lambda e: self.on_ps2d_params_change())
-
-        #ttk.Label(radii_frame, text="(per LM stage)", font=('TkDefaultFont', 8), foreground='gray').grid(row=3, column=3, sticky=tk.W, pady=(10, 0))
-
-        # Row 4: Apply button and helper text
-        apply_params_btn = ttk.Button(radii_frame, text="Apply Changes", command=self.on_ps2d_params_change, width=15)
-        apply_params_btn.grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
-
-        #ttk.Label(radii_frame, text="← Click to update parameters",
-        #         font=('TkDefaultFont', 8), foreground='gray').grid(row=4, column=2, columnspan=4, sticky=tk.W, pady=(5, 0), padx=(5, 0))
+        # Store current folders for dialog (initialize to None)
+        self.current_nmr_folder = None
+        self.current_peak_folder = None
 
         # =================== SPECTRUM CONTROLS SECTION ===================
-        spectrum_frame = ttk.LabelFrame(parent, text="🖼️ Spectrum Display Controls", padding=10)
+        spectrum_frame = CTkLabelFrame(parent, text="Spectrum Display Controls", padding=10)
         spectrum_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Contour controls
-        contour_frame = ttk.LabelFrame(spectrum_frame, text="Contour Settings", padding=5)
-        contour_frame.pack(fill=tk.X, pady=(0, 5))
+        # Button row: Contour Settings toggle and Reset Zoom
+        button_frame = ttk.Frame(spectrum_frame)
+        button_frame.pack(fill=tk.X, pady=(0, 5))
 
-        contour_grid = ttk.Frame(contour_frame)
-        contour_grid.pack(fill=tk.X)
+        button_frame.columnconfigure(0, weight=1)
+        button_frame.columnconfigure(1, weight=1)
+
+        self.contour_toggle_button = ctk.CTkButton(button_frame, text="Contour Settings ▼",
+                                                  command=self.toggle_contour_settings, corner_radius=8,
+                                                  fg_color=self.button_fg_color,
+                                                  hover_color=self.button_hover_color,
+                                                  text_color=self.button_text_color)
+        self.contour_toggle_button.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=2)
+
+        ctk.CTkButton(button_frame, text="Reset Zoom",
+                     command=self.reset_interactive_zoom, corner_radius=8,
+                     fg_color=self.button_fg_color,
+                     hover_color=self.button_hover_color,
+                     text_color=self.button_text_color).grid(row=0, column=1, sticky=(tk.W, tk.E), padx=2)
+
+        # Collapsible contour parameters
+        self.contour_params_visible = tk.BooleanVar(value=False)
+        self.contour_params_frame = ttk.Frame(spectrum_frame)
+
+        contour_grid = ttk.Frame(self.contour_params_frame)
+        contour_grid.pack(fill=tk.X, pady=5)
 
         ttk.Label(contour_grid, text="Levels:").grid(row=0, column=0, sticky=tk.W)
         contour_levels_spin = tk.Spinbox(contour_grid, from_=5, to=50, increment=1, width=4,
                                         textvariable=self.contour_levels, command=self.update_main_plot)
         contour_levels_spin.grid(row=0, column=1, sticky=tk.W, padx=(5,15))
-        # Bind events for immediate updates on direct input
         contour_levels_spin.bind('<KeyRelease>', lambda e: self.update_main_plot())
         contour_levels_spin.bind('<FocusOut>', lambda e: self.update_main_plot())
 
@@ -921,7 +1131,6 @@ class NMRPeaksSeriesGUI:
         contour_min_spin = tk.Spinbox(contour_grid, from_=0.01, to=1.0, increment=0.01, width=4,
                                      textvariable=self.contour_min, format="%.3f", command=self.update_main_plot)
         contour_min_spin.grid(row=0, column=3, sticky=tk.W, padx=5)
-        # Bind events for immediate updates on direct input
         contour_min_spin.bind('<KeyRelease>', lambda e: self.update_main_plot())
         contour_min_spin.bind('<FocusOut>', lambda e: self.update_main_plot())
 
@@ -929,158 +1138,145 @@ class NMRPeaksSeriesGUI:
         contour_inc_spin = tk.Spinbox(contour_grid, from_=0.01, to=10.0, increment=0.01, width=4,
                                      textvariable=self.contour_increment, format="%.2f", command=self.update_main_plot)
         contour_inc_spin.grid(row=1, column=1, sticky=tk.W, padx=(5,15))
-        # Bind events for immediate updates on direct input
         contour_inc_spin.bind('<KeyRelease>', lambda e: self.update_main_plot())
         contour_inc_spin.bind('<FocusOut>', lambda e: self.update_main_plot())
 
-        ttk.Button(contour_grid, text="🔄 Reset Zoom", command=self.reset_interactive_zoom).grid(row=2, column=0, sticky=(tk.W, tk.E), padx=2)
+        # =================== CONTROL CENTER SECTION ===================
+        detection_section = CTkLabelFrame(parent, text="Control Center", padding=10)
+        detection_section.pack(fill=tk.X, pady=(0, 10))
 
+        # Button frame for side-by-side buttons (centered)
+        detection_button_frame = ttk.Frame(detection_section)
+        detection_button_frame.pack(anchor=tk.CENTER, padx=10, pady=5)
 
-        # =================== PEAK COORDINATE ADJUSTMENT SECTION ===================
-        adjustment_frame = ttk.LabelFrame(parent, text="📐 Peak List Coordinate Adjustment", padding=10)
-        adjustment_frame.pack(fill=tk.X, pady=(0, 10))
+        # Detect button (left side) with light green color, bold text, and subtle elevation
+        self.detect_peaks_button = ctk.CTkButton(detection_button_frame, text="Detect",
+                                                command=self.detect_peaks, corner_radius=8,
+                                                fg_color="#90EE90", hover_color="#7CCD7C",
+                                                text_color=self.button_text_color,
+                                                width=70, font=("TkDefaultFont", 14, "bold"),
+                                                border_width=2, border_color="#7CCD7C")
+        self.detect_peaks_button.pack(side=tk.LEFT, padx=(0, 2))
 
-        # Coordinate adjustment controls
-        adjust_controls_frame = ttk.Frame(adjustment_frame)
-        adjust_controls_frame.pack(fill=tk.X, pady=5)
+        # Fit Spectrum button (middle) with light green color, bold text, and subtle elevation
+        self.fit_all_peaks_button = ctk.CTkButton(detection_button_frame, text="Fit Spectrum",
+                                                 command=self.fit_all_peaks, corner_radius=8,
+                                                 fg_color="#90EE90", hover_color="#7CCD7C",
+                                                 text_color=self.button_text_color,
+                                                 width=100, font=("TkDefaultFont", 14, "bold"),
+                                                 border_width=2, border_color="#7CCD7C")
+        self.fit_all_peaks_button.pack(side=tk.LEFT, padx=2)
 
-        # X and Y offset controls
-        offset_frame = ttk.Frame(adjust_controls_frame)
-        offset_frame.pack(fill=tk.X, pady=2)
+        # Fit Series button (right side) with light green color, bold text, and subtle elevation
+        self.series_button = ctk.CTkButton(detection_button_frame, text="Fit Series",
+                                          command=self.start_series_integration, corner_radius=8,
+                                          fg_color="#90EE90", hover_color="#7CCD7C",
+                                          text_color=self.button_text_color,
+                                          width=80, font=("TkDefaultFont", 14, "bold"),
+                                          border_width=2, border_color="#7CCD7C")
+        self.series_button.pack(side=tk.LEFT, padx=(2, 0))
 
-        ttk.Label(offset_frame, text="1H (ppm):").pack(side=tk.LEFT)
-        x_offset_spinbox = ttk.Spinbox(offset_frame, from_=-2.0, to=2.0, increment=0.001, width=5,
+        # Peak Edition toggle button (below the three main buttons)
+        self.peak_edit_toggle_button = ctk.CTkButton(detection_section, text="Peak Edition ▼",
+                                                    command=self.toggle_peak_edit_mode, corner_radius=8,
+                                                    fg_color=self.button_fg_color,
+                                                    hover_color=self.button_hover_color,
+                                                    text_color=self.button_text_color)
+        self.peak_edit_toggle_button.pack(fill=tk.X, padx=10, pady=(5, 5))
+
+        # Collapsible editing controls frame (hidden by default)
+        self.peak_editing_controls_frame = ttk.Frame(detection_section)
+
+        # Mode status label (shown inside collapsible section)
+        self.edit_mode_status_label = ttk.Label(self.peak_editing_controls_frame, text="Mode: View Only",
+                                               font=('TkDefaultFont', 9), foreground='gray')
+        self.edit_mode_status_label.pack(anchor=tk.W, pady=(5, 2), padx=10)
+
+        # Peak list selection frame
+        peak_list_frame = ttk.Frame(self.peak_editing_controls_frame)
+        peak_list_frame.pack(fill=tk.X, pady=(5, 2), padx=10)
+
+        ref_checkbox = ttk.Checkbutton(peak_list_frame, text="Edit Reference peaks",
+                                       variable=self.edit_reference_peaks)
+        ref_checkbox.pack(side=tk.LEFT)
+
+        det_checkbox = ttk.Checkbutton(peak_list_frame, text="Edit Detected peaks",
+                                       variable=self.edit_detected_peaks)
+        det_checkbox.pack(side=tk.LEFT)
+
+        # Peak deletion mode
+        deletion_frame = ttk.Frame(self.peak_editing_controls_frame)
+        deletion_frame.pack(fill=tk.X, pady=(5, 2), padx=10)
+
+        self.peak_deletion_mode = tk.BooleanVar(value=False)
+        deletion_checkbox = ttk.Checkbutton(deletion_frame, text="Delete Mode",
+                                           variable=self.peak_deletion_mode)
+        deletion_checkbox.pack(side=tk.LEFT, padx=(20, 0))
+
+        # Peak addition mode
+        addition_frame = ttk.Frame(self.peak_editing_controls_frame)
+        addition_frame.pack(fill=tk.X, pady=(5, 2), padx=10)
+
+        self.peak_addition_mode = tk.BooleanVar(value=False)
+        addition_checkbox = ttk.Checkbutton(addition_frame, text="Add Mode",
+                                           variable=self.peak_addition_mode)
+        addition_checkbox.pack(side=tk.LEFT, padx=(20, 0))
+
+        # Selected peak info
+        self.selected_peak_label = ttk.Label(self.peak_editing_controls_frame, text="No peak selected",
+                                           font=('TkDefaultFont', 9), foreground='black')
+        self.selected_peak_label.pack(anchor=tk.W, pady=2, padx=10)
+
+        # Initialize toggle variables for Expert Mode functionality
+        self.params_visible = tk.BooleanVar(value=False)
+        self.ps2d_params_visible = tk.BooleanVar(value=False)
+
+        # Update Fit All Peaks button text based on Voigt fitting toggle
+        self._update_fit_all_button_text()
+
+        # =================== PEAK OPERATIONS SECTION (CONSOLIDATED) ===================
+        # Single container for: Coordinate Adjustment
+        peak_operations_frame = CTkLabelFrame(parent, text="Shift peak list", padding=(10, 5, 10, 5))
+        peak_operations_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Single row with 4 columns: 1H label+spinbox, 15N/13C label+spinbox, Apply button, Reset button
+        adjustment_frame = ttk.Frame(peak_operations_frame)
+        adjustment_frame.pack(fill=tk.X, pady=2)
+
+        # 1H offset
+        ttk.Label(adjustment_frame, text="1H:").pack(side=tk.LEFT)
+        x_offset_spinbox = ttk.Spinbox(adjustment_frame, from_=-2.0, to=2.0, increment=0.001, width=5,
                                       textvariable=self.adjust_x_offset, format="%.3f")
-        x_offset_spinbox.pack(side=tk.LEFT, padx=(5, 20))
+        x_offset_spinbox.pack(side=tk.LEFT, padx=(5, 10))
 
-        ttk.Label(offset_frame, text="15N/13C (ppm):").pack(side=tk.LEFT)
-        y_offset_spinbox = ttk.Spinbox(offset_frame, from_=-10.0, to=10.0, increment=0.1, width=4,
+        # 15N/13C offset
+        ttk.Label(adjustment_frame, text="15N/13C:").pack(side=tk.LEFT)
+        y_offset_spinbox = ttk.Spinbox(adjustment_frame, from_=-10.0, to=10.0, increment=0.1, width=4,
                                       textvariable=self.adjust_y_offset, format="%.1f")
-        y_offset_spinbox.pack(side=tk.LEFT, padx=(5, 20))
+        y_offset_spinbox.pack(side=tk.LEFT, padx=(5, 10))
 
-        # Action buttons with responsive layout
-        adjust_buttons_frame = ttk.Frame(adjust_controls_frame)
-        adjust_buttons_frame.pack(fill=tk.X, pady=5)
+        # Apply button
+        ctk.CTkButton(adjustment_frame, text="Apply",
+                     command=self.apply_coordinate_offsets, corner_radius=8,
+                     fg_color=self.button_fg_color, hover_color=self.button_hover_color,
+                     text_color=self.button_text_color, width=80).pack(side=tk.LEFT, padx=2)
 
-        # Configure equal width columns for buttons
-        adjust_buttons_frame.columnconfigure(0, weight=1)
-        adjust_buttons_frame.columnconfigure(1, weight=1)
-        adjust_buttons_frame.columnconfigure(2, weight=1)
+        # Reset button
+        ctk.CTkButton(adjustment_frame, text="Reset",
+                     command=self.reset_coordinate_offsets, corner_radius=8,
+                     fg_color=self.button_fg_color, hover_color=self.button_hover_color,
+                     text_color=self.button_text_color, width=80).pack(side=tk.LEFT, padx=2)
 
-        ttk.Button(adjust_buttons_frame, text="↗️ Apply Offsets",
-                  command=self.apply_coordinate_offsets).grid(row=0, column=0, sticky=(tk.W, tk.E), padx=1)
-        ttk.Button(adjust_buttons_frame, text="🔄 Reset",
-                  command=self.reset_coordinate_offsets).grid(row=0, column=1, sticky=(tk.W, tk.E), padx=1)
-        #ttk.Button(adjust_buttons_frame, text="💾 Save newt List",
-        #          command=self.save_adjusted_peak_list).grid(row=1, column=0, sticky=(tk.W, tk.E), padx=1)
-
-        # Info and status
-        adjust_info_frame = ttk.Frame(adjustment_frame)
-        adjust_info_frame.pack(fill=tk.X, pady=2)
-
-        #ttk.Label(adjust_info_frame,
-        #         text="ℹ️ Adjust all peak coordinates by specified offset values. Useful for spectrum calibration or systematic shifts.",
-        #         font=('TkDefaultFont', 8), foreground='blue').pack(anchor=tk.W)
-
-        self.adjustment_status_label = ttk.Label(adjust_info_frame, text="Ready for coordinate adjustment",
-                                                foreground='gray')
+        # Status label (for feedback after operations)
+        self.adjustment_status_label = ttk.Label(peak_operations_frame, text="", foreground='gray')
         self.adjustment_status_label.pack(anchor=tk.W, pady=(2, 0))
 
-        # =================== DETECTION & PROCESSING SECTION ===================
-        detection_frame = ttk.LabelFrame(parent, text="🔍 Enhanced Peak Detection & Processing", padding=10)
-        detection_frame.pack(fill=tk.X, pady=(0, 10))
-
-        # Mode-specific options
-        self.mode_options_frame = ttk.Frame(detection_frame)
-        self.mode_options_frame.pack(fill=tk.X, pady=(0, 5))
-
-        # Set callback and initialize mode after all UI is ready
-        #self.mode_selection_frame.set_callback(self.on_mode_change)
-        #self.mode_selection_frame.set_mode(self.processing_mode.get())
-
-        # Detection parameters in organized grid
-        params_frame = ttk.LabelFrame(detection_frame, text="Detection Parameters", padding=5)
-        params_frame.pack(fill=tk.X, pady=5)
-
-        # Primary parameters
-        primary_frame = ttk.Frame(params_frame)
-        primary_frame.pack(fill=tk.X, pady=(0, 5))
-
-        ttk.Label(primary_frame, text="1H/15N (ppm)").grid(row=0, column=0, sticky=tk.W, padx=(0,10))
-        search_x_spin = ttk.Spinbox(primary_frame, from_=0.01, to=0.2, increment=0.01, width=4,
-                                  textvariable=self.search_window_x, #format="%.2f",
-                                  command=self.on_parameter_change)
-        search_x_spin.grid(row=0, column=1, sticky=tk.W)
-
-        #ttk.Label(primary_frame, text="15N/13C (±ppm):").grid(row=0, column=2, sticky=tk.W, padx=(0,10))
-        search_y_spin = ttk.Spinbox(primary_frame, from_=0.05, to=4.0, increment=0.05, width=4,
-                                  textvariable=self.search_window_y, #format="%.1f",
-                                  command=self.on_parameter_change)
-        search_y_spin.grid(row=0, column=2, sticky=tk.W)
-
-        ttk.Label(primary_frame, text="Noise Threshold:").grid(row=1, column=0, sticky=tk.W, padx=(0,10))
-        noise_spin = ttk.Spinbox(primary_frame, from_=0.01, to=10.0, increment=0.01, width=4,
-                               textvariable=self.noise_threshold, #format="%.1f",
-                               command=self.on_parameter_change)
-        noise_spin.grid(row=1, column=1, sticky=tk.W)
-
-        # Detection rectangle size parameter (anisotropic)
-        ttk.Label(primary_frame, text="X×Y (pixels):").grid(row=3, column=0, sticky=tk.W, padx=(0,5))
-        square_size_spin = tk.Spinbox(primary_frame, from_=1, to=9, increment=2, width=3,
-                                     textvariable=self.detection_square_size,
-                                     command=self.update_detection_square_ppm)
-        square_size_spin.grid(row=3, column=1, sticky=tk.W)
-
-        #ttk.Label(primary_frame, text="×").grid(row=3, column=2, sticky=tk.W)
-
-        rectangle_y_spin = tk.Spinbox(primary_frame, from_=1, to=5, increment=1, width=3,
-                                     textvariable=self.detection_rectangle_y,
-                                     command=self.update_detection_square_ppm)
-        rectangle_y_spin.grid(row=3, column=2, sticky=tk.W)
-
-        # PPM conversion display
-        self.square_ppm_label = ttk.Label(primary_frame, textvariable=self.detection_square_ppm_x, font=('TkDefaultFont', 8))
-        self.square_ppm_label.grid(row=3, column=3, sticky=tk.W, padx=(5,0))
-
-
-        # Row 8: Peak Centroid Detection (optional post-processing enhancement)
-        ttk.Label(primary_frame, text="🎯 Peak Centroid Detection:", font=('TkDefaultFont', 9, 'bold')).grid(
-            row=4, column=0, columnspan=4, sticky=tk.W, pady=(5,5))
-
-        # Row 9: Enable centroid refinement checkbox
-        #centroid_check = ttk.Checkbutton(primary_frame, text="🔬 Enable Centroid Refinement (sub-pixel accuracy)",
-        #                               variable=self.use_centroid_refinement,
-        #                               command=self.on_parameter_change)
-        #centroid_check.grid(row=5, column=0, columnspan=4, sticky=tk.W, pady=(5,0))
-
-        # Row 6: Centroid window parameters in ppm
-        ttk.Label(primary_frame, text="Window X ppm:").grid(row=6, column=0, sticky=tk.W)
-        centroid_x_spin = tk.Spinbox(primary_frame, from_=0.01, to=0.2, increment=0.01, width=4,
-                                   textvariable=self.centroid_window_x_ppm, #format="%.2f",
-                                   command=self.on_parameter_change)
-        centroid_x_spin.grid(row=6, column=1, sticky=tk.W, padx=(5,15))
-
-        #ttk.Label(primary_frame, text="Y ppm:").grid(row=6, column=2, sticky=tk.W)
-        centroid_y_spin = tk.Spinbox(primary_frame, from_=0.01, to=0.5, increment=0.02, width=4,
-                                   textvariable=self.centroid_window_y_ppm, #format="%.1f",
-                                   command=self.on_parameter_change)
-        centroid_y_spin.grid(row=6, column=2, sticky=tk.W, padx=5)
-
-        # Row 7: Noise threshold multiplier
-        #ttk.Label(primary_frame, text="Noise Mult:").grid(row=7, column=0, sticky=tk.W)
-        #centroid_noise_spin = tk.Spinbox(primary_frame, from_=1.0, to=5.0, increment=0.1, width=4,
-        #                             textvariable=self.centroid_noise_multiplier, #format="%.1f",
-        #                             command=self.on_parameter_change)
-        #centroid_noise_spin.grid(row=7, column=1, sticky=tk.W, padx=(5,5))
-
-        # =================== DETECTION MODE CONTROLS ===================
-        # Simplified detection controls for Standard and Enhanced modes only
-        mode_controls_frame = ttk.LabelFrame(detection_frame, text="🎛️ Detection Mode Selection", padding=5)
-        mode_controls_frame.pack(fill=tk.X, pady=5)
+        # Setup advanced options (Expert Mode) controls
+        self.setup_series_controls(parent)
 
         # Enhanced Detection Parameters
-        #enhanced_frame = ttk.LabelFrame(mode_controls_frame, text="🚀 Enhanced Detection Parameters", padding=5)
-        #enhanced_frame = ttk.LabelFrame(detection_frame, text="🚀 Enhanced Detection Parameters", padding=5)
+        #enhanced_frame = CTkLabelFrame(mode_controls_frame, text="🚀 Enhanced Detection Parameters", padding=5)
+        #enhanced_frame = CTkLabelFrame(detection_section, text="🚀 Enhanced Detection Parameters", padding=5)
         #enhanced_frame.pack(fill=tk.X, pady=2)
 
         # Row 1: Radius Constraint and Pattern Similarity
@@ -1178,362 +1374,42 @@ class NMRPeaksSeriesGUI:
         #self.single_integration_controls = []  # Removed all Integrated/Adaptive mode controls
         #self.single_integration_checkboxes = []  # Removed all Integrated/Adaptive mode checkboxes
 
-        # Processing buttons with responsive grid layout
-        button_frame = ttk.Frame(detection_frame)
-        button_frame.pack(fill=tk.X, pady=10)
-
-        # Configure equal width columns for main processing buttons
-        button_frame.columnconfigure(0, weight=1)
-        button_frame.columnconfigure(1, weight=1)
-        button_frame.columnconfigure(2, weight=1)
-        button_frame.columnconfigure(3, weight=1)
-        button_frame.columnconfigure(4, weight=1)
-
-        self.detect_peaks_button = ttk.Button(button_frame, text="🔍 Detect Peaks",
-                                             command=self.detect_peaks)
-        self.detect_peaks_button.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=2)
-
-        # =================== PEAK NAVIGATION SECTION ===================
-        nav_frame = ttk.LabelFrame(parent, text="🎯 Peak Navigation", padding=10)
-        nav_frame.pack(fill=tk.X, pady=(0, 10))
-
-        # Peak selector with enhanced info
-        peak_select_frame = ttk.Frame(nav_frame)
-        peak_select_frame.pack(fill=tk.X, pady=2)
-
-        ttk.Label(peak_select_frame, text="Peak Number:").pack(side=tk.LEFT)
-        peak_spin = tk.Spinbox(peak_select_frame, from_=1, to=500, width=4,
-                              textvariable=self.selected_peak_number,
-                              command=self.center_on_selected_peak)
-        peak_spin.pack(side=tk.LEFT, padx=5)
-
-        self.peak_info_label = ttk.Label(peak_select_frame, text="Peak: -/-",
-                                        font=('TkDefaultFont', 9, 'bold'))
-        self.peak_info_label.pack(side=tk.LEFT, padx=20)
-
-        # Enhanced navigation buttons
-        nav_button_frame = ttk.Frame(nav_frame)
-        nav_button_frame.pack(fill=tk.X, pady=5)
-
-        ttk.Button(nav_button_frame, text="◀◀",
-                  command=self.prev_peak, width=4).pack(side=tk.LEFT, padx=2)
-        ttk.Button(nav_button_frame, text="🎯 ",
-                  command=self.center_on_selected_peak, width=4).pack(side=tk.LEFT, padx=2)
-        ttk.Button(nav_button_frame, text="▶▶",
-                  command=self.next_peak, width=4).pack(side=tk.LEFT, padx=2)
-        ttk.Button(nav_button_frame, text="🔍",
-                  command=self.zoom_to_peak, width=4).pack(side=tk.LEFT, padx=2)
-        ttk.Button(nav_button_frame, text="🔬",
-                  command=self.show_selected_peak_analysis, width=4).pack(side=tk.LEFT, padx=2)
-
-        # =================== PEAK EDITING SECTION ===================
-        edit_frame = ttk.LabelFrame(parent, text="🎯 Peak Position Editor", padding=10)
-        edit_frame.pack(fill=tk.X, pady=(0, 10))
-
-        # Edit mode toggle
-        edit_mode_frame = ttk.Frame(edit_frame)
-        edit_mode_frame.pack(fill=tk.X, pady=2)
-
-        edit_checkbox = ttk.Checkbutton(edit_mode_frame, text="Enable Peak Editing Mode",
-                                       variable=self.peak_edit_mode,
-                                       command=self.toggle_peak_edit_mode)
-        edit_checkbox.pack(side=tk.LEFT)
-
-        # Mode status label
-        self.edit_mode_status_label = ttk.Label(edit_mode_frame, text="Mode: View Only",
-                                               font=('TkDefaultFont', 9), foreground='gray')
-        self.edit_mode_status_label.pack(side=tk.LEFT, padx=20)
-
-        # Peak list selection frame
-        peak_list_frame = ttk.Frame(edit_frame)
-        peak_list_frame.pack(fill=tk.X, pady=(5, 2))
-
-        #ttk.Label(peak_list_frame, text="Edit which peak lists:", font=('TkDefaultFont', 9)).pack(anchor=tk.W)
-
-        # Individual peak list checkboxes
-        list_checkboxes_frame = ttk.Frame(peak_list_frame)
-        list_checkboxes_frame.pack(fill=tk.X, pady=(2, 0))
-
-        ref_checkbox = ttk.Checkbutton(list_checkboxes_frame, text="Reference peaks",
-                                      variable=self.edit_reference_peaks,
-                                      command=self.update_edit_mode_status)
-        ref_checkbox.pack(side=tk.LEFT, padx=(20, 10))
-
-        det_checkbox = ttk.Checkbutton(list_checkboxes_frame, text="Detected peaks",
-                                      variable=self.edit_detected_peaks,
-                                      command=self.update_edit_mode_status)
-        det_checkbox.pack(side=tk.LEFT)
-
-        # Peak deletion mode
-        deletion_frame = ttk.Frame(edit_frame)
-        deletion_frame.pack(fill=tk.X, pady=(5, 2))
-
-        self.peak_deletion_mode = tk.BooleanVar(value=False)
-        deletion_checkbox = ttk.Checkbutton(deletion_frame, text="🗑️ Enable Peak Deletion (Left-click to delete)",
-                                          variable=self.peak_deletion_mode,
-                                          command=self.update_edit_mode_status)
-        deletion_checkbox.pack(side=tk.LEFT, padx=(20, 0))
-
-        # Peak addition mode
-        addition_frame = ttk.Frame(edit_frame)
-        addition_frame.pack(fill=tk.X, pady=(5, 2))
-
-        self.peak_addition_mode = tk.BooleanVar(value=False)
-        addition_checkbox = ttk.Checkbutton(addition_frame, text="➕ Enable Peak Addition (Left-click to add)",
-                                          variable=self.peak_addition_mode,
-                                          command=self.update_edit_mode_status)
-        addition_checkbox.pack(side=tk.LEFT, padx=(20, 0))
-
-        # Instructions
-        #instructions_label = ttk.Label(edit_frame,
-        #                             text="Instructions: Click peak to select, click new position to move",
-        #                             font=('TkDefaultFont', 8), foreground='blue')
-        #instructions_label.pack(anchor=tk.W, pady=(2, 0))
-
-        # Selected peak info
-        self.selected_peak_label = ttk.Label(edit_frame, text="No peak selected",
-                                           font=('TkDefaultFont', 9), foreground='black')
-        self.selected_peak_label.pack(anchor=tk.W, pady=2)
-
+        # Create hidden dummy label for peak_info_label to prevent AttributeError
+        # (Navigation functionality now provided by Peak Navigator in right panel)
+        self.peak_info_label = ttk.Label(parent, text="Peak: -/-")
+        # Don't pack - keep hidden
 
         # =================== VOIGT FITTING SECTION ===================
-        voigt_frame = ttk.LabelFrame(parent, text="📈 Voigt Profile Fitting", padding=5)
+        voigt_frame = CTkLabelFrame(parent, text="Voigt Fitting", padding=5)
         voigt_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Simplified parameters frame (always shown, no toggle)
-        self.simplified_fitting_frame = ttk.LabelFrame(voigt_frame, text="🎯 PS2D-Style High-Performance Fitting", padding=10)
-        self.simplified_fitting_frame.pack(fill=tk.X, pady=5)  # Pack immediately - shown by default
-
-        # PS2D-style status indicator
-        ps2d_status_frame = ttk.Frame(self.simplified_fitting_frame)
-        ps2d_status_frame.pack(fill=tk.X, pady=(0, 10))
-        ps2d_status_label = ttk.Label(ps2d_status_frame,
-                                     text="✅ PS2D-style fitting active: Multi-stage algorithm with optimal convergence",
-                                     font=('TkDefaultFont', 9, 'bold'), foreground='darkgreen')
-        ps2d_status_label.pack(anchor=tk.W)
-
-        # Create a single grid container for PS2D controls
-        params_container = ttk.Frame(self.simplified_fitting_frame)
-        params_container.pack(fill=tk.X)
-
-        # Header
-        row = 0
-        ttk.Label(params_container, text="PS2D Multi-Peak Controls:", font=('TkDefaultFont', 9, 'bold')).grid(
-            row=row, column=0, columnspan=3, sticky=tk.W, pady=(0,3))
-
-        # PS2D is always active - show informational text instead of checkbox
-        row = 1
-        ps2d_status_label = ttk.Label(params_container,
-                                      text="✅ PS2D 5-stage multi-peak fitting: Always active for optimal results",
-                                      font=('TkDefaultFont', 9), foreground='darkgreen')
-        ps2d_status_label.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=3)
-
-        row = 2
-        fix_lw_check = ttk.Checkbutton(params_container, text="🔒 Fix Linewidths (fixLW flag)",
-                                       variable=self.fix_linewidths,
-                                       command=self.on_simplified_parameter_change)
-        fix_lw_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=3)
-        ttk.Label(params_container, text="(Hold linewidths constant during multi-peak fitting)",
-                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=3)
-
-        row = 3
-        fix_pos_check = ttk.Checkbutton(params_container, text="🔒 Fix Positions (fixPos flag)",
-                                       variable=self.fix_positions,
-                                       command=self.on_simplified_parameter_change)
-        fix_pos_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=3)
-        ttk.Label(params_container, text="(Hold peak positions constant during multi-peak fitting)",
-                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=3)
-
-        row = 4
-        custom_lw_check = ttk.Checkbutton(params_container, text="⚙️ Custom Initial Linewidths",
-                                         variable=self.use_custom_linewidths,
-                                         command=self.on_custom_linewidths_toggle)
-        custom_lw_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(8,3))
-        ttk.Label(params_container, text="(Override defaults: Lor/Gauss 1H=0.001/0.3, 15N=0.0001/0.03)",
-                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=(8,3))
-
-        # Custom linewidth input fields (initially disabled)
-        self.lw_custom_frame = ttk.Frame(params_container)
-        self.lw_custom_frame.grid(row=5, column=0, columnspan=3, sticky=tk.W, pady=(0,5))
-
-        # 1H linewidths
-        ttk.Label(self.lw_custom_frame, text="  1H:").grid(row=0, column=0, sticky=tk.W, padx=(10,5))
-        ttk.Label(self.lw_custom_frame, text="Lor:").grid(row=0, column=1, sticky=tk.W)
-        self.lw_lorentz_1h_spin = ttk.Spinbox(self.lw_custom_frame, from_=0.0001, to=0.1, increment=0.001,
-                                              width=8, textvariable=self.lw_lorentz_1h, format="%.4f",
-                                              command=self.on_simplified_parameter_change, state='disabled')
-        self.lw_lorentz_1h_spin.grid(row=0, column=2, sticky=tk.W, padx=(2,10))
-
-        ttk.Label(self.lw_custom_frame, text="Gauss:").grid(row=0, column=3, sticky=tk.W)
-        self.lw_gauss_1h_spin = ttk.Spinbox(self.lw_custom_frame, from_=0.001, to=1.0, increment=0.01,
-                                            width=8, textvariable=self.lw_gauss_1h, format="%.3f",
-                                            command=self.on_simplified_parameter_change, state='disabled')
-        self.lw_gauss_1h_spin.grid(row=0, column=4, sticky=tk.W, padx=(2,0))
-
-        # 15N linewidths
-        ttk.Label(self.lw_custom_frame, text="  15N:").grid(row=1, column=0, sticky=tk.W, padx=(10,5), pady=(3,0))
-        ttk.Label(self.lw_custom_frame, text="Lor:").grid(row=1, column=1, sticky=tk.W, pady=(3,0))
-        self.lw_lorentz_15n_spin = ttk.Spinbox(self.lw_custom_frame, from_=0.00001, to=0.01, increment=0.0001,
-                                               width=8, textvariable=self.lw_lorentz_15n, format="%.5f",
-                                               command=self.on_simplified_parameter_change, state='disabled')
-        self.lw_lorentz_15n_spin.grid(row=1, column=2, sticky=tk.W, padx=(2,10), pady=(3,0))
-
-        ttk.Label(self.lw_custom_frame, text="Gauss:").grid(row=1, column=3, sticky=tk.W, pady=(3,0))
-        self.lw_gauss_15n_spin = ttk.Spinbox(self.lw_custom_frame, from_=0.001, to=0.5, increment=0.005,
-                                            width=8, textvariable=self.lw_gauss_15n, format="%.3f",
-                                            command=self.on_simplified_parameter_change, state='disabled')
-        self.lw_gauss_15n_spin.grid(row=1, column=4, sticky=tk.W, padx=(2,0), pady=(3,0))
-
-        # Help text for PS2D-style mode
-        simplified_help = ttk.Label(self.simplified_fitting_frame,
-                                  text="ℹ️ PS2D 5-stage Levenberg-Marquardt fitting with optimal convergence:\n"
-                                       "   • Stage 0: Intensity warm-up (positions/widths fixed)\n"
-                                       "   • Stage 1: Linewidth refinement (positions fixed)\n"
-                                       "   • Stage 2: Position refinement (if not fixed)\n"
-                                       "   • Stage 4: Global refinement (all parameters)\n"
-                                       "   • Max 250 iterations per stage with adaptive damping (λ=0.001 initial)\n"
-                                       "   • fixLW/fixPos: Constrain parameters during stages 1-4\n"
-                                       "   • Custom linewidths: Override automatic initial guesses",
-                                  font=('TkDefaultFont', 8), foreground='blue', wraplength=680, justify=tk.LEFT)
-        simplified_help.pack(anchor=tk.W, pady=(10, 5))
-
-        # Parallel processing option
-        parallel_frame = ttk.Frame(self.simplified_fitting_frame)
-        parallel_frame.pack(fill=tk.X, pady=(10, 0))
-
-        parallel_check = ttk.Checkbutton(parallel_frame,
-                                        text="🚀 Use Parallel Processing (75% cores)",
-                                        variable=self.use_parallel_processing,
-                                        command=self.on_simplified_parameter_change)
-        parallel_check.pack(anchor=tk.W)
-        ttk.Label(parallel_frame,
-                 text="✅ Parallel processing fully supports PS2D 2D simultaneous fitting (3-7× speedup)",
-                 font=('TkDefaultFont', 8), foreground='dark green').pack(anchor=tk.W, padx=(25,0))
-
-
-        # Voigt buttons
-        voigt_button_frame = ttk.Frame(voigt_frame)
-        voigt_button_frame.pack(fill=tk.X, pady=5)
-
-        ttk.Button(voigt_button_frame, text="📊 Fit Selected Peak",
-                  command=self.fit_selected_peak, width=18).pack(side=tk.LEFT, padx=2)
-        self.fit_all_peaks_button = ttk.Button(voigt_button_frame, text="📈 Fit All Peaks",
-                                              command=self.fit_all_peaks, width=17)
-        self.fit_all_peaks_button.pack(side=tk.LEFT, padx=2)
-
-        # Add Reset Results button
-        ttk.Button(voigt_button_frame, text="🔄 Reset Results",
-                   command=self.reset_analysis_results, width=15).pack(side=tk.LEFT, padx=2)
-
-        # Update button text based on Voigt fitting toggle
-        self._update_fit_all_button_text()
-
-        # Setup series integration controls
-        self.setup_series_controls(parent)
+        # Reset Results button (full width)
+        ctk.CTkButton(voigt_frame, text="Reset Results",
+                     command=self.reset_analysis_results, corner_radius=8,
+                     fg_color=self.button_fg_color, hover_color=self.button_hover_color,
+                     text_color=self.button_text_color).pack(fill=tk.X, padx=10, pady=5)
 
     def _update_fit_all_button_text(self):
-        """Update the Fit All Peaks button text based on Voigt fitting mode"""
+        """Update the Fit Spectrum button text based on Voigt fitting mode"""
         if hasattr(self, 'fit_all_peaks_button'):
             if self.use_voigt_fitting.get():
-                self.fit_all_peaks_button.configure(text="🔬 Fit All Peaks")
+                self.fit_all_peaks_button.configure(text="Fit Spectrum")
             else:
-                self.fit_all_peaks_button.configure(text="📊 Extract Heights")
+                self.fit_all_peaks_button.configure(text="Extract Heights")
 
     def setup_series_controls(self, parent):
         """Set up series integration controls"""
         # =================== SERIES INTEGRATION SECTION ===================
-        series_frame = ttk.LabelFrame(parent, text="🚀 Advanced Series Integration Workflow", padding=10)
+        series_frame = CTkLabelFrame(parent, text="Advanced Options", padding=10)
         series_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Series options with enhanced controls
-        options_frame = ttk.LabelFrame(series_frame, text="Processing Options", padding=5)
-        options_frame.pack(fill=tk.X, pady=(0, 5))
-
-        ttk.Checkbutton(options_frame, text="Auto-process entire folder",
-                       variable=self.auto_process_series).pack(anchor=tk.W)
-        ttk.Checkbutton(options_frame, text="Save individual spectrum results",
-                       variable=self.save_individual_results).pack(anchor=tk.W)
-        ttk.Checkbutton(options_frame, text="Create comprehensive summary plots",
-                       variable=self.create_summary_plots).pack(anchor=tk.W)
-
-        # OPTION 1: Series Integration uses parameters from Voigt Analysis Options
-        ttk.Separator(options_frame, orient='horizontal').pack(fill=tk.X, pady=5)
-        ttk.Label(options_frame, text="🔬 Series-Specific Options:", font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W)
-
-        # Informational label - settings inherited from Voigt Analysis Options
-        info_label = ttk.Label(options_frame,
-                              text="ℹ️ Fitting parameters (Voigt, parallel, fix positions/linewidths) use settings from Voigt Analysis Options above",
-                              font=('TkDefaultFont', 8), foreground='blue', wraplength=400)
-        info_label.pack(anchor=tk.W, padx=10, pady=(0,5))
-
-        # PS2D Linewidth Reuse option
-        ps2d_lw_check = ttk.Checkbutton(options_frame, text="🔒 PS2D Linewidth Reuse (Fix LW from reference, ~40% speedup)",
-                       variable=self.use_ps2d_linewidth_reuse, command=self._on_ps2d_linewidth_reuse_toggle)
-        ps2d_lw_check.pack(anchor=tk.W, padx=10)
-
-        # Add tooltip/help text for PS2D Linewidth Reuse
-        ps2d_help_frame = ttk.Frame(options_frame)
-        ps2d_help_frame.pack(fill=tk.X, padx=20, pady=(0, 5))
-        ttk.Label(ps2d_help_frame, text="ℹ️ When enabled: Reference spectrum uses full optimization, series spectra reuse linewidths",
-                 font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W)
-        ttk.Label(ps2d_help_frame, text="   Only intensity and position are optimized for series (PS2D C++ algorithm)",
-                 font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W)
-
-
-        # Number of integrations option for Voigt fitting
-        integrations_frame = ttk.Frame(options_frame)
-        integrations_frame.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(integrations_frame, text="Number of integrations per peak:").pack(side=tk.LEFT)
-        integrations_spinbox = ttk.Spinbox(integrations_frame, from_=1, to=10, width=5,
-                                         textvariable=self.series_num_integrations)
-        integrations_spinbox.pack(side=tk.LEFT, padx=(5, 0))
-        #ttk.Label(integrations_frame, text="(only applies when Voigt fitting is enabled)",
-        #         font=('TkDefaultFont', 8), foreground='gray').pack(side=tk.LEFT, padx=(5, 0))
-
-        # NEW: Series peak source selection
-        ttk.Separator(series_frame, orient='horizontal').pack(fill=tk.X, pady=10)
-
-        peak_source_label_frame = ttk.Frame(series_frame)
-        peak_source_label_frame.pack(fill=tk.X, pady=(0, 5))
-        ttk.Label(peak_source_label_frame, text="🎯 Peak List Source:", font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W)
-
-        peak_source_frame = ttk.Frame(series_frame)
-        peak_source_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-
-        # Peak source radio buttons
-        ttk.Radiobutton(peak_source_frame, text="Use detected peaks ",
-                       variable=self.series_peak_source, value="detected").pack(anchor=tk.W)
-        ttk.Radiobutton(peak_source_frame, text="Use reference peak list",
-                       variable=self.series_peak_source, value="reference").pack(anchor=tk.W)
-        ttk.Radiobutton(peak_source_frame, text="Cascade mode (propagate positions: n→n+1→n+2)",
-                       variable=self.series_peak_source, value="cascade").pack(anchor=tk.W)
-
-        # Cascade mode explanation
-        cascade_info_frame = ttk.Frame(series_frame)
-        cascade_info_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
-        ttk.Label(cascade_info_frame,
-                 text="   ℹ️ Cascade: Uses top contour centroid to find local maximum for each peak\n"
-                      "      before fitting (spectrum N positions → refine for spectrum N+1)",
-                 font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W)
-
-        # Peak detection toggle
-        detection_frame = ttk.Frame(series_frame)
-        detection_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-
-        #ttk.Checkbutton(detection_frame, text="🔍 Enable peak detection for each spectrum (slower, more thorough)",
-        #               variable=self.series_enable_detection).pack(anchor=tk.W)
-        #ttk.Label(detection_frame, text="   ⚡ When OFF: Direct fitting only (faster, uses existing peak positions)",
-        #         font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W)
-
-        # Series processing controls
-        #ttk.Separator(series_frame, orient='horizontal').pack(fill=tk.X, pady=10)
-
-        series_control_frame = ttk.Frame(series_frame)
-        series_control_frame.pack(fill=tk.X, pady=5)
-
-        self.series_button = ttk.Button(series_control_frame, text="🚀 START SERIES INTEGRATION",
-                                       command=self.start_series_integration)
-        self.series_button.pack(fill=tk.X, pady=2)
+        # Expert Mode button (full width)
+        self.expert_mode_button = ctk.CTkButton(series_frame, text="Expert Mode",
+                                                command=self.open_expert_mode, corner_radius=8,
+                                                fg_color=self.button_fg_color,
+                                                hover_color=self.button_hover_color,
+                                                text_color=self.button_text_color)
+        self.expert_mode_button.pack(fill=tk.X, padx=10, pady=5)
 
         # Series results browser with enhanced features
         #ttk.Separator(series_frame, orient='horizontal').pack(fill=tk.X, pady=10)
@@ -1558,7 +1434,7 @@ class NMRPeaksSeriesGUI:
 
 
         # =================== DISPLAY OPTIONS SECTION ===================
-        #display_frame = ttk.LabelFrame(parent, text="🖼️ Enhanced Display Options", padding=10)
+        #display_frame = CTkLabelFrame(parent, text="🖼️ Enhanced Display Options", padding=10)
         #display_frame.pack(fill=tk.X, pady=(0, 10))
 
         #display_checks_frame = ttk.Frame(display_frame)
@@ -1573,7 +1449,7 @@ class NMRPeaksSeriesGUI:
 
 
         # =================== INTEGRATION PROGRESS SECTION ===================
-        progress_frame = ttk.LabelFrame(parent, text="🔄 Integration Progress", padding=10)
+        progress_frame = CTkLabelFrame(parent, text="Integration Progress", padding=10)
         progress_frame.pack(fill=tk.X, pady=(0, 10))
 
         # Progress display and control
@@ -1635,12 +1511,12 @@ class NMRPeaksSeriesGUI:
         progress_control_frame = ttk.Frame(progress_frame)
         progress_control_frame.pack(fill=tk.X, pady=(5, 0))
 
-        self.pause_integration_button = ttk.Button(progress_control_frame, text="⏸️ Pause",
-                                                  command=self.pause_integration, width=4)
+        self.pause_integration_button = ctk.CTkButton(progress_control_frame, text="Pause",
+                                                     command=self.pause_integration, width=4*8, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color)
         self.pause_integration_button.pack(side=tk.LEFT, padx=2)
 
-        self.stop_integration_button = ttk.Button(progress_control_frame, text="⏹️ Stop",
-                                                 command=self.stop_integration, width=4)
+        self.stop_integration_button = ctk.CTkButton(progress_control_frame, text="Stop",
+                                                    command=self.stop_integration, width=4*8, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color)
         self.stop_integration_button.pack(side=tk.LEFT, padx=2)
 
         # Initially hide progress frame
@@ -1648,7 +1524,7 @@ class NMRPeaksSeriesGUI:
         self.progress_frame = progress_frame  # Store reference for showing/hiding
 
         # =================== STATUS & EXPORT SECTION ===================
-        #status_frame = ttk.LabelFrame(parent, text="📋 Status & Export", padding=10)
+        #status_frame = CTkLabelFrame(parent, text="📋 Status & Export", padding=10)
         #status_frame.pack(fill=tk.X, pady=(0, 10))
 
         #self.status_label = ttk.Label(status_frame, text="Ready - Load files to begin",
@@ -1799,18 +1675,31 @@ class NMRPeaksSeriesGUI:
 
     def setup_enhanced_visualization(self, parent):
         """Setup enhanced visualization with multiple tabs"""
-        # Create enhanced notebook with more tabs
-        self.viz_notebook = ttk.Notebook(parent)
-        self.viz_notebook.pack(fill=tk.BOTH, expand=True)
+        # Create modern tabview with rounded corners matching button colors
+        self.viz_notebook = CTkTabview(
+            parent,
+            # Layout
+            corner_radius=12,
+            border_width=1,
 
-        # Bind tab change event to refresh toolbars on Linux
-        import platform
-        if platform.system() == "Linux":
-            self.viz_notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+            # Colors matching existing button scheme
+            fg_color="#F0F0F0",  # Background
+            segmented_button_fg_color="#F0F0F0",  # Tab bar background
+            segmented_button_selected_color=self.button_fg_color,  # Selected tab (#D3D3D3)
+            segmented_button_selected_hover_color=self.button_hover_color,  # Selected hover (#B0B0B0)
+            segmented_button_unselected_color="#E8E8E8",  # Unselected tabs
+            segmented_button_unselected_hover_color="#D8D8D8",  # Unselected hover
+            text_color=self.button_text_color,  # Text (#000000)
+            text_color_disabled="#808080",  # Disabled text
+            border_color="#C0C0C0",  # Border
+
+            # Event handler
+            command=self._on_tab_changed  # Tab change callback
+        )
+        self.viz_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Tab 1: Main spectrum
-        main_tab = ttk.Frame(self.viz_notebook)
-        self.viz_notebook.add(main_tab, text="📊 Main Spectrum")
+        main_tab = self.viz_notebook.add("Main Spectrum")
 
         # Create responsive main figure
         self.fig_main, self.ax_main = plt.subplots(1, 1, figsize=(4, 3))
@@ -1836,8 +1725,7 @@ class NMRPeaksSeriesGUI:
 
 
         # Tab 2: Voigt analysis (enhanced 2x2 layout)
-        voigt_tab = ttk.Frame(self.viz_notebook)
-        self.viz_notebook.add(voigt_tab, text="📈 Voigt Analysis")
+        voigt_tab = self.viz_notebook.add("📈 Voigt Analysis")
 
         # Create responsive Voigt analysis figure - 2x1 layout with backward compatibility
         # Reduced from (4, 8) to (4, 5) for better fit in window
@@ -1875,19 +1763,20 @@ class NMRPeaksSeriesGUI:
             toolbar_frame_voigt.after(10, lambda: toolbar_frame_voigt.update_idletasks())
 
         # Tab 3: 3D Voigt Analysis (new - supplementary visualization)
-        voigt_3d_tab = ttk.Frame(self.viz_notebook)
-        self.viz_notebook.add(voigt_3d_tab, text="🎨 3D Voigt Analysis")
+        voigt_3d_tab = self.viz_notebook.add("3D Voigt Analysis")
 
         # Create control frame at top
         control_frame_3d = ttk.Frame(voigt_3d_tab)
         control_frame_3d.pack(side=tk.TOP, fill=tk.X, padx=5, pady=3)
 
         # Row 1: Layer toggling checkboxes
-        layer_frame = ttk.LabelFrame(control_frame_3d, text="Layer Visibility", padding=3)
+        layer_frame = CTkLabelFrame(control_frame_3d, text="Layer Visibility", padding=3)
         layer_frame.pack(side=tk.LEFT, padx=3)
 
         self.show_exp_3d_var = tk.BooleanVar(value=True)
         self.show_fit_3d_var = tk.BooleanVar(value=True)
+        self.show_individual_3d_var = tk.BooleanVar(value=True)
+        self.show_peak_labels_3d_var = tk.BooleanVar(value=True)
         self.show_resid_3d_var = tk.BooleanVar(value=True)
         # self.show_cross_3d_var = tk.BooleanVar(value=True)  # Disabled - code kept for future use
 
@@ -1897,6 +1786,12 @@ class NMRPeaksSeriesGUI:
         ttk.Checkbutton(layer_frame, text="Fitted", variable=self.show_fit_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_fitted(self.show_fit_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
+        ttk.Checkbutton(layer_frame, text="Individual Peaks", variable=self.show_individual_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_individual_peaks(self.show_individual_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
+        ttk.Checkbutton(layer_frame, text="Peak Labels", variable=self.show_peak_labels_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_peak_labels(self.show_peak_labels_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
         ttk.Checkbutton(layer_frame, text="Residuals", variable=self.show_resid_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_residuals(self.show_resid_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
@@ -1905,7 +1800,7 @@ class NMRPeaksSeriesGUI:
         #                 ).pack(side=tk.LEFT, padx=2)  # Disabled - code kept for future use
 
         # Row 2: Residual mode radio buttons
-        residual_frame = ttk.LabelFrame(control_frame_3d, text="Residual Mode", padding=3)
+        residual_frame = CTkLabelFrame(control_frame_3d, text="Residual Mode", padding=3)
         residual_frame.pack(side=tk.LEFT, padx=3)
 
         self.residual_mode_3d_var = tk.StringVar(value='overlay')
@@ -1918,8 +1813,23 @@ class NMRPeaksSeriesGUI:
                         command=lambda: self.voigt_plotter_3d.set_residual_mode('overlay')
                         ).pack(side=tk.LEFT, padx=2)
 
-        # Row 3: Intensity scaling slider
-        intensity_frame = ttk.LabelFrame(control_frame_3d, text="Intensity Scale", padding=3)
+        # Row 3: Color scheme dropdown
+        color_scheme_frame = CTkLabelFrame(control_frame_3d, text="Color Scheme", padding=3)
+        color_scheme_frame.pack(side=tk.LEFT, padx=3)
+
+        self.color_scheme_3d_var = tk.StringVar(value='Warm')
+        color_scheme_dropdown = ttk.Combobox(
+            color_scheme_frame,
+            textvariable=self.color_scheme_3d_var,
+            values=['Classic', 'Clean', 'Dark', 'Warm'],
+            state='readonly',
+            width=10
+        )
+        color_scheme_dropdown.pack(side=tk.LEFT, padx=2)
+        color_scheme_dropdown.bind('<<ComboboxSelected>>', self._on_color_scheme_change_3d)
+
+        # Row 4: Intensity scaling slider
+        intensity_frame = CTkLabelFrame(control_frame_3d, text="Intensity Scale", padding=3)
         intensity_frame.pack(side=tk.LEFT, padx=3, fill=tk.X, expand=True)
 
         ttk.Label(intensity_frame, text="50%").pack(side=tk.LEFT, padx=2)
@@ -1965,8 +1875,7 @@ class NMRPeaksSeriesGUI:
             toolbar_frame_voigt_3d.after(10, lambda: toolbar_frame_voigt_3d.update_idletasks())
 
         # Tab 4: Peak Parameters (synchronized with 2D and 3D Voigt tabs)
-        peak_params_tab = ttk.Frame(self.viz_notebook)
-        self.viz_notebook.add(peak_params_tab, text="📋 Peak Parameters")
+        peak_params_tab = self.viz_notebook.add("Peak Parameters")
 
         # Create scrollable text widget for peak parameters
         params_scroll_frame = ttk.Frame(peak_params_tab)
@@ -2002,94 +1911,34 @@ class NMRPeaksSeriesGUI:
         self.peak_params_text.insert('1.0', 'No peak selected.\n\nNavigate to a peak using 2D or 3D Voigt Analysis tabs.')
         self.peak_params_text.config(state=tk.DISABLED)
 
-        # Tab 5: Series overview
-        series_tab = ttk.Frame(self.viz_notebook)
-        self.viz_notebook.add(series_tab, text="📊 Series Overview")
+        # REMOVED: Tab 5: Series overview (not needed in main GUI - user request 2025-11-19)
+        # Create dummy figures to prevent errors in code that references these
+        self.fig_series, self.ax_series = plt.subplots(1, 1, figsize=(1, 1))
+        plt.close(self.fig_series)  # Close immediately to save memory
+        self.canvas_series = None  # Dummy, not displayed
 
-        # Create responsive series overview figure
-        # Reduced from (8, 6) to (6, 4) for better fit in window
-        self.fig_series, self.ax_series = plt.subplots(1, 1, figsize=(6, 4))
-        self.fig_series.tight_layout()
-        self.canvas_series = FigureCanvasTkAgg(self.fig_series, series_tab)
-        self.canvas_series.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        # Create toolbar with dedicated frame
-        toolbar_frame_series = ttk.Frame(series_tab)
-        toolbar_frame_series.pack(fill=tk.X, pady=(2, 0))
-
-        toolbar_series = NavigationToolbar2Tk(self.canvas_series, toolbar_frame_series)
-        toolbar_series.pack(side=tk.TOP, fill=tk.X)
-        toolbar_series.update()
-        toolbar_frame_series.update_idletasks()
-        if not toolbar_series.winfo_ismapped():
-            toolbar_series.pack_configure(side=tk.TOP, fill=tk.X)
-            toolbar_frame_series.after(10, lambda: toolbar_frame_series.update_idletasks())
-
-        # Tab 4: Statistics and Quality Assessment
-        stats_tab = ttk.Frame(self.viz_notebook)
-        self.viz_notebook.add(stats_tab, text="📈 Statistics")
-
-        # Create responsive statistics figure
-        # Reduced from (10, 7) to (7, 5) for better fit in window
+        # REMOVED: Tab 4: Statistics and Quality Assessment (not needed in main GUI - user request 2025-11-19)
+        # Create dummy figures to prevent errors in code that references these
         self.fig_stats, ((self.ax_stats_1, self.ax_stats_2),
-                         (self.ax_stats_3, self.ax_stats_4)) = plt.subplots(2, 2, figsize=(7, 5))
-        self.fig_stats.tight_layout()
-        self.canvas_stats = FigureCanvasTkAgg(self.fig_stats, stats_tab)
-        self.canvas_stats.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                         (self.ax_stats_3, self.ax_stats_4)) = plt.subplots(2, 2, figsize=(1, 1))
+        plt.close(self.fig_stats)  # Close immediately to save memory
+        self.canvas_stats = None  # Dummy, not displayed
 
-        # Create toolbar with dedicated frame
-        toolbar_frame_stats = ttk.Frame(stats_tab)
-        toolbar_frame_stats.pack(fill=tk.X, pady=(2, 0))
-
-        toolbar_stats = NavigationToolbar2Tk(self.canvas_stats, toolbar_frame_stats)
-        toolbar_stats.pack(side=tk.TOP, fill=tk.X)
-        toolbar_stats.update()
-        toolbar_frame_stats.update_idletasks()
-        if not toolbar_stats.winfo_ismapped():
-            toolbar_stats.pack_configure(side=tk.TOP, fill=tk.X)
-            toolbar_frame_stats.after(10, lambda: toolbar_frame_stats.update_idletasks())
-
-        # Tab 5: Integration Diagnostics
-        diagnostics_tab = ttk.Frame(self.viz_notebook)
-        self.viz_notebook.add(diagnostics_tab, text="🔍 Integration Diagnostics")
-
-        # Create a paned window for diagnostics layout
-        diagnostics_paned = ttk.PanedWindow(diagnostics_tab, orient=tk.HORIZONTAL)
-        diagnostics_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # Left panel: Diagnostic plots
-        plots_frame = ttk.Frame(diagnostics_paned)
-        diagnostics_paned.add(plots_frame, weight=2)
-
-        # Reduced from (10, 8) to (7, 5) for better fit in window
+        # REMOVED: Tab 5: Integration Diagnostics (not needed in main GUI - user request 2025-11-19)
+        # Create dummy figures to prevent errors in code that references these
         self.fig_diagnostics, ((self.ax_diag_quality, self.ax_diag_convergence),
-                              (self.ax_diag_aic, self.ax_diag_timing)) = plt.subplots(2, 2, figsize=(7, 5))
-        self.canvas_diagnostics = FigureCanvasTkAgg(self.fig_diagnostics, plots_frame)
-        self.canvas_diagnostics.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+                              (self.ax_diag_aic, self.ax_diag_timing)) = plt.subplots(2, 2, figsize=(1, 1))
+        plt.close(self.fig_diagnostics)  # Close immediately to save memory
+        self.canvas_diagnostics = None  # Dummy, not displayed
 
-        # Create toolbar with dedicated frame
-        toolbar_frame_diagnostics = ttk.Frame(plots_frame)
-        toolbar_frame_diagnostics.pack(fill=tk.X, pady=(2, 0))
+        # Tab 5: Configuration and Settings (hidden by default)
+        # Users can access via Tools menu -> "Configuration..."
+        # Uncomment below to show Configuration tab by default:
+        # config_tab = self.viz_notebook.add("Configuration")
+        # self.setup_config_tab(config_tab)
 
-        toolbar_diagnostics = NavigationToolbar2Tk(self.canvas_diagnostics, toolbar_frame_diagnostics)
-        toolbar_diagnostics.pack(side=tk.TOP, fill=tk.X)
-        toolbar_diagnostics.update()
-        toolbar_frame_diagnostics.update_idletasks()
-        if not toolbar_diagnostics.winfo_ismapped():
-            toolbar_diagnostics.pack_configure(side=tk.TOP, fill=tk.X)
-            toolbar_frame_diagnostics.after(10, lambda: toolbar_frame_diagnostics.update_idletasks())
-
-        # Right panel: Diagnostic information
-        info_frame = ttk.Frame(diagnostics_paned)
-        diagnostics_paned.add(info_frame, weight=1)
-
-        # Diagnostic information sections
-        self.setup_diagnostics_info_panel(info_frame)
-
-        # Tab 5: Configuration and Settings
-        config_tab = ttk.Frame(self.viz_notebook)
-        self.viz_notebook.add(config_tab, text="⚙️ Configuration")
-        self.setup_config_tab(config_tab)
+        # Store config tab reference for on-demand creation
+        self.config_tab_created = False
 
         # Initialize plots
         self.init_all_plots()
@@ -2106,18 +1955,18 @@ class NMRPeaksSeriesGUI:
                  font=('TkDefaultFont', 14, 'bold')).pack(anchor=tk.W, pady=(0, 10))
 
         # Save/Load configuration
-        config_file_frame = ttk.LabelFrame(config_content, text="Configuration Files", padding=10)
+        config_file_frame = CTkLabelFrame(config_content, text="Configuration Files", padding=10)
         config_file_frame.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Button(config_file_frame, text="💾 Save Configuration",
-                  command=self.save_config).pack(side=tk.LEFT, padx=5)
-        ttk.Button(config_file_frame, text="📂 Load Configuration",
-                  command=self.load_config).pack(side=tk.LEFT, padx=5)
-        ttk.Button(config_file_frame, text="🔄 Reset to Defaults",
-                  command=self.reset_config).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(config_file_frame, text="Save Configuration",
+                     command=self.save_config, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(config_file_frame, text="Load Configuration",
+                     command=self.load_config, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(config_file_frame, text="Reset to Defaults",
+                     command=self.reset_config, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color).pack(side=tk.LEFT, padx=5)
 
         # Current configuration display
-        config_display_frame = ttk.LabelFrame(config_content, text="Current Settings", padding=10)
+        config_display_frame = CTkLabelFrame(config_content, text="Current Settings", padding=10)
         config_display_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         self.config_text = tk.Text(config_display_frame, height=15, font=('Courier', 9))
@@ -2189,7 +2038,7 @@ class NMRPeaksSeriesGUI:
         diagnostics_scrollbar.pack(side="right", fill="y")
 
         # Integration Summary Section
-        summary_frame = ttk.LabelFrame(scrollable_frame, text="🔍 Integration Summary", padding=10)
+        summary_frame = CTkLabelFrame(scrollable_frame, text="Integration Summary", padding=10)
         summary_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.diag_total_peaks_label = ttk.Label(summary_frame, text="Total peaks analyzed: N/A")
@@ -2205,7 +2054,7 @@ class NMRPeaksSeriesGUI:
         self.diag_total_iterations_label.pack(anchor=tk.W)
 
         # Performance Metrics Section
-        performance_frame = ttk.LabelFrame(scrollable_frame, text="⚡ Performance Metrics", padding=10)
+        performance_frame = CTkLabelFrame(scrollable_frame, text="⚡ Performance Metrics", padding=10)
         performance_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.diag_processing_time_label = ttk.Label(performance_frame, text="Processing time: N/A")
@@ -2218,7 +2067,7 @@ class NMRPeaksSeriesGUI:
         self.diag_memory_usage_label.pack(anchor=tk.W)
 
         # Quality Distribution Section
-        quality_frame = ttk.LabelFrame(scrollable_frame, text="📊 Quality Distribution", padding=10)
+        quality_frame = CTkLabelFrame(scrollable_frame, text="Quality Distribution", padding=10)
         quality_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.diag_high_quality_label = ttk.Label(quality_frame, text="High quality (≥0.7): N/A")
@@ -2231,7 +2080,7 @@ class NMRPeaksSeriesGUI:
         self.diag_low_quality_label.pack(anchor=tk.W)
 
         # AIC Analysis Section
-        aic_frame = ttk.LabelFrame(scrollable_frame, text="📈 AIC Analysis", padding=10)
+        aic_frame = CTkLabelFrame(scrollable_frame, text="AIC Analysis", padding=10)
         aic_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.diag_avg_aic_label = ttk.Label(aic_frame, text="Average AIC score: N/A")
@@ -2244,7 +2093,7 @@ class NMRPeaksSeriesGUI:
         self.diag_model_selection_label.pack(anchor=tk.W)
 
         # Convergence Analysis Section
-        convergence_frame = ttk.LabelFrame(scrollable_frame, text="🎯 Convergence Analysis", padding=10)
+        convergence_frame = CTkLabelFrame(scrollable_frame, text="Convergence Analysis", padding=10)
         convergence_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.diag_convergence_rate_label = ttk.Label(convergence_frame, text="Convergence rate: N/A")
@@ -2257,15 +2106,15 @@ class NMRPeaksSeriesGUI:
         self.diag_failed_peaks_label.pack(anchor=tk.W)
 
         # Actions Section
-        actions_frame = ttk.LabelFrame(scrollable_frame, text="🔧 Actions", padding=10)
+        actions_frame = CTkLabelFrame(scrollable_frame, text="Actions", padding=10)
         actions_frame.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Button(actions_frame, text="🔄 Refresh Diagnostics",
-                  command=self.refresh_diagnostics, width=20).pack(pady=2)
-        ttk.Button(actions_frame, text="📊 Export Diagnostics",
-                  command=self.export_diagnostics, width=20).pack(pady=2)
-        ttk.Button(actions_frame, text="🔍 Detailed Analysis",
-                  command=self.show_detailed_analysis, width=20).pack(pady=2)
+        ctk.CTkButton(actions_frame, text="Refresh Diagnostics",
+                     command=self.refresh_diagnostics, width=20*8, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color).pack(pady=2)
+        ctk.CTkButton(actions_frame, text="Export Diagnostics",
+                     command=self.export_diagnostics, width=20*8, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color).pack(pady=2)
+        ctk.CTkButton(actions_frame, text="Detailed Analysis",
+                     command=self.show_detailed_analysis, width=20*8, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color).pack(pady=2)
 
     def init_all_plots(self):
         """Initialize all plots with default content"""
@@ -2295,8 +2144,10 @@ class NMRPeaksSeriesGUI:
         # Draw all canvases
         self.canvas_main.draw()
         self.canvas_voigt.draw()
-        self.canvas_series.draw()
-        self.canvas_stats.draw()
+        if self.canvas_series is not None:
+            self.canvas_series.draw()
+        if self.canvas_stats is not None:
+            self.canvas_stats.draw()
 
     # =================== EVENT HANDLERS ===================
 
@@ -2487,7 +2338,7 @@ class NMRPeaksSeriesGUI:
             convergence_status="Pending",
             elapsed_time=0
         )
-        self.pause_integration_button.config(text="⏸️ Pause")
+        self.pause_integration_button.configure(text="Pause")
 
     def refresh_diagnostics(self):
         """Refresh the diagnostics display with current data"""
@@ -2764,7 +2615,8 @@ class NMRPeaksSeriesGUI:
             self.ax_diag_timing.set_ylabel('Time (s)')
 
             self.fig_diagnostics.tight_layout()
-            self.canvas_diagnostics.draw()
+            if self.canvas_diagnostics is not None:
+                self.canvas_diagnostics.draw()
 
         except Exception as e:
             print(f"Error updating diagnostic plots: {e}")
@@ -2823,12 +2675,404 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
 
     # =================== FILE HANDLING ===================
 
+    def open_data_loading_dialog(self):
+        """Open data loading popup dialog - replaces inline file browsers"""
+        # Create and show dialog with current folders
+        dialog = DataLoadingDialog(
+            self.root,
+            current_nmr_folder=self.current_nmr_folder,
+            current_peak_folder=self.current_peak_folder
+        )
+
+        # Wait for dialog to close (modal)
+        self.root.wait_window(dialog)
+
+        # Process result if user clicked Load
+        if dialog.result:
+            nmr_file = dialog.result['nmr_file']
+            peak_file = dialog.result['peak_file']
+
+            # Remember folders for next time
+            self.current_nmr_folder = dialog.result['nmr_folder']
+            self.current_peak_folder = dialog.result['peak_folder']
+
+            # Call existing file selection handlers (preserves all existing logic)
+            self.on_nmr_file_select(nmr_file, os.path.basename(nmr_file))
+            self.on_peak_file_select(peak_file, os.path.basename(peak_file))
+
+            # Update status labels in main GUI
+            self.nmr_status_label.config(
+                text=f"📊 NMR Spectrum: {os.path.basename(nmr_file)}",
+                foreground='blue'
+            )
+
+            # Get peak count if available
+            peak_count_text = ""
+            if hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
+                peak_count_text = f" ({len(self.integrator.peak_list)} peaks)"
+
+            self.peak_status_label.config(
+                text=f"📌 Peak List: {os.path.basename(peak_file)}{peak_count_text}",
+                foreground='blue'
+            )
+
+            print(f"✅ Data loaded successfully from dialog")
+            print(f"   NMR: {nmr_file}")
+            print(f"   Peaks: {peak_file}")
+
+    def get_all_nmr_files(self):
+        """Get all NMR files from current folder (replaces nmr_file_list.get_all_files())"""
+        if not self.current_nmr_folder:
+            return []
+
+        import glob
+        files = []
+        for file_type in ["ft", "fid"]:  # NMR file extensions
+            pattern = os.path.join(self.current_nmr_folder, f"*.{file_type}")
+            files.extend(glob.glob(pattern))
+
+        # Natural sorting for numeric suffixes
+        def natural_sort_key(s):
+            import re
+            return [int(text) if text.isdigit() else text.lower()
+                    for text in re.split(r'(\d+)', s)]
+
+        return sorted(files, key=natural_sort_key)
+
+    def open_expert_mode(self):
+        """Open Expert Mode popup with advanced parameters"""
+        # Create popup window
+        popup = tk.Toplevel(self.root)
+        popup.title("Expert Mode - Advanced Parameters")
+        popup.geometry("700x600")
+
+        # Make modal
+        popup.transient(self.root)
+        popup.grab_set()
+
+        # Center on parent
+        popup.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - popup.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - popup.winfo_height()) // 2
+        popup.geometry(f"+{x}+{y}")
+
+        # Main container with scrollbar
+        main_frame = ttk.Frame(popup)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Canvas and scrollbar for scrollable content
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # =================== PEAK DETECTION PARAMETERS SECTION ===================
+        detection_params_frame = CTkLabelFrame(scrollable_frame, text="Peak Detection Parameters", padding=10)
+        detection_params_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Parameters toggle button
+        self.params_toggle_button = ctk.CTkButton(detection_params_frame, text="Parameters ▼",
+                                                 command=self.toggle_parameters, corner_radius=8,
+                                                 fg_color=self.button_fg_color, hover_color=self.button_hover_color,
+                                                 text_color=self.button_text_color)
+        self.params_toggle_button.pack(fill=tk.X, pady=2)
+
+        # Collapsible detection parameters
+        self.params_frame = ttk.Frame(detection_params_frame)
+
+        # Primary parameters (hidden by default)
+        primary_frame = ttk.Frame(self.params_frame)
+        primary_frame.pack(fill=tk.X, pady=(5, 5))
+
+        ttk.Label(primary_frame, text="1H/15N (ppm)").grid(row=0, column=0, sticky=tk.W, padx=(0,10))
+        search_x_spin = ttk.Spinbox(primary_frame, from_=0.01, to=0.2, increment=0.01, width=4,
+                                  textvariable=self.search_window_x,
+                                  command=self.on_parameter_change)
+        search_x_spin.grid(row=0, column=1, sticky=tk.W)
+
+        search_y_spin = ttk.Spinbox(primary_frame, from_=0.05, to=4.0, increment=0.05, width=4,
+                                  textvariable=self.search_window_y,
+                                  command=self.on_parameter_change)
+        search_y_spin.grid(row=0, column=2, sticky=tk.W)
+
+        ttk.Label(primary_frame, text="Noise Threshold:").grid(row=1, column=0, sticky=tk.W, padx=(0,10))
+        noise_spin = ttk.Spinbox(primary_frame, from_=0.01, to=10.0, increment=0.01, width=4,
+                               textvariable=self.noise_threshold,
+                               command=self.on_parameter_change)
+        noise_spin.grid(row=1, column=1, sticky=tk.W)
+
+        # Detection rectangle size parameter (anisotropic)
+        ttk.Label(primary_frame, text="X×Y (pixels):").grid(row=3, column=0, sticky=tk.W, padx=(0,5))
+        square_size_spin = tk.Spinbox(primary_frame, from_=1, to=9, increment=2, width=3,
+                                     textvariable=self.detection_square_size,
+                                     command=self.update_detection_square_ppm)
+        square_size_spin.grid(row=3, column=1, sticky=tk.W)
+
+        rectangle_y_spin = tk.Spinbox(primary_frame, from_=1, to=5, increment=1, width=3,
+                                     textvariable=self.detection_rectangle_y,
+                                     command=self.update_detection_square_ppm)
+        rectangle_y_spin.grid(row=3, column=2, sticky=tk.W)
+
+        # PPM conversion display
+        self.square_ppm_label = ttk.Label(primary_frame, textvariable=self.detection_square_ppm_x, font=('TkDefaultFont', 8))
+        self.square_ppm_label.grid(row=3, column=3, sticky=tk.W, padx=(5,0))
+
+        # Peak Centroid Detection
+        ttk.Label(primary_frame, text="🎯 Peak Centroid Detection:", font=('TkDefaultFont', 9, 'bold')).grid(
+            row=4, column=0, columnspan=4, sticky=tk.W, pady=(5,5))
+
+        # Centroid window parameters in ppm
+        ttk.Label(primary_frame, text="Window X ppm:").grid(row=6, column=0, sticky=tk.W)
+        centroid_x_spin = tk.Spinbox(primary_frame, from_=0.01, to=0.2, increment=0.01, width=4,
+                                   textvariable=self.centroid_window_x_ppm,
+                                   command=self.on_parameter_change)
+        centroid_x_spin.grid(row=6, column=1, sticky=tk.W, padx=(5,15))
+
+        centroid_y_spin = tk.Spinbox(primary_frame, from_=0.01, to=0.5, increment=0.02, width=4,
+                                   textvariable=self.centroid_window_y_ppm,
+                                   command=self.on_parameter_change)
+        centroid_y_spin.grid(row=6, column=2, sticky=tk.W, padx=5)
+
+        # Detection Mode Selection
+        mode_controls_frame = CTkLabelFrame(detection_params_frame, text="Detection Mode Selection", padding=5)
+        mode_controls_frame.pack(fill=tk.X, pady=5)
+
+        # =================== PS2D ALGORITHM CONFIGURATION SECTION ===================
+        ps2d_config_frame = CTkLabelFrame(scrollable_frame, text="PS2D Algorithm Configuration", padding=10)
+        ps2d_config_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Nucleus Type - always visible at top
+        nucleus_frame = ttk.Frame(ps2d_config_frame)
+        nucleus_frame.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Label(nucleus_frame, text="Nucleus Type:", font=('TkDefaultFont', 9, 'bold')).pack(side=tk.LEFT, padx=(0, 10))
+
+        nucleus_combo = ttk.Combobox(nucleus_frame, textvariable=self.nucleus_type,
+                                     values=['15N', '13C'], state='readonly', width=10)
+        nucleus_combo.pack(side=tk.LEFT, padx=(0, 10))
+        nucleus_combo.bind('<<ComboboxSelected>>', self.on_nucleus_type_change)
+
+        ttk.Label(nucleus_frame, text="(for 2D overlap fitting)",
+                 font=('TkDefaultFont', 8), foreground='gray').pack(side=tk.LEFT, padx=(0, 15))
+
+        # Button row: Apply Changes and Parameters toggle
+        button_frame_ps2d = ttk.Frame(ps2d_config_frame)
+        button_frame_ps2d.pack(fill=tk.X, pady=(5, 5))
+
+        button_frame_ps2d.columnconfigure(0, weight=1)
+        button_frame_ps2d.columnconfigure(1, weight=1)
+
+        apply_params_btn = ctk.CTkButton(button_frame_ps2d, text="Apply Changes",
+                                        command=self.on_ps2d_params_change, corner_radius=8,
+                                        fg_color=self.button_fg_color, hover_color=self.button_hover_color,
+                                        text_color=self.button_text_color)
+        apply_params_btn.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=2)
+
+        self.ps2d_config_toggle_button = ctk.CTkButton(button_frame_ps2d, text="Parameters ▼",
+                                                      command=self.toggle_ps2d_config_parameters, corner_radius=8,
+                                                      fg_color=self.button_fg_color, hover_color=self.button_hover_color,
+                                                      text_color=self.button_text_color)
+        self.ps2d_config_toggle_button.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=2)
+
+        # Collapsible PS2D parameters
+        self.ps2d_params_frame = ttk.Frame(ps2d_config_frame)
+
+        # PS2D Radii Controls (hidden by default)
+        radii_frame = ttk.Frame(self.ps2d_params_frame)
+        radii_frame.pack(fill=tk.X, pady=5)
+
+        # Row 0: Labels and spinboxes
+        ttk.Label(radii_frame, text="Ellipse Radii:", font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+
+        ttk.Label(radii_frame, text="F1:").grid(row=0, column=1, sticky=tk.W)
+        radF1_spin = tk.Spinbox(radii_frame, from_=0.01, to=2.0, increment=0.01,
+                                textvariable=self.ps2d_radF1, width=4, format="%.3f")
+        radF1_spin.grid(row=0, column=2, sticky=tk.W, padx=(2, 4))
+        radF1_spin.bind('<Return>', lambda e: self.on_ps2d_radii_change())
+
+        ttk.Label(radii_frame, text="F2:").grid(row=0, column=3, sticky=tk.W)
+        radF2_spin = tk.Spinbox(radii_frame, from_=0.001, to=0.5, increment=0.005,
+                                textvariable=self.ps2d_radF2, width=4, format="%.3f")
+        radF2_spin.grid(row=0, column=4, sticky=tk.W, padx=(2, 4))
+        radF2_spin.bind('<Return>', lambda e: self.on_ps2d_radii_change())
+
+        ttk.Label(radii_frame, text="(ppm)", font=('TkDefaultFont', 8), foreground='gray').grid(row=0, column=5, sticky=tk.W)
+
+        # Row 1: Show Ellipses checkbox
+        show_ellipses_check = ttk.Checkbutton(radii_frame, text="Show Ellipses",
+                                              variable=self.show_ellipses,
+                                              command=self.update_main_plot)
+        show_ellipses_check.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
+
+        # Row 2: Overlap Thresholds
+        ttk.Label(radii_frame, text="Overlap Thresholds:", font=('TkDefaultFont', 9, 'bold')).grid(row=2, column=0, sticky=tk.W, padx=(0, 6), pady=(8, 0))
+
+        ttk.Label(radii_frame, text="X:").grid(row=2, column=1, sticky=tk.W, pady=(8, 0))
+        overlap_x_spin = tk.Spinbox(radii_frame, from_=0.01, to=1.0, increment=0.01,
+                                    textvariable=self.ps2d_overlap_x, width=4, format="%.3f")
+        overlap_x_spin.grid(row=2, column=2, sticky=tk.W, padx=(2, 4), pady=(10, 0))
+        overlap_x_spin.bind('<Return>', lambda e: self.on_ps2d_params_change())
+
+        ttk.Label(radii_frame, text="Y:").grid(row=2, column=3, sticky=tk.W, pady=(8, 0))
+        overlap_y_spin = tk.Spinbox(radii_frame, from_=0.01, to=2.0, increment=0.05,
+                                    textvariable=self.ps2d_overlap_y, width=4, format="%.3f")
+        overlap_y_spin.grid(row=2, column=4, sticky=tk.W, padx=(2, 4), pady=(10, 0))
+        overlap_y_spin.bind('<Return>', lambda e: self.on_ps2d_params_change())
+
+        ttk.Label(radii_frame, text="(ppm)", font=('TkDefaultFont', 8), foreground='gray').grid(row=2, column=5, sticky=tk.W, pady=(10, 0))
+
+        # Row 3: Max iterations control
+        ttk.Label(radii_frame, text="Max Iterations:", font=('TkDefaultFont', 9, 'bold')).grid(row=3, column=0, sticky=tk.W, padx=(0, 10), pady=(10, 0))
+
+        max_iter_spin = tk.Spinbox(radii_frame, from_=50, to=2000, increment=50,
+                                   textvariable=self.ps2d_max_iterations, width=6)
+        max_iter_spin.grid(row=3, column=2, sticky=tk.W, padx=(2, 15), pady=(10, 0))
+        max_iter_spin.bind('<Return>', lambda e: self.on_ps2d_params_change())
+
+        # =================== PS2D FIT PARAMETERS SECTION ===================
+        ps2d_fit_frame = CTkLabelFrame(scrollable_frame, text="PS2D Fit Parameters", padding=10)
+        ps2d_fit_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # PS2D parameters toggle button
+        self.ps2d_params_toggle_button = ctk.CTkButton(ps2d_fit_frame, text="PS2D fit parameters ▼",
+                                                      command=self.toggle_ps2d_parameters, corner_radius=8,
+                                                      fg_color=self.button_fg_color,
+                                                      hover_color=self.button_hover_color,
+                                                      text_color=self.button_text_color)
+        self.ps2d_params_toggle_button.pack(fill=tk.X, pady=2)
+
+        # Collapsible PS2D parameters frame (hidden by default)
+        self.simplified_fitting_frame = ttk.Frame(ps2d_fit_frame)
+
+        # Create a single grid container for PS2D controls
+        params_container = ttk.Frame(self.simplified_fitting_frame)
+        params_container.pack(fill=tk.X)
+
+        # PS2D controls start at row 0
+        row = 0
+        fix_lw_check = ttk.Checkbutton(params_container, text="🔒 Fix Linewidths (fixLW flag)",
+                                       variable=self.fix_linewidths,
+                                       command=self.on_simplified_parameter_change)
+        fix_lw_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=3)
+        ttk.Label(params_container, text="(Hold linewidths constant during multi-peak fitting)",
+                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=3)
+
+        row = 3
+        fix_pos_check = ttk.Checkbutton(params_container, text="🔒 Fix Positions (fixPos flag)",
+                                       variable=self.fix_positions,
+                                       command=self.on_simplified_parameter_change)
+        fix_pos_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=3)
+        ttk.Label(params_container, text="(Hold peak positions constant during multi-peak fitting)",
+                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=3)
+
+        row = 4
+        custom_lw_check = ttk.Checkbutton(params_container, text="Custom Initial Linewidths",
+                                         variable=self.use_custom_linewidths,
+                                         command=self.on_custom_linewidths_toggle)
+        custom_lw_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=(8,3))
+        ttk.Label(params_container, text="(Override defaults: Lor/Gauss 1H=0.001/0.3, 15N=0.0001/0.03)",
+                 font=('TkDefaultFont', 8), foreground='gray').grid(row=row, column=2, sticky=tk.W, padx=(10,0), pady=(8,3))
+
+        # Custom linewidth input fields (collapsible - hidden by default)
+        self.lw_custom_frame = ttk.Frame(self.simplified_fitting_frame)
+
+        # 1H linewidths
+        ttk.Label(self.lw_custom_frame, text="  1H:").grid(row=0, column=0, sticky=tk.W, padx=(10,5))
+        ttk.Label(self.lw_custom_frame, text="Lor:").grid(row=0, column=1, sticky=tk.W)
+        self.lw_lorentz_1h_spin = ttk.Spinbox(self.lw_custom_frame, from_=0.0001, to=0.1, increment=0.001,
+                                              width=8, textvariable=self.lw_lorentz_1h, format="%.4f",
+                                              command=self.on_simplified_parameter_change)
+        self.lw_lorentz_1h_spin.grid(row=0, column=2, sticky=tk.W, padx=(2,10))
+
+        ttk.Label(self.lw_custom_frame, text="Gauss:").grid(row=0, column=3, sticky=tk.W)
+        self.lw_gauss_1h_spin = ttk.Spinbox(self.lw_custom_frame, from_=0.001, to=1.0, increment=0.01,
+                                            width=8, textvariable=self.lw_gauss_1h, format="%.3f",
+                                            command=self.on_simplified_parameter_change)
+        self.lw_gauss_1h_spin.grid(row=0, column=4, sticky=tk.W, padx=(2,0))
+
+        # 15N linewidths
+        ttk.Label(self.lw_custom_frame, text="  15N:").grid(row=1, column=0, sticky=tk.W, padx=(10,5), pady=(3,0))
+        ttk.Label(self.lw_custom_frame, text="Lor:").grid(row=1, column=1, sticky=tk.W, pady=(3,0))
+        self.lw_lorentz_15n_spin = ttk.Spinbox(self.lw_custom_frame, from_=0.00001, to=0.01, increment=0.0001,
+                                               width=8, textvariable=self.lw_lorentz_15n, format="%.5f",
+                                               command=self.on_simplified_parameter_change)
+        self.lw_lorentz_15n_spin.grid(row=1, column=2, sticky=tk.W, padx=(2,10), pady=(3,0))
+
+        ttk.Label(self.lw_custom_frame, text="Gauss:").grid(row=1, column=3, sticky=tk.W, pady=(3,0))
+        self.lw_gauss_15n_spin = ttk.Spinbox(self.lw_custom_frame, from_=0.001, to=0.5, increment=0.005,
+                                            width=8, textvariable=self.lw_gauss_15n, format="%.3f",
+                                            command=self.on_simplified_parameter_change)
+        self.lw_gauss_15n_spin.grid(row=1, column=4, sticky=tk.W, padx=(2,0), pady=(3,0))
+
+        # Parallel processing option
+        parallel_frame = ttk.Frame(self.simplified_fitting_frame)
+        parallel_frame.pack(fill=tk.X, pady=(10, 0))
+
+        parallel_check = ttk.Checkbutton(parallel_frame,
+                                        text="🚀 Use Parallel Processing (75% cores)",
+                                        variable=self.use_parallel_processing,
+                                        command=self.on_simplified_parameter_change)
+        parallel_check.pack(anchor=tk.W)
+
+        # =================== SERIES INTEGRATION SECTION ===================
+        series_integration_frame = CTkLabelFrame(scrollable_frame, text="🚀 Series Integration", padding=10)
+        series_integration_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # PS2D Linewidth Reuse option
+        ps2d_lw_check = ttk.Checkbutton(series_integration_frame,
+                                       text="🔒 PS2D Linewidth Reuse (Fix LW from reference, ~40% speedup)",
+                                       variable=self.use_ps2d_linewidth_reuse,
+                                       command=self._on_ps2d_linewidth_reuse_toggle)
+        ps2d_lw_check.pack(anchor=tk.W, pady=(0, 10))
+
+        # Series peak source selection
+        ttk.Separator(series_integration_frame, orient='horizontal').pack(fill=tk.X, pady=10)
+
+        peak_source_label_frame = ttk.Frame(series_integration_frame)
+        peak_source_label_frame.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(peak_source_label_frame, text="🎯 Peak List Source:",
+                 font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W)
+
+        peak_source_frame = ttk.Frame(series_integration_frame)
+        peak_source_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        # Peak source radio buttons
+        ttk.Radiobutton(peak_source_frame, text="Use detected peaks ",
+                       variable=self.series_peak_source, value="detected").pack(anchor=tk.W)
+        ttk.Radiobutton(peak_source_frame, text="Cascade mode (propagate positions: n→n+1→n+2)",
+                       variable=self.series_peak_source, value="cascade").pack(anchor=tk.W)
+
+        # Placeholder for future expert options
+        future_options_frame = CTkLabelFrame(scrollable_frame, text="Additional Expert Options", padding=10)
+        future_options_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(future_options_frame, text="More expert options will be added here...",
+                 font=('TkDefaultFont', 9), foreground='gray').pack(pady=10)
+
+        # Close button at bottom
+        button_frame = ttk.Frame(popup)
+        button_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
+
+        close_btn = ctk.CTkButton(button_frame, text="Close",
+                                 command=popup.destroy,
+                                 corner_radius=8)
+        close_btn.pack()
+
     def on_nmr_file_select(self, file_path, filename):
         """Handle NMR file selection"""
         self.current_nmr_file = file_path
         self.config_manager.add_recent_file(file_path, 'nmr')
         self.update_recent_files_menu()
-        self.update_current_status()
         self.validate_current_files()
 
         # Load data based on workflow mode
@@ -2850,7 +3094,6 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
         self.current_peak_file = file_path
         self.config_manager.add_recent_file(file_path, 'peak')
         self.update_recent_files_menu()
-        self.update_current_status()
         self.validate_current_files()
 
         if self.current_nmr_file:
@@ -3011,7 +3254,8 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 self.update_status("✅ Data loaded successfully - Ready for processing")
                 # Auto-adjust zoom to fit the loaded data
                 self.auto_adjust_zoom_to_data()
-                self.update_main_plot()
+                # Automatically trigger reset zoom after data loading
+                self.reset_view()
                 self.update_peak_navigation()
                 self.update_statistics()
 
@@ -3142,53 +3386,6 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                                "The spectrum remains loaded and ready for new analysis.")
         else:
             self.update_status("❌ Reset cancelled by user")
-
-    def update_current_status(self):
-        """Update current file status display with workflow awareness"""
-        mode = getattr(self, 'workflow_mode', tk.StringVar(value="peak_list")).get()
-
-        if mode == "peak_list":
-            # Peak list mode: both files required for green status
-            if self.current_nmr_file and self.current_peak_file:
-                nmr_name = os.path.basename(self.current_nmr_file)
-                peak_name = os.path.basename(self.current_peak_file)
-                self.current_status.config(
-                    text=f"📊 Spectrum: {nmr_name} | 📋 Peaks: {peak_name}",
-                    foreground='green'
-                )
-            elif self.current_nmr_file:
-                nmr_name = os.path.basename(self.current_nmr_file)
-                self.current_status.config(
-                    text=f"📊 Spectrum: {nmr_name} | 📋 Peak list: Not selected",
-                    foreground='orange'
-                )
-            elif self.current_peak_file:
-                peak_name = os.path.basename(self.current_peak_file)
-                self.current_status.config(
-                    text=f"📊 Spectrum: Not selected | 📋 Peaks: {peak_name}",
-                    foreground='orange'
-                )
-            else:
-                self.current_status.config(
-                    text="📋 Peak List Mode: Load spectrum and peak list",
-                    foreground='gray'
-                )
-        else:
-            # S/N mode: spectrum only sufficient for green status
-            if self.current_nmr_file:
-                nmr_name = os.path.basename(self.current_nmr_file)
-                sn_threshold = getattr(self, 'sn_threshold', tk.DoubleVar(value=3.0)).get()
-                expected_count = getattr(self, 'expected_peak_count', tk.IntVar(value=50)).get()
-
-                self.current_status.config(
-                    text=f"🎯 S/N Mode: {nmr_name} | Threshold: {sn_threshold} | Count: {expected_count}",
-                    foreground='green'
-                )
-            else:
-                self.current_status.config(
-                    text="🎯 S/N Mode: Load NMR spectrum to begin",
-                    foreground='gray'
-                )
 
     # =================== PEAK COORDINATE ADJUSTMENT METHODS ===================
 
@@ -3584,7 +3781,7 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                 self.update_peak_parameters(result)
 
                 # Switch to 3D Voigt tab
-                self.viz_notebook.select(2)
+                self.viz_notebook.set("3D Voigt Analysis")
 
                 quality = result.get('fitting_quality', 'Unknown')
                 self.update_status(f"✅ Voigt fit: {assignment} - Quality: {quality}")
@@ -3699,9 +3896,9 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             # Continue to fitting pipeline - do not return here
 
         # LOG VOIGT FITTING PARAMETERS
-        print("\n" + "="*60)
-        print("📋 VOIGT FITTING PARAMETERS")
-        print("="*60)
+        #print("\n" + "="*60)
+        #print("📋 VOIGT FITTING PARAMETERS")
+        #print("="*60)
 
         # Get current parameters from parameter manager
         try:
@@ -3716,8 +3913,8 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             print(f"   • Max Iterations: {fitting_params.get('max_iterations', 'N/A')}")
 
             print(f"\n🎯 Detection Parameters:")
-            print(f"   • Search Window X: ±{detection_params.get('search_window_x', 'N/A')} ppm (1H dimension)")
-            print(f"   • Search Window Y: ±{detection_params.get('search_window_y', 'N/A')} ppm (15N/13C dimension)")
+            #print(f"   • Search Window X: ±{detection_params.get('search_window_x', 'N/A')} ppm (1H dimension)")
+            #print(f"   • Search Window Y: ±{detection_params.get('search_window_y', 'N/A')} ppm (15N/13C dimension)")
             print(f"   • Noise Threshold Multiplier: {detection_params.get('noise_threshold', 'N/A')}")
 
             print(f"\n⚙️ Advanced Fitting Parameters:")
@@ -3757,8 +3954,8 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             print(f"   • Max Iterations: {self.max_iterations.get()}")
 
             print(f"\n🎯 Detection Parameters:")
-            print(f"   • Search Window X: ±{self.search_window_x.get()} ppm (1H dimension)")
-            print(f"   • Search Window Y: ±{self.search_window_y.get()} ppm (15N/13C dimension)")
+            #print(f"   • Search Window X: ±{self.search_window_x.get()} ppm (1H dimension)")
+            #print(f"   • Search Window Y: ±{self.search_window_y.get()} ppm (15N/13C dimension)")
             print(f"   • Noise Threshold Multiplier: {self.noise_threshold.get()}")
 
         # Add simplified parameter logging
@@ -4152,7 +4349,7 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             reference_peaks = self.integrator.peak_list.copy()
 
         # 3. Validate NMR files
-        nmr_files = self.nmr_file_list.get_all_files()
+        nmr_files = self.get_all_nmr_files()
         if not nmr_files:
             messagebox.showerror("Error",
                 "No NMR files found in the selected folder. Please load NMR files first.")
@@ -4309,7 +4506,7 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             raw_params = self.param_manager.current_params.copy()
 
             # 3. Define output folder with timestamp
-            base_folder = self.nmr_file_list.get_current_folder()
+            base_folder = self.current_nmr_folder
             output_folder = os.path.join(
                 base_folder,
                 f"series_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -4439,14 +4636,14 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
                     self._validate_legacy_results_for_plotting(legacy_batch_results)
                     self.series_plotter.plot_series_overview(legacy_batch_results)
 
-                    if hasattr(self, 'canvas_series'):
+                    if hasattr(self, 'canvas_series') and self.canvas_series is not None:
                         self.canvas_series.draw()
 
                     print("✅ Series visualization updated successfully")
 
                 except Exception as e:
-                    print(f"⚠️ Series visualization failed: {e}")
-                    print("✅ Processing completed successfully despite visualization issue")
+                    print(f"Series visualization failed: {e}")
+                    print("Processing completed successfully despite visualization issue")
 
                     # Try alternative visualization approach
                     self._plot_series_alternative(legacy_batch_results)
@@ -4454,9 +4651,9 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             # 9. Update statistics display
             self.update_statistics_from_batch(legacy_batch_results)
 
-            # 10. Switch to series overview tab
+            # 10. Switch to 3D Voigt Analysis tab
             if hasattr(self, 'viz_notebook'):
-                self.viz_notebook.select(2)  # Series overview tab
+                self.viz_notebook.set("3D Voigt Analysis")
 
             # 11. Display success message
             summary = new_batch_results.get('summary', {})
@@ -5168,19 +5365,91 @@ Total Peaks Processed: {total_peaks}
 
     # =================== PEAK EDITING METHODS ===================
 
+    def toggle_parameters(self):
+        """Toggle visibility of detection parameters"""
+        if self.params_visible.get():
+            # Hide parameters
+            self.params_frame.pack_forget()
+            self.params_visible.set(False)
+            self.params_toggle_button.configure(text="Parameters ▼")
+        else:
+            # Show parameters (pack after the toggle button)
+            self.params_frame.pack(fill=tk.X, pady=5)
+            self.params_visible.set(True)
+            self.params_toggle_button.configure(text="Parameters ▲")
+
+    def toggle_ps2d_config_parameters(self):
+        """Toggle visibility of PS2D Algorithm Configuration parameters"""
+        if self.ps2d_params_visible.get():
+            # Hide parameters
+            self.ps2d_params_frame.pack_forget()
+            self.ps2d_params_visible.set(False)
+            self.ps2d_config_toggle_button.configure(text="Parameters ▼")
+        else:
+            # Show parameters
+            self.ps2d_params_frame.pack(fill=tk.X, pady=5, after=self.ps2d_config_toggle_button.master)
+            self.ps2d_params_visible.set(True)
+            self.ps2d_config_toggle_button.configure(text="Parameters ▲")
+
+    def toggle_contour_settings(self):
+        """Toggle visibility of contour parameters"""
+        if self.contour_params_visible.get():
+            # Hide parameters
+            self.contour_params_frame.pack_forget()
+            self.contour_params_visible.set(False)
+            self.contour_toggle_button.configure(text="Contour Settings ▼")
+        else:
+            # Show parameters
+            self.contour_params_frame.pack(fill=tk.X, pady=5, after=self.contour_toggle_button.master)
+            self.contour_params_visible.set(True)
+            self.contour_toggle_button.configure(text="Contour Settings ▲")
+
+    def toggle_ps2d_parameters(self):
+        """Toggle visibility of PS2D fit parameters"""
+        # Check current state by visibility of parameters frame
+        is_visible = self.simplified_fitting_frame.winfo_ismapped()
+
+        if not is_visible:
+            # Show parameters
+            self.simplified_fitting_frame.pack(fill=tk.X, pady=(5, 0))
+            self.ps2d_params_toggle_button.configure(text="PS2D fit parameters ▲")
+        else:
+            # Hide parameters
+            self.simplified_fitting_frame.pack_forget()
+            self.ps2d_params_toggle_button.configure(text="PS2D fit parameters ▼")
+
     def toggle_peak_edit_mode(self):
         """Toggle peak editing mode on/off"""
-        if self.peak_edit_mode.get():
+        # Check current state by visibility of controls
+        is_visible = self.peak_editing_controls_frame.winfo_ismapped()
+
+        if not is_visible:
             # Enable edit mode
+            self.peak_edit_mode.set(True)
             self.canvas_main.mpl_connect('button_press_event', self.on_peak_edit_click)
             self.canvas_main.get_tk_widget().config(cursor="crosshair")
+
+            # Show editing controls
+            self.peak_editing_controls_frame.pack(fill=tk.X, pady=(5, 0))
+
+            # Update button text
+            self.peak_edit_toggle_button.configure(text="Peak Edition ▲")
+
             print("Peak editing mode enabled")
         else:
             # Disable edit mode
+            self.peak_edit_mode.set(False)
             self.canvas_main.mpl_disconnect('button_press_event')
             self.canvas_main.get_tk_widget().config(cursor="")
             self.selected_peak_info = None
             self.selected_peak_label.config(text="No peak selected")
+
+            # Hide editing controls
+            self.peak_editing_controls_frame.pack_forget()
+
+            # Update button text
+            self.peak_edit_toggle_button.configure(text="Peak Edition ▼")
+
             print("Peak editing mode disabled")
 
         # Update status display
@@ -5698,16 +5967,17 @@ Total Peaks Processed: {total_peaks}
         if filename:
             try:
                 # Determine which tab is active
-                current_tab = self.viz_notebook.index(self.viz_notebook.select())
+                current_tab_name = self.viz_notebook.get()
 
-                if current_tab == 0:
+                if current_tab_name == "Main Spectrum":
                     self.fig_main.savefig(filename, dpi=300, bbox_inches='tight')
-                elif current_tab == 1:
+                elif current_tab_name == "Voigt Analysis":
                     self.fig_voigt.savefig(filename, dpi=300, bbox_inches='tight')
-                elif current_tab == 2:
-                    self.fig_series.savefig(filename, dpi=300, bbox_inches='tight')
-                elif current_tab == 3:
-                    self.fig_stats.savefig(filename, dpi=300, bbox_inches='tight')
+                elif current_tab_name == "3D Voigt Analysis":
+                    self.fig_voigt_3d.savefig(filename, dpi=300, bbox_inches='tight')
+                elif current_tab_name == "Configuration":
+                    # Configuration tab doesn't have a figure to save
+                    pass
 
                 self.update_status(f"✅ Plot saved: {os.path.basename(filename)}")
                 messagebox.showinfo("Save Successful", f"Plot saved to:\n{filename}")
@@ -5798,43 +6068,40 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
             self.config_text.insert(1.0, config_info)
 
     def open_config_dialog(self):
-        """Open configuration dialog"""
-        self.viz_notebook.select(4)  # Switch to config tab
+        """Open configuration dialog - creates tab on first access"""
+        # Create Configuration tab on-demand (only once)
+        if not self.config_tab_created:
+            config_tab = self.viz_notebook.add("Configuration")
+            self.setup_config_tab(config_tab)
+            self.config_tab_created = True
+
+        # Switch to config tab and update display
+        self.viz_notebook.set("Configuration")
         self.update_config_display()
 
     # =================== UTILITY METHODS ===================
 
     def validate_current_files(self):
-        """Validate currently loaded files with workflow awareness"""
-        validation_messages = []
+        """Validate currently loaded files (background validation with console output)"""
         mode = getattr(self, 'workflow_mode', tk.StringVar(value="peak_list")).get()
 
+        results = {'nmr_valid': False, 'peak_valid': False}
+
+        # Validate NMR file
         if self.current_nmr_file:
             valid, message = self.file_manager.validate_nmr_file(self.current_nmr_file)
-            if valid:
-                validation_messages.append(f"✅ NMR: {message}")
-            else:
-                validation_messages.append(f"❌ NMR: {message}")
+            results['nmr_valid'] = valid
+            status = "✅" if valid else "❌"
+            print(f"{status} NMR validation: {message}")
 
-        if mode == "peak_list":
-            # Peak list mode: validate peak file if present
-            if self.current_peak_file:
-                valid, message = self.file_manager.validate_peak_file(self.current_peak_file)
-                if valid:
-                    validation_messages.append(f"✅ Peaks: {message}")
-                else:
-                    validation_messages.append(f"❌ Peaks: {message}")
-        else:
-            # S/N mode: peak file not required, add S/N status if spectrum loaded
-            if self.current_nmr_file:
-                sn_threshold = getattr(self, 'sn_threshold', tk.DoubleVar(value=3.0)).get()
-                expected_count = getattr(self, 'expected_peak_count', tk.IntVar(value=50)).get()
-                validation_messages.append(f"🎯 S/N: {sn_threshold}, Count: {expected_count}")
+        # Validate peak file (only in peak_list mode)
+        if mode == "peak_list" and self.current_peak_file:
+            valid, message = self.file_manager.validate_peak_file(self.current_peak_file)
+            results['peak_valid'] = valid
+            status = "✅" if valid else "❌"
+            print(f"{status} Peak list validation: {message}")
 
-        if validation_messages:
-            self.file_validation_label.config(text=" | ".join(validation_messages))
-        else:
-            self.file_validation_label.config(text="")
+        return results
 
     def reset_view(self):
         """Reset main spectrum view"""
@@ -5881,7 +6148,7 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
                 if os.path.exists(file_path):
                     filename = os.path.basename(file_path)
                     self.recent_menu.add_command(
-                        label=f"📋 {filename}",
+                        label=f"{filename}",
                         command=lambda f=file_path: self.on_peak_file_select(f, os.path.basename(f))
                     )
 
@@ -5927,8 +6194,8 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
             messagebox.showinfo("No Data", "No series results available for analysis")
             return
 
-        # Switch to statistics tab and update with series analysis
-        self.viz_notebook.select(3)
+        # Switch to Peak Parameters tab and update with series analysis
+        self.viz_notebook.set("Peak Parameters")
 
         # Create series analyzer and generate analysis
         analyzer = SeriesAnalyzer()
@@ -5987,11 +6254,12 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
                 self.ax_stats_4.set_title('Processing Success Rate')
 
         self.fig_stats.tight_layout()
-        self.canvas_stats.draw()
+        if self.canvas_stats is not None:
+            self.canvas_stats.draw()
 
     def show_voigt_analysis(self):
         """Show 3D Voigt analysis tab"""
-        self.viz_notebook.select(2)
+        self.viz_notebook.set("3D Voigt Analysis")
 
         if self.current_voigt_result:
             self.voigt_plotter.plot_voigt_analysis(self.current_voigt_result)
@@ -6106,8 +6374,14 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
         # Disable editing
         self.peak_params_text.config(state=tk.DISABLED)
 
-    def show_selected_peak_analysis(self):
-        """Show Voigt analysis for the currently selected peak"""
+    def show_selected_peak_analysis(self, auto_switch_tab=True):
+        """
+        Show Voigt analysis for the currently selected peak.
+
+        Args:
+            auto_switch_tab: If True, automatically switch to 3D Voigt tab.
+                           If False, stay on current tab (used when clicking peak in navigator)
+        """
         if (not hasattr(self.integrator, 'peak_list') or
             self.integrator.peak_list is None or
             (hasattr(self.integrator.peak_list, 'empty') and self.integrator.peak_list.empty)):
@@ -6143,8 +6417,9 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
                     break
 
         if selected_result:
-            # Switch to 3D Voigt analysis tab
-            self.viz_notebook.select(2)
+            # Switch to 3D Voigt analysis tab (only if auto_switch_tab=True)
+            if auto_switch_tab:
+                self.viz_notebook.set("3D Voigt Analysis")
 
             # Show the analysis for the selected peak
             self.voigt_plotter.plot_voigt_analysis(selected_result)
@@ -6200,8 +6475,15 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
         else:
             messagebox.showerror("Error", f"Unknown peak type: {peak_type}")
 
-    def show_detected_peak_analysis_by_index(self, peak_index):
-        """Show Voigt analysis for detected peak by index - EXACT same logic as navigation button"""
+    def show_detected_peak_analysis_by_index(self, peak_index, auto_switch_tab=True):
+        """
+        Show Voigt analysis for detected peak by index.
+
+        Args:
+            peak_index: Index of peak in detected peaks list
+            auto_switch_tab: If True, automatically switch to 3D Voigt tab.
+                           If False, stay on current tab (used when clicking peak in navigator)
+        """
 
         # Check if we have fitted results (same check as navigation button)
         if not hasattr(self.integrator, 'fitted_peaks') or not self.integrator.fitted_peaks:
@@ -6216,9 +6498,9 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
         selected_result = None
 
         # DIAGNOSTIC: Check if fitted_peaks matches navigator order
-        print(f"\n🐛 VOIGT ANALYSIS INDEX DIAGNOSTIC:")
-        print(f"   Clicked peak_index = {peak_index} in Peak Navigator")
-        print(f"   fitted_peaks has {len(self.integrator.fitted_peaks)} total peaks")
+        #print(f"\n🐛 VOIGT ANALYSIS INDEX DIAGNOSTIC:")
+        #print(f"   Clicked peak_index = {peak_index} in Peak Navigator")
+        #print(f"   fitted_peaks has {len(self.integrator.fitted_peaks)} total peaks")
 
         # Show the navigator's displayed data for this row
         if hasattr(self, 'peak_navigator') and hasattr(self.peak_navigator, 'detected_peaks'):
@@ -6255,8 +6537,9 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
 
         # EXACT same display logic as navigation button
         if selected_result:
-            # Switch to 3D Voigt analysis tab
-            self.viz_notebook.select(2)
+            # Switch to 3D Voigt analysis tab (only if auto_switch_tab=True)
+            if auto_switch_tab:
+                self.viz_notebook.set("3D Voigt Analysis")
 
             # Show the analysis for the selected peak
             self.voigt_plotter.plot_voigt_analysis(selected_result)
@@ -6412,28 +6695,28 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
 
         # Overview tab
         overview_frame = ttk.Frame(notebook)
-        notebook.add(overview_frame, text="📊 Overview")
+        notebook.add(overview_frame, text="Overview")
         self._create_results_overview_tab(overview_frame)
 
         # Peak Tracking tab
         tracking_frame = ttk.Frame(notebook)
-        notebook.add(tracking_frame, text="🎯 Peak Tracking")
+        notebook.add(tracking_frame, text="Peak Tracking")
         self._create_peak_tracking_tab(tracking_frame)
 
         # Data Export tab
         export_frame = ttk.Frame(notebook)
-        notebook.add(export_frame, text="💾 Data Export")
+        notebook.add(export_frame, text="Data Export")
         self._create_data_export_tab(export_frame)
 
         # Quality Assessment tab
         quality_frame = ttk.Frame(notebook)
-        notebook.add(quality_frame, text="🔍 Quality Assessment")
+        notebook.add(quality_frame, text="Quality Assessment")
         self._create_quality_assessment_tab(quality_frame)
 
     def _create_results_overview_tab(self, parent):
         """Create results overview tab content"""
         # Summary statistics frame
-        stats_frame = ttk.LabelFrame(parent, text="Series Summary", padding=10)
+        stats_frame = CTkLabelFrame(parent, text="Series Summary", padding=10)
         stats_frame.pack(fill=tk.X, padx=5, pady=5)
 
         summary = self.batch_results.get_summary()
@@ -6452,7 +6735,7 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
         summary_label.pack(anchor=tk.W)
 
         # Detailed results listbox
-        results_frame = ttk.LabelFrame(parent, text="Spectrum Results", padding=10)
+        results_frame = CTkLabelFrame(parent, text="Spectrum Results", padding=10)
         results_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Create treeview for detailed results
@@ -6515,7 +6798,7 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
             ttk.Label(info_frame, text=info_text, font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W)
 
             # Create preview table (first 10 columns to fit)
-            preview_frame = ttk.LabelFrame(parent, text="Peak Tracking Preview", padding=10)
+            preview_frame = CTkLabelFrame(parent, text="Peak Tracking Preview", padding=10)
             preview_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
             # Select relevant columns for display
@@ -6553,7 +6836,7 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
     def _create_data_export_tab(self, parent):
         """Create data export options tab"""
         # Export options frame
-        export_frame = ttk.LabelFrame(parent, text="Export Options", padding=15)
+        export_frame = CTkLabelFrame(parent, text="Export Options", padding=15)
         export_frame.pack(fill=tk.X, padx=10, pady=10)
 
         # Quick export buttons
@@ -6570,7 +6853,7 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
                   command=self.export_detection_stats).pack(side=tk.LEFT)
 
         # Batch export section
-        batch_frame = ttk.LabelFrame(parent, text="Batch Export", padding=15)
+        batch_frame = CTkLabelFrame(parent, text="Batch Export", padding=15)
         batch_frame.pack(fill=tk.X, padx=10, pady=10)
 
         ttk.Label(batch_frame, text="Export all results in multiple formats:",
@@ -6587,7 +6870,7 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
                   command=lambda: self.batch_export_results('pdf')).pack(side=tk.LEFT)
 
         # Custom export section
-        custom_frame = ttk.LabelFrame(parent, text="Custom Export", padding=15)
+        custom_frame = CTkLabelFrame(parent, text="Custom Export", padding=15)
         custom_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         ttk.Label(custom_frame, text="Select specific data to export:",
@@ -6636,7 +6919,7 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
             quality_report = analyzer.generate_quality_report()
 
             # Quality grade display
-            grade_frame = ttk.LabelFrame(parent, text="Overall Quality Assessment", padding=15)
+            grade_frame = CTkLabelFrame(parent, text="Overall Quality Assessment", padding=15)
             grade_frame.pack(fill=tk.X, padx=10, pady=10)
 
             grade = quality_report.get('overall_grade', 'Unknown')
@@ -6647,7 +6930,7 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
                      foreground=grade_colors.get(grade, 'black')).pack()
 
             # Quality metrics
-            metrics_frame = ttk.LabelFrame(parent, text="Quality Metrics", padding=15)
+            metrics_frame = CTkLabelFrame(parent, text="Quality Metrics", padding=15)
             metrics_frame.pack(fill=tk.X, padx=10, pady=10)
 
             metrics = quality_report.get('quality_metrics', {})
@@ -6661,7 +6944,7 @@ Success Rate: {quality_report['summary']['success_rate']:.1f}%
 
             # Issues and recommendations
             if quality_report.get('issues') or quality_report.get('recommendations'):
-                advice_frame = ttk.LabelFrame(parent, text="Analysis & Recommendations", padding=15)
+                advice_frame = CTkLabelFrame(parent, text="Analysis & Recommendations", padding=15)
                 advice_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
                 advice_text = tk.Text(advice_frame, wrap=tk.WORD, height=10)
@@ -7062,7 +7345,7 @@ Detection Rate Statistics:
             from lunaNMR.gui.spectrum_browser import SpectrumBrowserDialog
 
             # Get original data folder
-            original_data_folder = self.nmr_file_list.get_current_folder()
+            original_data_folder = self.current_nmr_folder
 
             # Create spectrum browser with legacy-compatible batch results
             browser = SpectrumBrowserDialog(
@@ -7152,7 +7435,7 @@ Detection Rate Statistics:
                 # Check if spectrum_file is missing OR is not an absolute path
                 if 'spectrum_file' not in result_dict or not os.path.isabs(result_dict.get('spectrum_file', '')):
                     # spectrum_file is missing or is relative path - construct full path
-                    data_folder = self.nmr_file_list.get_current_folder()
+                    data_folder = self.current_nmr_folder
                     result_dict['spectrum_file'] = os.path.join(data_folder, spectrum_name)
                     print(f"   🔧 Constructed full path for {spectrum_name}: {result_dict['spectrum_file']}")
 
@@ -7428,7 +7711,15 @@ Configuration: {self.config_manager.config_file}
         self.update_status(f"Centered on coordinates: {x:.3f}, {y:.1f}")
 
     def set_selected_peak(self, peak_index, peak_type, source="unknown"):
-        """Coordinate peak selection between navigator and navigation panel"""
+        """
+        Coordinate peak selection between navigator and navigation panel.
+        Behavior depends on currently active tab:
+        - Main Spectrum tab: Center spectrum on peak (handled by navigator)
+        - 3D Voigt Analysis tab: Show Voigt analysis for peak
+        """
+        # Get currently active tab
+        current_tab_name = self.viz_notebook.get()
+
         if peak_type == "reference":
             # Convert 0-based index to 1-based for navigation panel
             peak_number = peak_index + 1
@@ -7440,11 +7731,23 @@ Configuration: {self.config_manager.config_file}
             if source != "navigator" and hasattr(self, 'peak_navigator'):
                 self.peak_navigator.update_selection(peak_index, peak_type)
 
+            # If we're in 3D Voigt Analysis tab, show Voigt analysis
+            if current_tab_name == "3D Voigt Analysis" and source == "navigator":
+                # Use show_selected_peak_analysis which handles reference peaks
+                # Don't auto-switch tab since we're already on the right tab
+                self.show_selected_peak_analysis(auto_switch_tab=False)
+
         elif peak_type == "detected":
             # For detected peaks, we mainly coordinate with navigator
             # (there's no separate navigation panel for detected peaks in the original design)
             if source != "navigator" and hasattr(self, 'peak_navigator'):
                 self.peak_navigator.update_selection(peak_index, peak_type)
+
+            # If we're in 3D Voigt Analysis tab, show Voigt analysis
+            if current_tab_name == "3D Voigt Analysis" and source == "navigator":
+                # Use show_detected_peak_analysis_by_index for detected peaks
+                # Don't auto-switch tab since we're already on the right tab
+                self.show_detected_peak_analysis_by_index(peak_index, auto_switch_tab=False)
 
     def __del__(self):
         """Cleanup when GUI is destroyed"""
@@ -7689,8 +7992,12 @@ Configuration: {self.config_manager.config_file}
             # Fallback to manual reset if auto-adjustment fails
             self.reset_zoom()
 
-    def _on_tab_changed(self, event):
-        """Handle notebook tab change events to refresh toolbars on Linux."""
+    def _on_tab_changed(self, tab_name=None):
+        """Handle tab change events to refresh toolbars.
+
+        Args:
+            tab_name: Name of the selected tab (from CTkTabview command callback)
+        """
         try:
             # Force update on tab change to help with toolbar visibility
             self.root.update_idletasks()

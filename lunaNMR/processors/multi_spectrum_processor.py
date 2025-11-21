@@ -105,7 +105,7 @@ class MultiSpectrumProcessor:
         max_shift_x = gui_params.get('centroid_window_x_ppm', 0.01)
         max_shift_y = gui_params.get('centroid_window_y_ppm', 0.10)
 
-        print(f"      Search windows: F2={max_shift_x:.3f} ppm, F1={max_shift_y:.3f} ppm")
+        #print(f"      Search windows: F2={max_shift_x:.3f} ppm, F1={max_shift_y:.3f} ppm")
 
         refined_peaks = []
         refinement_count = 0
@@ -142,8 +142,8 @@ class MultiSpectrumProcessor:
 
             # CRITICAL: If position extraction fails, use a safe fallback
             if prev_x_ppm is None or prev_y_ppm is None:
-                print(f"      ⚠️ Peak {assignment}: Could not extract position (keys: {list(peak.keys())})")
-                print(f"         Using fallback: keeping peak in list with last valid position")
+                #print(f"      ⚠️ Peak {assignment}: Could not extract position (keys: {list(peak.keys())})")
+                #print(f"         Using fallback: keeping peak in list with last valid position")
 
                 # Try to get ANY numeric values as fallback
                 for key in peak.keys():

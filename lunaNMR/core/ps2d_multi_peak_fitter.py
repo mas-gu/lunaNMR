@@ -696,29 +696,26 @@ class Ps2dMultiPeakFitter:
         else:
             params_current = params_init.copy()
 
-        # STAGE 1: Fit linewidths (positions fixed)
+        # STAGE 0: Fit linewidths (positions fixed)
         if self.verbose:
-            print("\n--- Stage 1: Linewidth fitting (positions fixed) ---")
+            print("\n--- Stage 0: Linewidth fitting (positions fixed) ---")
         result_stage1 = self._fit_stage_one(x_data, y_data, params_current, n_peaks)
         params_current = result_stage1.x
 
-        # STAGE 2: Float positions (if not fixed by user)
+        # STAGE 1: Float positions (if not fixed by user)
         if not all(fix_positions):
             if self.verbose:
-                print("\n--- Stage 2: Position refinement ---")
+                print("\n--- Stage 1: Position refinement ---")
             result_stage2 = self._fit_stage_two(x_data, y_data, params_current, n_peaks)
             params_current = result_stage2.x
         else:
             if self.verbose:
-                print("\n--- Stage 2: Skipped (all positions fixed) ---")
+                print("\n--- Stage 1: Skipped (all positions fixed) ---")
             result_stage2 = result_stage1
 
-        # STAGE 3: Skipped for 1D single-plane fitting
-        # (Original C++ only for multi-plane data)
-
-        # STAGE 4: Final global optimization
+        # STAGE 2: Final global optimization
         if self.verbose:
-            print("\n--- Stage 4: Final global optimization ---")
+            print("\n--- Stage 2: Final global optimization ---")
         result_final = self._fit_stage_four(x_data, y_data, params_current, n_peaks)
 
         # Extract results
@@ -926,11 +923,11 @@ class Ps2dMultiPeakFitter:
 
         eps = 1e-10  # Small epsilon to avoid lower==upper
 
-        if self.verbose:
-            print(f"   [Stage 1] Constraint enforcement:")
-            print
-            for i in range(n_peaks):
-                print(f"      Peak {i+1}: fixLW={self.fix_linewidths[i]}, pos_init={params_init[i*4]:.4f}")
+        #if self.verbose:
+        #    print(f"   [Stage 1] Constraint enforcement:")
+        #    print
+        #    for i in range(n_peaks):
+        #        print(f"      Peak {i+1}: fixLW={self.fix_linewidths[i]}, pos_init={params_init[i*4]:.4f}")
 
         for i in range(n_peaks):
             base_idx = i * 4
@@ -980,14 +977,14 @@ class Ps2dMultiPeakFitter:
             xtol=1e-8
         )
 
-        if self.verbose:
-            print(f"      Stage 1 iterations: {result.nfev}, Chi²: {np.sum(result.fun**2):.6e}")
-            # Show fitted positions after stage 1
-            for i in range(n_peaks):
-                pos_fitted = result.x[i*4]
-                pos_init = params_init[i*4]
-                shift = pos_fitted - pos_init
-                print(f"      Peak {i+1} position: init={pos_init:.4f}, fitted={pos_fitted:.4f}, shift={shift:.6f}")
+        #if self.verbose:
+        #    print(f"      Stage 1 iterations: {result.nfev}, Chi²: {np.sum(result.fun**2):.6e}")
+        #    # Show fitted positions after stage 1
+        #    for i in range(n_peaks):
+        #        pos_fitted = result.x[i*4]
+        #        pos_init = params_init[i*4]
+        #        shift = pos_fitted - pos_init
+        #        print(f"      Peak {i+1} position: init={pos_init:.4f}, fitted={pos_fitted:.4f}, shift={shift:.6f}")
 
         return result
 
@@ -1005,10 +1002,10 @@ class Ps2dMultiPeakFitter:
         eps = 1e-10  # Small epsilon to avoid lower==upper
         any_floating_positions = False
 
-        if self.verbose:
-            print(f"   [Stage 2] Constraint enforcement:")
-            for i in range(n_peaks):
-                print(f"      Peak {i+1}: fixPos={self.fix_positions[i]}, fixLW={self.fix_linewidths[i]}, pos_init={params_init[i*4]:.4f}")
+        #if self.verbose:
+        #    print(f"   [Stage 2] Constraint enforcement:")
+        #    for i in range(n_peaks):
+        #        print(f"      Peak {i+1}: fixPos={self.fix_positions[i]}, fixLW={self.fix_linewidths[i]}, pos_init={params_init[i*4]:.4f}")
 
         for i in range(n_peaks):
             base_idx = i * 4
@@ -1080,14 +1077,14 @@ class Ps2dMultiPeakFitter:
             xtol=1e-8
         )
 
-        if self.verbose:
-            print(f"      Stage 2 iterations: {result.nfev}, Chi²: {np.sum(result.fun**2):.6e}")
-            # Show fitted positions after stage 2
-            for i in range(n_peaks):
-                pos_fitted = result.x[i*4]
-                pos_init = params_init[i*4]
-                shift = pos_fitted - pos_init
-                print(f"      Peak {i+1} position: init={pos_init:.4f}, fitted={pos_fitted:.4f}, shift={shift:.6f}")
+        #if self.verbose:
+        #    print(f"      Stage 2 iterations: {result.nfev}, Chi²: {np.sum(result.fun**2):.6e}")
+        #    # Show fitted positions after stage 2
+        #    for i in range(n_peaks):
+        #        pos_fitted = result.x[i*4]
+        #        pos_init = params_init[i*4]
+        #        shift = pos_fitted - pos_init
+        #        print(f"      Peak {i+1} position: init={pos_init:.4f}, fitted={pos_fitted:.4f}, shift={shift:.6f}")
 
         return result
 

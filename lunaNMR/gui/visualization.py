@@ -630,6 +630,8 @@ class VoigtAnalysisPlotter:
         self.show_experimental = True
         self.show_fitted = True
         self.show_residuals = True
+        self.show_individual_peaks = True  # Toggle all individual peak surfaces
+        self.show_peak_labels = True  # Toggle 3D peak assignment labels
 
         # Feature 2: Cross-sections (disabled by default, code kept for future use)
         self.show_cross_sections = False
@@ -653,6 +655,39 @@ class VoigtAnalysisPlotter:
         # Store event connection ID to prevent accumulation
         self.click_event_cid = None
 
+        # Feature 5: Color scheme presets for 3D plots
+        self.color_presets = {
+            'Classic': {
+                'background': 'black',
+                'experimental': {'color': 'silver', 'alpha': 0.4, 'linewidth': 2.0},
+                'total_fit': {'color': 'lightsteelblue', 'alpha': 0.4},
+                'grid': {'color': '#333333', 'alpha': 0.4},
+                'pane': {'facecolor': 'black', 'alpha': 0.9}
+            },
+            'Clean': {
+                'background': 'white',
+                'experimental': {'color': 'black', 'alpha': 0.4, 'linewidth': 2.0},
+                'total_fit': {'color': 'dodgerblue', 'alpha': 0.4},
+                'grid': {'color': 'lightgray', 'alpha': 0.5},
+                'pane': {'facecolor': 'white', 'alpha': 0.95}
+            },
+            'Dark': {
+                'background': '#2C3E50',
+                'experimental': {'color': 'silver', 'alpha': 0.4, 'linewidth': 2.0},
+                'total_fit': {'color': 'cyan', 'alpha': 0.4},
+                'grid': {'color': '#34495E', 'alpha': 0.6},
+                'pane': {'facecolor': '#2C3E50', 'alpha': 0.9}
+            },
+            'Warm': {
+                'background': '#404040',
+                'experimental': {'color': 'wheat', 'alpha': 0.4, 'linewidth': 2.0},
+                'total_fit': {'color': 'skyblue', 'alpha': 0.4},
+                'grid': {'color': '#505050', 'alpha': 0.5},
+                'pane': {'facecolor': '#404040', 'alpha': 0.9}
+            }
+        }
+        self.current_color_scheme = 'Warm'  # Default scheme
+
     # ===== Feature Control Methods =====
 
     def toggle_experimental(self, visible):
@@ -663,6 +698,16 @@ class VoigtAnalysisPlotter:
     def toggle_fitted(self, visible):
         """Toggle fitted peaks layer visibility"""
         self.show_fitted = visible
+        self.refresh_plot()
+
+    def toggle_individual_peaks(self, visible):
+        """Toggle individual peak surfaces visibility"""
+        self.show_individual_peaks = visible
+        self.refresh_plot()
+
+    def toggle_peak_labels(self, visible):
+        """Toggle 3D peak assignment labels visibility"""
+        self.show_peak_labels = visible
         self.refresh_plot()
 
     def toggle_residuals(self, visible):
@@ -694,6 +739,16 @@ class VoigtAnalysisPlotter:
         """
         self.intensity_scale_factor = scale_percent / 100.0
         self.apply_intensity_scale(self.intensity_scale_factor)
+
+    def set_color_scheme(self, scheme_name):
+        """Set color scheme for 3D plots
+
+        Args:
+            scheme_name: One of 'Classic', 'Clean', 'Dark', 'Warm'
+        """
+        if scheme_name in self.color_presets:
+            self.current_color_scheme = scheme_name
+            self.refresh_plot()
 
     def apply_intensity_scale(self, factor):
         """Apply intensity scaling to Z-axis limits"""
@@ -1328,7 +1383,9 @@ Fit Timestamp: {str(timestamp)[:19] if timestamp != 'Unknown' else 'Unknown'}
         f1_ppm = region_2d['f1_ppm']
         f2_ppm = region_2d['f2_ppm']
         experimental = region_2d['intensity']
-        residuals = experimental - fitted_surface
+        # fitted_surface now contains only sum of peaks (no baseline)
+        # For residuals, add baseline back to compare with experimental data
+        residuals = experimental - (fitted_surface + baseline)
 
         # CRITICAL: Create 2D meshgrids for 3D plotting
         F2_ppm, F1_ppm = np.meshgrid(f2_ppm, f1_ppm)
@@ -1366,11 +1423,31 @@ Fit Timestamp: {str(timestamp)[:19] if timestamp != 'Unknown' else 'Unknown'}
         # Create axes (NO ax_text - peak parameters moved to dedicated tab)
         ax_data = self.fig.add_subplot(gs[0, 0] if self.show_cross_sections or self.residual_mode == 'separate' else gs[0], projection='3d')
         self.ax_data = ax_data  # Store for intensity scaling
+
+        # Get current color scheme
+        scheme = self.color_presets[self.current_color_scheme]
+
+        # Set 3D background pane colors from preset
+        ax_data.xaxis.pane.set_facecolor(scheme['pane']['facecolor'])
+        ax_data.yaxis.pane.set_facecolor(scheme['pane']['facecolor'])
+        ax_data.zaxis.pane.set_facecolor(scheme['pane']['facecolor'])
+        ax_data.xaxis.pane.set_alpha(scheme['pane']['alpha'])
+        ax_data.yaxis.pane.set_alpha(scheme['pane']['alpha'])
+        ax_data.zaxis.pane.set_alpha(scheme['pane']['alpha'])
+
         self.ax_resid = None
 
         if self.residual_mode == 'separate' and self.show_residuals:
             ax_resid = self.fig.add_subplot(gs[1, 0], projection='3d')
             self.ax_resid = ax_resid
+
+            # Set 3D background pane colors for residuals panel from preset
+            ax_resid.xaxis.pane.set_facecolor(scheme['pane']['facecolor'])
+            ax_resid.yaxis.pane.set_facecolor(scheme['pane']['facecolor'])
+            ax_resid.zaxis.pane.set_facecolor(scheme['pane']['facecolor'])
+            ax_resid.xaxis.pane.set_alpha(scheme['pane']['alpha'])
+            ax_resid.yaxis.pane.set_alpha(scheme['pane']['alpha'])
+            ax_resid.zaxis.pane.set_alpha(scheme['pane']['alpha'])
 
         if self.show_cross_sections:
             if self.residual_mode == 'separate':
@@ -1383,87 +1460,179 @@ Fit Timestamp: {str(timestamp)[:19] if timestamp != 'Unknown' else 'Unknown'}
         # Panel 1: Experimental data + Individual fitted peaks
         colors = ['red', 'orange', 'purple', 'brown', 'pink', 'olive', 'cyan', 'magenta']
 
-        # Plot experimental data as blue wireframe (background) if enabled
+        # Adaptive rendering parameters based on cluster size
+        n_peaks = len(individual_surfaces) if individual_surfaces is not None else 0
+
+        # Adaptive alpha scaling for individual peaks
+        # Small cluster (≤2 peaks): High opacity
+        # Medium cluster (3-5 peaks): Medium opacity
+        # Large cluster (>5 peaks): Lower opacity for depth perception
+        if n_peaks <= 2:
+            individual_alpha = 0.9  # Small cluster - highly opaque
+        elif n_peaks <= 5:
+            individual_alpha = 0.8  # Medium cluster - medium opacity
+        else:
+            individual_alpha = 0.7  # Large cluster - lower opacity
+
+        # Plot experimental data wireframe (background) if enabled - use preset colors
         if self.show_experimental:
             ax_data.plot_wireframe(F2_ppm, F1_ppm, experimental,
-                                   color='blue', alpha=0.3, linewidth=0.5,
+                                   color=scheme['experimental']['color'],
+                                   alpha=scheme['experimental']['alpha'],
+                                   linewidth=scheme['experimental']['linewidth'],
                                    label='Experimental')
 
-        # Plot total fitted surface WITHOUT baseline (green, semi-transparent middle layer)
-        # This shows the sum of all individual peaks (no baseline offset)
-        # So it's directly comparable to individual peak surfaces (red, orange, etc.)
+        # Plot total fitted surface (semi-transparent middle layer) - use preset colors
+        # fitted_surface already contains sum of peaks WITHOUT baseline (changed 2025-11-19)
+        # Directly comparable to individual peak surfaces (red, orange, etc.)
         if self.show_fitted and fitted_surface is not None:
-            fitted_surface_no_baseline = fitted_surface - baseline
-            ax_data.plot_surface(F2_ppm, F1_ppm, fitted_surface_no_baseline,
-                                color='green', alpha=0.4,
-                                edgecolor='darkgreen', linewidth=0.3,
+            ax_data.plot_surface(F2_ppm, F1_ppm, fitted_surface,
+                                color=scheme['total_fit']['color'],
+                                alpha=scheme['total_fit']['alpha'],
                                 antialiased=True, shade=True,
                                 label='Total Fit')
 
         # Overlay individual fitted peaks with different colors if enabled
-        if self.show_fitted and individual_surfaces is not None and len(individual_surfaces) > 0:
+        if self.show_individual_peaks and individual_surfaces is not None and len(individual_surfaces) > 0:
             for i, (surf, peak) in enumerate(zip(individual_surfaces, all_peaks)):
                 color = colors[i % len(colors)]
                 peak_assignment = peak.get('assignment', f'Peak {i+1}')
 
                 # Plot pure Voigt profile (starts at 0, rises to peak maximum)
+                # Apply adaptive alpha based on cluster size
                 ax_data.plot_wireframe(F2_ppm, F1_ppm, surf,
-                                       color=color, alpha=0.8, linewidth=1.0,
+                                       color=color, alpha=individual_alpha, linewidth=1.5,
                                        label=peak_assignment)
+
+        # Add elliptical contour overlay showing actual PS2D fit regions
+        # This shows which data points were included in the PS2D fitting
+        if self.show_individual_peaks and all_peaks is not None and len(all_peaks) > 0:
+            from ..core.ps2d_config import get_ps2d_config
+
+            # Get PS2D ellipse radii from config
+            config = get_ps2d_config()
+            radF1 = config.radF1  # Indirect dimension (15N/13C)
+            radF2 = config.radF2  # Direct dimension (1H)
+
+            # Draw elliptical contours at base plane (z=0) for each peak
+            # These show the actual fit regions used by PS2D algorithm
+            theta = np.linspace(0, 2*np.pi, 100)  # Parametric angle
+
+            for i, peak in enumerate(all_peaks):
+                color = colors[i % len(colors)]
+
+                # Extract peak position
+                pos_f2 = peak['pos_f2']  # 1H chemical shift (x-axis)
+                pos_f1 = peak['pos_f1']  # 15N/13C chemical shift (y-axis)
+
+                # Parametric ellipse equations
+                # x(θ) = center_x + a*cos(θ)
+                # y(θ) = center_y + b*sin(θ)
+                ellipse_f2 = pos_f2 + radF2 * np.cos(theta)  # x-coordinates
+                ellipse_f1 = pos_f1 + radF1 * np.sin(theta)  # y-coordinates
+                ellipse_z = np.zeros_like(theta)              # At base plane
+
+                # Draw ellipse at base (z=0) showing fit region boundary
+                ax_data.plot(ellipse_f2, ellipse_f1, ellipse_z,
+                            color=color, linewidth=2.5, alpha=0.7,
+                            linestyle='--', zorder=10)
+
+        # Add 3D text labels for peak assignments if enabled
+        if self.show_peak_labels and individual_surfaces is not None and len(individual_surfaces) > 0:
+            # Collect label positions for collision detection
+            label_positions = []
+
+            for i, (surf, peak) in enumerate(zip(individual_surfaces, all_peaks)):
+                color = colors[i % len(colors)]
+                peak_assignment = peak.get('assignment', f'Peak {i+1}')
+
+                # Extract peak position
+                pos_f2 = peak['pos_f2']  # 1H chemical shift
+                pos_f1 = peak['pos_f1']  # 15N/13C chemical shift
+
+                # Find Z-height at peak maximum on TOTAL fitted surface
+                f2_idx = np.argmin(np.abs(f2_ppm - pos_f2))
+                f1_idx = np.argmin(np.abs(f1_ppm - pos_f1))
+                max_z = fitted_surface[f1_idx, f2_idx]  # Use total fit instead of individual peak
+
+                # Position label 15% above peak maximum
+                label_z = max_z * 1.15
+                label_x = pos_f2
+                label_y = pos_f1
+
+                # Simple collision avoidance: offset if too close to previous labels
+                for prev_x, prev_y, prev_z in label_positions:
+                    # Calculate 2D distance in ppm space (F1 and F2 have different scales)
+                    # Use normalized distance based on typical peak spacing
+                    f2_dist = abs(label_x - prev_x) / 0.05  # 0.05 ppm typical 1H spacing
+                    f1_dist = abs(label_y - prev_y) / 0.5   # 0.5 ppm typical 15N spacing
+
+                    if f2_dist < 1.5 and f1_dist < 1.5:  # Labels would overlap
+                        # Apply small radial offset
+                        label_z *= 1.1  # Move label higher to avoid overlap
+                        # Offset in F2 direction (1H dimension, smaller range)
+                        label_x += 0.01 * (1 if i % 2 == 0 else -1)
+
+                # Store position for future collision checks
+                label_positions.append((label_x, label_y, label_z))
+
+                # Draw arrow from label to peak top on total fitted surface
+                ax_data.plot([label_x, pos_f2], [label_y, pos_f1], [label_z, max_z],
+                            color=color, linewidth=2, alpha=0.8, linestyle='-')
+
+                # Add 3D text label with larger font (2x size)
+                ax_data.text(label_x, label_y, label_z,
+                            peak_assignment,
+                            color=color,
+                            fontsize=18,  # 2x original size (was 9pt)
+                            fontweight='bold',
+                            ha='center',
+                            va='bottom',
+                            bbox=dict(boxstyle='round,pad=0.3',
+                                     facecolor='white',
+                                     edgecolor=color,
+                                     alpha=0.85))
 
         # Overlay residuals if in overlay mode
         if self.residual_mode == 'overlay' and self.show_residuals:
-            # Calculate quality map using hybrid signal+noise normalization
-            # Absolute scale: comparable between peaks, works in baseline and peak regions
-            abs_residuals = np.abs(residuals)
-
-            # Estimate noise from edge regions (assumed no signal)
-            edge_pixels = np.concatenate([
-                experimental[0, :],   # Top edge
-                experimental[-1, :],  # Bottom edge
-                experimental[:, 0],   # Left edge
-                experimental[:, -1]   # Right edge
-            ])
-            noise_std = np.std(edge_pixels)
-
-            # Adaptive threshold: max(1% of peak signal, 3σ noise)
-            # This handles both high-signal regions (signal-limited) and baseline (noise-limited)
+            # Position residuals below zero for visibility
+            # Place baseline at 0 - 20% of max intensity
             max_intensity = np.max(experimental)
-            adaptive_threshold = np.maximum(0.01 * max_intensity, 3.0 * noise_std)
-
-            # Quality map: 1.0 at zero residual, 0.0 at threshold
-            # Residuals > threshold are clipped to 0.0 (poor)
-            quality_map = 1.0 - np.clip(abs_residuals / adaptive_threshold, 0, 1)
-
-            # Height encoding: position residuals below zero for visibility
-            # Place baseline at 0 - 20% of max intensity, residual range spans 10% (from -20% to -10%)
-            # This ensures no overlap with main data (which starts at 0 or above)
             residual_baseline = 0 - (0.2 * max_intensity)
-            residual_heights = residual_baseline + np.clip(abs_residuals / adaptive_threshold, 0, 1) * (0.1 * max_intensity)
 
-            # Create custom colormap: green → yellow → red
-            colors_list = ['darkred', 'red', 'yellow', 'lightgreen', 'darkgreen']
-            positions = [0.0, 0.15, 0.50, 0.90, 1.0]
-            cmap = LinearSegmentedColormap.from_list('quality',
-                                                     list(zip(positions, colors_list)))
+            # Scale residuals to fit in visual range
+            z_max_resid = np.max(np.abs(residuals))
+            residual_range = 0.1 * max_intensity  # Span 10% of max intensity
 
-            # Plot residual map overlay
-            from matplotlib.cm import ScalarMappable
+            # Normalize residuals to [-1, 1] range for colormap
+            if z_max_resid > 0:
+                normalized_residuals = residuals / z_max_resid
+            else:
+                normalized_residuals = residuals
+
+            # Height encoding: map residuals to visual range
+            residual_heights = residual_baseline + (normalized_residuals + 1) * 0.5 * residual_range
+
+            # Use same colormap as separate panel mode (RdBu_r: Red-Blue reversed)
+            import matplotlib.cm as cm
+            from matplotlib.colors import Normalize
+
+            # Create colormap with proper normalization
+            norm = Normalize(vmin=-z_max_resid, vmax=z_max_resid)
+            cmap_rdbu = cm.get_cmap('RdBu_r')
+
+            # Map residual values to colors
+            colors_mapped = cmap_rdbu(norm(residuals))
+
+            # Plot residual map overlay with RdBu_r colormap
             residual_surf = ax_data.plot_surface(
                 F2_ppm, F1_ppm, residual_heights,
-                facecolors=cmap(quality_map),
+                facecolors=colors_mapped,
                 alpha=0.6,
                 edgecolor='none',
                 antialiased=True,
                 shade=False
             )
-
-            # Add colorbar (50% smaller, positioned under 3D graph)
-            sm = ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
-            sm.set_array([])
-            cbar = self.fig.colorbar(sm, ax=ax_data, orientation='horizontal',
-                                    shrink=0.3, aspect=10, pad=0.05)
-            cbar.set_label('Fit Quality (1=perfect, 0=error > max(1% signal, 3σ noise))', fontsize=7)
 
         # Configure axes (NMR convention)
         ax_data.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
@@ -1478,16 +1647,16 @@ Fit Timestamp: {str(timestamp)[:19] if timestamp != 'Unknown' else 'Unknown'}
         ax_data.xaxis.set_major_locator(MaxNLocator(nbins=2))
         ax_data.yaxis.set_major_locator(MaxNLocator(nbins=2))
 
-        # Make plot 50% taller in intensity (Z) dimension for better visibility
-        ax_data.set_box_aspect([1, 1, 1.5])
+        # Z-axis height reduced by 30% (was 1.5, now 1.05) per user request 2025-11-19
+        ax_data.set_box_aspect([1, 1, 1.05])
 
-        title = f'Data + Fitted Peaks - {assignment}'
-        if self.residual_mode == 'overlay':
-            title += ' (with Residual Map)'
-        ax_data.set_title(title, fontsize=10, fontweight='bold')
+        #title = f'Data + Fitted Peaks - {assignment}'
+        #if self.residual_mode == 'overlay':
+        #    title += ' (with Residual Map)'
+        #ax_data.set_title(title, fontsize=10, fontweight='bold')
 
         # Add legend (limit to 6 peaks to avoid crowding)
-        if len(all_peaks) <= 6 and (self.show_experimental or self.show_fitted):
+        if len(all_peaks) <= 6 and (self.show_experimental or self.show_fitted or self.show_individual_peaks):
             ax_data.legend(loc='upper right', fontsize=7, framealpha=0.9)
 
         # CRITICAL: Calculate and store auto Z-axis scale
