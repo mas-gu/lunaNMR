@@ -67,6 +67,36 @@ try:
         StatisticsPanel,
         ModeSelectionFrame,
         PeakNavigator,
+        # Apple-style design constants
+        BG_COLOR,
+        PANEL_BG_COLOR,
+        FRAME_BG_COLOR,
+        PRIMARY_TEXT,
+        SECONDARY_TEXT,
+        DISABLED_TEXT,
+        PRIMARY_BUTTON_BG,
+        PRIMARY_BUTTON_HOVER,
+        PRIMARY_BUTTON_TEXT,
+        SECONDARY_BUTTON_BG,
+        SECONDARY_BUTTON_HOVER,
+        SECONDARY_BUTTON_TEXT,
+        SECONDARY_BUTTON_BORDER,
+        DESTRUCTIVE_BUTTON_BG,
+        DESTRUCTIVE_BUTTON_HOVER,
+        DESTRUCTIVE_BUTTON_TEXT,
+        SUCCESS_GREEN,
+        WARNING_ORANGE,
+        ERROR_RED,
+        INFO_BLUE,
+        BORDER_COLOR,
+        BUTTON_CORNER_RADIUS,
+        FRAME_CORNER_RADIUS,
+        SPACING_XS,
+        SPACING_SM,
+        SPACING_MD,
+        SPACING_LG,
+        SPACING_XL,
+        # Legacy compatibility
         BUTTON_FG_COLOR,
         BUTTON_HOVER_COLOR,
         BUTTON_TEXT_COLOR
@@ -138,7 +168,7 @@ class DataLoadingDialog(tk.Toplevel):
     just moved to a dedicated popup window for better UI organization.
     """
 
-    def __init__(self, parent, current_nmr_folder=None, current_peak_folder=None):
+    def __init__(self, parent, current_nmr_folder=None, current_peak_folder=None, workflow_mode='peak_list'):
         super().__init__(parent)
         self.title("Load Data - lunaNMR v0.9")
         self.geometry("1000x650")
@@ -147,6 +177,9 @@ class DataLoadingDialog(tk.Toplevel):
         # Make modal (blocks main window)
         self.transient(parent)
         self.grab_set()
+
+        # Store workflow mode
+        self.workflow_mode = workflow_mode  # 'peak_list' or 'sn_threshold'
 
         # Store selections
         self.selected_nmr = None
@@ -168,10 +201,15 @@ class DataLoadingDialog(tk.Toplevel):
         main_frame = ttk.Frame(self, padding=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Title label
+        # Title label (workflow-aware)
+        if self.workflow_mode == 'sn_threshold':
+            title_text = "Select NMR Spectrum (Peak List Optional)"
+        else:
+            title_text = "Select NMR Spectrum and Peak List"
+
         title_label = ttk.Label(
             main_frame,
-            text="Select NMR Spectrum and Peak List",
+            text=title_text,
             font=('TkDefaultFont', 14, 'bold')
         )
         title_label.grid(row=0, column=0, columnspan=2, pady=(0, 15))
@@ -217,10 +255,15 @@ class DataLoadingDialog(tk.Toplevel):
             self.peak_file_list.current_folder = peak_folder
             self.peak_file_list.refresh_file_list()
 
-        # Status/instruction label
+        # Status/instruction label (workflow-aware)
+        if self.workflow_mode == 'sn_threshold':
+            initial_instruction = "Select NMR spectrum to enable loading"
+        else:
+            initial_instruction = "Select files from both panels to enable loading"
+
         self.instruction_label = ttk.Label(
             main_frame,
-            text="Select files from both panels to enable loading",
+            text=initial_instruction,
             foreground='gray',
             font=('TkDefaultFont', 10, 'italic')
         )
@@ -253,12 +296,12 @@ class DataLoadingDialog(tk.Toplevel):
             font=('TkDefaultFont', 11, 'bold'),
             command=self._on_load,
             state='disabled',
-            corner_radius=8,
-            fg_color=BUTTON_FG_COLOR,
-            hover_color=BUTTON_HOVER_COLOR,
-            text_color=BUTTON_TEXT_COLOR
+            corner_radius=BUTTON_CORNER_RADIUS,
+            fg_color=PRIMARY_BUTTON_BG,
+            hover_color=PRIMARY_BUTTON_HOVER,
+            text_color=PRIMARY_BUTTON_TEXT
         )
-        self.load_button.grid(row=0, column=1, padx=5)
+        self.load_button.grid(row=0, column=1, padx=SPACING_SM)
 
         cancel_button = ctk.CTkButton(
             button_frame,
@@ -267,11 +310,14 @@ class DataLoadingDialog(tk.Toplevel):
             height=40,
             font=('TkDefaultFont', 10),
             command=self._on_cancel,
-            fg_color='gray',
-            hover_color='darkgray',
-            corner_radius=8
+            fg_color=SECONDARY_BUTTON_BG,
+            hover_color=SECONDARY_BUTTON_HOVER,
+            text_color=SECONDARY_BUTTON_TEXT,
+            corner_radius=BUTTON_CORNER_RADIUS,
+            border_width=1,
+            border_color=SECONDARY_BUTTON_BORDER
         )
-        cancel_button.grid(row=0, column=2, padx=5)
+        cancel_button.grid(row=0, column=2, padx=SPACING_SM)
 
     def _on_nmr_select(self, file_path, filename):
         """Handle NMR file selection (same callback as original)"""
@@ -284,7 +330,7 @@ class DataLoadingDialog(tk.Toplevel):
         self._update_status()
 
     def _update_status(self):
-        """Update status label and enable/disable load button"""
+        """Update status label and enable/disable load button (workflow-aware)"""
         status_parts = []
 
         if self.selected_nmr:
@@ -300,30 +346,52 @@ class DataLoadingDialog(tk.Toplevel):
         else:
             self.status_label.config(text="")
 
-        # Enable load button only if BOTH files selected (matches current behavior)
-        if self.selected_nmr and self.selected_peak:
-            self.load_button.configure(state='normal')
-            self.instruction_label.config(
-                text="Ready to load data",
-                foreground='green'
-            )
-        else:
-            self.load_button.configure(state='disabled')
-            if self.selected_nmr and not self.selected_peak:
-                self.instruction_label.config(
-                    text="Please select a peak list",
-                    foreground='orange'
-                )
-            elif self.selected_peak and not self.selected_nmr:
+        # Workflow-aware validation
+        if self.workflow_mode == 'sn_threshold':
+            # S/N Threshold mode: Only spectrum required, peak list optional
+            if self.selected_nmr:
+                self.load_button.configure(state='normal')
+                if self.selected_peak:
+                    self.instruction_label.config(
+                        text="Ready to load data (spectrum + peaks)",
+                        foreground='green'
+                    )
+                else:
+                    self.instruction_label.config(
+                        text="Ready to load spectrum (S/N threshold mode)",
+                        foreground='green'
+                    )
+            else:
+                self.load_button.configure(state='disabled')
                 self.instruction_label.config(
                     text="Please select an NMR spectrum",
                     foreground='orange'
                 )
-            else:
+        else:
+            # Peak List mode: BOTH files required
+            if self.selected_nmr and self.selected_peak:
+                self.load_button.configure(state='normal')
                 self.instruction_label.config(
-                    text="Select files from both panels to enable loading",
-                    foreground='gray'
+                    text="Ready to load data",
+                    foreground='green'
                 )
+            else:
+                self.load_button.configure(state='disabled')
+                if self.selected_nmr and not self.selected_peak:
+                    self.instruction_label.config(
+                        text="Please select a peak list",
+                        foreground='orange'
+                    )
+                elif self.selected_peak and not self.selected_nmr:
+                    self.instruction_label.config(
+                        text="Please select an NMR spectrum",
+                        foreground='orange'
+                    )
+                else:
+                    self.instruction_label.config(
+                        text="Select files from both panels to enable loading",
+                        foreground='gray'
+                    )
 
     def _on_load(self):
         """User clicked Load - return selections"""
@@ -373,11 +441,11 @@ class NMRPeaksSeriesGUI:
         ctk.set_appearance_mode("light")  # Options: "light", "dark", "system"
         ctk.set_default_color_theme("blue")  # Options: "blue", "green", "dark-blue"
 
-        # Define consistent color theme (light grey)
-        self.bg_color = "#F0F0F0"  # Very light grey background (lighter than buttons)
-        self.button_fg_color = "#D3D3D3"  # Light grey (darker than background)
-        self.button_hover_color = "#B0B0B0"  # Darker grey for hover
-        self.button_text_color = "#000000"  # Black text
+        # Define consistent color theme (Apple-style design system)
+        self.bg_color = BG_COLOR  # Apple-style softer white background
+        self.button_fg_color = SECONDARY_BUTTON_BG  # Secondary button color
+        self.button_hover_color = SECONDARY_BUTTON_HOVER  # Secondary button hover
+        self.button_text_color = SECONDARY_BUTTON_TEXT  # Button text color
 
         # Set root window background
         self.root.configure(bg=self.bg_color)
@@ -911,16 +979,6 @@ class NMRPeaksSeriesGUI:
         # File menu
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Load NMR Spectrum...", command=self.load_nmr_file)
-        file_menu.add_command(label="Load Peak List...", command=self.load_peak_file)
-        file_menu.add_separator()
-
-        # Recent files submenu
-        self.recent_menu = tk.Menu(file_menu, tearoff=0)
-        file_menu.add_cascade(label="Recent Files", menu=self.recent_menu)
-        self.update_recent_files_menu()
-
-        file_menu.add_separator()
         file_menu.add_command(label="Export Peak List...", command=self.export_peak_list)
         file_menu.add_command(label="Export Results...", command=self.export_results)
         file_menu.add_command(label="Save Configuration...", command=self.save_config)
@@ -964,15 +1022,10 @@ class NMRPeaksSeriesGUI:
         results_menu.add_command(label="Browse Series Results...", command=self.open_results_browser)
         results_menu.add_command(label="Browse Individual Spectra...", command=self.open_spectrum_browser)
         results_menu.add_command(label="Multi-Spectrum Overlay Viewer...", command=self.open_multi_spectrum_viewer)
-        results_menu.add_command(label="Peak Evolution Analysis", command=self.show_peak_evolution)
-        results_menu.add_command(label="Comparison Dashboard", command=self.open_comparison_dashboard)
         results_menu.add_separator()
         results_menu.add_command(label="Export Data Matrix...", command=self.export_data_matrix)
         results_menu.add_command(label="Export Analysis Report...", command=self.export_analysis_report)
         results_menu.add_command(label="Batch Export Results...", command=self.batch_export_results)
-        results_menu.add_separator()
-        results_menu.add_command(label="Series Quality Assessment", command=self.show_quality_assessment)
-        results_menu.add_command(label="Detection Statistics", command=self.show_detection_statistics)
 
         # Modules menu
         modules_menu = tk.Menu(menubar, tearoff=0)
@@ -1049,19 +1102,19 @@ class NMRPeaksSeriesGUI:
         data_load_frame = CTkLabelFrame(parent, text="Data Loading", padding=15)
         data_load_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Load Data button - opens dialog
+        # Load Data button - opens dialog (PRIMARY ACTION)
         self.load_data_button = ctk.CTkButton(
             data_load_frame,
             text="Load Data (Spectrum + Peaks)",
             command=self.open_data_loading_dialog,
             height=45,
             font=('TkDefaultFont', 12, 'bold'),
-            corner_radius=8,
-            fg_color=BUTTON_FG_COLOR,
-            hover_color=BUTTON_HOVER_COLOR,
-            text_color=BUTTON_TEXT_COLOR
+            corner_radius=BUTTON_CORNER_RADIUS,
+            fg_color=PRIMARY_BUTTON_BG,
+            hover_color=PRIMARY_BUTTON_HOVER,
+            text_color=PRIMARY_BUTTON_TEXT
         )
-        self.load_data_button.pack(fill=tk.X, padx=10, pady=(5, 15))
+        self.load_data_button.pack(fill=tk.X, padx=SPACING_MD, pady=(SPACING_SM, SPACING_MD))
 
         # Status display - shows currently loaded files
         status_container = ttk.Frame(data_load_frame)
@@ -1101,17 +1154,21 @@ class NMRPeaksSeriesGUI:
         button_frame.columnconfigure(1, weight=1)
 
         self.contour_toggle_button = ctk.CTkButton(button_frame, text="Contour Settings ▼",
-                                                  command=self.toggle_contour_settings, corner_radius=8,
-                                                  fg_color=self.button_fg_color,
-                                                  hover_color=self.button_hover_color,
-                                                  text_color=self.button_text_color)
+                                                  command=self.toggle_contour_settings, corner_radius=BUTTON_CORNER_RADIUS,
+                                                  fg_color=SECONDARY_BUTTON_BG,
+                                                  hover_color=SECONDARY_BUTTON_HOVER,
+                                                  text_color=SECONDARY_BUTTON_TEXT,
+                                                  border_width=1,
+                                                  border_color=SECONDARY_BUTTON_BORDER)
         self.contour_toggle_button.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=2)
 
         ctk.CTkButton(button_frame, text="Reset Zoom",
-                     command=self.reset_interactive_zoom, corner_radius=8,
-                     fg_color=self.button_fg_color,
-                     hover_color=self.button_hover_color,
-                     text_color=self.button_text_color).grid(row=0, column=1, sticky=(tk.W, tk.E), padx=2)
+                     command=self.reset_interactive_zoom, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=SECONDARY_BUTTON_BG,
+                     hover_color=SECONDARY_BUTTON_HOVER,
+                     text_color=SECONDARY_BUTTON_TEXT,
+                     border_width=1,
+                     border_color=SECONDARY_BUTTON_BORDER).grid(row=0, column=1, sticky=(tk.W, tk.E), padx=2)
 
         # Collapsible contour parameters
         self.contour_params_visible = tk.BooleanVar(value=False)
@@ -1149,40 +1206,39 @@ class NMRPeaksSeriesGUI:
         detection_button_frame = ttk.Frame(detection_section)
         detection_button_frame.pack(anchor=tk.CENTER, padx=10, pady=5)
 
-        # Detect button (left side) with light green color, bold text, and subtle elevation
+        # Detect button (left side) - SUCCESS ACTION
         self.detect_peaks_button = ctk.CTkButton(detection_button_frame, text="Detect",
-                                                command=self.detect_peaks, corner_radius=8,
-                                                fg_color="#90EE90", hover_color="#7CCD7C",
-                                                text_color=self.button_text_color,
-                                                width=70, font=("TkDefaultFont", 14, "bold"),
-                                                border_width=2, border_color="#7CCD7C")
-        self.detect_peaks_button.pack(side=tk.LEFT, padx=(0, 2))
+                                                command=self.detect_peaks, corner_radius=BUTTON_CORNER_RADIUS,
+                                                fg_color=SUCCESS_GREEN, hover_color="#2AA64A",
+                                                text_color="#FFFFFF",
+                                                width=70, font=("TkDefaultFont", 14, "bold"))
+        self.detect_peaks_button.pack(side=tk.LEFT, padx=(0, SPACING_XS))
 
-        # Fit Spectrum button (middle) with light green color, bold text, and subtle elevation
+        # Fit Spectrum button (middle) - PRIMARY ACTION
         self.fit_all_peaks_button = ctk.CTkButton(detection_button_frame, text="Fit Spectrum",
-                                                 command=self.fit_all_peaks, corner_radius=8,
-                                                 fg_color="#90EE90", hover_color="#7CCD7C",
-                                                 text_color=self.button_text_color,
-                                                 width=100, font=("TkDefaultFont", 14, "bold"),
-                                                 border_width=2, border_color="#7CCD7C")
-        self.fit_all_peaks_button.pack(side=tk.LEFT, padx=2)
+                                                 command=self.fit_all_peaks, corner_radius=BUTTON_CORNER_RADIUS,
+                                                 fg_color=PRIMARY_BUTTON_BG, hover_color=PRIMARY_BUTTON_HOVER,
+                                                 text_color=PRIMARY_BUTTON_TEXT,
+                                                 width=100, font=("TkDefaultFont", 14, "bold"))
+        self.fit_all_peaks_button.pack(side=tk.LEFT, padx=SPACING_XS)
 
-        # Fit Series button (right side) with light green color, bold text, and subtle elevation
+        # Fit Series button (right side) - PRIMARY ACTION
         self.series_button = ctk.CTkButton(detection_button_frame, text="Fit Series",
-                                          command=self.start_series_integration, corner_radius=8,
-                                          fg_color="#90EE90", hover_color="#7CCD7C",
-                                          text_color=self.button_text_color,
-                                          width=80, font=("TkDefaultFont", 14, "bold"),
-                                          border_width=2, border_color="#7CCD7C")
-        self.series_button.pack(side=tk.LEFT, padx=(2, 0))
+                                          command=self.start_series_integration, corner_radius=BUTTON_CORNER_RADIUS,
+                                          fg_color=PRIMARY_BUTTON_BG, hover_color=PRIMARY_BUTTON_HOVER,
+                                          text_color=PRIMARY_BUTTON_TEXT,
+                                          width=80, font=("TkDefaultFont", 14, "bold"))
+        self.series_button.pack(side=tk.LEFT, padx=(SPACING_XS, 0))
 
         # Peak Edition toggle button (below the three main buttons)
         self.peak_edit_toggle_button = ctk.CTkButton(detection_section, text="Peak Edition ▼",
-                                                    command=self.toggle_peak_edit_mode, corner_radius=8,
-                                                    fg_color=self.button_fg_color,
-                                                    hover_color=self.button_hover_color,
-                                                    text_color=self.button_text_color)
-        self.peak_edit_toggle_button.pack(fill=tk.X, padx=10, pady=(5, 5))
+                                                    command=self.toggle_peak_edit_mode, corner_radius=BUTTON_CORNER_RADIUS,
+                                                    fg_color=SECONDARY_BUTTON_BG,
+                                                    hover_color=SECONDARY_BUTTON_HOVER,
+                                                    text_color=SECONDARY_BUTTON_TEXT,
+                                                    border_width=1,
+                                                    border_color=SECONDARY_BUTTON_BORDER)
+        self.peak_edit_toggle_button.pack(fill=tk.X, padx=SPACING_MD, pady=(SPACING_SM, SPACING_SM))
 
         # Collapsible editing controls frame (hidden by default)
         self.peak_editing_controls_frame = ttk.Frame(detection_section)
@@ -1255,17 +1311,18 @@ class NMRPeaksSeriesGUI:
                                       textvariable=self.adjust_y_offset, format="%.1f")
         y_offset_spinbox.pack(side=tk.LEFT, padx=(5, 10))
 
-        # Apply button
+        # Apply button (compact width to fit in row)
         ctk.CTkButton(adjustment_frame, text="Apply",
-                     command=self.apply_coordinate_offsets, corner_radius=8,
-                     fg_color=self.button_fg_color, hover_color=self.button_hover_color,
-                     text_color=self.button_text_color, width=80).pack(side=tk.LEFT, padx=2)
+                     command=self.apply_coordinate_offsets, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=PRIMARY_BUTTON_BG, hover_color=PRIMARY_BUTTON_HOVER,
+                     text_color=PRIMARY_BUTTON_TEXT, width=60).pack(side=tk.LEFT, padx=(SPACING_SM, SPACING_XS))
 
-        # Reset button
+        # Reset button (compact width to fit in row)
         ctk.CTkButton(adjustment_frame, text="Reset",
-                     command=self.reset_coordinate_offsets, corner_radius=8,
-                     fg_color=self.button_fg_color, hover_color=self.button_hover_color,
-                     text_color=self.button_text_color, width=80).pack(side=tk.LEFT, padx=2)
+                     command=self.reset_coordinate_offsets, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=SECONDARY_BUTTON_BG, hover_color=SECONDARY_BUTTON_HOVER,
+                     text_color=SECONDARY_BUTTON_TEXT, width=60,
+                     border_width=1, border_color=SECONDARY_BUTTON_BORDER).pack(side=tk.LEFT, padx=SPACING_XS)
 
         # Status label (for feedback after operations)
         self.adjustment_status_label = ttk.Label(peak_operations_frame, text="", foreground='gray')
@@ -1383,11 +1440,11 @@ class NMRPeaksSeriesGUI:
         voigt_frame = CTkLabelFrame(parent, text="Voigt Fitting", padding=5)
         voigt_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Reset Results button (full width)
+        # Reset Results button (full width) - DESTRUCTIVE ACTION
         ctk.CTkButton(voigt_frame, text="Reset Results",
-                     command=self.reset_analysis_results, corner_radius=8,
-                     fg_color=self.button_fg_color, hover_color=self.button_hover_color,
-                     text_color=self.button_text_color).pack(fill=tk.X, padx=10, pady=5)
+                     command=self.reset_analysis_results, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=DESTRUCTIVE_BUTTON_BG, hover_color=DESTRUCTIVE_BUTTON_HOVER,
+                     text_color=DESTRUCTIVE_BUTTON_TEXT).pack(fill=tk.X, padx=SPACING_MD, pady=SPACING_SM)
 
     def _update_fit_all_button_text(self):
         """Update the Fit Spectrum button text based on Voigt fitting mode"""
@@ -1405,11 +1462,13 @@ class NMRPeaksSeriesGUI:
 
         # Expert Mode button (full width)
         self.expert_mode_button = ctk.CTkButton(series_frame, text="Expert Mode",
-                                                command=self.open_expert_mode, corner_radius=8,
-                                                fg_color=self.button_fg_color,
-                                                hover_color=self.button_hover_color,
-                                                text_color=self.button_text_color)
-        self.expert_mode_button.pack(fill=tk.X, padx=10, pady=5)
+                                                command=self.open_expert_mode, corner_radius=BUTTON_CORNER_RADIUS,
+                                                fg_color=SECONDARY_BUTTON_BG,
+                                                hover_color=SECONDARY_BUTTON_HOVER,
+                                                text_color=SECONDARY_BUTTON_TEXT,
+                                                border_width=1,
+                                                border_color=SECONDARY_BUTTON_BORDER)
+        self.expert_mode_button.pack(fill=tk.X, padx=SPACING_MD, pady=SPACING_SM)
 
         # Series results browser with enhanced features
         #ttk.Separator(series_frame, orient='horizontal').pack(fill=tk.X, pady=10)
@@ -1512,12 +1571,16 @@ class NMRPeaksSeriesGUI:
         progress_control_frame.pack(fill=tk.X, pady=(5, 0))
 
         self.pause_integration_button = ctk.CTkButton(progress_control_frame, text="Pause",
-                                                     command=self.pause_integration, width=4*8, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color)
-        self.pause_integration_button.pack(side=tk.LEFT, padx=2)
+                                                     command=self.pause_integration, width=4*8, corner_radius=BUTTON_CORNER_RADIUS,
+                                                     fg_color=WARNING_ORANGE, hover_color="#DD9043",
+                                                     text_color="#FFFFFF")
+        self.pause_integration_button.pack(side=tk.LEFT, padx=SPACING_XS)
 
         self.stop_integration_button = ctk.CTkButton(progress_control_frame, text="Stop",
-                                                    command=self.stop_integration, width=4*8, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color)
-        self.stop_integration_button.pack(side=tk.LEFT, padx=2)
+                                                    command=self.stop_integration, width=4*8, corner_radius=BUTTON_CORNER_RADIUS,
+                                                    fg_color=DESTRUCTIVE_BUTTON_BG, hover_color=DESTRUCTIVE_BUTTON_HOVER,
+                                                    text_color=DESTRUCTIVE_BUTTON_TEXT)
+        self.stop_integration_button.pack(side=tk.LEFT, padx=SPACING_XS)
 
         # Initially hide progress frame
         progress_frame.pack_forget()
@@ -1765,20 +1828,27 @@ class NMRPeaksSeriesGUI:
         # Tab 3: 3D Voigt Analysis (new - supplementary visualization)
         voigt_3d_tab = self.viz_notebook.add("3D Voigt Analysis")
 
-        # Create control frame at top
+        # Create compact control frame in 2 rows to save horizontal space
         control_frame_3d = ttk.Frame(voigt_3d_tab)
         control_frame_3d.pack(side=tk.TOP, fill=tk.X, padx=5, pady=3)
 
-        # Row 1: Layer toggling checkboxes
-        layer_frame = CTkLabelFrame(control_frame_3d, text="Layer Visibility", padding=3)
-        layer_frame.pack(side=tk.LEFT, padx=3)
-
+        # Initialize control variables
         self.show_exp_3d_var = tk.BooleanVar(value=True)
         self.show_fit_3d_var = tk.BooleanVar(value=True)
-        self.show_individual_3d_var = tk.BooleanVar(value=True)
-        self.show_peak_labels_3d_var = tk.BooleanVar(value=True)
-        self.show_resid_3d_var = tk.BooleanVar(value=True)
-        # self.show_cross_3d_var = tk.BooleanVar(value=True)  # Disabled - code kept for future use
+        self.show_individual_3d_var = tk.BooleanVar(value=False)  # Hidden by default
+        self.show_peak_labels_3d_var = tk.BooleanVar(value=False)  # Hidden by default
+        self.show_resid_3d_var = tk.BooleanVar(value=False)  # Hidden by default
+        self.limit_peak_display_3d_var = tk.BooleanVar(value=True)  # ON by default
+        self.residual_mode_3d_var = tk.StringVar(value='overlay')
+        self.color_scheme_3d_var = tk.StringVar(value='Clean')  # Professional white background
+        self.intensity_scale_3d_var = tk.DoubleVar(value=100.0)
+
+        # === Row 1: Layer visibility checkboxes ===
+        row1 = ttk.Frame(control_frame_3d)
+        row1.pack(side=tk.TOP, fill=tk.X, pady=(0, 2))
+
+        layer_frame = CTkLabelFrame(row1, text="Layer Visibility", padding=3)
+        layer_frame.pack(side=tk.LEFT, padx=(0, 5))
 
         ttk.Checkbutton(layer_frame, text="Experimental", variable=self.show_exp_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_experimental(self.show_exp_3d_var.get())
@@ -1795,15 +1865,18 @@ class NMRPeaksSeriesGUI:
         ttk.Checkbutton(layer_frame, text="Residuals", variable=self.show_resid_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_residuals(self.show_resid_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
-        # ttk.Checkbutton(layer_frame, text="Cross-Sections", variable=self.show_cross_3d_var,
-        #                 command=lambda: self.voigt_plotter_3d.toggle_cross_sections(self.show_cross_3d_var.get())
-        #                 ).pack(side=tk.LEFT, padx=2)  # Disabled - code kept for future use
+        ttk.Checkbutton(layer_frame, text="Limit Peak Extent", variable=self.limit_peak_display_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_peak_clipping(self.limit_peak_display_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
 
-        # Row 2: Residual mode radio buttons
-        residual_frame = CTkLabelFrame(control_frame_3d, text="Residual Mode", padding=3)
-        residual_frame.pack(side=tk.LEFT, padx=3)
+        # === Row 2: Residual mode, Color scheme, Intensity scale ===
+        row2 = ttk.Frame(control_frame_3d)
+        row2.pack(side=tk.TOP, fill=tk.X)
 
-        self.residual_mode_3d_var = tk.StringVar(value='overlay')
+        # Residual mode
+        residual_frame = CTkLabelFrame(row2, text="Residual Mode", padding=3)
+        residual_frame.pack(side=tk.LEFT, padx=(0, 5))
+
         ttk.Radiobutton(residual_frame, text="Separate Panel", variable=self.residual_mode_3d_var,
                         value='separate',
                         command=lambda: self.voigt_plotter_3d.set_residual_mode('separate')
@@ -1813,28 +1886,25 @@ class NMRPeaksSeriesGUI:
                         command=lambda: self.voigt_plotter_3d.set_residual_mode('overlay')
                         ).pack(side=tk.LEFT, padx=2)
 
-        # Row 3: Color scheme dropdown
-        color_scheme_frame = CTkLabelFrame(control_frame_3d, text="Color Scheme", padding=3)
-        color_scheme_frame.pack(side=tk.LEFT, padx=3)
+        # Color scheme
+        color_scheme_frame = CTkLabelFrame(row2, text="Color Scheme", padding=3)
+        color_scheme_frame.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.color_scheme_3d_var = tk.StringVar(value='Warm')
         color_scheme_dropdown = ttk.Combobox(
             color_scheme_frame,
             textvariable=self.color_scheme_3d_var,
             values=['Classic', 'Clean', 'Dark', 'Warm'],
             state='readonly',
-            width=10
+            width=8
         )
         color_scheme_dropdown.pack(side=tk.LEFT, padx=2)
         color_scheme_dropdown.bind('<<ComboboxSelected>>', self._on_color_scheme_change_3d)
 
-        # Row 4: Intensity scaling slider
-        intensity_frame = CTkLabelFrame(control_frame_3d, text="Intensity Scale", padding=3)
-        intensity_frame.pack(side=tk.LEFT, padx=3, fill=tk.X, expand=True)
+        # Intensity scale
+        intensity_frame = CTkLabelFrame(row2, text="Intensity Scale", padding=3)
+        intensity_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         ttk.Label(intensity_frame, text="50%").pack(side=tk.LEFT, padx=2)
-
-        self.intensity_scale_3d_var = tk.DoubleVar(value=100.0)
         intensity_slider_3d = tk.Scale(
             intensity_frame,
             from_=50,
@@ -1844,7 +1914,7 @@ class NMRPeaksSeriesGUI:
             command=self._on_intensity_scale_change_3d,
             resolution=5,
             showvalue=0,
-            length=200
+            length=150
         )
         intensity_slider_3d.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
@@ -1853,9 +1923,9 @@ class NMRPeaksSeriesGUI:
 
         ttk.Label(intensity_frame, text="200%").pack(side=tk.LEFT, padx=2)
 
-        # Create 3D Voigt analysis figure - responsive sizing to match canvas
-        # Reduced from (10, 6) to (8, 4) for better fit in window
-        self.fig_voigt_3d = plt.figure(figsize=(8, 4))
+        # Create 3D Voigt analysis figure - responsive sizing to match other tabs
+        # Use small figsize like other tabs - canvas will expand to fill available space
+        self.fig_voigt_3d = plt.figure(figsize=(4, 3))
         self.canvas_voigt_3d = FigureCanvasTkAgg(self.fig_voigt_3d, voigt_3d_tab)
         self.canvas_voigt_3d.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
@@ -1959,11 +2029,18 @@ class NMRPeaksSeriesGUI:
         config_file_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkButton(config_file_frame, text="Save Configuration",
-                     command=self.save_config, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color).pack(side=tk.LEFT, padx=5)
+                     command=self.save_config, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=PRIMARY_BUTTON_BG, hover_color=PRIMARY_BUTTON_HOVER,
+                     text_color=PRIMARY_BUTTON_TEXT).pack(side=tk.LEFT, padx=SPACING_SM)
         ctk.CTkButton(config_file_frame, text="Load Configuration",
-                     command=self.load_config, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color).pack(side=tk.LEFT, padx=5)
+                     command=self.load_config, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=SECONDARY_BUTTON_BG, hover_color=SECONDARY_BUTTON_HOVER,
+                     text_color=SECONDARY_BUTTON_TEXT,
+                     border_width=1, border_color=SECONDARY_BUTTON_BORDER).pack(side=tk.LEFT, padx=SPACING_SM)
         ctk.CTkButton(config_file_frame, text="Reset to Defaults",
-                     command=self.reset_config, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color).pack(side=tk.LEFT, padx=5)
+                     command=self.reset_config, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=DESTRUCTIVE_BUTTON_BG, hover_color=DESTRUCTIVE_BUTTON_HOVER,
+                     text_color=DESTRUCTIVE_BUTTON_TEXT).pack(side=tk.LEFT, padx=SPACING_SM)
 
         # Current configuration display
         config_display_frame = CTkLabelFrame(config_content, text="Current Settings", padding=10)
@@ -2110,11 +2187,19 @@ class NMRPeaksSeriesGUI:
         actions_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkButton(actions_frame, text="Refresh Diagnostics",
-                     command=self.refresh_diagnostics, width=20*8, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color).pack(pady=2)
+                     command=self.refresh_diagnostics, width=20*8, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=SECONDARY_BUTTON_BG, hover_color=SECONDARY_BUTTON_HOVER,
+                     text_color=SECONDARY_BUTTON_TEXT,
+                     border_width=1, border_color=SECONDARY_BUTTON_BORDER).pack(pady=SPACING_XS)
         ctk.CTkButton(actions_frame, text="Export Diagnostics",
-                     command=self.export_diagnostics, width=20*8, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color).pack(pady=2)
+                     command=self.export_diagnostics, width=20*8, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=PRIMARY_BUTTON_BG, hover_color=PRIMARY_BUTTON_HOVER,
+                     text_color=PRIMARY_BUTTON_TEXT).pack(pady=SPACING_XS)
         ctk.CTkButton(actions_frame, text="Detailed Analysis",
-                     command=self.show_detailed_analysis, width=20*8, corner_radius=8, fg_color=self.button_fg_color, hover_color=self.button_hover_color, text_color=self.button_text_color).pack(pady=2)
+                     command=self.show_detailed_analysis, width=20*8, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=SECONDARY_BUTTON_BG, hover_color=SECONDARY_BUTTON_HOVER,
+                     text_color=SECONDARY_BUTTON_TEXT,
+                     border_width=1, border_color=SECONDARY_BUTTON_BORDER).pack(pady=SPACING_XS)
 
     def init_all_plots(self):
         """Initialize all plots with default content"""
@@ -2677,11 +2762,15 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
 
     def open_data_loading_dialog(self):
         """Open data loading popup dialog - replaces inline file browsers"""
-        # Create and show dialog with current folders
+        # Get current workflow mode
+        current_mode = self.workflow_mode.get() if hasattr(self, 'workflow_mode') else 'peak_list'
+
+        # Create and show dialog with current folders and workflow mode
         dialog = DataLoadingDialog(
             self.root,
             current_nmr_folder=self.current_nmr_folder,
-            current_peak_folder=self.current_peak_folder
+            current_peak_folder=self.current_peak_folder,
+            workflow_mode=current_mode
         )
 
         # Wait for dialog to close (modal)
@@ -2782,10 +2871,11 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
 
         # Parameters toggle button
         self.params_toggle_button = ctk.CTkButton(detection_params_frame, text="Parameters ▼",
-                                                 command=self.toggle_parameters, corner_radius=8,
-                                                 fg_color=self.button_fg_color, hover_color=self.button_hover_color,
-                                                 text_color=self.button_text_color)
-        self.params_toggle_button.pack(fill=tk.X, pady=2)
+                                                 command=self.toggle_parameters, corner_radius=BUTTON_CORNER_RADIUS,
+                                                 fg_color=SECONDARY_BUTTON_BG, hover_color=SECONDARY_BUTTON_HOVER,
+                                                 text_color=SECONDARY_BUTTON_TEXT,
+                                                 border_width=1, border_color=SECONDARY_BUTTON_BORDER)
+        self.params_toggle_button.pack(fill=tk.X, pady=SPACING_XS)
 
         # Collapsible detection parameters
         self.params_frame = ttk.Frame(detection_params_frame)
@@ -2873,16 +2963,17 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
         button_frame_ps2d.columnconfigure(1, weight=1)
 
         apply_params_btn = ctk.CTkButton(button_frame_ps2d, text="Apply Changes",
-                                        command=self.on_ps2d_params_change, corner_radius=8,
-                                        fg_color=self.button_fg_color, hover_color=self.button_hover_color,
-                                        text_color=self.button_text_color)
-        apply_params_btn.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=2)
+                                        command=self.on_ps2d_params_change, corner_radius=BUTTON_CORNER_RADIUS,
+                                        fg_color=PRIMARY_BUTTON_BG, hover_color=PRIMARY_BUTTON_HOVER,
+                                        text_color=PRIMARY_BUTTON_TEXT)
+        apply_params_btn.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=SPACING_XS)
 
         self.ps2d_config_toggle_button = ctk.CTkButton(button_frame_ps2d, text="Parameters ▼",
-                                                      command=self.toggle_ps2d_config_parameters, corner_radius=8,
-                                                      fg_color=self.button_fg_color, hover_color=self.button_hover_color,
-                                                      text_color=self.button_text_color)
-        self.ps2d_config_toggle_button.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=2)
+                                                      command=self.toggle_ps2d_config_parameters, corner_radius=BUTTON_CORNER_RADIUS,
+                                                      fg_color=SECONDARY_BUTTON_BG, hover_color=SECONDARY_BUTTON_HOVER,
+                                                      text_color=SECONDARY_BUTTON_TEXT,
+                                                      border_width=1, border_color=SECONDARY_BUTTON_BORDER)
+        self.ps2d_config_toggle_button.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=SPACING_XS)
 
         # Collapsible PS2D parameters
         self.ps2d_params_frame = ttk.Frame(ps2d_config_frame)
@@ -2945,11 +3036,13 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
 
         # PS2D parameters toggle button
         self.ps2d_params_toggle_button = ctk.CTkButton(ps2d_fit_frame, text="PS2D fit parameters ▼",
-                                                      command=self.toggle_ps2d_parameters, corner_radius=8,
-                                                      fg_color=self.button_fg_color,
-                                                      hover_color=self.button_hover_color,
-                                                      text_color=self.button_text_color)
-        self.ps2d_params_toggle_button.pack(fill=tk.X, pady=2)
+                                                      command=self.toggle_ps2d_parameters, corner_radius=BUTTON_CORNER_RADIUS,
+                                                      fg_color=SECONDARY_BUTTON_BG,
+                                                      hover_color=SECONDARY_BUTTON_HOVER,
+                                                      text_color=SECONDARY_BUTTON_TEXT,
+                                                      border_width=1,
+                                                      border_color=SECONDARY_BUTTON_BORDER)
+        self.ps2d_params_toggle_button.pack(fill=tk.X, pady=SPACING_XS)
 
         # Collapsible PS2D parameters frame (hidden by default)
         self.simplified_fitting_frame = ttk.Frame(ps2d_fit_frame)
@@ -3065,7 +3158,12 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
 
         close_btn = ctk.CTkButton(button_frame, text="Close",
                                  command=popup.destroy,
-                                 corner_radius=8)
+                                 corner_radius=BUTTON_CORNER_RADIUS,
+                                 fg_color=SECONDARY_BUTTON_BG,
+                                 hover_color=SECONDARY_BUTTON_HOVER,
+                                 text_color=SECONDARY_BUTTON_TEXT,
+                                 border_width=1,
+                                 border_color=SECONDARY_BUTTON_BORDER)
         close_btn.pack()
 
     def on_nmr_file_select(self, file_path, filename):
@@ -3243,6 +3341,20 @@ Generated by NMR Peaks Series Analysis - Integration Diagnostics
             success = self.integrator.load_nmr_file(self.current_nmr_file)
 
             if success:
+                # Auto-detect and apply nucleus type based on spectral dimensions
+                if hasattr(self.integrator, 'auto_detected_nucleus') and self.integrator.auto_detected_nucleus:
+                    detected_nucleus = self.integrator.auto_detected_nucleus
+
+                    # Update GUI dropdown to match detected nucleus
+                    current_setting = self.nucleus_type.get()
+                    if current_setting != detected_nucleus:
+                        self.nucleus_type.set(detected_nucleus)
+                        # Trigger PS2D configuration update
+                        self.on_nucleus_type_change()
+                        print(f"✅ PS2D configuration automatically switched from {current_setting} to {detected_nucleus}")
+                    else:
+                        print(f"✅ PS2D configuration confirmed: {detected_nucleus} (already set)")
+
                 # If peak list was loaded without intensities, measure them now
                 if hasattr(self, '_need_intensity_measurement') and self._need_intensity_measurement:
                     print("   📏 Measuring peak intensities from spectrum...")
@@ -6124,33 +6236,9 @@ Last Updated: {self.config_manager.config.get('last_updated', 'Never')}
             self.status_text.config(text=message[:50] + "..." if len(message) > 50 else message)
 
     def update_recent_files_menu(self):
-        """Update recent files menu"""
-        self.recent_menu.delete(0, tk.END)
-
-        recent_files = self.config_manager.load_recent_files()
-
-        nmr_files = recent_files.get('nmr_files', [])
-        peak_files = recent_files.get('peak_files', [])
-
-        if nmr_files:
-            self.recent_menu.add_separator()
-            for i, file_path in enumerate(nmr_files[:5]):
-                if os.path.exists(file_path):
-                    filename = os.path.basename(file_path)
-                    self.recent_menu.add_command(
-                        label=f"📊 {filename}",
-                        command=lambda f=file_path: self.on_nmr_file_select(f, os.path.basename(f))
-                    )
-
-        if peak_files:
-            self.recent_menu.add_separator()
-            for i, file_path in enumerate(peak_files[:5]):
-                if os.path.exists(file_path):
-                    filename = os.path.basename(file_path)
-                    self.recent_menu.add_command(
-                        label=f"{filename}",
-                        command=lambda f=file_path: self.on_peak_file_select(f, os.path.basename(f))
-                    )
+        """Update recent files menu (no-op since Recent Files menu was removed)"""
+        # Recent files functionality removed - file browsers provide better UX
+        pass
 
     def show_statistics(self):
         """Show statistics in separate window"""

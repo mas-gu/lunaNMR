@@ -36,10 +36,65 @@ except ImportError:
         pass
 
 
-# CustomTkinter button color theme (light grey)
-BUTTON_FG_COLOR = "#D3D3D3"  # Light grey
-BUTTON_HOVER_COLOR = "#B0B0B0"  # Darker grey for hover  
-BUTTON_TEXT_COLOR = "#000000"  # Black text
+# ============================================================================
+# APPLE-STYLE DESIGN SYSTEM
+# Modern, clean color palette with high contrast and visual hierarchy
+# ============================================================================
+
+# Background Colors
+BG_COLOR = "#FAFAFA"  # Main window background - softer white with subtle warmth
+PANEL_BG_COLOR = "#F5F5F7"  # Secondary panels/frames - Apple's signature light grey
+FRAME_BG_COLOR = "#FFFFFF"  # Card/container backgrounds - pure white for contrast
+
+# Text Colors (softer than pure black for better readability)
+PRIMARY_TEXT = "#1C1C1E"  # Primary content text
+SECONDARY_TEXT = "#8E8E93"  # Secondary/help text
+DISABLED_TEXT = "#C7C7CC"  # Disabled states
+LABEL_TEXT = "#1C1C1E"  # Label text
+
+# Primary Action Buttons (Load Data, Fit All Peaks, Start Integration)
+PRIMARY_BUTTON_BG = "#5B9EE5"  # Softer, more pleasant blue
+PRIMARY_BUTTON_HOVER = "#4A8DD4"  # Darker blue on hover
+PRIMARY_BUTTON_TEXT = "#FFFFFF"  # White text
+
+# Secondary/Utility Buttons (Browse, Refresh, Clear, Cancel)
+SECONDARY_BUTTON_BG = "#E5E5EA"  # Light grey
+SECONDARY_BUTTON_HOVER = "#D1D1D6"  # Slightly darker grey
+SECONDARY_BUTTON_TEXT = "#1C1C1E"  # Near-black (softer than pure black)
+SECONDARY_BUTTON_BORDER = "#C8C8CD"  # Subtle border to prevent edge artifacts on light backgrounds
+
+# Destructive Action Buttons (Clear All, Reset, Delete)
+DESTRUCTIVE_BUTTON_BG = "#E8554E"  # Softer, less aggressive red
+DESTRUCTIVE_BUTTON_HOVER = "#D44943"  # Darker red on hover
+DESTRUCTIVE_BUTTON_TEXT = "#FFFFFF"  # White text
+
+# Accent Colors (for status indicators and messages)
+SUCCESS_GREEN = "#34C759"  # Successful operations
+WARNING_ORANGE = "#F0A04B"  # Softer orange for warnings
+ERROR_RED = "#E8554E"  # Softer red for errors (matches destructive buttons)
+INFO_BLUE = "#5B9EE5"  # Softer blue for informational messages (matches primary buttons)
+
+# Border and Separator Colors
+BORDER_COLOR = "#D1D1D6"  # Light grey border
+SEPARATOR_COLOR = "#E5E5EA"  # Separators and dividers
+
+# Corner Radius (modern, soft edges)
+BUTTON_CORNER_RADIUS = 10  # Buttons
+FRAME_CORNER_RADIUS = 12  # Panels and labelframes
+DIALOG_CORNER_RADIUS = 14  # Modal dialogs
+CARD_CORNER_RADIUS = 8  # Smaller UI cards/elements
+
+# Spacing System (8pt grid for consistency)
+SPACING_XS = 4   # Tight spacing (label-to-field)
+SPACING_SM = 8   # Default spacing (between elements)
+SPACING_MD = 16  # Section spacing
+SPACING_LG = 24  # Major section breaks
+SPACING_XL = 32  # Window padding
+
+# Legacy compatibility aliases (to be phased out)
+BUTTON_FG_COLOR = SECONDARY_BUTTON_BG
+BUTTON_HOVER_COLOR = SECONDARY_BUTTON_HOVER
+BUTTON_TEXT_COLOR = SECONDARY_BUTTON_TEXT
 
 def natural_sort_key(path):
     """
@@ -116,12 +171,15 @@ class EnhancedFileListFrame(ttk.Frame):
         folder_frame.pack(fill=tk.X, pady=(0, 5))
 
         self.folder_button = ctk.CTkButton(folder_frame, text=title,
-                                          command=self.select_folder, width=15*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
-        self.folder_button.pack(side=tk.LEFT, padx=(0, 5))
+                                          command=self.select_folder, width=15*8, corner_radius=BUTTON_CORNER_RADIUS,
+                                          fg_color=PRIMARY_BUTTON_BG, hover_color=PRIMARY_BUTTON_HOVER, text_color=PRIMARY_BUTTON_TEXT)
+        self.folder_button.pack(side=tk.LEFT, padx=(0, SPACING_SM))
 
         # Refresh button
         self.refresh_button = ctk.CTkButton(folder_frame, text="🔄", width=3*8,
-                                           command=self.refresh_file_list, state='disabled', corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
+                                           command=self.refresh_file_list, state='disabled', corner_radius=BUTTON_CORNER_RADIUS,
+                                           fg_color=SECONDARY_BUTTON_BG, hover_color=SECONDARY_BUTTON_HOVER, text_color=SECONDARY_BUTTON_TEXT,
+                                           border_width=1, border_color=SECONDARY_BUTTON_BORDER)
         self.refresh_button.pack(side=tk.LEFT)
 
         # Current folder display - make it non-clickable by binding to nothing
@@ -302,11 +360,13 @@ class EnhancedFileListFrame(ttk.Frame):
         return sorted(files, key=natural_sort_key)
 
 class AdvancedProgressDialog:
-    """Enhanced progress dialog with detailed logging and statistics"""
+    """Enhanced progress dialog with detailed logging and statistics - Apple-style design"""
     def __init__(self, parent, title="Processing", show_details=True):
         self.top = tk.Toplevel(parent)
         self.top.title(title)
-        self.top.geometry("600x400")
+        self.top.geometry("600x550")
+        self.top.configure(bg=BG_COLOR)
+        self.top.minsize(600, 550)  # Set minimum size to prevent shrinking
         # Make dialog independent (not modal)
         # self.top.transient(parent)  # Commented out to prevent window following
         # self.top.grab_set()  # Commented out to make non-modal
@@ -334,74 +394,149 @@ class AdvancedProgressDialog:
         """Center dialog on screen"""
         self.top.update_idletasks()
         x = (self.top.winfo_screenwidth() // 2) - (600 // 2)
-        y = (self.top.winfo_screenheight() // 2) - (400 // 2)
-        self.top.geometry(f"600x400+{x}+{y}")
+        y = (self.top.winfo_screenheight() // 2) - (550 // 2)
+        self.top.geometry(f"600x550+{x}+{y}")
 
     def create_widgets(self, show_details):
-        """Create dialog widgets"""
-        # Main progress section
-        progress_frame = ttk.Frame(self.top)
-        progress_frame.pack(fill=tk.X, padx=20, pady=10)
+        """Create dialog widgets with Apple-style design"""
+        # Main content container (will expand)
+        main_container = ctk.CTkFrame(self.top, fg_color=BG_COLOR, corner_radius=0)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=SPACING_LG, pady=(SPACING_LG, 0))
 
-        # Progress bar
-        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100)
-        self.progress_bar.pack(fill=tk.X, pady=(0, 10))
+        # Progress bar - using ttk for reliable progress tracking
+        # Wrapped in styled frame for Apple-style appearance
+        progress_container = ctk.CTkFrame(main_container, fg_color=PANEL_BG_COLOR, corner_radius=10, height=24)
+        progress_container.pack(fill=tk.X, pady=(0, SPACING_MD))
+        progress_container.pack_propagate(False)
+
+        # Configure ttk style for green progress bar
+        style = ttk.Style()
+        style.theme_use('default')
+        style.configure("green.Horizontal.TProgressbar",
+                       troughcolor=PANEL_BG_COLOR,
+                       bordercolor=PANEL_BG_COLOR,
+                       background=SUCCESS_GREEN,
+                       lightcolor=SUCCESS_GREEN,
+                       darkcolor=SUCCESS_GREEN,
+                       thickness=20)
+
+        self.progress_bar = ttk.Progressbar(progress_container,
+                                           variable=self.progress_var,
+                                           maximum=100,
+                                           style="green.Horizontal.TProgressbar")
+        self.progress_bar.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
         # Current task display
-        task_frame = ttk.Frame(progress_frame)
-        task_frame.pack(fill=tk.X, pady=(0, 10))
+        task_frame = ctk.CTkFrame(main_container, fg_color="transparent")
+        task_frame.pack(fill=tk.X, pady=(0, SPACING_MD))
 
-        ttk.Label(task_frame, text="Current Task:", font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W)
-        self.task_label = ttk.Label(task_frame, textvariable=self.current_task, font=('TkDefaultFont', 9))
-        self.task_label.pack(anchor=tk.W, padx=(20, 0))
+        ctk.CTkLabel(task_frame, text="Current Task:",
+                    font=('TkDefaultFont', 11, 'bold'),
+                    text_color=PRIMARY_TEXT).pack(anchor=tk.W)
+        self.task_label = ctk.CTkLabel(task_frame, textvariable=self.current_task,
+                                       font=('TkDefaultFont', 10),
+                                       text_color=SECONDARY_TEXT)
+        self.task_label.pack(anchor=tk.W, padx=(SPACING_MD, 0))
 
-        # Statistics frame
-        stats_frame = ttk.LabelFrame(progress_frame, text="📊 Statistics", padding=5)
-        stats_frame.pack(fill=tk.X, pady=(0, 10))
+        # Statistics frame with rounded corners
+        stats_frame = ctk.CTkFrame(main_container,
+                                   fg_color=PANEL_BG_COLOR,
+                                   corner_radius=FRAME_CORNER_RADIUS)
+        stats_frame.pack(fill=tk.X, pady=(0, SPACING_MD))
 
-        self.stats_label = ttk.Label(stats_frame, text="Starting...", font=('TkDefaultFont', 9))
-        self.stats_label.pack(anchor=tk.W)
+        ctk.CTkLabel(stats_frame, text="📊 Statistics",
+                    font=('TkDefaultFont', 10, 'bold'),
+                    text_color=PRIMARY_TEXT).pack(anchor=tk.W, padx=SPACING_MD, pady=(SPACING_SM, SPACING_XS))
+
+        self.stats_label = ctk.CTkLabel(stats_frame, text="Starting...",
+                                       font=('TkDefaultFont', 9),
+                                       text_color=SECONDARY_TEXT,
+                                       justify=tk.LEFT)
+        self.stats_label.pack(anchor=tk.W, padx=SPACING_MD, pady=(0, SPACING_SM))
 
         if show_details:
-            # Detailed log section
-            log_frame = ttk.LabelFrame(self.top, text="📋 Detailed Log", padding=5)
-            log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
+            # Detailed log section with rounded corners
+            log_frame = ctk.CTkFrame(main_container,
+                                    fg_color=PANEL_BG_COLOR,
+                                    corner_radius=FRAME_CORNER_RADIUS)
+            log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, SPACING_MD))
+
+            ctk.CTkLabel(log_frame, text="📋 Detailed Log",
+                        font=('TkDefaultFont', 10, 'bold'),
+                        text_color=PRIMARY_TEXT).pack(anchor=tk.W, padx=SPACING_MD, pady=(SPACING_SM, SPACING_XS))
 
             # Log text with scrollbar
-            log_container = ttk.Frame(log_frame)
-            log_container.pack(fill=tk.BOTH, expand=True)
+            log_container = ctk.CTkFrame(log_frame, fg_color="transparent")
+            log_container.pack(fill=tk.BOTH, expand=True, padx=SPACING_SM, pady=(0, SPACING_SM))
 
-            self.log_text = tk.Text(log_container, height=10, font=('Courier', 8), wrap=tk.WORD)
-            log_scroll = ttk.Scrollbar(log_container, orient="vertical", command=self.log_text.yview)
-
-            self.log_text.config(yscrollcommand=log_scroll.set)
-            self.log_text.grid(row=0, column=0, sticky='nsew')
-            log_scroll.grid(row=0, column=1, sticky='ns')
-
-            log_container.grid_rowconfigure(0, weight=1)
-            log_container.grid_columnconfigure(0, weight=1)
+            self.log_text = ctk.CTkTextbox(log_container, height=150, font=('Courier', 9),
+                                          fg_color="#FFFFFF",
+                                          text_color=PRIMARY_TEXT,
+                                          corner_radius=CARD_CORNER_RADIUS,
+                                          wrap=tk.WORD)
+            self.log_text.pack(fill=tk.BOTH, expand=True)
         else:
             self.log_text = None
 
-        # Control buttons
-        button_frame = ttk.Frame(self.top)
-        button_frame.pack(fill=tk.X, padx=20, pady=10)
+        # Control buttons with Apple-style design (fixed at bottom, outside main_container)
+        button_container = ctk.CTkFrame(self.top, fg_color=BG_COLOR, corner_radius=0)
+        button_container.pack(fill=tk.X, padx=SPACING_LG, pady=SPACING_LG, side=tk.BOTTOM)
 
-        self.pause_button = ttk.Button(button_frame, text="⏸️ Pause", command=self.toggle_pause)
-        self.pause_button.pack(side=tk.LEFT, padx=(0, 5))
+        button_frame = ctk.CTkFrame(button_container, fg_color="transparent")
+        button_frame.pack(fill=tk.X)
 
-        self.cancel_button = ttk.Button(button_frame, text=get_display_text("❌ Cancel"), command=self.cancel)
+        # Left side buttons
+        left_buttons = ctk.CTkFrame(button_frame, fg_color="transparent")
+        left_buttons.pack(side=tk.LEFT)
+
+        self.pause_button = ctk.CTkButton(left_buttons, text="⏸️ Pause",
+                                         command=self.toggle_pause,
+                                         corner_radius=BUTTON_CORNER_RADIUS,
+                                         fg_color=WARNING_ORANGE,
+                                         hover_color="#DD9043",
+                                         text_color="#FFFFFF",
+                                         width=100)
+        self.pause_button.pack(side=tk.LEFT, padx=(0, SPACING_SM))
+
+        self.cancel_button = ctk.CTkButton(left_buttons, text="❌ Cancel",
+                                          command=self.cancel,
+                                          corner_radius=BUTTON_CORNER_RADIUS,
+                                          fg_color=DESTRUCTIVE_BUTTON_BG,
+                                          hover_color=DESTRUCTIVE_BUTTON_HOVER,
+                                          text_color=DESTRUCTIVE_BUTTON_TEXT,
+                                          width=100)
         self.cancel_button.pack(side=tk.LEFT)
 
-        self.close_button = ttk.Button(button_frame, text=get_display_text("✅ Close"), command=self.close, state='disabled')
-        self.close_button.pack(side=tk.RIGHT)
+        # Right side buttons
+        right_buttons = ctk.CTkFrame(button_frame, fg_color="transparent")
+        right_buttons.pack(side=tk.RIGHT)
 
-        self.details_button = ttk.Button(button_frame, text="💾 Save Log", command=self.save_log, state='disabled')
-        self.details_button.pack(side=tk.RIGHT, padx=(0, 5))
+        self.details_button = ctk.CTkButton(right_buttons, text="💾 Save Log",
+                                           command=self.save_log,
+                                           corner_radius=BUTTON_CORNER_RADIUS,
+                                           fg_color=SECONDARY_BUTTON_BG,
+                                           hover_color=SECONDARY_BUTTON_HOVER,
+                                           text_color=SECONDARY_BUTTON_TEXT,
+                                           width=120,
+                                           state='disabled',
+                                           border_width=1,
+                                           border_color=SECONDARY_BUTTON_BORDER)
+        self.details_button.pack(side=tk.LEFT, padx=(0, SPACING_SM))
+
+        self.close_button = ctk.CTkButton(right_buttons, text="✅ Close",
+                                         command=self.close,
+                                         corner_radius=BUTTON_CORNER_RADIUS,
+                                         fg_color=SUCCESS_GREEN,
+                                         hover_color="#2AA64A",
+                                         text_color="#FFFFFF",
+                                         width=100,
+                                         state='disabled')
+        self.close_button.pack(side=tk.LEFT)
 
     def update_progress(self, value, task="", log_message="", failed=False):
         """Update progress dialog with enhanced statistics - THREAD SAFE"""
         def _do_gui_update():
+            # Update progress bar (ttk.Progressbar uses 0-100 scale with variable)
             self.progress_var.set(value)
 
             if task:
@@ -422,7 +557,7 @@ class AdvancedProgressDialog:
                 f"⏱️  Elapsed: {elapsed_str} | 🔮 ETA: {eta_str}\n"
                 + get_display_text(f"✅ Completed: {self.completed_tasks} | ❌ Failed: {self.failed_tasks}")
             )
-            self.stats_label.config(text=stats_text)
+            self.stats_label.configure(text=stats_text)
 
             # Update log
             if log_message and self.log_text:
@@ -453,15 +588,15 @@ class AdvancedProgressDialog:
                 f"🏁 Completed in: {total_time_str}\n"
                 f"✅ Successful: {self.completed_tasks} | ❌ Failed: {self.failed_tasks}"
             )
-            self.stats_label.config(text=final_stats)
+            self.stats_label.configure(text=final_stats)
 
             # Enable controls
-            self.cancel_button.config(state='disabled')
-            self.pause_button.config(state='disabled')
-            self.close_button.config(state='normal')
+            self.cancel_button.configure(state='disabled')
+            self.pause_button.configure(state='disabled')
+            self.close_button.configure(state='normal')
 
             if self.log_text:
-                self.details_button.config(state='normal')
+                self.details_button.configure(state='normal')
 
         # Thread-safe GUI update
         self.top.after(0, _do_completion)
@@ -470,10 +605,10 @@ class AdvancedProgressDialog:
         """Toggle pause state"""
         self.paused = not self.paused
         if self.paused:
-            self.pause_button.config(text="▶️ Resume")
+            self.pause_button.configure(text="▶️ Resume")
             self.current_task.set("⏸️ Processing paused...")
         else:
-            self.pause_button.config(text="⏸️ Pause")
+            self.pause_button.configure(text="⏸️ Pause")
 
     def cancel(self):
         """Cancel processing"""
@@ -522,13 +657,19 @@ class StatisticsPanel(ttk.LabelFrame):
         self.stats_text.grid(row=0, column=0, sticky='nsew', padx=(0, 5))
         stats_scroll.grid(row=0, column=1, sticky='ns')
 
-        # Control buttons
+        # Control buttons (compact sizing to fit in narrow panel)
         button_frame = ttk.Frame(self)
         button_frame.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(10, 0))
 
-        ctk.CTkButton(button_frame, text="🔄 Refresh", command=self.refresh_display, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=(0, 5))
-        ctk.CTkButton(button_frame, text="💾 Export", command=self.export_stats, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT, padx=(0, 5))
-        ctk.CTkButton(button_frame, text="🗑️ Clear", command=self.clear_stats, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR).pack(side=tk.LEFT)
+        ctk.CTkButton(button_frame, text="🔄", command=self.refresh_display, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=SECONDARY_BUTTON_BG, hover_color=SECONDARY_BUTTON_HOVER, text_color=SECONDARY_BUTTON_TEXT,
+                     width=36, border_width=1, border_color=SECONDARY_BUTTON_BORDER).pack(side=tk.LEFT, padx=(0, SPACING_XS))
+        ctk.CTkButton(button_frame, text="💾", command=self.export_stats, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=PRIMARY_BUTTON_BG, hover_color=PRIMARY_BUTTON_HOVER, text_color=PRIMARY_BUTTON_TEXT,
+                     width=36).pack(side=tk.LEFT, padx=(0, SPACING_XS))
+        ctk.CTkButton(button_frame, text="🗑️", command=self.clear_stats, corner_radius=BUTTON_CORNER_RADIUS,
+                     fg_color=DESTRUCTIVE_BUTTON_BG, hover_color=DESTRUCTIVE_BUTTON_HOVER, text_color=DESTRUCTIVE_BUTTON_TEXT,
+                     width=36).pack(side=tk.LEFT)
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
@@ -797,8 +938,10 @@ class PeakNavigator(ttk.Frame):
         button_frame.pack(fill=tk.X)
 
         self.refresh_btn = ctk.CTkButton(button_frame, text="🔄",
-                                        command=self.refresh_peak_list, width=3*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
-        self.refresh_btn.pack(side=tk.LEFT, padx=(0, 5))
+                                        command=self.refresh_peak_list, width=3*8, corner_radius=BUTTON_CORNER_RADIUS,
+                                        fg_color=SECONDARY_BUTTON_BG, hover_color=SECONDARY_BUTTON_HOVER, text_color=SECONDARY_BUTTON_TEXT,
+                                        border_width=1, border_color=SECONDARY_BUTTON_BORDER)
+        self.refresh_btn.pack(side=tk.LEFT, padx=(0, SPACING_SM))
 
         # Navigation sub-frame for Previous/Analyze/Next buttons
         nav_frame = ttk.Frame(button_frame)
@@ -807,18 +950,23 @@ class PeakNavigator(ttk.Frame):
         # Previous peak button (small)
         self.prev_btn = ctk.CTkButton(nav_frame, text="◀", width=3*8,
                                      command=self.navigate_to_previous_peak,
-                                     state='disabled', corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
+                                     state='disabled', corner_radius=BUTTON_CORNER_RADIUS,
+                                     fg_color=SECONDARY_BUTTON_BG, hover_color=SECONDARY_BUTTON_HOVER, text_color=SECONDARY_BUTTON_TEXT,
+                                     border_width=1, border_color=SECONDARY_BUTTON_BORDER)
         self.prev_btn.pack(side=tk.LEFT, padx=(0, 2))
 
         # Main analyze button (unchanged functionality)
         self.analysis_btn = ctk.CTkButton(nav_frame, text="🔬",
-                                         command=self.analyze_selected_peak, width=3*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
+                                         command=self.analyze_selected_peak, width=3*8, corner_radius=BUTTON_CORNER_RADIUS,
+                                         fg_color=PRIMARY_BUTTON_BG, hover_color=PRIMARY_BUTTON_HOVER, text_color=PRIMARY_BUTTON_TEXT)
         self.analysis_btn.pack(side=tk.LEFT)
 
         # Next peak button (small)
         self.next_btn = ctk.CTkButton(nav_frame, text="▶", width=3*8,
                                      command=self.navigate_to_next_peak,
-                                     state='disabled', corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
+                                     state='disabled', corner_radius=BUTTON_CORNER_RADIUS,
+                                     fg_color=SECONDARY_BUTTON_BG, hover_color=SECONDARY_BUTTON_HOVER, text_color=SECONDARY_BUTTON_TEXT,
+                                     border_width=1, border_color=SECONDARY_BUTTON_BORDER)
         self.next_btn.pack(side=tk.LEFT, padx=(2, 0))
 
         # Interactive editing frame for detected peaks
@@ -826,19 +974,24 @@ class PeakNavigator(ttk.Frame):
         self.edit_frame.pack(fill=tk.X, pady=(5, 0))
 
         self.edit_btn = ctk.CTkButton(self.edit_frame, text="✏️",
-                                     command=self.edit_selected_peak, width=3*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
-        self.edit_btn.pack(side=tk.LEFT, padx=(0, 5))
+                                     command=self.edit_selected_peak, width=3*8, corner_radius=BUTTON_CORNER_RADIUS,
+                                     fg_color=SECONDARY_BUTTON_BG, hover_color=SECONDARY_BUTTON_HOVER, text_color=SECONDARY_BUTTON_TEXT,
+                                     border_width=1, border_color=SECONDARY_BUTTON_BORDER)
+        self.edit_btn.pack(side=tk.LEFT, padx=(0, SPACING_SM))
 
         self.delete_btn = ctk.CTkButton(self.edit_frame, text="🗑️",
-                                       command=self.delete_selected_peak, width=3*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
-        self.delete_btn.pack(side=tk.LEFT, padx=(0, 5))
+                                       command=self.delete_selected_peak, width=3*8, corner_radius=BUTTON_CORNER_RADIUS,
+                                       fg_color=DESTRUCTIVE_BUTTON_BG, hover_color=DESTRUCTIVE_BUTTON_HOVER, text_color=DESTRUCTIVE_BUTTON_TEXT)
+        self.delete_btn.pack(side=tk.LEFT, padx=(0, SPACING_SM))
 
         self.add_btn = ctk.CTkButton(self.edit_frame, text="➕",
-                                    command=self.add_new_peak, width=3*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
-        self.add_btn.pack(side=tk.LEFT, padx=(0, 5))
+                                    command=self.add_new_peak, width=3*8, corner_radius=BUTTON_CORNER_RADIUS,
+                                    fg_color=PRIMARY_BUTTON_BG, hover_color=PRIMARY_BUTTON_HOVER, text_color=PRIMARY_BUTTON_TEXT)
+        self.add_btn.pack(side=tk.LEFT, padx=(0, SPACING_SM))
 
         self.save_btn = ctk.CTkButton(self.edit_frame, text="💾",
-                                     command=self.save_peak_changes, width=3*8, corner_radius=8, fg_color=BUTTON_FG_COLOR, hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
+                                     command=self.save_peak_changes, width=3*8, corner_radius=BUTTON_CORNER_RADIUS,
+                                     fg_color=PRIMARY_BUTTON_BG, hover_color=PRIMARY_BUTTON_HOVER, text_color=PRIMARY_BUTTON_TEXT)
         self.save_btn.pack(side=tk.LEFT)
 
         # Initialize button states

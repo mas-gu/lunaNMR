@@ -217,6 +217,7 @@ class InPlaceAdvancedNMRIntegrator:
             # Create PPM axes (nmrglue handles all the complex NMRPipe parameter conversion)
             self.ppm_x_axis = f2_ppm_scale
             self.ppm_y_axis = f1_ppm_scale
+            self._using_fallback_ppm_axes = False
 
             print(f"F2 (1H) range: {f2_ppm_scale[0]:.2f} to {f2_ppm_scale[-1]:.2f} ppm")
             print(f"F1 (15N/13C) range: {f1_ppm_scale[0]:.1f} to {f1_ppm_scale[-1]:.1f} ppm")
@@ -226,6 +227,58 @@ class InPlaceAdvancedNMRIntegrator:
             # Fallback to simple linear axes
             self.ppm_x_axis = np.linspace(12, 0, self.nmr_data.shape[1])
             self.ppm_y_axis = np.linspace(140, 100, self.nmr_data.shape[0])
+            self._using_fallback_ppm_axes = True
+
+    def _detect_nucleus_type(self):
+        """
+        Automatically detect nucleus type based on spectral dimensions.
+
+        Detection criteria:
+          15N-HSQC: X: 5-12 ppm, Y: 100-140 ppm (amide region)
+          13C-HSQC: X: -2-4 ppm, Y: 0-80 ppm (aliphatic region, aromatic excluded)
+
+        Returns:
+            str: '15N', '13C', or None (if cannot determine)
+        """
+        if self.ppm_x_axis is None or self.ppm_y_axis is None:
+            return None
+
+        # Skip auto-detection if using fallback axes (unreliable)
+        if hasattr(self, '_using_fallback_ppm_axes') and self._using_fallback_ppm_axes:
+            print("⚠️  Skipping nucleus auto-detection (using fallback PPM axes)")
+            return None
+
+        try:
+            # Get spectral ranges
+            x_min, x_max = float(min(self.ppm_x_axis)), float(max(self.ppm_x_axis))
+            y_min, y_max = float(min(self.ppm_y_axis)), float(max(self.ppm_y_axis))
+
+            # Calculate center points for weighted detection
+            x_center = (x_min + x_max) / 2.0
+            y_center = (y_min + y_max) / 2.0
+
+            # Priority 1: Classic 15N-HSQC (amide region)
+            # X: 5-12 ppm (amide protons), Y: 100-140 ppm (backbone/sidechain nitrogens)
+            if (5 <= x_center <= 12) and (100 <= y_center <= 140):
+                return '15N'
+
+            # Priority 2: Classic 13C-HSQC (aliphatic region)
+            # X: -2 to 5 ppm (aliphatic CH), Y: 0-80 ppm (aliphatic carbons)
+            if (-2 <= x_center <= 5) and (0 <= y_center <= 80):
+                return '13C'
+
+            # Priority 3: Edge cases based on Y-dimension
+            if y_center < 90:  # 13C aliphatic likely
+                return '13C'
+            if y_center > 95:  # 15N backbone likely
+                return '15N'
+
+            # Cannot determine with confidence
+            return None
+
+        except Exception as e:
+            print(f"⚠️  Error during nucleus auto-detection: {e}")
+            return None
 
     def _estimate_noise_level(self):
         """Estimate noise level in the spectrum using custom or default regions"""

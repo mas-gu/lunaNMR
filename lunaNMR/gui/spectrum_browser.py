@@ -991,9 +991,9 @@ class SpectrumViewer:
 
         self.show_exp_3d_var = tk.BooleanVar(value=True)
         self.show_fit_3d_var = tk.BooleanVar(value=True)
-        self.show_individual_3d_var = tk.BooleanVar(value=True)
+        self.show_individual_3d_var = tk.BooleanVar(value=False)  # Hidden by default
         self.show_peak_labels_3d_var = tk.BooleanVar(value=True)
-        self.show_resid_3d_var = tk.BooleanVar(value=True)
+        self.show_resid_3d_var = tk.BooleanVar(value=False)  # Hidden by default
         # self.show_cross_3d_var = tk.BooleanVar(value=True)  # Disabled - code kept for future use
 
         ttk.Checkbutton(layer_frame, text="Experimental", variable=self.show_exp_3d_var,

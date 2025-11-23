@@ -358,9 +358,11 @@ class MultiSpectrumProcessor:
         print(f"   🔄 Loading NMR file using integrator's load method: {nmr_file}")
 
         # First attempt: Use integrator's load method
+        # OPTIMIZATION: Skip nucleus auto-detection for spectra 2+ (use reference config)
+        skip_detection = (spectrum_number > 1)
         load_success = False
         try:
-            load_success = self.integrator.load_nmr_file(nmr_file)
+            load_success = self.integrator.load_nmr_file(nmr_file, skip_nucleus_detection=skip_detection)
             if load_success:
                 print(f"   ✅ NMR file loaded successfully via load_nmr_file()")
             else:
@@ -378,6 +380,15 @@ class MultiSpectrumProcessor:
                 # Only calculate axes if not already done
                 if not hasattr(self.integrator, 'ppm_x_axis') or self.integrator.ppm_x_axis is None:
                     self.integrator._calculate_ppm_axes()
+
+                # Auto-detect nucleus type (fallback path) - ONLY for spectrum 1
+                if not skip_detection and hasattr(self.integrator, '_detect_nucleus_type'):
+                    detected_nucleus = self.integrator._detect_nucleus_type()
+                    if detected_nucleus:
+                        self.integrator.auto_detected_nucleus = detected_nucleus
+                        print(f"   🔬 Auto-detected nucleus type: {detected_nucleus}-HSQC (fallback path)")
+                elif skip_detection:
+                    print(f"   ⏭️  Skipping nucleus auto-detection (using reference spectrum configuration)")
 
                 # Only estimate noise if not already done
                 if not hasattr(self.integrator, 'noise_level'):

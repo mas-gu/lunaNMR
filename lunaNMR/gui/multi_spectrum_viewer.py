@@ -13,18 +13,29 @@ import os
 from pathlib import Path
 
 # Import LunaNMR components
-from lunaNMR.gui.gui_components import PeakNavigator, natural_sort_key
+from lunaNMR.gui.gui_components import (
+    PeakNavigator,
+    natural_sort_key,
+    # Apple-style design constants
+    BG_COLOR,
+    PANEL_BG_COLOR,
+    PRIMARY_BUTTON_BG,
+    PRIMARY_BUTTON_HOVER,
+    PRIMARY_BUTTON_TEXT,
+    SECONDARY_BUTTON_BG,
+    SECONDARY_BUTTON_HOVER,
+    SECONDARY_BUTTON_TEXT,
+    SECONDARY_BUTTON_BORDER,
+    BUTTON_CORNER_RADIUS,
+    FRAME_CORNER_RADIUS,
+    SPACING_SM,
+    SPACING_MD
+)
 from lunaNMR.gui.visualization import VoigtAnalysisPlotter
-
-# CustomTkinter color theme (light grey)
-BG_COLOR = "#F0F0F0"  # Very light grey background
-BUTTON_FG_COLOR = "#D3D3D3"  # Light grey
-BUTTON_HOVER_COLOR = "#B0B0B0"  # Darker grey for hover
-BUTTON_TEXT_COLOR = "#000000"  # Black text
 
 class CTkLabelFrame(ctk.CTkFrame):
     """Custom labeled frame with rounded corners using CustomTkinter"""
-    def __init__(self, parent, text="", padding=10, corner_radius=10, **kwargs):
+    def __init__(self, parent, text="", padding=10, corner_radius=FRAME_CORNER_RADIUS, **kwargs):
         # Extract padding value (can be int or tuple)
         if isinstance(padding, (tuple, list)):
             pad_x, pad_y = padding[0], padding[1] if len(padding) > 1 else padding[0]
@@ -622,15 +633,16 @@ class MultiSpectrumViewer:
 
         # Update button
         update_btn = ctk.CTkButton(controls_frame, text="Update Plot", command=self.update_overlay_plot,
-                                   corner_radius=8, fg_color=BUTTON_FG_COLOR,
-                                   hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
-        update_btn.grid(row=0, column=6, padx=20)
+                                   corner_radius=BUTTON_CORNER_RADIUS, fg_color=PRIMARY_BUTTON_BG,
+                                   hover_color=PRIMARY_BUTTON_HOVER, text_color=PRIMARY_BUTTON_TEXT)
+        update_btn.grid(row=0, column=6, padx=SPACING_MD)
 
         # Export button
         export_btn = ctk.CTkButton(controls_frame, text="Export PNG", command=self.export_overlay_plot,
-                                  corner_radius=8, fg_color=BUTTON_FG_COLOR,
-                                  hover_color=BUTTON_HOVER_COLOR, text_color=BUTTON_TEXT_COLOR)
-        export_btn.grid(row=0, column=7, padx=5)
+                                  corner_radius=BUTTON_CORNER_RADIUS, fg_color=SECONDARY_BUTTON_BG,
+                                  hover_color=SECONDARY_BUTTON_HOVER, text_color=SECONDARY_BUTTON_TEXT,
+                                  border_width=1, border_color=SECONDARY_BUTTON_BORDER)
+        export_btn.grid(row=0, column=7, padx=SPACING_SM)
 
     def update_overlay_plot(self):
         """Redraw overlay plot with all visible spectra"""
@@ -910,33 +922,44 @@ class MultiSpectrumViewer:
         control_frame_3d = ttk.Frame(plot_container)
         control_frame_3d.pack(side=tk.TOP, fill=tk.X, padx=5, pady=3)
 
-        # Row 1: Layer toggling checkboxes
+        # Row 1: Layer toggling checkboxes (split into two rows)
         layer_frame = CTkLabelFrame(control_frame_3d, text="Layer Visibility", padding=3)
         layer_frame.pack(side=tk.LEFT, padx=3)
 
         self.show_exp_3d_var = tk.BooleanVar(value=True)
         self.show_fit_3d_var = tk.BooleanVar(value=True)
-        self.show_individual_3d_var = tk.BooleanVar(value=True)
-        self.show_peak_labels_3d_var = tk.BooleanVar(value=True)
-        self.show_resid_3d_var = tk.BooleanVar(value=True)
+        self.show_individual_3d_var = tk.BooleanVar(value=False)  # Hidden by default
+        self.show_peak_labels_3d_var = tk.BooleanVar(value=False)  # Hidden by default
+        self.show_resid_3d_var = tk.BooleanVar(value=False)  # Hidden by default
+        self.limit_peak_display_3d_var = tk.BooleanVar(value=True)  # ON by default
         # self.show_cross_3d_var = tk.BooleanVar(value=True)  # Disabled - code kept for future use
 
-        ttk.Checkbutton(layer_frame, text="Experimental", variable=self.show_exp_3d_var,
+        # First row: Experimental, Fitted, Individual Peaks, Peak Labels
+        layer_row1 = ttk.Frame(layer_frame)
+        layer_row1.pack(side=tk.TOP, fill=tk.X)
+        ttk.Checkbutton(layer_row1, text="Experimental", variable=self.show_exp_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_experimental(self.show_exp_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
-        ttk.Checkbutton(layer_frame, text="Fitted", variable=self.show_fit_3d_var,
+        ttk.Checkbutton(layer_row1, text="Fitted", variable=self.show_fit_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_fitted(self.show_fit_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
-        ttk.Checkbutton(layer_frame, text="Individual Peaks", variable=self.show_individual_3d_var,
+        ttk.Checkbutton(layer_row1, text="Individual Peaks", variable=self.show_individual_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_individual_peaks(self.show_individual_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
-        ttk.Checkbutton(layer_frame, text="Peak Labels", variable=self.show_peak_labels_3d_var,
+        ttk.Checkbutton(layer_row1, text="Peak Labels", variable=self.show_peak_labels_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_peak_labels(self.show_peak_labels_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
-        ttk.Checkbutton(layer_frame, text="Residuals", variable=self.show_resid_3d_var,
+
+        # Second row: Residuals, Limit Peak Extent
+        layer_row2 = ttk.Frame(layer_frame)
+        layer_row2.pack(side=tk.TOP, fill=tk.X)
+        ttk.Checkbutton(layer_row2, text="Residuals", variable=self.show_resid_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_residuals(self.show_resid_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
-        # ttk.Checkbutton(layer_frame, text="Cross-Sections", variable=self.show_cross_3d_var,
+        ttk.Checkbutton(layer_row2, text="Limit Peak Extent", variable=self.limit_peak_display_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_peak_clipping(self.limit_peak_display_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
+        # ttk.Checkbutton(layer_row2, text="Cross-Sections", variable=self.show_cross_3d_var,
         #                 command=lambda: self.voigt_plotter_3d.toggle_cross_sections(self.show_cross_3d_var.get())
         #                 ).pack(side=tk.LEFT, padx=2)  # Disabled - code kept for future use
 

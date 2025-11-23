@@ -629,8 +629,8 @@ class VoigtAnalysisPlotter:
         # Feature 1: Layer toggling
         self.show_experimental = True
         self.show_fitted = True
-        self.show_residuals = True
-        self.show_individual_peaks = True  # Toggle all individual peak surfaces
+        self.show_residuals = False  # Residuals hidden by default (user must enable)
+        self.show_individual_peaks = False  # Individual peaks hidden by default (user must enable)
         self.show_peak_labels = True  # Toggle 3D peak assignment labels
 
         # Feature 2: Cross-sections (disabled by default, code kept for future use)
@@ -686,7 +686,11 @@ class VoigtAnalysisPlotter:
                 'pane': {'facecolor': '#404040', 'alpha': 0.9}
             }
         }
-        self.current_color_scheme = 'Warm'  # Default scheme
+        self.current_color_scheme = 'Clean'  # Default scheme (professional white background)
+
+        # Feature 6: Individual peak clipping to fit region
+        self.clip_individual_peaks = True  # ON by default
+        self.peak_display_multiplier = 2.2  # Show peaks up to 2.2× fit ellipse radius
 
     # ===== Feature Control Methods =====
 
@@ -718,6 +722,15 @@ class VoigtAnalysisPlotter:
     def toggle_cross_sections(self, visible):
         """Toggle cross-sections display"""
         self.show_cross_sections = visible
+        self.refresh_plot()
+
+    def toggle_peak_clipping(self, enabled):
+        """Toggle individual peak clipping to fit region
+
+        Args:
+            enabled: True to limit peaks to 2.5× fit ellipse radius, False for full extent
+        """
+        self.clip_individual_peaks = enabled
         self.refresh_plot()
 
     def set_residual_mode(self, mode):
@@ -781,6 +794,9 @@ class VoigtAnalysisPlotter:
         """Redraw current plot with new settings"""
         if self.current_result is not None:
             self.plot_voigt_analysis_3d(self.current_result)
+            # Force canvas redraw
+            if hasattr(self.fig, 'canvas') and self.fig.canvas is not None:
+                self.fig.canvas.draw()
 
     def update_cross_sections(self, x_ppm, y_ppm, result):
         """Update F1 and F2 cross-section plots
@@ -1370,15 +1386,73 @@ Fit Timestamp: {str(timestamp)[:19] if timestamp != 'Unknown' else 'Unknown'}
 
         # Extract 2D data
         region_2d = voigt_result.get('region_2d')
-        fitted_surface = voigt_result.get('fitted_2d_surface')
-        individual_surfaces = voigt_result.get('individual_surfaces', None)
+        fitted_surface_original = voigt_result.get('fitted_2d_surface')
+        individual_surfaces_original = voigt_result.get('individual_surfaces', None)
         all_peaks = voigt_result.get('all_peaks', [])
         r_squared = voigt_result.get('avg_r_squared', 0)
         baseline = voigt_result.get('baseline', 0.0)  # Get baseline for visualization
 
-        if region_2d is None or fitted_surface is None:
+        if region_2d is None or fitted_surface_original is None:
             self._plot_no_data_3d()
             return
+
+        # CRITICAL: Always use original fitted_surface for Z-axis scaling
+        # Only individual surfaces are clipped, not the total fit
+        fitted_surface = fitted_surface_original
+
+        # Re-reconstruct individual surfaces with clipping if enabled
+        if self.clip_individual_peaks and individual_surfaces_original is not None and len(all_peaks) > 0:
+            # Import reconstruction function
+            from scipy.special import wofz
+            from ..core.ps2d_config import get_ps2d_config
+            import numpy as np
+
+            config = get_ps2d_config()
+            display_multiplier = self.peak_display_multiplier
+            radF1_display = config.radF1 * display_multiplier
+            radF2_display = config.radF2 * display_multiplier
+
+            # Reconstruct with clipping
+            individual_surfaces = []
+            n_clipped_points = 0
+            total_points = 0
+            for peak in all_peaks:
+                # Reconstruct single peak (same logic as core_integrator._reconstruct_2d_surface)
+                fitted_intensity = peak.get('intensity', peak.get('amplitude', 1000))
+
+                SQRT_8LN2 = np.sqrt(8 * np.log(2))
+                sigma_f1 = peak['lw_gau_f1'] / SQRT_8LN2
+                sigma_f2 = peak['lw_gau_f2'] / SQRT_8LN2
+                gamma_f1 = peak['lw_lor_f1'] / 2.0
+                gamma_f2 = peak['lw_lor_f2'] / 2.0
+
+                sigma_f1 = max(sigma_f1, 1e-10)
+                sigma_f2 = max(sigma_f2, 1e-10)
+
+                SQRT_2 = np.sqrt(2)
+                z_f1 = ((peak['pos_f1'] - region_2d['f1_grid']) + 1j * gamma_f1) / (sigma_f1 * SQRT_2)
+                z_f2 = ((peak['pos_f2'] - region_2d['f2_grid']) + 1j * gamma_f2) / (sigma_f2 * SQRT_2)
+
+                fade_f1 = np.real(wofz(z_f1))
+                fade_f2 = np.real(wofz(z_f2))
+
+                peak_surface = fitted_intensity * fade_f1 * fade_f2 / (sigma_f1 * sigma_f2 * 2.0 * np.pi)
+
+                # Apply elliptical clipping
+                ellipse_distance_sq = ((region_2d['f1_grid'] - peak['pos_f1']) / radF1_display) ** 2 + \
+                                      ((region_2d['f2_grid'] - peak['pos_f2']) / radF2_display) ** 2
+                ellipse_mask = ellipse_distance_sq <= 1.0
+
+                # Count clipped points for diagnostics
+                total_points += peak_surface.size
+                n_clipped_points += np.sum(~ellipse_mask)
+
+                peak_surface = np.where(ellipse_mask, peak_surface, 0.0)
+
+                individual_surfaces.append(peak_surface)
+        else:
+            # Use original surfaces without clipping
+            individual_surfaces = individual_surfaces_original
 
         f1_ppm = region_2d['f1_ppm']
         f2_ppm = region_2d['f2_ppm']
@@ -1482,15 +1556,15 @@ Fit Timestamp: {str(timestamp)[:19] if timestamp != 'Unknown' else 'Unknown'}
                                    linewidth=scheme['experimental']['linewidth'],
                                    label='Experimental')
 
-        # Plot total fitted surface (semi-transparent middle layer) - use preset colors
+        # Plot total fitted surface as wireframe (grid) - use preset colors
         # fitted_surface already contains sum of peaks WITHOUT baseline (changed 2025-11-19)
         # Directly comparable to individual peak surfaces (red, orange, etc.)
         if self.show_fitted and fitted_surface is not None:
-            ax_data.plot_surface(F2_ppm, F1_ppm, fitted_surface,
-                                color=scheme['total_fit']['color'],
-                                alpha=scheme['total_fit']['alpha'],
-                                antialiased=True, shade=True,
-                                label='Total Fit')
+            ax_data.plot_wireframe(F2_ppm, F1_ppm, fitted_surface,
+                                   color=scheme['total_fit']['color'],
+                                   alpha=scheme['experimental']['alpha'],  # Match experimental alpha
+                                   linewidth=scheme['experimental']['linewidth'],
+                                   label='Total Fit')
 
         # Overlay individual fitted peaks with different colors if enabled
         if self.show_individual_peaks and individual_surfaces is not None and len(individual_surfaces) > 0:
@@ -1498,9 +1572,17 @@ Fit Timestamp: {str(timestamp)[:19] if timestamp != 'Unknown' else 'Unknown'}
                 color = colors[i % len(colors)]
                 peak_assignment = peak.get('assignment', f'Peak {i+1}')
 
+                # If clipping is enabled, mask the wireframe coordinates where surface is zero
+                if self.clip_individual_peaks:
+                    # Create masked arrays - NaN where clipped (surf == 0)
+                    threshold = np.max(surf) * 1e-6  # Very small threshold
+                    surf_masked = np.where(surf > threshold, surf, np.nan)
+                else:
+                    surf_masked = surf
+
                 # Plot pure Voigt profile (starts at 0, rises to peak maximum)
                 # Apply adaptive alpha based on cluster size
-                ax_data.plot_wireframe(F2_ppm, F1_ppm, surf,
+                ax_data.plot_wireframe(F2_ppm, F1_ppm, surf_masked,
                                        color=color, alpha=individual_alpha, linewidth=1.5,
                                        label=peak_assignment)
 
@@ -1525,6 +1607,7 @@ Fit Timestamp: {str(timestamp)[:19] if timestamp != 'Unknown' else 'Unknown'}
                 pos_f2 = peak['pos_f2']  # 1H chemical shift (x-axis)
                 pos_f1 = peak['pos_f1']  # 15N/13C chemical shift (y-axis)
 
+                # Draw FIT ellipse (solid line - what was fitted)
                 # Parametric ellipse equations
                 # x(θ) = center_x + a*cos(θ)
                 # y(θ) = center_y + b*sin(θ)
@@ -1613,13 +1696,22 @@ Fit Timestamp: {str(timestamp)[:19] if timestamp != 'Unknown' else 'Unknown'}
             # Height encoding: map residuals to visual range
             residual_heights = residual_baseline + (normalized_residuals + 1) * 0.5 * residual_range
 
-            # Use same colormap as separate panel mode (RdBu_r: Red-Blue reversed)
+            # Use custom colormap with brighter, softer colors (matches LunaNMR aesthetic)
             import matplotlib.cm as cm
-            from matplotlib.colors import Normalize
+            from matplotlib.colors import Normalize, LinearSegmentedColormap
+
+            # Create custom colormap: brighter blue to white to brighter red
+            # Blue: #5B9EE5 (LunaNMR primary blue, softer)
+            # Red: #E8554E (LunaNMR destructive red, softer)
+            colors_custom = [
+                (0.357, 0.620, 0.898),  # Bright blue #5B9EE5 (negative residuals)
+                (1.0, 1.0, 1.0),        # White (zero)
+                (0.910, 0.333, 0.306)   # Bright red #E8554E (positive residuals)
+            ]
+            cmap_rdbu = LinearSegmentedColormap.from_list('lunaNMR_residuals', colors_custom)
 
             # Create colormap with proper normalization
             norm = Normalize(vmin=-z_max_resid, vmax=z_max_resid)
-            cmap_rdbu = cm.get_cmap('RdBu_r')
 
             # Map residual values to colors
             colors_mapped = cmap_rdbu(norm(residuals))
@@ -1672,8 +1764,17 @@ Fit Timestamp: {str(timestamp)[:19] if timestamp != 'Unknown' else 'Unknown'}
         if self.residual_mode == 'separate' and self.show_residuals and self.ax_resid is not None:
             z_max_resid = np.max(np.abs(residuals))
 
+            # Create custom colormap with brighter, softer colors (matches LunaNMR aesthetic)
+            from matplotlib.colors import LinearSegmentedColormap
+            colors_custom = [
+                (0.357, 0.620, 0.898),  # Bright blue #5B9EE5 (negative residuals)
+                (1.0, 1.0, 1.0),        # White (zero)
+                (0.910, 0.333, 0.306)   # Bright red #E8554E (positive residuals)
+            ]
+            cmap_lunaNMR = LinearSegmentedColormap.from_list('lunaNMR_residuals', colors_custom)
+
             surf_resid = self.ax_resid.plot_surface(F2_ppm, F1_ppm, residuals,
-                                                    cmap='RdBu_r', alpha=0.8,
+                                                    cmap=cmap_lunaNMR, alpha=0.8,
                                                     vmin=-z_max_resid, vmax=z_max_resid,
                                                     antialiased=True)
 

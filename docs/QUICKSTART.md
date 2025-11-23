@@ -1,6 +1,6 @@
 # 5-Minute Quickstart
 
-**TL;DR**: Load spectrum → Detect Peaks → Fit All Peaks → Export. PS2D automatically handles overlaps. Default parameters work for most 15N-HSQC data.
+**TL;DR**: Load spectrum → Detect Peaks → Fit All Peaks → Export. PS2D automatically handles overlaps. Default parameters adapt automatically to 15N and 13C data.
 
 ---
 
@@ -8,7 +8,7 @@
 
 ```bash
 cd lunaNMR_v0o9
-python3 launch_lunaNMR.py
+python launch_lunaNMR.py
 ```
 
 Click **LunaNMR** in launcher dialog.
@@ -18,15 +18,15 @@ Click **LunaNMR** in launcher dialog.
 ## 2. Load Data (1 minute)
 
 **Option A: Spectrum + Peak List**
-1. **File → Open Spectrum** → Select `.2ii` (Bruker), `.ft` (NMRPipe), or `.ucsf` (SPARKY)
-2. **File → Open Peak List** → Select `.list` or `.tab` file
+1. **Load data**
+2. → Select `.2ii` (Bruker), `.ft` (NMRPipe), or `.ucsf` (SPARKY)
+3. → Select `.txt` or `.tab` file
 3. Spectrum displays with reference peaks as blue ×
 
 **Option B: Spectrum Only**
-1. **File → Open Spectrum**
-2. Skip peak list → will detect all peaks
-
-**Sample data**: Use `test_data/` folder if available, or your own 15N-HSQC.
+1. **Load data**
+2. → Select `.2ii` (Bruker), `.ft*` (NMRPipe), or `.ucsf` (SPARKY)
+3. Skip peak list → will detect all peaks
 
 ---
 
@@ -34,118 +34,44 @@ Click **LunaNMR** in launcher dialog.
 
 **Default settings work for most data.**
 
-1. Check parameters (left panel):
-   - `1H/15N (ppm)`: 0.03 / 0.2 ✓
-   - `Noise Threshold`: 0.5 ✓
-   - `Centroid Window X/Y`: 0.01 / 0.10 ✓
+1. Click **Detect**
 
-2. Click **Detect Peaks**
-
-3. Console shows:
+2. Console shows:
    ```
-   Found 152 peaks total
-   116/125 matched, 9 references retained
-   ✅ Detection complete
+   x
    ```
 
-4. Peak markers appear on spectrum (red dots)
+3. Peak markers appear on spectrum (red dots)
 
 ---
 
 ## 4. Fit Peaks (2 minutes)
 
-1. Click **Fit All Peaks**
+1. Click **Fit Spectrum**
 
 2. Console shows progress:
-   ```
-   Cluster 1: 1 peak → 1D fitting
-   Cluster 5: 3 peaks → PS2D 2D fitting
-   ...
-   ✅ 116 peaks fitted (97.9% success)
-   ```
 
-3. **Peak Navigator** (right panel) shows quality colors:
-   - Green = Excellent/Good (R² ≥ 0.8)
-   - Yellow = Fair (R² ≥ 0.5)
-   - Red = Poor/Failed (R² < 0.5)
+3. **Peak Navigator** (right panel)
 
 ---
 
-## 5. Inspect Results (1 minute)
+## 5. Inspect Results
 
-**Option A: Navigate Peaks**
+** Navigate Peaks**
 1. Click any peak in **Peak Navigator**
 2. Spectrum auto-centers on peak
-3. **Voigt Analysis** tab opens showing:
+3. **3D Voigt Analysis** tab opens showing: (click on analysis symbol)
    - Experimental contours (top left)
    - Fitted peaks (top right)
    - Residual heatmap (bottom left)
    - Quality metrics (R², intensity, linewidths)
 
-**Option B: Browse Table**
-1. Main window shows peak table with columns:
-   - Assignment
-   - Position F1/F2
-   - Height
-   - Quality
-2. Sort by clicking column headers
-3. Right-click peak → **Show Voigt Analysis**
-
 ---
 
-## 6. Export (30 seconds)
 
-**File → Export Results** → Choose format:
+## Button Expert Mode
 
-| Format | Use Case |
-|--------|----------|
-| **CSV** | Peak table for Excel/R/Python |
-| **JSON** | Full results (fitted surfaces, residuals) |
-| **NMRPipe .tab** | Import into NMRDraw/NMRView |
-| **SPARKY .list** | Import into SPARKY |
-
----
-
-## Common Adjustments
-
-### Too Many Peaks Detected
-- Increase `Noise Threshold` (0.5 → 1.0)
-- Increase `X×Y pixels` (3×1 → 5×2)
-
-### Peaks at Wrong Positions
-- Decrease `Centroid Window X/Y` (0.01/0.10 → 0.005/0.05)
-- Check spectrum phasing in original software
-
-### PS2D Fitting Fails
-- Increase `Window Scale` slider (Simplified Mode)
-- Check overlap ellipses (Tools → Show Ellipses)
-- Manually adjust individual peak windows
-
-### Need Consistent Positions Across Spectra
-- Check **Fix Positions** before fitting
-- Use **Analysis → Start Series Integration** for batches
-
----
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Ctrl+O` | Open Spectrum |
-| `Ctrl+L` | Open Peak List |
-| `Ctrl+D` | Detect Peaks |
-| `Ctrl+F` | Fit All Peaks |
-| `Ctrl+E` | Export Results |
-| `←/→` | Navigate Peaks |
-
----
-
-## Next Steps
-
-- **Batch processing**: Tools → Batch Processing (for multiple spectra)
-- **Series integration**: Analysis → Start Series Integration (relaxation/titration)
-- **Parameter tuning**: See `docs/GUI_GUIDE.md` for advanced controls
-- **Algorithm details**: See `docs/ALGORITHMS.md` for math/equations
+### All parameters for expect peak detection and 2D voigt fitting. Not needed for regular user.
 
 ---
 

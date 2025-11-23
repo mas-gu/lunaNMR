@@ -115,6 +115,7 @@ except ImportError as e:
 
                 self.ppm_x_axis = uc_x.ppm_scale()
                 self.ppm_y_axis = uc_y.ppm_scale()
+                self._using_fallback_ppm_axes = False
 
                 print(f"PPM axes calculated - X: {self.ppm_x_axis[0]:.2f} to {self.ppm_x_axis[-1]:.2f} ppm")
                 print(f"                      Y: {self.ppm_y_axis[0]:.1f} to {self.ppm_y_axis[-1]:.1f} ppm")
@@ -125,8 +126,60 @@ except ImportError as e:
                 import numpy as np
                 self.ppm_x_axis = np.linspace(12, 0, self.nmr_data.shape[1])
                 self.ppm_y_axis = np.linspace(140, 100, self.nmr_data.shape[0])
+                self._using_fallback_ppm_axes = True
                 print(f"Fallback PPM axes created - X: {self.ppm_x_axis[0]:.2f} to {self.ppm_x_axis[-1]:.2f} ppm")
                 print(f"                               Y: {self.ppm_y_axis[0]:.1f} to {self.ppm_y_axis[-1]:.1f} ppm")
+
+        def _detect_nucleus_type(self):
+            """
+            Automatically detect nucleus type based on spectral dimensions.
+
+            Detection criteria:
+              15N-HSQC: X: 5-12 ppm, Y: 100-140 ppm (amide region)
+              13C-HSQC: X: -2-4 ppm, Y: 0-80 ppm (aliphatic region, aromatic excluded)
+
+            Returns:
+                str: '15N', '13C', or None (if cannot determine)
+            """
+            if self.ppm_x_axis is None or self.ppm_y_axis is None:
+                return None
+
+            # Skip auto-detection if using fallback axes (unreliable)
+            if hasattr(self, '_using_fallback_ppm_axes') and self._using_fallback_ppm_axes:
+                print("⚠️  Skipping nucleus auto-detection (using fallback PPM axes)")
+                return None
+
+            try:
+                # Get spectral ranges
+                x_min, x_max = float(min(self.ppm_x_axis)), float(max(self.ppm_x_axis))
+                y_min, y_max = float(min(self.ppm_y_axis)), float(max(self.ppm_y_axis))
+
+                # Calculate center points for weighted detection
+                x_center = (x_min + x_max) / 2.0
+                y_center = (y_min + y_max) / 2.0
+
+                # Priority 1: Classic 15N-HSQC (amide region)
+                # X: 5-12 ppm (amide protons), Y: 100-140 ppm (backbone/sidechain nitrogens)
+                if (5 <= x_center <= 12) and (100 <= y_center <= 140):
+                    return '15N'
+
+                # Priority 2: Classic 13C-HSQC (aliphatic region)
+                # X: -2 to 5 ppm (aliphatic CH), Y: 0-80 ppm (aliphatic carbons)
+                if (-2 <= x_center <= 5) and (0 <= y_center <= 80):
+                    return '13C'
+
+                # Priority 3: Edge cases based on Y-dimension
+                if y_center < 90:  # 13C aliphatic likely
+                    return '13C'
+                if y_center > 95:  # 15N backbone likely
+                    return '15N'
+
+                # Cannot determine with confidence
+                return None
+
+            except Exception as e:
+                print(f"⚠️  Error during nucleus auto-detection: {e}")
+                return None
 
         def _estimate_noise_level(self):
             """Estimate noise level from spectrum corners"""
@@ -2179,7 +2232,7 @@ class VoigtIntegrator(BaseIntegrator):
             'f2_ppm': region_x
         }
 
-    def _reconstruct_2d_surface(self, region_2d, fitted_peaks):
+    def _reconstruct_2d_surface(self, region_2d, fitted_peaks, display_multiplier=None):
         """
         Reconstruct 2D Voigt surface from PS2D fitted parameters
 
@@ -2189,12 +2242,17 @@ class VoigtIntegrator(BaseIntegrator):
             Contains f1_grid, f2_grid, intensity arrays
         fitted_peaks : list of dict
             Fitted peak parameters from PS2D 2D fitter
+        display_multiplier : float or None
+            Multiplier for fit ellipse radius when clipping individual peaks.
+            None = full extent (no clipping)
+            2.5 = clip to 2.5× fit ellipse radius (recommended for visualization)
 
         Returns:
         --------
-        tuple : (total_surface, individual_surfaces)
-            total_surface: np.ndarray - Sum of all peaks + baseline
+        tuple : (total_surface, individual_surfaces, baseline)
+            total_surface: np.ndarray - Sum of all peaks (without baseline)
             individual_surfaces: list of np.ndarray - Each peak surface separately (without baseline)
+            baseline: float - Estimated baseline from region edges
         """
         from scipy.special import wofz
 
@@ -2245,6 +2303,21 @@ class VoigtIntegrator(BaseIntegrator):
 
             # 2D Voigt using EXACT PS2D formula (ps2d_style_fitter.py:107)
             peak_surface = fitted_intensity * fade_f1 * fade_f2 / (sigma_f1 * sigma_f2 * 2.0 * np.pi)
+
+            # Apply elliptical clipping if requested (for visualization clarity)
+            if display_multiplier is not None:
+                from .ps2d_config import get_ps2d_config
+                config = get_ps2d_config()
+                radF1_display = config.radF1 * display_multiplier
+                radF2_display = config.radF2 * display_multiplier
+
+                # Create elliptical mask
+                ellipse_distance_sq = ((region_2d['f1_grid'] - peak['pos_f1']) / radF1_display) ** 2 + \
+                                      ((region_2d['f2_grid'] - peak['pos_f2']) / radF2_display) ** 2
+                ellipse_mask = ellipse_distance_sq <= 1.0
+
+                # Zero out peak outside display ellipse
+                peak_surface = np.where(ellipse_mask, peak_surface, 0.0)
 
             peak_max = np.max(peak_surface)
             #print(f"      Peak {i+1}: PS2D intensity={fitted_intensity:.2e}, reconstructed max={peak_max:.2e}")
@@ -4102,13 +4175,33 @@ class VoigtIntegrator(BaseIntegrator):
         # Enhanced detection with better reference handling
         return self.detect_peaks_professional(**kwargs)
 
-    def load_nmr_file(self, nmr_file):
-        """Load NMR data file (convenience method for GUI)"""
-        # Always load NMR data - spectrum loading should work regardless of peak list
-        return self._load_nmr_data_only(nmr_file)
+    def load_nmr_file(self, nmr_file, skip_nucleus_detection=False):
+        """
+        Load NMR data file (convenience method for GUI)
 
-    def _load_nmr_data_only(self, nmr_file):
-        """Load only NMR data without peak list"""
+        Parameters:
+        -----------
+        nmr_file : str
+            Path to NMR data file
+        skip_nucleus_detection : bool, optional
+            If True, skip auto-detection of nucleus type (default: False)
+            Used in series integration to avoid redundant detection for spectra 2+
+        """
+        # Always load NMR data - spectrum loading should work regardless of peak list
+        return self._load_nmr_data_only(nmr_file, skip_nucleus_detection=skip_nucleus_detection)
+
+    def _load_nmr_data_only(self, nmr_file, skip_nucleus_detection=False):
+        """
+        Load only NMR data without peak list
+
+        Parameters:
+        -----------
+        nmr_file : str
+            Path to NMR data file
+        skip_nucleus_detection : bool, optional
+            If True, skip auto-detection of nucleus type (default: False)
+            Used in series integration to avoid redundant detection for spectra 2+
+        """
         try:
             import nmrglue as ng
             self.nmr_dict, self.nmr_data = ng.pipe.read(nmr_file)
@@ -4116,6 +4209,23 @@ class VoigtIntegrator(BaseIntegrator):
 
             # Calculate PPM axes
             self._calculate_ppm_axes()
+
+            # Auto-detect nucleus type based on spectral dimensions (unless skipped)
+            if not skip_nucleus_detection:
+                detected_nucleus = self._detect_nucleus_type()
+                if detected_nucleus:
+                    self.auto_detected_nucleus = detected_nucleus
+                    print(f"🔬 Auto-detected nucleus type: {detected_nucleus}-HSQC")
+                    print(f"   Spectral range: X={self.ppm_x_axis[0]:.2f}-{self.ppm_x_axis[-1]:.2f} ppm, "
+                          f"Y={self.ppm_y_axis[0]:.1f}-{self.ppm_y_axis[-1]:.1f} ppm")
+                else:
+                    self.auto_detected_nucleus = None
+                    print(f"⚠️  Could not auto-detect nucleus type from spectral dimensions")
+                    print(f"   Spectral range: X={self.ppm_x_axis[0]:.2f}-{self.ppm_x_axis[-1]:.2f} ppm, "
+                          f"Y={self.ppm_y_axis[0]:.1f}-{self.ppm_y_axis[-1]:.1f} ppm")
+                    print(f"   Please select nucleus type manually in Expert Mode (PS2D Algorithm Configuration)")
+            else:
+                print(f"⏭️  Skipping nucleus auto-detection (using reference spectrum configuration)")
 
             # Estimate noise level
             self._estimate_noise_level()

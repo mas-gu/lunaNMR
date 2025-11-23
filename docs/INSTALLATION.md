@@ -6,7 +6,6 @@ Follow these steps to get lunaNMR running on macOS, Linux, or Windows with an ac
 
 - **Python**: 3.8 – 3.11 (64‑bit). Install from python.org or your package manager.
 - **Git**: if you plan to clone from version control.
-- **C/C++ build tools**: only needed when compiling wheels (rare). On Windows, install *Build Tools for Visual Studio*; on Linux, ensure `build-essential`/`gcc` is present.
 - **TK GUI toolkit**: included in most Python distributions. On some Linux distros install `python3-tk` (Ubuntu/Debian) or `python3-tkinter` (Fedora/RHEL).
 
 ## 2. Obtain the Sources

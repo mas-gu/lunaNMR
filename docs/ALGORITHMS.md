@@ -117,21 +117,133 @@ F2: [0.5, 2.0] × median_FWHM
 
 ## 3. Overlap Resolution Strategy
 
-**Overlap detection**: Two-circle touching test
+### 3.1 Hierarchical Graph-Based Clustering
+
+**Purpose**: Group overlapping peaks into disjoint clusters for simultaneous fitting.
+
+**Algorithm** (`ps2d_exact_overlap_detector.py:identify_overlap_clusters`):
+
+1. **Build Overlap Graph**:
+   - Nodes = detected peaks
+   - Edges = overlap relationships (two-circle touching test)
+   - Graph is undirected (overlap is symmetric)
+
+2. **Two-Circle Touching Test**:
+   ```python
+   peaks_overlap = (|ΔF1| ≤ 2×threshold_f1) AND (|ΔF2| ≤ 2×threshold_f2)
+   ```
+
+   **Default thresholds:**
+   - 15N-HSQC: threshold_f1 = 0.4 ppm, threshold_f2 = 0.04 ppm
+   - 13C-HSQC: threshold_f1 = 0.1 ppm, threshold_f2 = 0.04 ppm
+
+3. **Connected Components**:
+   - Use `networkx.connected_components()` to find clusters
+   - Each cluster = one connected component
+   - Clusters are disjoint (no peak in multiple clusters)
+
+4. **Transitive Closure**:
+   - If peak A overlaps B, and B overlaps C, then {A, B, C} form one cluster
+   - Even if A and C don't directly overlap
+   - Ensures all mutually-interfering peaks fitted together
+
+**Example:**
 ```
-(|Δx| ≤ 2×threshold_x) AND (|Δy| ≤ 2×threshold_y)
+Peaks: A(118.5, 8.25), B(118.6, 8.26), C(118.7, 8.25), D(120.0, 8.50)
+
+Overlaps:
+  A-B: ΔF1=0.1, ΔF2=0.01 → overlap (within thresholds)
+  B-C: ΔF1=0.1, ΔF2=0.01 → overlap
+  A-C: ΔF1=0.2, ΔF2=0.00 → overlap
+  A-D: ΔF1=1.5, ΔF2=0.25 → no overlap
+  B-D: ΔF1=1.4, ΔF2=0.24 → no overlap
+  C-D: ΔF1=1.3, ΔF2=0.25 → no overlap
+
+Graph:
+  {A, B, C} - connected component → Cluster 1
+  {D}       - isolated node → Cluster 2
+
+Result:
+  Cluster 1 (3 peaks): PS2D 2D simultaneous fitting
+  Cluster 2 (1 peak):  1D cross-section fitting
 ```
 
-**Cluster formation**:
-1. Build overlap graph (peaks = nodes, overlaps = edges)
-2. Find connected components using `networkx`
-3. Each component is a disjoint cluster
+### 3.2 Cluster Properties
 
-**Fitting**:
-- Single-peak clusters → 1D cross-section fitting
-- Multi-peak clusters → PS2D 2D simultaneous fitting (max 6 peaks/cluster)
+**Disjoint Partitioning**:
+- Each peak appears in exactly ONE cluster
+- No overlap between clusters (by definition)
+- Clusters can be processed independently
 
-**Parallel mode**: Distributes clusters (not individual peaks) across workers. Identical clustering to sequential mode.
+**Determinism**:
+- Same peak positions + same thresholds → same clusters
+- Graph algorithm is deterministic (breadth-first search)
+- Cluster ordering may vary (set-based), but membership is constant
+
+**Size Distribution** (typical 15N-HSQC, 150 peaks):
+- Single-peak clusters (isolated): ~60-70%
+- 2-3 peak clusters (doublets/triplets): ~20-30%
+- 4-6 peak clusters (heavy overlap): ~5-10%
+- 7+ peak clusters (pathological): <5%
+
+### 3.3 Cluster-to-Algorithm Routing
+
+**Decision Tree:**
+```
+For each cluster:
+    if cluster.size == 1:
+        → Enhanced Voigt Fitter (1D cross-sections)
+        → Method: 'consensus' or '1d_staged'
+        → Fast, simple, adequate for isolated peaks
+
+    elif cluster.size >= 2:
+        → PS2D 2D Simultaneous Fitter
+        → Method: '2d_simultaneous_multi_peak'
+        → Fits all peaks together, resolves overlap
+
+    if cluster.size > 15:
+        → Warning: cluster too large
+        → Subdivide or fit with relaxed constraints
+```
+
+**Code Reference:**
+- `core_integrator.py:~line 2400` (routing logic)
+- `core_integrator.py:fit_overlap_group_2d()` (PS2D wrapper)
+- `enhanced_voigt_fitter.py:fit_peak()` (1D wrapper)
+
+### 3.4 Parallel Mode Clustering
+
+**Critical**: Clustering happens ONCE before distribution.
+
+**Workflow:**
+1. Main process calls `identify_overlap_clusters()` → disjoint clusters
+2. Clusters distributed across workers (round-robin or load-balanced)
+3. Each worker processes entire clusters (not individual peaks)
+4. Results consolidated by integer `peak_number` matching
+
+**Properties:**
+- **Same clustering** as sequential mode (identical graph algorithm)
+- **Same results** as sequential mode (R² values match within precision)
+- **Faster execution** via parallelism (2.7× speedup with 6 cores)
+
+**Code Reference:**
+- `parallel_voigt_processor.py:distribute_clusters()`
+- `parallel_voigt_processor.py:consolidate_results()`
+
+### 3.5 Cluster Subdivision (Future Work)
+
+**Current Limits:**
+- Max cluster size: 15 peaks (hard limit to prevent combinatorial explosion)
+- Max diameter: 2.0 ppm (F1) × 0.2 ppm (F2)
+
+**Proposed Subdivision Strategies:**
+1. **K-means clustering** on (F1, F2) coordinates
+2. **Hierarchical subdivision** using distance threshold
+3. **Density-based clustering** (DBSCAN) for irregular shapes
+
+**Status**: Not yet implemented. Clusters > 15 peaks currently rejected with warning.
+
+---
 
 ---
 
