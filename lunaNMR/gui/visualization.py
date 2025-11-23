@@ -229,28 +229,49 @@ class SpectrumPlotter:
             # No detected peaks, but we might still have reference peaks to show
             pass
         else:
-            # Plot detected/fitted peaks (existing code for red circles)
+            # Plot detected/fitted peaks with quality-based color coding
             if show_detected:
-                # Show ALL peaks in fitted_peaks list as "detected" (red circles)
+                # Show ALL peaks in fitted_peaks list as "detected" with color-coded quality
                 # This includes both matched peaks and reference-retained peaks
                 # Use flexible field name lookup to handle different data sources
                 # Detection results use 'ppm_x'/'ppm_y', fitting results use 'peak_x'/'peak_y'
                 detected_x = []
                 detected_y = []
+                colors = []
+
                 for p in peak_list:
                     # Try multiple possible field names for X coordinate
                     x = p.get('ppm_x') or p.get('x_ppm') or p.get('peak_x') or p.get('center_x')
                     # Try multiple possible field names for Y coordinate
                     y = p.get('ppm_y') or p.get('y_ppm') or p.get('peak_y') or p.get('center_y')
+
                     if x is not None and y is not None:
                         detected_x.append(float(x))
                         detected_y.append(float(y))
 
+                        # Extract quality from multiple possible field names
+                        quality = p.get('quality') or p.get('Quality') or p.get('fitting_quality') or 'Unknown'
+
+                        # Map quality to color (same as multi_spectrum_viewer and spectrum_browser)
+                        if quality in ['Excellent', 'excellent']:
+                            colors.append('lime')
+                        elif quality in ['Good', 'good']:
+                            colors.append('green')
+                        elif quality in ['Fair', 'fair']:
+                            colors.append('orange')
+                        elif quality in ['Poor', 'poor']:
+                            colors.append('red')
+                        else:
+                            colors.append('red')  # No quality info = detected but not fitted (red as before)
+
                 if detected_x:
-                    self.ax.scatter(detected_x, detected_y, c='red', marker='o', s=60,
-                                  alpha=0.8, edgecolors='white', linewidth=1, zorder=5,
+                    # Plot with quality-based colors
+                    self.ax.scatter(detected_x, detected_y, c=colors, marker='o', s=60,
+                                  alpha=0.8, edgecolors='black', linewidth=1, zorder=5,
                                   label=f'Detected ({len(detected_x)})')
-                    for peak in peak_list:
+
+                    # Add annotations with matching colors
+                    for peak, color in zip(peak_list, colors):
                         # Use flexible field name lookup for assignment
                         assignment_label = (peak.get('assignment') or
                                           peak.get('Assignment') or
@@ -258,13 +279,15 @@ class SpectrumPlotter:
                         # Use flexible field name lookup for coordinates
                         x = peak.get('ppm_x') or peak.get('x_ppm') or peak.get('peak_x') or peak.get('center_x')
                         y = peak.get('ppm_y') or peak.get('y_ppm') or peak.get('peak_y') or peak.get('center_y')
+
                         if x is not None and y is not None:
                             annotation = self.ax.annotate(
                                 assignment_label,
                                 (float(x), float(y)),
                                 xytext=(5, 5), textcoords='offset points',
-                                fontsize='small', color='red', fontweight='bold',
-                                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8)
+                                fontsize='small', color=color, fontweight='bold',
+                                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8,
+                                         edgecolor=color)
                             )
                             self.peak_annotations.append(annotation)
 

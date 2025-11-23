@@ -981,20 +981,27 @@ class SpectrumViewer:
         plot_container = CTkLabelFrame(left_panel_3d, text="🎨 3D Voigt Surface Analysis", padding=5)
         plot_container.pack(fill=tk.BOTH, expand=True)
 
-        # Create control frame at top
+        # Create compact control frame in 2 rows to save horizontal space
         control_frame_3d = ttk.Frame(plot_container)
         control_frame_3d.pack(side=tk.TOP, fill=tk.X, padx=5, pady=3)
 
-        # Row 1: Layer toggling checkboxes
-        layer_frame = CTkLabelFrame(control_frame_3d, text="Layer Visibility", padding=3)
-        layer_frame.pack(side=tk.LEFT, padx=3)
-
+        # Initialize control variables
         self.show_exp_3d_var = tk.BooleanVar(value=True)
         self.show_fit_3d_var = tk.BooleanVar(value=True)
         self.show_individual_3d_var = tk.BooleanVar(value=False)  # Hidden by default
-        self.show_peak_labels_3d_var = tk.BooleanVar(value=True)
+        self.show_peak_labels_3d_var = tk.BooleanVar(value=False)
         self.show_resid_3d_var = tk.BooleanVar(value=False)  # Hidden by default
-        # self.show_cross_3d_var = tk.BooleanVar(value=True)  # Disabled - code kept for future use
+        self.limit_peak_display_3d_var = tk.BooleanVar(value=True)
+        self.residual_mode_3d_var = tk.StringVar(value='overlay')
+        self.color_scheme_3d_var = tk.StringVar(value='Clean')  # Professional white background
+        self.intensity_scale_3d_var = tk.DoubleVar(value=100.0)
+
+        # === Row 1: All 6 layer visibility checkboxes ===
+        row1 = ttk.Frame(control_frame_3d)
+        row1.pack(side=tk.TOP, fill=tk.X, pady=(0, 2))
+
+        layer_frame = CTkLabelFrame(row1, text="Layer Visibility", padding=3)
+        layer_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         ttk.Checkbutton(layer_frame, text="Experimental", variable=self.show_exp_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_experimental(self.show_exp_3d_var.get())
@@ -1011,15 +1018,18 @@ class SpectrumViewer:
         ttk.Checkbutton(layer_frame, text="Residuals", variable=self.show_resid_3d_var,
                         command=lambda: self.voigt_plotter_3d.toggle_residuals(self.show_resid_3d_var.get())
                         ).pack(side=tk.LEFT, padx=2)
-        # ttk.Checkbutton(layer_frame, text="Cross-Sections", variable=self.show_cross_3d_var,
-        #                 command=lambda: self.voigt_plotter_3d.toggle_cross_sections(self.show_cross_3d_var.get())
-        #                 ).pack(side=tk.LEFT, padx=2)  # Disabled - code kept for future use
+        ttk.Checkbutton(layer_frame, text="Limit Peak Extent", variable=self.limit_peak_display_3d_var,
+                        command=lambda: self.voigt_plotter_3d.toggle_limit_peak_display(self.limit_peak_display_3d_var.get())
+                        ).pack(side=tk.LEFT, padx=2)
 
-        # Row 2: Residual mode radio buttons
-        residual_frame = CTkLabelFrame(control_frame_3d, text="Residual Mode", padding=3)
+        # === Row 2: Residual mode, Color scheme, Intensity scale ===
+        row2 = ttk.Frame(control_frame_3d)
+        row2.pack(side=tk.TOP, fill=tk.X)
+
+        # Residual mode radio buttons
+        residual_frame = CTkLabelFrame(row2, text="Residual Mode", padding=3)
         residual_frame.pack(side=tk.LEFT, padx=3)
 
-        self.residual_mode_3d_var = tk.StringVar(value='overlay')
         ttk.Radiobutton(residual_frame, text="Separate Panel", variable=self.residual_mode_3d_var,
                         value='separate',
                         command=lambda: self.voigt_plotter_3d.set_residual_mode('separate')
@@ -1029,13 +1039,26 @@ class SpectrumViewer:
                         command=lambda: self.voigt_plotter_3d.set_residual_mode('overlay')
                         ).pack(side=tk.LEFT, padx=2)
 
-        # Row 3: Intensity scaling slider
-        intensity_frame = CTkLabelFrame(control_frame_3d, text="Intensity Scale", padding=3)
+        # Color scheme dropdown
+        color_scheme_frame = CTkLabelFrame(row2, text="Color Scheme", padding=3)
+        color_scheme_frame.pack(side=tk.LEFT, padx=3)
+
+        color_scheme_dropdown = ttk.Combobox(
+            color_scheme_frame,
+            textvariable=self.color_scheme_3d_var,
+            values=['Classic', 'Clean', 'Dark', 'Warm'],
+            state='readonly',
+            width=8
+        )
+        color_scheme_dropdown.pack(side=tk.LEFT, padx=2)
+        color_scheme_dropdown.bind('<<ComboboxSelected>>', self._on_color_scheme_change_3d)
+
+        # Intensity scaling slider
+        intensity_frame = CTkLabelFrame(row2, text="Intensity Scale", padding=3)
         intensity_frame.pack(side=tk.LEFT, padx=3, fill=tk.X, expand=True)
 
         ttk.Label(intensity_frame, text="50%").pack(side=tk.LEFT, padx=2)
 
-        self.intensity_scale_3d_var = tk.DoubleVar(value=100.0)
         intensity_slider_3d = tk.Scale(
             intensity_frame,
             from_=50,
@@ -1045,7 +1068,7 @@ class SpectrumViewer:
             command=self._on_intensity_scale_change_3d,
             resolution=5,
             showvalue=0,
-            length=200
+            length=150
         )
         intensity_slider_3d.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
@@ -1054,8 +1077,8 @@ class SpectrumViewer:
 
         ttk.Label(intensity_frame, text="200%").pack(side=tk.LEFT, padx=2)
 
-        # Create 3D Voigt analysis figure - will be dynamically resized by plotter
-        self.fig_voigt_3d = plt.figure(figsize=(15, 5))
+        # Create 3D Voigt analysis figure - compact size for responsive layout
+        self.fig_voigt_3d = plt.figure(figsize=(4, 3))
 
         self.canvas_voigt_3d = FigureCanvasTkAgg(self.fig_voigt_3d, plot_container)
         self.canvas_voigt_3d.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -1123,6 +1146,14 @@ class SpectrumViewer:
             ax.axis('off')
             ax.text(0.5, 0.5, f"Error: {str(e)[:100]}",
                    ha='center', va='center', transform=ax.transAxes, fontsize=10)
+            self.canvas_voigt_3d.draw()
+
+    def _on_color_scheme_change_3d(self, event=None):
+        """Handle color scheme dropdown change for 3D Voigt plot"""
+        scheme_name = self.color_scheme_3d_var.get()
+        self.voigt_plotter_3d.set_color_scheme(scheme_name)
+        # Trigger replot if peak is already displayed
+        if hasattr(self, 'voigt_plotter_3d') and hasattr(self.voigt_plotter_3d, 'current_peak_result'):
             self.canvas_voigt_3d.draw()
 
     def _on_intensity_scale_change_3d(self, value):
