@@ -313,11 +313,17 @@ class MultiSpectrumProcessor:
             # Create all output files for downstream compatibility
             self._create_comprehensive_output_files(batch_results)
 
-            return batch_results
+            # Convert dict to BatchResults object for GUI compatibility
+            batch_results_obj = self._convert_to_batch_results(batch_results, start_time, end_time)
+
+            return batch_results_obj
 
         except Exception as e:
             print(f" Multi-spectrum processing failed: {e}")
-            return {'error': str(e), 'results': {}, 'summary': {}}
+            # Return BatchResults object even on error for consistent interface
+            error_result = BatchResults()
+            error_result.errors.append({'error': str(e)})
+            return error_result
         finally:
             self.processing_active = False
 
@@ -416,6 +422,7 @@ class MultiSpectrumProcessor:
         print(f"✅ NMR data verified for {spectrum_name}: {self.integrator.nmr_data.shape}")
 
         # DETECTION-BASED MATCHING: Choose reference source based on mode
+        # Exact 1-to-1 copy from v0.9 multi_spectrum_processor.py:418-479
         if self.peak_source_mode == 'reference':
             # REFERENCE MODE: Always use original reference peaks (fixed reference for all spectra)
             print(f"🔍 REFERENCE MODE: Spectrum {spectrum_number} - using original reference peaks")
@@ -442,18 +449,19 @@ class MultiSpectrumProcessor:
             self.integrator.peak_list = self.reference_peaks.copy()
 
         # RUN PEAK DETECTION: Detect all peaks, then match to reference
-        # This is the exact same process as GUI "With peak list (standard)" → "Detect Peaks"
-        print(f"   🎯 Running peak detection (detect all → match to reference)...")
+        # This recenters each peak around the actual peak top in the current spectrum
+        # Exact 1-to-1 copy from v0.9 multi_spectrum_processor.py:444-479
+        print(f"   🎯 Running peak detection (detect all → match to reference for recentering)...")
 
         # Ensure noise level is estimated
         if not hasattr(self.integrator, 'noise_level') or self.integrator.noise_level is None:
             self.integrator._estimate_noise_level()
 
-        # Call the same detection method used by GUI
+        # Call the same detection method used by GUI - this finds actual peak positions
         detected_peaks = self.integrator._detect_peaks_reference_based()
 
         if detected_peaks and len(detected_peaks) > 0:
-            print(f"   ✅ Detection complete: {len(detected_peaks)} peaks matched")
+            print(f"   ✅ Detection complete: {len(detected_peaks)} peaks matched and recentered")
 
             # Convert detected peaks (fitted_peaks) to DataFrame format for fitting
             # This is the same conversion that GUI does (line 3283-3286 in main_gui.py)
@@ -470,9 +478,9 @@ class MultiSpectrumProcessor:
             detected_df = pd.DataFrame(detected_peak_data)
 
             # CRITICAL: Replace peak_list with detected positions (not reference positions)
-            # This ensures fitting uses DETECTED positions, just like GUI
+            # This ensures fitting uses DETECTED/RECENTERED positions, just like GUI
             self.integrator.peak_list = detected_df
-            print(f"   ✅ peak_list now contains DETECTED positions (fitting will use detected peaks)")
+            print(f"   ✅ peak_list now contains DETECTED positions (fitting will use recentered peaks)")
 
         else:
             print(f"   ⚠️ No peaks detected - using reference positions as fallback")
@@ -673,6 +681,49 @@ class MultiSpectrumProcessor:
         tidy_df_formatted.to_csv(tidy_file, index=False)
         print(f"✨ Created tidy results file for easy analysis: {tidy_file}")
 
+    def _convert_to_batch_results(self, batch_results_dict: Dict[str, Any],
+                                   start_time, end_time) -> 'BatchResults':
+        """Convert dict batch_results to BatchResults object for GUI compatibility.
+
+        The dialogs expect a BatchResults object with .results attribute and get_summary() method,
+        but internal processing uses dicts for flexibility. This converts at the end.
+
+        Args:
+            batch_results_dict: Dictionary with 'results' and 'summary' keys
+            start_time: Processing start time
+            end_time: Processing end time
+
+        Returns:
+            BatchResults object with same data
+        """
+        batch_obj = BatchResults()
+
+        # Set metadata
+        batch_obj.metadata['start_time'] = start_time
+        batch_obj.metadata['end_time'] = end_time
+        batch_obj.metadata['processing_mode'] = 'series_integration'
+        batch_obj.metadata['total_spectra'] = batch_results_dict.get('summary', {}).get('total_spectra', 0)
+
+        # Copy data_folder from batch_results_dict metadata for viewers
+        source_metadata = batch_results_dict.get('metadata', {})
+        if 'data_folder' in source_metadata:
+            batch_obj.metadata['data_folder'] = source_metadata['data_folder']
+        if 'output_folder' in source_metadata:
+            batch_obj.metadata['output_folder'] = source_metadata['output_folder']
+
+        # Copy results - mark status as 'success' or 'failed' for each spectrum
+        for spectrum_name, result in batch_results_dict.get('results', {}).items():
+            # Ensure result has a 'status' field for the dialogs
+            if 'status' not in result:
+                result['status'] = 'success' if result.get('success', False) else 'failed'
+            batch_obj.add_result(spectrum_name, result)
+
+        # Copy statistics if available
+        if 'statistics' in batch_results_dict:
+            batch_obj.statistics = batch_results_dict['statistics']
+
+        return batch_obj
+
     def _create_comprehensive_output_files(self, batch_results: Dict[str, Any]):
         """
         Creates all output files, including the new tidy format.
@@ -841,17 +892,18 @@ class MultiSpectrumProcessor:
                         pass
 
                 # Extract linewidths (FWHM in ppm)
+                # NOTE: sigma/gamma in x_fit/y_fit are ALREADY FWHM values (not true sigma/gamma)
+                # So we just add them directly (matching Peak Parameters display)
                 lw_x, lw_y = 0.0, 0.0
                 if x_fit:
-                    x_sigma = x_fit.get('sigma', 0)
-                    x_gamma = x_fit.get('gamma', 0)
-                    # FWHM = 2*sqrt(2*ln(2))*sigma + 2*gamma (Voigt FWHM approximation)
-                    lw_x = 2 * np.sqrt(2 * np.log(2)) * x_sigma + 2 * x_gamma
+                    x_sigma = x_fit.get('sigma', 0)  # Actually Gaussian FWHM
+                    x_gamma = x_fit.get('gamma', 0)  # Actually Lorentzian FWHM
+                    lw_x = x_sigma + x_gamma  # Simple sum of FWHM components
 
                 if y_fit:
-                    y_sigma = y_fit.get('sigma', 0)
-                    y_gamma = y_fit.get('gamma', 0)
-                    lw_y = 2 * np.sqrt(2 * np.log(2)) * y_sigma + 2 * y_gamma
+                    y_sigma = y_fit.get('sigma', 0)  # Actually Gaussian FWHM
+                    y_gamma = y_fit.get('gamma', 0)  # Actually Lorentzian FWHM
+                    lw_y = y_sigma + y_gamma  # Simple sum of FWHM components
 
                 # SNR extraction - try multiple sources
                 snr = 0.0
@@ -941,6 +993,21 @@ class MultiSpectrumProcessor:
                     'R_Squared': r_squared
                 })
 
+                # CRITICAL: Preserve 2D visualization data for Voigt analysis tabs
+                # These fields are needed by VoigtAnalysisPlotter for 2D/3D visualization
+                if 'method' in fit_result:
+                    peak_data['method'] = fit_result['method']
+                if 'region_2d' in fit_result:
+                    peak_data['region_2d'] = fit_result['region_2d']
+                if 'fitted_2d_surface' in fit_result:
+                    peak_data['fitted_2d_surface'] = fit_result['fitted_2d_surface']
+                if 'individual_surfaces' in fit_result:
+                    peak_data['individual_surfaces'] = fit_result['individual_surfaces']
+                if 'baseline' in fit_result:
+                    peak_data['baseline'] = fit_result['baseline']
+                if 'all_peaks' in fit_result:
+                    peak_data['all_peaks'] = fit_result['all_peaks']
+
                 print(f"   ✅ Peak {assignment}: fitted=({final_x:.3f}, {final_y:.1f}), ref=({ref_x:.3f}, {ref_y:.1f})")
 
             else:
@@ -957,12 +1024,16 @@ class MultiSpectrumProcessor:
     def _initialize_comprehensive_batch_results(self, nmr_files: List[str],
                                               output_folder: str, peak_source_mode: str) -> Dict[str, Any]:
         """Initialize comprehensive batch results structure"""
+        # Derive data folder from first NMR file path
+        data_folder = os.path.dirname(nmr_files[0]) if nmr_files else ''
+
         return {
             'metadata': {
                 'processing_started': datetime.now().isoformat(),
                 'peak_source_mode': peak_source_mode,
                 'total_spectra': len(nmr_files),
                 'output_folder': output_folder,
+                'data_folder': data_folder,  # Store folder containing NMR files
                 'reference_peaks_count': len(self.reference_peaks)
             },
             'results': {},
@@ -1094,8 +1165,8 @@ class MultiSpectrumProcessor:
             # Check if column is integer type (preserve as integer without decimals)
             if pd.api.types.is_integer_dtype(df_formatted[col]):
                 df_formatted[col] = df_formatted[col].apply(lambda x: f'{int(x)}' if pd.notna(x) else '')
-            # Format Reference_X and Reference_Y with 3 decimal places
-            elif col in ['Reference_X', 'Reference_Y']:
+            # Format positions and linewidths with 3 decimal places
+            elif col in ['Reference_X', 'Reference_Y', 'LW_X', 'LW_Y'] or 'LW_' in col:
                 df_formatted[col] = df_formatted[col].apply(lambda x: f'{x:.3f}' if pd.notna(x) else '')
             # Format all other numeric columns with 1 decimal place
             else:
@@ -1456,8 +1527,8 @@ class BatchResults:
                 for col in integration_df_formatted.columns:
                     if not pd.api.types.is_numeric_dtype(integration_df_formatted[col]):
                         continue
-                    # Position columns get 3 decimal places
-                    if col in ['ppm_x', 'ppm_y']:
+                    # Position and linewidth columns get 3 decimal places
+                    if col in ['ppm_x', 'ppm_y', 'lw_x', 'lw_y']:
                         integration_df_formatted[col] = integration_df_formatted[col].apply(lambda x: f'{x:.3f}' if pd.notna(x) else '')
                     # All other numeric columns get 1 decimal place
                     else:

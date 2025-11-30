@@ -1,6 +1,6 @@
 # Fine-Tuning PS2D 2D Voigt Fitting – Developer Playbook
 
-This guide consolidates the tunable parameters, code entry points, and experimentation ideas for improving the PS2D multi-peak fitting pipeline. File and line references point to the current codebase (`lunaNMR_v0o9`). Quantitative suggestions below note expected qualitative changes in convergence, fit stability, and runtime so you can predict trade-offs before running sweep experiments.
+This guide consolidates the tunable parameters, code entry points, and experimentation ideas for improving the PS2D multi-peak fitting pipeline. File and line references point to the current codebase (`lunaNMR_v1o0`). Quantitative suggestions below note expected qualitative changes in convergence, fit stability, and runtime so you can predict trade-offs before running sweep experiments.
 
 ---
 

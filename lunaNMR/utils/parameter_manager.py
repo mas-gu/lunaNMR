@@ -227,7 +227,9 @@ class NMRParameterManager:
                 'lw_lorentz_15n': self.current_params.get('lw_lorentz_15n', None),
                 'lw_gauss_15n': self.current_params.get('lw_gauss_15n', None),
                 # Series Integration / PS2D Linewidth Reuse
-                'use_ps2d_linewidth_reuse': self.current_params.get('use_ps2d_linewidth_reuse', False)
+                'use_ps2d_linewidth_reuse': self.current_params.get('use_ps2d_linewidth_reuse', False),
+                # Adaptive parameter optimization
+                'use_adaptive_optimization': self.current_params.get('use_adaptive_optimization', True)
             },
             'processing_options': {
                 'use_parallel_processing': self.current_params['use_parallel_processing'],
@@ -370,6 +372,9 @@ class NMRParameterManager:
             params['gui_params']['centroid_window_x_ppm'] = self.current_params.get('centroid_window_x_ppm', 0.01)
             params['gui_params']['centroid_window_y_ppm'] = self.current_params.get('centroid_window_y_ppm', 0.1)
             params['gui_params']['centroid_noise_multiplier'] = self.current_params.get('centroid_noise_multiplier', 2.0)
+
+            # Adaptive optimization parameter
+            params['gui_params']['use_adaptive_optimization'] = self.current_params.get('use_adaptive_optimization', True)
 
             return params
         else:

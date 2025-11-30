@@ -1,4 +1,4 @@
-# Peak Fitting Logic - LunaNMR v0.9
+# Peak Fitting Logic - LunaNMR v1.0
 
 **TL;DR**: Two-phase workflow - (1) Detection + Clustering creates disjoint peak groups, (2) Fitting routes single-peak clusters to 1D fallback, multi-peak clusters to PS2D 2D simultaneous fitting. Clustering is deterministic and happens ONCE. Parallel mode distributes entire clusters across workers.
 

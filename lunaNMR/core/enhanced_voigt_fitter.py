@@ -5768,9 +5768,26 @@ class EnhancedVoigtFitter:
                 # Use new parallel implementation
                 from lunaNMR.core.parallel_voigt_processor import ParallelVoigtProcessor
 
+                # Get adaptive optimization setting from gui_params
+                enable_adaptive = True  # Default: ON
+                if parent_integrator and hasattr(parent_integrator, 'gui_params'):
+                    enable_adaptive = parent_integrator.gui_params.get('use_adaptive_optimization', True)
+
                 print(f"🚀 Using parallel Voigt fitting for {len(peak_list)} peaks")
-                parallel_processor = ParallelVoigtProcessor(self)
+                parallel_processor = ParallelVoigtProcessor(self, enable_adaptive=enable_adaptive)
+
+                # Pass series_params if available (for subsequent spectra in series)
+                if hasattr(self, 'series_params') and self.series_params is not None:
+                    parallel_processor.set_series_params(self.series_params)
+                    print(f"   📦 Loaded series_params from reference spectrum")
+
                 results = parallel_processor.fit_all_peaks_parallel(peak_list, progress_callback)
+
+                # Store series_params after first spectrum optimization
+                if parallel_processor.series_params and not hasattr(self, 'series_params'):
+                    self.series_params = parallel_processor.series_params
+                elif parallel_processor.series_params:
+                    self.series_params = parallel_processor.series_params
 
                 # Return single result if single peak input
                 if len(results) == 1 and len(peak_list) == 1:

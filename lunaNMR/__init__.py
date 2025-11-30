@@ -1,23 +1,28 @@
+# ABOUTME: Main package init for LunaNMR v1.0 Qt/PySide6 NMR analysis suite
+# ABOUTME: Exports main window, core processing, and utility classes
+
 """
-LunaNMR: Advanced NMR Peak Analysis and Integration
+LunaNMR v1.0: Advanced NMR Peak Analysis and Integration
 
 A comprehensive toolkit for NMR peak detection, fitting, and integration
 with advanced Voigt profile analysis and multi-peak deconvolution.
+
+This version uses Qt/PySide6 for the GUI framework.
 """
 
-__version__ = "0.9.0"
-__author__ = "Guillaume"
+__version__ = "1.0.0"
+__author__ = "Guillaume Mas"
 __description__ = "Advanced NMR Peak Analysis and Integration"
 
-# Main GUI access
+# Main Qt GUI access
 try:
-    from .gui.main_gui import NMRPeaksSeriesGUI
+    from .gui.main_window import LunaNMRMainWindow, main
 except ImportError:
     pass
 
 # Core functionality
 try:
-    from .core.core_integrator import CoreIntegrator
+    from .core.core_integrator import EnhancedVoigtIntegrator
     from .core.enhanced_voigt_fitter import EnhancedVoigtFitter
     from .core.enhanced_peak_picker import EnhancedPeakPicker
 except ImportError:
@@ -25,19 +30,17 @@ except ImportError:
 
 # Processors
 try:
-    from .processors.series_processor import SeriesProcessor
     from .processors.multi_spectrum_processor import MultiSpectrumProcessor
     from .processors.single_spectrum_processor import SingleSpectrumProcessor
-    from .processors.parallel_fitting import ParallelFitting
+    from .processors.parallel_fitting import ParallelVoigtProcessor
 except ImportError:
     pass
 
 # Utilities
 try:
-    from .utils.config_manager import ConfigManager
-    from .utils.file_manager import FileManager
-    from .utils.parameter_manager import ParameterManager
-    from .utils.global_optimization_manager import GlobalOptimizationManager
+    from .utils.config_manager import ConfigurationManager
+    from .utils.file_manager import NMRFileManager
+    from .utils.parameter_manager import NMRParameterManager
 except ImportError:
     pass
 
@@ -49,29 +52,25 @@ try:
     modules_path = os.path.join(os.path.dirname(__file__), '..', 'modules')
     if modules_path not in sys.path:
         sys.path.append(modules_path)
-    
-    from dynamiXs import DynamiXsGUI, run_dynamixs
-    __all__.extend(['DynamiXsGUI', 'run_dynamixs'])
-except ImportError:
-    pass
 
-# Backwards compatibility
-try:
-    from .gui.main_gui import NMRPeaksSeriesGUI as lunaNMRv0o9_gui
+    from dynamiXs import DynamiXsGUI, run_dynamixs
 except ImportError:
     pass
 
 __all__ = [
-    'NMRPeaksSeriesGUI',
-    'CoreIntegrator',
+    # Main window
+    'LunaNMRMainWindow',
+    'main',
+    # Core
+    'EnhancedVoigtIntegrator',
     'EnhancedVoigtFitter',
     'EnhancedPeakPicker',
-    'SeriesProcessor',
+    # Processors
     'MultiSpectrumProcessor',
     'SingleSpectrumProcessor',
-    'ParallelFitting',
-    'ConfigManager',
-    'FileManager',
-    'ParameterManager',
-    'GlobalOptimizationManager'
+    'ParallelVoigtProcessor',
+    # Utilities
+    'ConfigurationManager',
+    'NMRFileManager',
+    'NMRParameterManager',
 ]

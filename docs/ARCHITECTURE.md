@@ -7,7 +7,7 @@
 ## 1. Directory Structure
 
 ```
-lunaNMR_v0o9/
+lunaNMR_v1o0/
 ├── launch_lunaNMR.py           # Entry point
 ├── docs/                       # Documentation
 ├── lunaNMR/                    # Main package

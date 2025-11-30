@@ -20,7 +20,7 @@ from pathlib import Path
 
 # Add the lunaNMR path to Python path (adjusted for new location)
 script_dir = Path(__file__).parent
-lunanmr_path = script_dir.parent  # Go up to lunaNMR_v0o9 folder
+lunanmr_path = script_dir.parent  # Go up to lunaNMR_v1o0 folder
 sys.path.insert(0, str(lunanmr_path))
 
 try:

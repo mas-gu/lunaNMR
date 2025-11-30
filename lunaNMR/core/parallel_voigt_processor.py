@@ -32,6 +32,14 @@ import sys
 import os
 from functools import partial
 
+# Adaptive optimization imports
+from lunaNMR.core.adaptive_optimizer import (
+    AdaptiveOptimizer,
+    estimate_noise_level,
+    create_series_params,
+    check_lw_deviation
+)
+
 # CRITICAL FIX for Linux deadlock: Set multiprocessing start method to 'spawn'
 # On Linux, default 'fork' causes pipe buffer deadlock when workers print verbose output
 # On Mac, 'spawn' is already the default, so this has no effect there
@@ -58,17 +66,23 @@ class ParallelVoigtProcessor:
     - Result compilation
     """
     
-    def __init__(self, enhanced_voigt_fitter, max_workers=None):
+    def __init__(self, enhanced_voigt_fitter, max_workers=None, enable_adaptive=True):
         """
         Initialize parallel Voigt processor
-        
+
         Args:
             enhanced_voigt_fitter: Original EnhancedVoigtFitter instance
             max_workers: Maximum number of worker processes (default: 75% of cores)
+            enable_adaptive: Enable adaptive parameter optimization (default: True)
         """
         self.original_fitter = enhanced_voigt_fitter
         self.shared_memory_blocks = []  # Track for cleanup
-        
+        self.enable_adaptive = enable_adaptive
+
+        # Adaptive optimization state
+        self.optimal_params = None  # Stores grid search optimization results
+        self.series_params = None   # Locked params for series integration
+
         # Configure worker processes
         if max_workers is None:
             self.max_workers = max(1, int(cpu_count() * 0.75))
@@ -76,7 +90,28 @@ class ParallelVoigtProcessor:
             self.max_workers = max_workers
             
         #print(f"🚀 ParallelVoigtProcessor initialized with {self.max_workers} workers")
-        
+
+    def set_series_params(self, series_params):
+        """
+        Set locked series parameters from reference spectrum.
+
+        Used for series integration to ensure consistent parameters
+        and enable linewidth deviation detection.
+
+        Args:
+            series_params: Dict with radF1, radF2, overlap thresholds,
+                          cluster_assignments, reference_LW values
+        """
+        self.series_params = series_params
+        if series_params:
+            print(f"   📦 Series parameters loaded from reference:")
+            print(f"      radF1={series_params.get('radF1', 'N/A'):.4f}, "
+                  f"radF2={series_params.get('radF2', 'N/A'):.5f}")
+
+    def get_series_params(self):
+        """Get current series parameters (for passing to next spectrum)."""
+        return self.series_params
+
     def fit_all_peaks_parallel(self, peak_list, progress_callback=None):
         """
         Complete parallel workflow using IDENTICAL clustering algorithm as sequential mode.
@@ -113,9 +148,23 @@ class ParallelVoigtProcessor:
             print(f"   🎯 2D overlap detection enabled with {len(all_peaks_context)} peaks context")
 
             # STEP 2: Call identify_overlap_clusters() ONCE (CRITICAL for deterministic clustering)
-            #print(f"   🔍 Identifying overlap clusters using hierarchical algorithm...")
-            clusters = self.original_fitter.parent.identify_overlap_clusters(all_peaks_context)
-            #print(f"   ✅ Found {len(clusters)} clusters from {len(peak_list)} peaks")
+            # Use locked overlap thresholds from series_params if available (subsequent spectra)
+            if self.series_params:
+                print(f"   📦 Using locked parameters from reference spectrum")
+                clusters = self.original_fitter.parent.identify_overlap_clusters(
+                    all_peaks_context,
+                    overlap_threshold_x=self.series_params['overlap_threshold_x'],
+                    overlap_threshold_y=self.series_params['overlap_threshold_y']
+                )
+                # Also apply locked radF1/radF2 to PS2D config
+                from lunaNMR.core.ps2d_config import get_ps2d_config
+                config = get_ps2d_config()
+                config.radF1 = self.series_params['radF1']
+                config.radF2 = self.series_params['radF2']
+                config.overlap_threshold_x = self.series_params['overlap_threshold_x']
+                config.overlap_threshold_y = self.series_params['overlap_threshold_y']
+            else:
+                clusters = self.original_fitter.parent.identify_overlap_clusters(all_peaks_context)
 
             # Build peak metadata mapping (peak position → metadata)
             peak_metadata = {}
@@ -168,6 +217,156 @@ class ParallelVoigtProcessor:
                 print(f"   ⚠️  No isolated peaks found - skipping Pass 1, using config defaults")
                 isolated_results = []
 
+            # ========== DEVIATION CHECK (for series integration) ==========
+            if self.series_params and spectrum_statistics and spectrum_statistics.get('n_samples', 0) >= 5:
+                has_deviation, warning_msg = check_lw_deviation(
+                    current_lw_f1=spectrum_statistics['lw_f1_median'],
+                    current_lw_f2=spectrum_statistics['lw_f2_median'],
+                    series_params=self.series_params
+                )
+                if has_deviation:
+                    print(f"\n   ⚠️  LINEWIDTH DEVIATION WARNING: {warning_msg}")
+
+            # ========== ADAPTIVE OPTIMIZATION (if enabled and not already have series_params) ==========
+            optimal_params = None
+            original_multi_peak_clusters = multi_peak_clusters  # Save for re-clustering
+
+            # Only run optimization on reference spectrum (when series_params is None)
+            # For subsequent spectra in series, use locked parameters from reference
+            if self.enable_adaptive and not self.series_params and spectrum_statistics and spectrum_statistics.get('n_samples', 0) >= 10:
+                print(f"\n   🎯 ADAPTIVE OPTIMIZATION: Learning optimal parameters...")
+                adaptive_start = time.time()
+
+                # Estimate noise level from spectrum
+                noise_level = estimate_noise_level(self.original_fitter.parent.nmr_data)
+
+                # Get PS2D config for bounds
+                from lunaNMR.core.ps2d_config import get_ps2d_config
+                config = get_ps2d_config()
+
+                # Create optimizer
+                optimizer = AdaptiveOptimizer(noise_level=noise_level, config=config)
+
+                # Extract good isolated peaks for optimization
+                good_isolated_peaks = self._extract_good_peaks_for_optimization(isolated_results)
+
+                if len(good_isolated_peaks) >= 10:
+                    # Define fit function for grid search evaluation
+                    _debug_shown = [False]  # Use list to allow modification in nested function
+
+                    def fit_single_peak(peak, radF1, radF2):
+                        """Fit a single peak with given radF1/radF2 for optimization."""
+                        # Save original config values BEFORE try block (guarantees they're defined)
+                        old_radF1 = config.radF1
+                        old_radF2 = config.radF2
+                        result = None
+                        try:
+                            # Temporarily update config for this fit
+                            config.radF1 = radF1
+                            config.radF2 = radF2
+
+                            # Fit the peak using full PS2D 2D fitting
+                            result = self.original_fitter.parent.enhanced_peak_fitting(
+                                peak.get('x_ppm'), peak.get('y_ppm'),
+                                all_peaks_context=all_peaks_context
+                            )
+
+                            # Debug: show first result structure
+                            if not _debug_shown[0] and result is not None:
+                                print(f"\n       DEBUG: First result type={type(result).__name__}")
+                                if isinstance(result, dict):
+                                    print(f"       DEBUG: Keys={list(result.keys())[:10]}")
+                                _debug_shown[0] = True
+
+                        except Exception as e:
+                            if not _debug_shown[0]:
+                                print(f"\n       DEBUG: Exception in fit_single_peak: {e}")
+                                _debug_shown[0] = True
+                        finally:
+                            # Always restore config (guaranteed to have old values)
+                            config.radF1 = old_radF1
+                            config.radF2 = old_radF2
+
+                        return result
+
+                    # Run grid search optimization
+                    optimal_params = optimizer.optimize(
+                        isolated_peaks=good_isolated_peaks,
+                        median_lw_f1=spectrum_statistics['lw_f1_median'],
+                        median_lw_f2=spectrum_statistics['lw_f2_median'],
+                        fit_function=fit_single_peak,
+                        progress_callback=progress_callback
+                    )
+
+                    if optimal_params and optimal_params.get('success'):
+                        # Apply optimal parameters to config
+                        config.radF1 = optimal_params['radF1']
+                        config.radF2 = optimal_params['radF2']
+                        config.overlap_threshold_x = optimal_params['overlap_threshold_x']
+                        config.overlap_threshold_y = optimal_params['overlap_threshold_y']
+
+                        self.optimal_params = optimal_params
+
+                        adaptive_time = time.time() - adaptive_start
+                        print(f"   ✅ Adaptive optimization completed in {adaptive_time:.1f}s")
+
+                        # ========== RE-CLUSTER originally clustered peaks with optimal thresholds ==========
+                        if len(original_multi_peak_clusters) > 0:
+                            print(f"\n   🔄 RE-CLUSTERING: Applying optimal overlap thresholds to {sum(len(c) for c in original_multi_peak_clusters)} clustered peaks...")
+
+                            # Extract only originally clustered peak positions
+                            originally_clustered_peaks = []
+                            for cluster in original_multi_peak_clusters:
+                                for pos in cluster:
+                                    originally_clustered_peaks.append({
+                                        'x_ppm': pos[0],
+                                        'y_ppm': pos[1],
+                                        'pos_x': pos[0],
+                                        'pos_y': pos[1]
+                                    })
+
+                            # Re-cluster with optimal thresholds
+                            new_clusters = self.original_fitter.parent.identify_overlap_clusters(
+                                originally_clustered_peaks,
+                                overlap_threshold_x=optimal_params['overlap_threshold_x'],
+                                overlap_threshold_y=optimal_params['overlap_threshold_y']
+                            )
+
+                            # Separate new isolated and multi-peak
+                            new_isolated_from_recluster = [c for c in new_clusters if len(c) == 1]
+                            multi_peak_clusters = [c for c in new_clusters if len(c) > 1]
+
+                            print(f"      Re-clustering result: {len(new_isolated_from_recluster)} now isolated, {len(multi_peak_clusters)} multi-peak")
+
+                            # Add newly isolated peaks to isolated_clusters for PASS 1-bis
+                            isolated_clusters = isolated_clusters + new_isolated_from_recluster
+                    else:
+                        print(f"   ⚠️  Adaptive optimization failed - using default parameters")
+                else:
+                    print(f"   ⚠️  Insufficient good peaks for adaptive optimization ({len(good_isolated_peaks)} < 10)")
+            elif self.enable_adaptive:
+                print(f"   ⚠️  Adaptive optimization skipped (insufficient PASS 1 statistics)")
+
+            # ========== PASS 1-bis: Re-fit isolated peaks with optimal parameters ==========
+            if optimal_params and optimal_params.get('success') and len(isolated_clusters) > 0:
+                print(f"\n   🔬 PASS 1-bis: Re-fitting {len(isolated_clusters)} isolated peaks with optimal parameters...")
+                pass1bis_start = time.time()
+
+                # Prepare shared context with optimal parameters
+                shared_context_pass1bis = self._prepare_shared_context(all_peaks_context, spectrum_statistics=None)
+
+                # Create tasks for all isolated peaks (including newly isolated from re-clustering)
+                isolated_tasks_bis = self._create_cluster_tasks(isolated_clusters, peak_metadata, peak_list, shared_context_pass1bis)
+
+                # Execute Pass 1-bis fitting in parallel
+                isolated_results = self._execute_parallel_cluster_fitting(isolated_tasks_bis, progress_callback, pass_name="PASS 1-bis")
+
+                # Update statistics with new fits
+                spectrum_statistics = self._collect_linewidth_statistics(isolated_results)
+
+                pass1bis_time = time.time() - pass1bis_start
+                print(f"   ✅ PASS 1-bis completed in {pass1bis_time:.1f}s")
+
             # ========== PASS 2: Fit multi-peak clusters using learned statistics ==========
             multi_peak_results = []
 
@@ -192,6 +391,26 @@ class ParallelVoigtProcessor:
             # ========== Consolidate results from both passes ==========
             all_cluster_results = isolated_results + multi_peak_results
             consolidated_results = self._consolidate_cluster_results(all_cluster_results, peak_list, peak_metadata)
+
+            # ========== Create series_params if adaptive optimization succeeded ==========
+            if self.optimal_params and self.optimal_params.get('success'):
+                # Build cluster assignments map
+                cluster_assignments = {}
+                for i, cluster in enumerate(isolated_clusters):
+                    for pos in cluster:
+                        peak_id = f"peak_{pos[0]:.4f}_{pos[1]:.4f}"
+                        cluster_assignments[peak_id] = 'isolated'
+                for i, cluster in enumerate(multi_peak_clusters):
+                    for pos in cluster:
+                        peak_id = f"peak_{pos[0]:.4f}_{pos[1]:.4f}"
+                        cluster_assignments[peak_id] = f'cluster_{i}'
+
+                self.series_params = create_series_params(
+                    optimization_result=self.optimal_params,
+                    cluster_assignments=cluster_assignments,
+                    reference_spectrum='current'  # Will be updated by GUI with actual filename
+                )
+                print(f"   📦 Series parameters saved for consistent series integration")
 
             elapsed_time = time.time() - start_time
             print(f"\n✅ Two-pass parallel fitting completed in {elapsed_time:.1f}s")
@@ -289,21 +508,49 @@ class ParallelVoigtProcessor:
                 lw_f1_total = lw_lor_f1 + lw_gau_f1
                 lw_f2_total = lw_lor_f2 + lw_gau_f2
 
-                # Sanity checks before adding to statistics
-                if lw_f1_total > 0.05:  # Minimum reasonable F1 linewidth (50 ppb)
+                # ================================================================
+                # NUCLEUS-ADAPTIVE SANITY CHECKS
+                # ================================================================
+                # Use config thresholds instead of hardcoded values
+                # This ensures 13C peaks (min 0.025 ppm) are not rejected
+                # ================================================================
+                from lunaNMR.core.ps2d_config import get_ps2d_config
+                config = get_ps2d_config()
+
+                if lw_f1_total > config.min_linewidth_f1:  # Nucleus-adaptive (15N: 0.05, 13C: 0.025)
                     linewidth_stats['lw_f1'].append(lw_f1_total)
-                    if lw_gau_f1 > 0.01:  # Avoid division by near-zero
+                    min_gau_f1 = config.min_linewidth_f1 * 0.2  # 20% of min to avoid division by zero
+                    if lw_gau_f1 > min_gau_f1:
                         linewidth_stats['lg_f1'].append(lw_lor_f1 / lw_gau_f1)
 
-                if lw_f2_total > 0.005:  # Minimum reasonable F2 linewidth (5 ppb)
+                if lw_f2_total > config.min_linewidth_f2:  # Nucleus-adaptive (15N: 0.001, 13C: 0.005)
                     linewidth_stats['lw_f2'].append(lw_f2_total)
-                    if lw_gau_f2 > 0.001:  # Avoid division by near-zero
+                    min_gau_f2 = config.min_linewidth_f2 * 0.2  # 20% of min to avoid division by zero
+                    if lw_gau_f2 > min_gau_f2:
                         linewidth_stats['lg_f2'].append(lw_lor_f2 / lw_gau_f2)
 
-        # Need at least 3 good fits for reliable statistics
-        if len(linewidth_stats['lw_f1']) < 3:
-            print(f"   ⚠️  Insufficient isolated peaks for statistics ({successful_fits} good fits, {len(linewidth_stats['lw_f1'])} valid LW)")
+        # ================================================================
+        # SAMPLE SIZE CHECK AND ADAPTIVE ALPHA
+        # ================================================================
+        # MAD reliability depends on sample size:
+        #   n < 3:  Unreliable, return None (fall back to config)
+        #   n < 10: Use conservative alpha=7 (wider bounds)
+        #   n >= 10: Use standard alpha=5
+        # ================================================================
+        MIN_SAMPLES = 3
+        RELIABLE_SAMPLES = 10
+
+        n_samples = len(linewidth_stats['lw_f1'])
+        if n_samples < MIN_SAMPLES:
+            print(f"   ⚠️  Insufficient isolated peaks for statistics ({successful_fits} good fits, {n_samples} valid LW)")
             return None
+
+        # Sample-size-dependent multiplier for bounds calculation
+        if n_samples < RELIABLE_SAMPLES:
+            alpha = 3.0  # Tighter bounds for small samples
+            print(f"   ⚠️  Small sample size (n={n_samples}), using α=3×MAD")
+        else:
+            alpha = 5.0  # Standard multiplier for reliable statistics
 
         # Compute robust statistics using median (resistant to outliers)
         spectrum_lw_f1 = np.median(linewidth_stats['lw_f1'])
@@ -320,10 +567,73 @@ class ParallelVoigtProcessor:
             'lw_f2_median': spectrum_lw_f2,
             'lg_f1_median': spectrum_lg_f1,
             'lg_f2_median': spectrum_lg_f2,
-            'n_samples': successful_fits,
+            'n_samples': n_samples,  # Use actual valid samples, not successful_fits
             'lw_f1_mad': mad_f1,
-            'lw_f2_mad': mad_f2
+            'lw_f2_mad': mad_f2,
+            'alpha': alpha  # Sample-size-dependent multiplier for PASS2 bounds
         }
+
+    def _extract_good_peaks_for_optimization(self, fitting_results):
+        """
+        Extract good isolated peaks for adaptive optimization.
+
+        Returns list of peak dicts with position, R², and residuals
+        for use by AdaptiveOptimizer.
+
+        Args:
+            fitting_results: List of cluster results from PASS1 isolated fitting
+
+        Returns:
+            List of dicts with x_ppm, y_ppm, r_squared, residuals for good peaks
+        """
+        good_peaks = []
+        _debug_done = False
+        for cluster_result in fitting_results:
+            if not cluster_result or not cluster_result.get('success'):
+                continue
+            for peak_result in cluster_result.get('peak_results', []):
+                if not peak_result or not peak_result.get('success'):
+                    continue
+
+                # Debug: show first peak_result structure
+                if not _debug_done:
+                    print(f"   DEBUG _extract: peak_result keys = {list(peak_result.keys())[:15]}")
+                    _debug_done = True
+
+                r_squared = peak_result.get('r_squared', 0)
+                if r_squared >= 0.70:
+                    # Get position - handle different key naming conventions
+                    # Standard format uses peak_x/peak_y or center_x/center_y
+                    x_ppm = (peak_result.get('peak_x') or peak_result.get('center_x') or
+                             peak_result.get('pos_x') or peak_result.get('pos_f2') or peak_result.get('x_ppm'))
+                    y_ppm = (peak_result.get('peak_y') or peak_result.get('center_y') or
+                             peak_result.get('pos_y') or peak_result.get('pos_f1') or peak_result.get('y_ppm'))
+
+                    # Skip peaks without valid positions
+                    if x_ppm is None or y_ppm is None:
+                        continue
+
+                    good_peaks.append({
+                        'x_ppm': x_ppm,
+                        'y_ppm': y_ppm,
+                        'r_squared': r_squared,
+                        'residuals': peak_result.get('residuals'),
+                        'fwhm_f1': peak_result.get('fwhm_f1'),
+                        'fwhm_f2': peak_result.get('fwhm_f2')
+                    })
+
+        # Cap at 30 peaks maximum - random sample if more available
+        max_peaks = 30
+        n_total = len(good_peaks)
+        if n_total > max_peaks:
+            np.random.seed(42)  # Reproducibility
+            indices = np.random.choice(n_total, max_peaks, replace=False)
+            good_peaks = [good_peaks[i] for i in sorted(indices)]
+            print(f"   Sampled {max_peaks} peaks from {n_total} for optimization (R² ≥ 0.70)")
+        else:
+            print(f"   Selected {n_total} peaks for optimization (R² ≥ 0.70)")
+
+        return good_peaks
 
     def _prepare_shared_context(self, all_peaks_context=None, spectrum_statistics=None):
         """
@@ -666,6 +976,15 @@ class ParallelVoigtProcessor:
                             r_squared = result.get('r_squared', 0)
                             print(f"✅ Cluster {task_id + 1}: {result['peaks_fitted']} peaks, R²={r_squared:.3f}")
 
+                            # Log individual peaks for progress dialog
+                            if progress_callback:
+                                progress = ((successful_clusters + failed_clusters) / len(async_results)) * 100
+                                task_desc = f"{pass_prefix}Parallel cluster fitting:\n{successful_clusters + failed_clusters}/{len(async_results)} clusters\n{total_peaks_processed} peaks fitted"
+                                for peak_result in result.get('peak_results', []):
+                                    assignment = peak_result.get('assignment', 'Unknown')
+                                    peak_r2 = peak_result.get('r_squared', peak_result.get('avg_r_squared', 0))
+                                    progress_callback(progress, task_desc, f"{assignment} fitted (R²={peak_r2:.3f})")
+
                         else:
                             failed_clusters += 1
                             error_msg = result.get('error', 'Unknown error')
@@ -674,14 +993,11 @@ class ParallelVoigtProcessor:
                             if 'traceback' in result:
                                 print(f"   Traceback: {result['traceback'][:200]}...")
 
-                        # Progress callback
-                        if progress_callback:
-                            progress = ((successful_clusters + failed_clusters) / len(async_results)) * 100
-                            progress_callback(
-                                progress,
-                                f"{pass_prefix}Parallel cluster fitting: {successful_clusters + failed_clusters}/{len(async_results)} clusters",
-                                f"{total_peaks_processed} peaks fitted"
-                            )
+                            # Log failed cluster for progress dialog
+                            if progress_callback:
+                                progress = ((successful_clusters + failed_clusters) / len(async_results)) * 100
+                                task_desc = f"{pass_prefix}Parallel cluster fitting:\n{successful_clusters + failed_clusters}/{len(async_results)} clusters\n{total_peaks_processed} peaks fitted"
+                                progress_callback(progress, task_desc, f"Cluster {task_id + 1} failed: {error_msg}")
 
                     except mp.TimeoutError:
                         failed_clusters += 1

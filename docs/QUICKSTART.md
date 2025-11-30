@@ -7,7 +7,7 @@
 ## 1. Launch (30 seconds)
 
 ```bash
-cd lunaNMR_v0o9
+cd lunaNMR_v1o0
 python launch_lunaNMR.py
 ```
 

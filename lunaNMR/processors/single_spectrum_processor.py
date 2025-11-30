@@ -215,9 +215,9 @@ class SingleSpectrumProcessor:
                 assignment = meta['assignment']
                 peak_number = meta['peak_number']
 
-                task_desc = f"Fitting isolated peak {peak_number}/{total_count}"
+                task_desc = f"PASS 1: Parallel cluster fitting:\n{clusters_processed}/{len(clusters)} clusters\n{self.stats['total_processed']} peaks fitted"
                 if self.progress_callback:
-                    self.progress_callback(progress, task_desc, f"Processing {assignment}")
+                    self.progress_callback(progress, task_desc, None)
 
                 print(f"   🎯 Fitting isolated peak {peak_number}: {assignment} at ({peak_x:.3f}, {peak_y:.1f})")
 
@@ -236,13 +236,24 @@ class SingleSpectrumProcessor:
                     quality = result.get('fitting_quality', 'Unknown')
                     r_squared = result.get('avg_r_squared', 0)
                     print(f"     ✅ Success: {quality} (R² = {r_squared:.3f})")
+                    # Log individual peak success for progress dialog
+                    if self.progress_callback:
+                        self.progress_callback(progress, task_desc, f"{assignment} fitted (R²={r_squared:.3f})")
                 else:
                     self.stats['failed_fits'] += 1
                     print(f"     ❌ Failed: Could not fit peak")
+                    # Log individual peak failure for progress dialog
+                    if self.progress_callback:
+                        self.progress_callback(progress, task_desc, f"{assignment} failed")
 
             else:
                 # Overlap group - 2D simultaneous fitting ONCE
                 print(f"   🎯 Fitting overlap cluster {cluster_idx+1}: {cluster_size} peaks (simultaneous 2D)")
+
+                # Update progress for cluster processing
+                task_desc = f"PASS 2: Fitting overlap cluster {cluster_idx+1}/{len(clusters)}\n{cluster_size} peaks (simultaneous 2D)"
+                if self.progress_callback:
+                    self.progress_callback(progress, task_desc, f"Cluster {cluster_idx+1}: {cluster_size} overlapping peaks")
 
                 # Collect assignments for each peak in cluster
                 cluster_assignments = []
@@ -390,9 +401,15 @@ class SingleSpectrumProcessor:
                             results_cache[(peak_x, peak_y)] = result
                             self.stats['successful_fits'] += 1
                             print(f"      ✅ Peak {meta['peak_number']} fitted: R² = {group_result['r_squared']:.3f}")
+                            # Log individual peak success for progress dialog
+                            if self.progress_callback:
+                                self.progress_callback(progress, task_desc, f"{meta['assignment']} fitted (R²={group_result['r_squared']:.3f})")
                         else:
                             self.stats['failed_fits'] += 1
                             print(f"      ❌ Peak {meta['peak_number']}: No match found in 2D result")
+                            # Log individual peak failure for progress dialog
+                            if self.progress_callback:
+                                self.progress_callback(progress, task_desc, f"{meta['assignment']} failed")
                 else:
                     # 2D fitting failed for entire cluster
                     print(f"   ⚠️ 2D fitting failed for cluster {cluster_idx+1}")
@@ -400,6 +417,9 @@ class SingleSpectrumProcessor:
                         meta = peak_metadata.get(peak_pos)
                         if meta:
                             self.stats['failed_fits'] += 1
+                            # Log cluster failure for progress dialog
+                            if self.progress_callback:
+                                self.progress_callback(progress, task_desc, f"{meta['assignment']} failed (cluster fit failed)")
 
             self.stats['total_processed'] += cluster_size
 

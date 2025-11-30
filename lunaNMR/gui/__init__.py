@@ -1,37 +1,51 @@
+# ABOUTME: GUI module for LunaNMR Qt/PySide6 interface
+# ABOUTME: Exports main window and dialog components for application launch
+
 """
-GUI Components for LunaNMR
+GUI Components for LunaNMR v1.0 (Qt/PySide6)
 
 This module contains all graphical user interface components including
-the main GUI, spectrum browser, and visualization tools.
+the main window, dialogs, and visualization tools.
+
+Note: Legacy Tkinter files have been moved to gui/_deprecated/
 
 Author: Guillaume Mas
 Date: 2025
 """
 
-try:
-    from .main_gui import NMRPeaksSeriesGUI
-except ImportError:
-    pass
+# Main Qt window
+from .main_window import LunaNMRMainWindow, main
 
-try:
-    from .spectrum_browser import SpectrumBrowser
-except ImportError:
-    pass
+# Qt Dialogs
+from .dialogs import (
+    DataLoadingDialog,
+    ConfigurationDialog,
+    SpectrumBrowserDialog,
+    MultiSpectrumViewerDialog,
+    SpectrumViewerDialog,
+    SeriesIntegrationDialog
+)
 
-try:
-    from .visualization import VoigtPlotter, create_residual_plot, create_comparison_plot
-except ImportError:
-    pass
-
-try:
-    from .gui_components import *
-except ImportError:
-    pass
+# Qt Components
+from .components import (
+    MatplotlibWidget,
+    MatplotlibMultiAxesWidget,
+    PeakNavigator
+)
 
 __all__ = [
-    'NMRPeaksSeriesGUI',
-    'SpectrumBrowser',
-    'VoigtPlotter',
-    'create_residual_plot',
-    'create_comparison_plot'
+    # Main window
+    'LunaNMRMainWindow',
+    'main',
+    # Dialogs
+    'DataLoadingDialog',
+    'ConfigurationDialog',
+    'SpectrumBrowserDialog',
+    'MultiSpectrumViewerDialog',
+    'SpectrumViewerDialog',
+    'SeriesIntegrationDialog',
+    # Components
+    'MatplotlibWidget',
+    'MatplotlibMultiAxesWidget',
+    'PeakNavigator',
 ]

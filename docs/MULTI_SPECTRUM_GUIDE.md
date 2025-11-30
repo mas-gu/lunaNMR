@@ -1,4 +1,4 @@
-# Multi-Spectrum Analysis Guide - LunaNMR v0.9
+# Multi-Spectrum Analysis Guide - LunaNMR v1.0
 
 **TL;DR**: Use **Analysis → Start Series Integration** for titrations, relaxation experiments, and time-series. Configure first spectrum, then apply identical fitting to all others with fixed peak positions. Results exported as CSV with one row per peak per spectrum.
 

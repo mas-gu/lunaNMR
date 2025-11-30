@@ -322,3 +322,22 @@ profile_*.txt
 # Memory profiling
 *.mprofile
 mprofile_*.dat
+
+# Deprecated code (preserved in v0.9.0 tag)
+_deprecated/
+old.*
+
+# Internal development docs
+MLps2d.md
+litteraturepeakfitting.md
+INTEGRATION_SUMMARY.txt
+
+# Backup files (additional patterns)
+*.backup_twopass
+
+# Internal dev docs (not for release)
+docs/phase0_completion_summary.md
+docs/how_to_lunaNMR.docx
+
+# Example data files (too large for repo)
+data_example/

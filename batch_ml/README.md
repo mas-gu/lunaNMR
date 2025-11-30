@@ -58,13 +58,13 @@ python batch_nmr_process.py /path/to/spectra --preset conservative --config cust
 
 **Option 1 - Simplest (Recommended for first run):**
 ```bash
-cd lunaNMR_v0o9/batch_ml
+cd lunaNMR_v1o0/batch_ml
 python quick_batch.py /path/to/your/100/spectra auto
 ```
 
 **Option 2 - Advanced (If you need more control):**
 ```bash
-cd lunaNMR_v0o9/batch_ml
+cd lunaNMR_v1o0/batch_ml
 python batch_nmr_process.py /path/to/your/100/spectra --optimize --preset aggressive
 # Use --preset aggressive for maximum ML training data collection
 # See "Available Presets" section below for all 6 preset options

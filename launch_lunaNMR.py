@@ -13,10 +13,10 @@ import sys
 import os
 
 # CRITICAL: Set matplotlib backend BEFORE any matplotlib imports anywhere in the application
-# This ensures NavigationToolbar2Tk renders properly on Linux systems
+# This ensures NavigationToolbar2Qt renders properly on all systems
 import matplotlib
 
-matplotlib.use("TkAgg", force=True)
+matplotlib.use("QtAgg", force=True)
 #print(f"🖼️ Matplotlib backend forced to: {matplotlib.get_backend()}")
 
 import tkinter as tk
@@ -62,7 +62,7 @@ def check_dynamixs_availability():
 def show_application_selector():
     """Show application selector GUI"""
     root = tk.Tk()
-    root.title("LunaNMR Suite v0.9")
+    root.title("LunaNMR Suite v1.0")
     root.geometry("400x300")
     root.resizable(False, False)
 
@@ -80,7 +80,7 @@ def show_application_selector():
 
     # Title
     title_label = ttk.Label(
-        main_frame, text="LunaNMR Suite v0.9", font=("Arial", 16, "bold")
+        main_frame, text="LunaNMR Suite v1.0", font=("Arial", 16, "bold")
     )
     title_label.pack(pady=(0, 20))
 
@@ -160,9 +160,9 @@ def show_application_selector():
 
 
 def launch_lunaNMR():
-    """Launch LunaNMR application"""
+    """Launch LunaNMR application (Qt/PySide6 version)"""
     try:
-        from lunaNMR.gui.main_gui import main as gui_main
+        from lunaNMR.gui.main_window import main as gui_main
 
         gui_main()
         return True
@@ -189,7 +189,7 @@ def launch_dynamixs():
 
 def main():
     """Main launcher function"""
-    print("LunaNMR Suite v0.9 - Starting...")
+    print("LunaNMR Suite v1.0 - Starting...")
 
     # Setup paths
     current_dir, parent_dir = setup_paths()

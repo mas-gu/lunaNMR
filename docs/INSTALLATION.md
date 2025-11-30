@@ -1,4 +1,4 @@
-# Installation Guide – lunaNMR v0.9
+# Installation Guide – lunaNMR v1.0
 
 Follow these steps to get lunaNMR running on macOS, Linux, or Windows with an activated Python environment and the correct native dependencies.
 
@@ -13,10 +13,10 @@ Follow these steps to get lunaNMR running on macOS, Linux, or Windows with an ac
 ```bash
 # Clone the repository
 git clone <your fork or upstream>
-cd lunaNMR_v0o9
+cd lunaNMR_v1o0
 ```
 
-If you downloaded an archive, extract it and open the extracted `lunaNMR_v0o9` folder in your terminal.
+If you downloaded an archive, extract it and open the extracted `lunaNMR_v1o0` folder in your terminal.
 
 ## 3. (Recommended) Create a Virtual Environment
 
@@ -93,6 +93,6 @@ Re-run the verification script to confirm that compiled extensions (Numba) still
 
 ## 9. Uninstallation / Cleanup
 
-Deactivate and remove your virtual environment, then delete the `lunaNMR_v0o9` directory. There are no system-wide services to stop.
+Deactivate and remove your virtual environment, then delete the `lunaNMR_v1o0` directory. There are no system-wide services to stop.
 
 You are now ready to explore the GUI or the batch processing CLI.

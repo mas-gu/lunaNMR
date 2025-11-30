@@ -23,14 +23,8 @@ nmrglue>=0.9.0
 # System monitoring (optional - for performance tracking)
 psutil>=5.8.0
 
-# GUI framework
-# tkinter is part of Python standard library
-# Note: On some Linux distributions, tkinter may need to be installed separately:
-#   Ubuntu/Debian: sudo apt-get install python3-tk
-#   CentOS/RHEL/Fedora: sudo yum install tkinter or sudo dnf install python3-tkinter
-
-# Modern GUI styling with rounded buttons and clean appearance
-customtkinter>=5.0.0
+# GUI framework - Qt for modern cross-platform UI
+PySide6>=6.6.0
 
 # Note: The following are Python standard library modules (no installation needed):
 # - os, sys, time, threading, subprocess, json, glob, warnings

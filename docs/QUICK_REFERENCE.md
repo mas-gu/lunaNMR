@@ -6,7 +6,7 @@
 
 ## Launch
 ```bash
-cd lunaNMR_v0o9
+cd lunaNMR_v1o0
 python3 launch_lunaNMR.py
 ```
 
@@ -181,7 +181,7 @@ Typical linewidths: 0.02/0.08 ppm (1H/13C)
 
 ## Support
 
-**Documentation:** `/lunaNMR_v0o9/docs/`
+**Documentation:** `/lunaNMR_v1o0/docs/`
 
 **Issues:** Check console output for error messages
 

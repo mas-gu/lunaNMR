@@ -581,7 +581,8 @@ class Ps2dMultiPeakFitter2D:
                           initial_peaks: List[Dict],
                           fix_positions: bool = False,
                           fix_linewidths: bool = False,
-                          data_mask: np.ndarray = None) -> Dict:
+                          data_mask: np.ndarray = None,
+                          spectrum_statistics: Dict = None) -> Dict:
         """
         Fit multiple overlapping 2D Voigt peaks simultaneously
 
@@ -604,6 +605,10 @@ class Ps2dMultiPeakFitter2D:
             If True, linewidths are fixed during fitting
         data_mask : np.ndarray, optional
             Boolean mask indicating which data points to use for fitting.
+        spectrum_statistics : dict, optional
+            Learned linewidth statistics from PASS1 isolated peak fitting.
+            Used to compute adaptive bounds: min(config_max, median + 5×MAD).
+            Keys: 'lw_f1_median', 'lw_f1_mad', 'lw_f2_median', 'lw_f2_mad'.
             PS2D uses union of elliptical windows
             If None, all data points are used (NOT recommended for overlapping peaks).
 
@@ -714,17 +719,79 @@ class Ps2dMultiPeakFitter2D:
         median_lw_lor_f2 = np.median(initial_lw_lor_f2)
         median_lw_gau_f2 = np.median(initial_lw_gau_f2)
 
-        # Absolute linewidth bounds (PINT-inspired: generous physical limits)
-        # These replace median-based bounds to give optimizer full freedom
-        # Based on physical reality rather than initial guesses
-        # LOWERED minimum bounds to allow nearly pure Gaussian peaks (common in high-quality NMR)
-        absolute_min_lw_f1 = 0.0001  # Minimum realistic 15N/13C linewidth (ppm) - LOWERED from 0.001
-        absolute_max_lw_f1 = 2.0    # Maximum realistic 15N/13C linewidth (ppm)
-        absolute_min_lw_f2 = 0.000005 # Minimum realistic 1H linewidth (ppm) - LOWERED from 0.00005
-        absolute_max_lw_f2 = 0.2    # Maximum realistic 1H linewidth (ppm)
-
-        # Get nucleus-adaptive position margins from centralized config
+        # Get nucleus-adaptive parameters from centralized config
         config = get_ps2d_config()
+
+        # ====================================================================
+        # ADAPTIVE LINEWIDTH BOUNDS (PASS1 → PASS2 Learning)
+        # ====================================================================
+        # Two-pass fitting strategy:
+        #   PASS1: Fit isolated peaks, collect linewidth statistics (median, MAD)
+        #   PASS2: Fit clusters using learned bounds from PASS1
+        #
+        # Bound formula: min(config_hard_cap, learned_median + 5×MAD)
+        #   - 5×MAD ≈ 7.4σ for Gaussian, captures virtually all real variation
+        #   - MAD (Median Absolute Deviation) is robust to outliers
+        #   - Config max acts as hard safety cap (prevents runaway optimization)
+        #
+        # Benefits:
+        #   - Data-driven: adapts to actual spectrum linewidth distribution
+        #   - Tighter bounds prevent optimizer wandering into unrealistic values
+        #   - Works automatically - no manual parameter tuning needed
+        # ====================================================================
+
+        # Minimum bounds (allow nearly pure Gaussian peaks)
+        absolute_min_lw_f1 = 0.0001   # Minimum realistic 15N/13C linewidth (ppm)
+        absolute_min_lw_f2 = 0.000005 # Minimum realistic 1H linewidth (ppm)
+
+        # Maximum bounds: use learned statistics if available, else config defaults
+        if spectrum_statistics is not None:
+            # ================================================================
+            # LEARNED BOUNDS WITH MINIMUM MAD FLOOR
+            # ================================================================
+            # Formula: median + α×MAD, capped by config hard limit
+            # - α is sample-size-dependent (7 for n<10, 5 for n≥10)
+            # - MAD has minimum floor (5% of typical) to prevent overly tight bounds
+            # ================================================================
+
+            # Get sample-size-dependent alpha from statistics (default 5.0)
+            alpha = spectrum_statistics.get('alpha', 5.0)
+
+            # Minimum MAD floor: 5% of typical linewidth
+            # Prevents zero or near-zero MAD from creating overly tight bounds
+            MIN_MAD_F1 = config.typical_linewidth_f1 * 0.05
+            MIN_MAD_F2 = config.typical_linewidth_f2 * 0.05
+
+            # Apply MAD floor
+            mad_f1 = max(spectrum_statistics.get('lw_f1_mad', MIN_MAD_F1), MIN_MAD_F1)
+            mad_f2 = max(spectrum_statistics.get('lw_f2_mad', MIN_MAD_F2), MIN_MAD_F2)
+
+            # Calculate learned bounds: median + α×MAD
+            median_f1 = spectrum_statistics.get('lw_f1_median', config.typical_linewidth_f1)
+            median_f2 = spectrum_statistics.get('lw_f2_median', config.typical_linewidth_f2)
+
+            learned_max_f1 = median_f1 + alpha * mad_f1
+            learned_max_f2 = median_f2 + alpha * mad_f2
+
+            # Cap by config maximum (safety limit)
+            absolute_max_lw_f1 = min(config.max_linewidth_f1, learned_max_f1)
+            absolute_max_lw_f2 = min(config.max_linewidth_f2, learned_max_f2)
+
+            if self.verbose:
+                n_samples = spectrum_statistics.get('n_samples', 0)
+                print(f"      📊 Using learned bounds from PASS1 (n={n_samples}, α={alpha:.0f}×MAD):")
+                print(f"         F1: median={median_f1:.4f}, MAD={mad_f1:.4f} → max={absolute_max_lw_f1:.4f} ppm (cap={config.max_linewidth_f1:.2f})")
+                print(f"         F2: median={median_f2:.5f}, MAD={mad_f2:.5f} → max={absolute_max_lw_f2:.5f} ppm (cap={config.max_linewidth_f2:.3f})")
+
+                # Warning if learned bounds exceed config cap
+                if learned_max_f1 > config.max_linewidth_f1:
+                    print(f"      ⚠️  Learned F1 bound ({learned_max_f1:.3f}) exceeds config cap - spectrum may have broad peaks")
+                if learned_max_f2 > config.max_linewidth_f2:
+                    print(f"      ⚠️  Learned F2 bound ({learned_max_f2:.4f}) exceeds config cap - spectrum may have broad peaks")
+        else:
+            # Fallback: use config defaults (nucleus-adaptive, 2-3× typical)
+            absolute_max_lw_f1 = config.max_linewidth_f1
+            absolute_max_lw_f2 = config.max_linewidth_f2
 
         # Calculate cluster-wide intensity bounds to prevent artificial constraints
         # Root cause: Per-peak bounds from contaminated 1D cross-sections can trap peaks

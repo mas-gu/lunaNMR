@@ -257,6 +257,11 @@ class VoigtIntegrator(BaseIntegrator):
         self.detected_nucleus_type = None
         self.gui_window_override = {'x': None, 'y': None}  # Track GUI overrides
 
+        # PASS1→PASS2 Learning: Statistics from isolated peak fitting (parallel mode)
+        # Set by parallel_voigt_processor after PASS1 completes
+        # Contains: lw_f1_median, lw_f2_median, lw_f1_mad, lw_f2_mad, alpha, n_samples
+        self.spectrum_statistics = None
+
         # Nucleus-specific default fitting windows
         # In HSQC: X-axis=1H (direct), Y-axis=15N (indirect)
         self.nucleus_default_windows = {
@@ -2522,16 +2527,25 @@ class VoigtIntegrator(BaseIntegrator):
                     break
 
             # ====================================================================
-            # CONDITIONAL LINEWIDTH ESTIMATION
+            # LINEWIDTH ESTIMATION FOR CLUSTER PEAKS
             # ====================================================================
-            if heavily_overlapping:
-                # Use spectrum-typical linewidths (not contaminated by overlap)
-                #print(f"      ⚠️  Heavy overlap detected for peak at ({x_ppm:.3f}, {y_ppm:.3f})")
-                #print(f"         Using typical linewidths instead of measured FWHM")
+            # For ALL peaks in multi-peak clusters (PASS 2), use learned statistics
+            # from isolated peaks (PASS 1) when available. This avoids contamination
+            # from neighbor peaks in 1D cross-section measurements.
+            # ====================================================================
+            if hasattr(self, 'spectrum_statistics') and self.spectrum_statistics:
+                # Use learned linewidths from PASS 1 isolated peaks
+                fwhm_f1 = self.spectrum_statistics['lw_f1_median']
+                fwhm_f2 = self.spectrum_statistics['lw_f2_median']
+                # Log first peak only to avoid spam
+                if len(initial_peaks) == 0:
+                    print(f"      📊 Using learned LW from PASS1: F1={fwhm_f1:.4f}, F2={fwhm_f2:.5f} ppm")
+            elif heavily_overlapping:
+                # Fallback: Use config typical linewidths for heavy overlap
                 fwhm_f1 = config.typical_linewidth_f1
                 fwhm_f2 = config.typical_linewidth_f2
             else:
-                # Estimate linewidths from 1D cross-sections FWHM (accurate for separated peaks)
+                # Fallback: Estimate from 1D cross-sections (may have some contamination)
                 f1_cross = region['intensity'][:, x_idx]  # F1 slice at peak F2 position
                 f2_cross = region['intensity'][y_idx, :]  # F2 slice at peak F1 position
 
@@ -2683,13 +2697,19 @@ class VoigtIntegrator(BaseIntegrator):
         # Constraint parameters controlled by ps2d_2d_fitter.py constructor defaults
         # To enable/disable constraints, change defaults in ps2d_2d_fitter.py:111
         # verbose=True with PROGRESS_PRINT_INTERVAL=200 (prints every 200 iterations)
+        #
+        # PASS1→PASS2 Learning: Pass spectrum_statistics for adaptive bounds
+        # If available, fitter uses median + 5×MAD to constrain linewidth bounds
+        spectrum_stats = getattr(self, 'spectrum_statistics', None)
+
         fitter = Ps2dMultiPeakFitter2D(verbose=True)
         result = fitter.fit_multi_peak_2d(
             region['f1_grid'], region['f2_grid'], normalized_data,
             initial_peaks,
             fix_positions=fix_positions,    # Pass GUI checkbox state
             fix_linewidths=fix_linewidths,  # Pass GUI checkbox state
-            data_mask=data_mask
+            data_mask=data_mask,
+            spectrum_statistics=spectrum_stats  # PASS1 learned statistics for bounds
         )
 
         # Denormalize fitted intensities AND derived quantities

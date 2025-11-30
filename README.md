@@ -1,4 +1,4 @@
-# LunaNMR v0.9
+# LunaNMR v1.0
 
 **Advanced NMR Peak Analysis and Integration Suite**
 
@@ -44,7 +44,7 @@ LunaNMR is a professional-grade software suite for Nuclear Magnetic Resonance (N
 1. **Clone the repository:**
 ```bash
 git clone https://github.com/your-username/lunaNMR.git
-cd lunaNMR/lunaNMR_v0o9
+cd lunaNMR/lunaNMR_v1o0
 ```
 
 2. **Install dependencies:**
@@ -66,7 +66,7 @@ python3 launch_lunaNMR.py
 ## Package Structure
 
 ```
-lunaNMR_v0o9/
+lunaNMR_v1o0/
 ├──  launch_lunaNMR.py          # Unified application launcher
 ├──  lunaNMR/                   # Main package
 │   ├── ️ gui/                   # Graphical user interface
@@ -107,7 +107,7 @@ Launch `python3 launch_lunaNMR.py` to access the unified launcher:
 
 ```
 ┌─────────────────────────────────────────┐
-│           LunaNMR Suite v0.9            │
+│           LunaNMR Suite v1.0            │
 │                                         │
 │  Select Application to Launch:          │
 │                                         │
@@ -164,7 +164,7 @@ We welcome contributions from the NMR community! Please see our contributing gui
 ```bash
 # Clone repository
 git clone https://github.com/your-username/lunaNMR.git
-cd lunaNMR/lunaNMR_v0o9
+cd lunaNMR/lunaNMR_v1o0
 
 # Create development environment
 python3 -m venv dev_env
@@ -226,7 +226,7 @@ If you use LunaNMR in your research, please cite:
   title = {LunaNMR: Advanced NMR Peak Analysis and Integration Suite},
   author = {LunaNMR Contributors},
   year = {2025},
-  version = {0.9},
+  version = {1.0},
   url = {https://github.com/mas-gu/lunaNMR},
   license = {MIT}
 }

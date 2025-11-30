@@ -1,4 +1,4 @@
-# LunaNMR v0.9 Documentation
+# LunaNMR v1.0 Documentation
 
 **TL;DR**: Start with [QUICKSTART.md](QUICKSTART.md) → Explore [GUI_GUIDE.md](GUI_GUIDE.md) for features → Consult [ALGORITHMS.md](ALGORITHMS.md) for technical details.
 
@@ -201,7 +201,7 @@ When updating documentation:
 
 ## Version History
 
-- **v0.9** (2025): PS2D 2D simultaneous fitting, parallel processing, series integration
+- **v1.0** (2025): PS2D 2D simultaneous fitting, parallel processing, series integration
 - **v0.8**: Enhanced peak detection with centroid refinement
 - **v0.7**: Initial GUI implementation
 

@@ -77,6 +77,10 @@ class PS2DConfig:
             'typical_linewidth_f1': 0.4,    # Typical 15N FWHM (ppm) - matched to user's spectrum
             'typical_linewidth_f2': 0.04,   # Typical 1H FWHM (ppm) - matched to user's spectrum
 
+            # Maximum allowed linewidths (2× typical) - prevents optimizer wandering
+            'max_linewidth_f1': 0.8,        # Max 15N linewidth (ppm) - 2× typical
+            'max_linewidth_f2': 0.08,       # Max 1H linewidth (ppm) - 2× typical
+
             # ================================================================
             # Heavy overlap threshold (contaminated cross-sections)
             # ================================================================
@@ -130,17 +134,21 @@ class PS2DConfig:
             # Overlap distance multiplier controls aggressiveness (1.0 = strict, 2.0 = very aggressive)
             # Gap thresholds are computed as 0.5 × overlap thresholds
             'overlap_threshold_x': 0.04,  # 1H dimension - radius of orange circle
-            'overlap_threshold_y': 0.1,   # 13C dimension - radius of orange circle
+            'overlap_threshold_y': 0.15,  # 13C dimension - 1.5× typical linewidth
             'overlap_distance_multiplier': 1.0,  # Aggressiveness: increase to catch more diagonal overlaps (try 1.5-2.0)
 
             # Linewidth constraints (realistic minimums based on actual peak widths)
-            'min_linewidth_f1': 0.025,    # Minimum 13C linewidth (~half of typical 0.05-0.08 ppm FWHM)
+            'min_linewidth_f1': 0.025,    # Minimum 13C linewidth (~half of typical)
             'min_linewidth_f2': 0.005,    # Minimum 1H linewidth
 
             # Typical linewidths for initial guesses in heavy overlap situations
             # Used when measured FWHM is unreliable due to contamination from neighbors
-            'typical_linewidth_f1': 0.06,   # Typical 13C FWHM (ppm)
-            'typical_linewidth_f2': 0.04,   # Typical 1H FWHM (ppm) - matched to typical spectra
+            'typical_linewidth_f1': 0.1,    # Typical 13C FWHM (ppm)
+            'typical_linewidth_f2': 0.04,   # Typical 1H FWHM (ppm)
+
+            # Maximum allowed linewidths - prevents optimizer wandering
+            'max_linewidth_f1': 0.18,       # Max 13C linewidth (ppm) - 3× typical
+            'max_linewidth_f2': 0.08,       # Max 1H linewidth (ppm) - 2× typical
 
             # ================================================================
             # Heavy overlap threshold (contaminated cross-sections)
@@ -160,8 +168,8 @@ class PS2DConfig:
             'pos_margin_f1': 0.05,        # Allow ±0.04 ppm movement (relaxed)
             'pos_margin_f2': 0.02,        # Allow ±0.04 ppm movement
 
-            # Cluster size limits (allow larger groups as requested)
-            'max_cluster_size': 6,        # Max 6 peaks per cluster (same as 15N)
+            # Cluster size limits
+            'max_cluster_size': 8,        # Maximum peaks in overlap group
 
             # Levenberg-Marquardt optimizer settings
             'max_iterations': 500,        # Maximum LM iterations per stage
