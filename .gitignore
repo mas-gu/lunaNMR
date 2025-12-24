@@ -286,6 +286,7 @@ debug_*.py
 *~
 *.swp
 *.swo
+backup.*.py
 
 # Large data files
 *.zip
