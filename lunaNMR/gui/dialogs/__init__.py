@@ -8,7 +8,10 @@ from .spectrum_browser_dialog import SpectrumBrowserDialog
 from .multi_spectrum_viewer_dialog import MultiSpectrumViewerDialog
 from .spectrum_viewer_dialog import SpectrumViewerDialog
 from .series_integration_dialog import SeriesIntegrationDialog
+from .series_manager_dialog import SeriesManagerDialog
 from .results_browser_dialog import ResultsBrowserDialog
+from .missing_files_dialog import MissingFilesDialog
+from .dynamixs_dialog import DynamiXsDialog
 
 __all__ = [
     'DataLoadingDialog',
@@ -17,5 +20,8 @@ __all__ = [
     'MultiSpectrumViewerDialog',
     'SpectrumViewerDialog',
     'SeriesIntegrationDialog',
-    'ResultsBrowserDialog'
+    'SeriesManagerDialog',
+    'ResultsBrowserDialog',
+    'MissingFilesDialog',
+    'DynamiXsDialog',
 ]

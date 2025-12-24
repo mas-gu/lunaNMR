@@ -188,7 +188,7 @@ def launch_dynamixs():
 
 
 def main():
-    """Main launcher function"""
+    """Main launcher function - directly launches LunaNMR"""
     print("LunaNMR Suite v1.0 - Starting...")
 
     # Setup paths
@@ -209,24 +209,10 @@ def main():
 
         return False
 
-    # Show application selector
-    selected_app = show_application_selector()
-
-    if selected_app is None:
-        print("Launch cancelled by user")
-        return True
-
-    # Launch selected application
+    # Directly launch LunaNMR (bypass application selector)
     try:
-        if selected_app == "lunaNMR":
-            print("Launching LunaNMR...")
-            success = launch_lunaNMR()
-        elif selected_app == "dynamixs":
-            print("Launching DynamiXs...")
-            success = launch_dynamixs()
-        else:
-            print(f"Unknown application: {selected_app}")
-            return False
+        print("Launching LunaNMR...")
+        success = launch_lunaNMR()
 
         if success:
             print("Application closed normally")

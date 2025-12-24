@@ -286,24 +286,6 @@ class BaseDialog(QDialog):
         frame_geometry.moveCenter(screen_center)
         self.move(frame_geometry.topLeft())
 
-    def set_margins(
-        self,
-        left: int = 10,
-        top: int = 10,
-        right: int = 10,
-        bottom: int = 10
-    ) -> None:
-        """Set content margins for the dialog.
-
-        Args:
-            left: Left margin in pixels
-            top: Top margin in pixels
-            right: Right margin in pixels
-            bottom: Bottom margin in pixels
-        """
-        if self.layout():
-            self.layout().setContentsMargins(left, top, right, bottom)
-
     def get_stylesheet_path(self) -> Path:
         """Get the path to the main stylesheet file.
 

@@ -158,15 +158,6 @@ class BaseWindow(QMainWindow):
         if self._status_bar_enabled and self.statusBar():
             self.statusBar().showMessage(message, timeout)
 
-    def clear_status(self) -> None:
-        """Clear the status bar message.
-
-        Note:
-            If status bar is not enabled, this method does nothing.
-        """
-        if self._status_bar_enabled and self.statusBar():
-            self.statusBar().clearMessage()
-
     def create_menu_bar(self) -> QMenuBar:
         """Create and return the window's menu bar.
 
@@ -182,23 +173,6 @@ class BaseWindow(QMainWindow):
         """
         menu_bar = self.menuBar()
         return menu_bar
-
-    def set_central_widget_margins(
-        self,
-        left: int = 0,
-        top: int = 0,
-        right: int = 0,
-        bottom: int = 0
-    ) -> None:
-        """Set margins around the central widget area.
-
-        Args:
-            left: Left margin in pixels
-            top: Top margin in pixels
-            right: Right margin in pixels
-            bottom: Bottom margin in pixels
-        """
-        self.centralWidget().setContentsMargins(left, top, right, bottom)
 
     def center_on_screen(self) -> None:
         """Center the window on the screen.

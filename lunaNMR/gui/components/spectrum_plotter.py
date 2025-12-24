@@ -23,9 +23,10 @@ Date: 2025
 """
 
 import numpy as np
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
+from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
 from lunaNMR.gui.styles.design_system import (
     PRIMARY_BUTTON_BG,
     SUCCESS_GREEN,
@@ -52,18 +53,20 @@ class SpectrumPlotter(MatplotlibWidget):
     Inherits from MatplotlibWidget for consistent matplotlib integration.
 
     Signals:
-        peak_clicked: Emitted when a peak is clicked (x_ppm, y_ppm)
+        peak_clicked: Emitted when a peak is clicked (x_ppm, y_ppm) [legacy]
+        peak_edit_requested: Emitted when modifier+click for peak editing (x_ppm, y_ppm, modifiers)
     """
 
     peak_clicked = Signal(float, float)
+    peak_edit_requested = Signal(float, float, object)  # x_ppm, y_ppm, Qt.KeyboardModifiers
 
-    def __init__(self, parent=None, toolbar=True, figsize=(8, 6)):
+    def __init__(self, parent=None, toolbar=False, figsize=(8, 6)):
         """
         Initialize the spectrum plotter widget.
 
         Args:
             parent: Parent Qt widget
-            toolbar: Show matplotlib navigation toolbar
+            toolbar: Show matplotlib navigation toolbar (default False, uses custom navigation)
             figsize: Figure size in inches (width, height)
         """
         super().__init__(parent=parent, toolbar=toolbar, figsize=figsize, tight_layout=False)
@@ -94,8 +97,11 @@ class SpectrumPlotter(MatplotlibWidget):
             'alpha': 0.7
         }
 
-        # Connect click events
-        self.canvas.mpl_connect('button_press_event', self._on_click)
+        # Setup navigation handler for pan/zoom
+        self._nav_handler = NMRNavigationHandler()
+        self._nav_handler.attach(self)
+        self._nav_handler.on_peak_edit = self._on_peak_edit_request
+        self._nav_handler.on_reset_zoom = self.reset_zoom
 
     def plot_spectrum(self, integrator, **kwargs):
         """
@@ -570,29 +576,6 @@ class SpectrumPlotter(MatplotlibWidget):
         self.ax.add_patch(circle)
         self.canvas.draw()
 
-    def add_crosshair(self, x, y):
-        """
-        Add crosshair lines at specified position.
-
-        Args:
-            x: X coordinate (ppm)
-            y: Y coordinate (ppm)
-        """
-        # Remove old crosshairs
-        for line in self.crosshair_lines:
-            try:
-                line.remove()
-            except:
-                pass
-        self.crosshair_lines.clear()
-
-        # Add new crosshairs
-        vline = self.ax.axvline(x, color='red', linestyle='--', alpha=0.5, linewidth=1)
-        hline = self.ax.axhline(y, color='red', linestyle='--', alpha=0.5, linewidth=1)
-        self.crosshair_lines.extend([vline, hline])
-
-        self.canvas.draw()
-
     def set_zoom(self, x_center, y_center, x_range, y_range):
         """
         Set zoom to specific region.
@@ -638,17 +621,18 @@ class SpectrumPlotter(MatplotlibWidget):
         self.colorbar_ax = None
         self.refresh()
 
-    def update_view(self):
-        """Refresh the display."""
-        self.refresh()
-
-    def _on_click(self, event):
+    def _on_peak_edit_request(self, x_ppm: float, y_ppm: float, modifiers):
         """
-        Handle mouse click events.
+        Handle peak edit request from navigation handler.
+
+        This is called when Shift+click or Ctrl+click is performed.
 
         Args:
-            event: Matplotlib mouse event
+            x_ppm: X coordinate in ppm
+            y_ppm: Y coordinate in ppm
+            modifiers: Qt.KeyboardModifiers indicating which modifier keys are pressed
         """
-        if event.inaxes == self.ax and event.xdata and event.ydata:
-            # Emit signal with clicked coordinates
-            self.peak_clicked.emit(event.xdata, event.ydata)
+        # Emit signal for main window to handle peak editing
+        self.peak_edit_requested.emit(x_ppm, y_ppm, modifiers)
+        # Also emit legacy signal for backward compatibility
+        self.peak_clicked.emit(x_ppm, y_ppm)

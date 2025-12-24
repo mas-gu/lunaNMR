@@ -1479,15 +1479,6 @@ class BatchProcessor:
         self.logger.info(f"\nSuccess rate: {success_rate:.1f}%")
         self.logger.info("="*60)
 
-    def get_processing_statistics(self) -> Dict[str, Any]:
-        """
-        Get current processing statistics.
-
-        Returns:
-            Dictionary with current processing statistics
-        """
-        return self.stats.copy()
-
     def _detect_nucleus_type(self, file_path: Path) -> str:
         """
         Detect nucleus type from file path using enhanced detection methods.
@@ -1544,29 +1535,6 @@ class BatchProcessor:
             'max_iterations': int(self.config.get('max_iterations', 1000)),
             'convergence_tolerance': float(self.config.get('convergence_tolerance', 1e-8))
         }
-
-    def _prepare_processing_parameters(self, nucleus_type: str) -> Dict[str, Any]:
-        """
-        Prepare complete processing parameters for a nucleus type.
-
-        Args:
-            nucleus_type: Type of nucleus
-
-        Returns:
-            Complete parameter dictionary for processing
-        """
-        base_params = self._get_nucleus_parameters(nucleus_type)
-
-        # Add additional processing parameters
-        processing_params = {
-            **base_params,
-            'skip_on_error': self.config.get('skip_on_error', True),
-            'max_optimization_iterations': int(self.config.get('max_optimization_iterations', 50)),
-            'baseline_max_iter': int(self.config.get('baseline_max_iter', 50)),
-            'detailed_logging': self.config.get('detailed_logging', True)
-        }
-
-        return processing_params
 
 if __name__ == "__main__":
     # Basic command-line usage

@@ -395,45 +395,6 @@ class ConfigManager:
             for name, preset in self.presets.items()
         }
 
-    def validate_parameters_for_nucleus(self, nucleus_type: str, config: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Get and validate parameters for a specific nucleus type.
-
-        Args:
-            nucleus_type: Type of nucleus ('15N1H', '13C1H', etc.)
-            config: Configuration dictionary
-
-        Returns:
-            Dictionary with validated parameters for the nucleus type
-        """
-        proc_config = config.get('processing', {})
-
-        # Get parameters for specific nucleus type or defaults
-        sn_threshold = proc_config.get('sn_thresholds', {}).get(
-            nucleus_type, proc_config.get('sn_thresholds', {}).get('default', 2.2)
-        )
-
-        expected_peaks = proc_config.get('expected_peaks', {}).get(
-            nucleus_type, proc_config.get('expected_peaks', {}).get('default', 50)
-        )
-
-        # Validate parameters
-        if sn_threshold <= 0:
-            self.logger.warning(f"Invalid S/N threshold for {nucleus_type}: {sn_threshold}, using default")
-            sn_threshold = 2.2
-
-        if expected_peaks <= 0:
-            self.logger.warning(f"Invalid expected peaks for {nucleus_type}: {expected_peaks}, using default")
-            expected_peaks = 50
-
-        return {
-            'nucleus_type': nucleus_type,
-            'sn_threshold': float(sn_threshold),
-            'expected_peak_count': int(expected_peaks),
-            'quality_threshold': float(proc_config.get('quality_threshold', 0.8)),
-            'max_attempts': int(proc_config.get('max_fitting_attempts', 3))
-        }
-
     def create_example_config(self, output_path: Union[str, Path]):
         """
         Create an example configuration file with comments.

@@ -2,7 +2,7 @@
 PS2D-Style Multi-Peak Voigt Fitter for LunaNMR
 ==============================================
 
-Complete port of  multi-peak fitting implementation (C++ → Python).
+Complete port of  multi-peak fitting implementation.
 Implements the exact 5-stage fitting strategy 
 fitting of multiple overlapping Voigt peaks.
 
@@ -17,7 +17,7 @@ fitting of multiple overlapping Voigt peaks.
 
 
 Date: 2025-10-04
-Version: 1.0 - MULTI_PEAK_PS2D_EXACT_PORT
+Version: 1.0 - 
 """
 
 import numpy as np
@@ -25,6 +25,8 @@ from scipy.special import wofz
 from scipy.optimize import least_squares
 from typing import Dict, List, Tuple, Optional, Union
 import warnings
+
+from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
 # ============================================================================
 # MATHEMATICAL CONSTANTS 
@@ -102,30 +104,6 @@ class Ps2dLinewidthEstimator:
         else:
             # Default to 1H if ambiguous
             return '1H'
-
-    def set_user_override(self, assignment: str, dimension: str,
-                         lw_lorentz: float, lw_gauss: float):
-        """
-        Set user-specified linewidth override 
-
-        Parameters
-        ----------
-        assignment : str
-            Peak assignment (e.g., 'A123', 'G45')
-        dimension : str
-            Dimension identifier ('1H', '15N', 'x', 'y')
-        lw_lorentz : float
-            Lorentzian FWHM (ppm)
-        lw_gauss : float
-            Gaussian FWHM (ppm)
-        """
-        if assignment not in self.user_overrides:
-            self.user_overrides[assignment] = {}
-
-        self.user_overrides[assignment][dimension] = {
-            'lw_lorentz': lw_lorentz,
-            'lw_gauss': lw_gauss
-        }
 
     def register_fitted_peak(self, dimension: str, lw_lorentz: float, lw_gauss: float,
                             assignment: str = None):
@@ -352,12 +330,6 @@ def get_global_estimator() -> Ps2dLinewidthEstimator:
     Ps2dLinewidthEstimator : Global estimator with accumulated knowledge
     """
     return _global_linewidth_estimator
-
-
-def reset_global_estimator():
-    """Reset global estimator to initial state (for new spectrum/session)"""
-    global _global_linewidth_estimator
-    _global_linewidth_estimator = Ps2dLinewidthEstimator()
 
 
 # ============================================================================
@@ -662,11 +634,6 @@ class Ps2dMultiPeakFitter:
                 f"For more peaks, consider alternative methods or split the spectrum."
             )
 
-        if self.verbose:
-            print(f"\n=== PS2D Multi-Peak Fitter ===")
-            print(f"Number of peaks: {n_peaks}")
-            print(f"Data points: {len(x_data)}")
-
         # Set default flags
         if fix_positions is None:
             fix_positions = [False] * n_peaks
@@ -690,32 +657,22 @@ class Ps2dMultiPeakFitter:
 
         # STAGE 0: VOIGT warm-up (optional)
         if self.use_voigt_warmup:
-            if self.verbose:
-                print("\n--- Stage 0: Intensity-only warm-up ---")
             params_current = self._fit_stage_zero(x_data, y_data, params_init, n_peaks)
         else:
             params_current = params_init.copy()
 
         # STAGE 0: Fit linewidths (positions fixed)
-        if self.verbose:
-            print("\n--- Stage 0: Linewidth fitting (positions fixed) ---")
         result_stage1 = self._fit_stage_one(x_data, y_data, params_current, n_peaks)
         params_current = result_stage1.x
 
         # STAGE 1: Float positions (if not fixed by user)
         if not all(fix_positions):
-            if self.verbose:
-                print("\n--- Stage 1: Position refinement ---")
             result_stage2 = self._fit_stage_two(x_data, y_data, params_current, n_peaks)
             params_current = result_stage2.x
         else:
-            if self.verbose:
-                print("\n--- Stage 1: Skipped (all positions fixed) ---")
             result_stage2 = result_stage1
 
         # STAGE 2: Final global optimization
-        if self.verbose:
-            print("\n--- Stage 2: Final global optimization ---")
         result_final = self._fit_stage_four(x_data, y_data, params_current, n_peaks)
 
         # Extract results
@@ -786,13 +743,6 @@ class Ps2dMultiPeakFitter:
             'convergence_flag': self.convergence_flag,
             'method': 'ps2d_multi_peak_5_stage'
         }
-
-        if self.verbose:
-            print(f"\n=== Fitting Complete ===")
-            print(f"Success: {result_final.success}")
-            print(f"R²: {self.r_squared:.6f}")
-            print(f"χ²: {self.chi2:.6e}")
-            print(f"Convergence flag: {self.convergence_flag}")
 
         return results
 
@@ -904,9 +854,6 @@ class Ps2dMultiPeakFitter:
             ftol=1e-8,
             xtol=1e-8
         )
-
-        if self.verbose:
-            print(f"  Iterations: {result.nfev}, Chi²: {np.sum(result.fun**2):.6e}")
 
         return result.x
 
@@ -1044,10 +991,8 @@ class Ps2dMultiPeakFitter:
             upper[base_idx + 3] = np.inf
 
 
-        # If all positions are fixed, skip optimization 
+        # If all positions are fixed, skip optimization
         if not any_floating_positions:
-            if self.verbose:
-                print("  All positions fixed - stage skipped")
             # Return identity result
             class IdentityResult:
                 def __init__(self, x):
@@ -1100,11 +1045,6 @@ class Ps2dMultiPeakFitter:
         upper = np.full_like(params_init, np.inf)
 
         eps = 1e-10  # Small epsilon to avoid lower==upper
-
-        if self.verbose:
-            print(f"   [Stage 4] Constraint enforcement:")
-            for i in range(n_peaks):
-                print(f"      Peak {i+1}: fixPos={self.fix_positions[i]}, fixLW={self.fix_linewidths[i]}, pos_init={params_init[i*4]:.4f}")
 
         for i in range(n_peaks):
             base_idx = i * 4
@@ -1160,15 +1100,6 @@ class Ps2dMultiPeakFitter:
             ftol=1e-8,
             xtol=1e-8
         )
-
-        if self.verbose:
-            print(f"      Stage 4 iterations: {result.nfev}, Chi²: {np.sum(result.fun**2):.6e}")
-            # Show final fitted positions after stage 4
-            for i in range(n_peaks):
-                pos_fitted = result.x[i*4]
-                pos_init = params_init[i*4]
-                shift = pos_fitted - pos_init
-                print(f"      Peak {i+1} FINAL position: init={pos_init:.4f}, fitted={pos_fitted:.4f}, shift={shift:.6f}")
 
         return result
 
@@ -1325,20 +1256,6 @@ def fit_overlapping_peaks_ps2d_style(
         all_peak_positions=all_positions
     )
 
-    # Report estimation method (if verbose)
-    if verbose:
-        estimate_info = estimator.spatial_estimates.get(dimension, {})
-        method = estimate_info.get('method', 'user_override' if dimension in estimator.reference_peaks else 'nucleus_default')
-        print(f"\n📊 Linewidth estimation ({dimension}):")
-        print(f"   Method: {method}")
-        print(f"   LW_Lorentz: {typical_lw_lorentz:.6f} ppm")
-        print(f"   LW_Gauss: {typical_lw_gauss:.6f} ppm")
-        if method == 'spatial_analysis':
-            print(f"   Quality: {estimate_info.get('quality', 'unknown')}")
-            print(f"   Isolated peaks: {estimate_info.get('isolated_count', 0)}")
-            print(f"   Peaks analyzed: {estimate_info.get('n_peaks_analyzed', 0)}")
-            print(f"   CV: {estimate_info.get('cv', 0):.3f}")
-
     # Build initial peak list
     initial_peaks = []
     for peak in detected_peaks:
@@ -1389,10 +1306,6 @@ def fit_overlapping_peaks_ps2d_style(
                 lw_gauss=peak['lw_gauss'],
                 assignment=peak.get('assignment')
             )
-        if verbose:
-            print(f"\n✅ Registered {len(results['peaks'])} fitted peaks as linewidth templates for {dimension}-dimension")
-            print(f"   LW_Lorentz: {results['peaks'][0]['lw_lorentz']:.6f} ppm")
-            print(f"   LW_Gauss: {results['peaks'][0]['lw_gauss']:.6f} ppm")
 
     return results
 

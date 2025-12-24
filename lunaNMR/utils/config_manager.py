@@ -18,7 +18,8 @@ import os
 import json
 from pathlib import Path
 from datetime import datetime
-import tkinter as tk
+#import tkinter as tk
+from lunaNMR.utils.output_manager import log_info, log_warning, log_error
 
 class ConfigurationManager:
     """Main configuration management system"""
@@ -130,7 +131,7 @@ class ConfigurationManager:
                 return self.default_config.copy()
 
         except Exception as e:
-            print(f"Warning: Failed to load config, using defaults: {e}")
+            log_warning(f"Failed to load config, using defaults: {e}")
             return self.default_config.copy()
 
     def save_config(self):
@@ -144,7 +145,7 @@ class ConfigurationManager:
             return True
 
         except Exception as e:
-            print(f"Warning: Failed to save config: {e}")
+            log_warning(f"Failed to save config: {e}")
             return False
 
     def _merge_configs(self, default, loaded):
@@ -200,7 +201,7 @@ class ConfigurationManager:
                 json.dump(self.config, f, indent=2)
             return True
         except Exception as e:
-            print(f"Failed to export config: {e}")
+            log_error(f"Failed to export config: {e}")
             return False
 
     def import_config(self, file_path):
@@ -214,7 +215,7 @@ class ConfigurationManager:
             return True
 
         except Exception as e:
-            print(f"Failed to import config: {e}")
+            log_error(f"Failed to import config: {e}")
             return False
 
     # Recent Files Management
@@ -283,20 +284,6 @@ class ConfigurationManager:
             'amplitude_correlation_threshold': 0.7
         })
 
-    def update_overlap_config(self, overlap_config):
-        """
-        Update overlap resolution configuration
-
-        Args:
-            overlap_config: Dictionary with overlap settings to update
-        """
-        if 'overlap_resolution' not in self.config:
-            self.config['overlap_resolution'] = {}
-
-        self.config['overlap_resolution'].update(overlap_config)
-        self.save_config()
-        print(f"✅ Overlap configuration updated and saved")
-
     def enable_overlap_resolution(self, enable=True):
         """
         Quick enable/disable overlap resolution
@@ -310,7 +297,7 @@ class ConfigurationManager:
         self.config['overlap_resolution']['enabled'] = enable
         self.save_config()
         status = 'enabled' if enable else 'disabled'
-        print(f"✅ Overlap resolution {status}")
+        log_info(f"Overlap resolution {status}")
 
 class UserPreferences:
     """User interface preferences manager"""
@@ -334,40 +321,6 @@ class UserPreferences:
         """Save window state"""
         self.config_manager.set("user_preferences.window_state", state)
 
-    def apply_to_window(self, root):
-        """Apply preferences to tkinter window"""
-        try:
-            # Set geometry
-            geometry = self.get_window_geometry()
-            root.geometry(geometry)
-
-            # Set state
-            state = self.get_window_state()
-            if state == "maximized":
-                root.state('zoomed' if os.name == 'nt' else 'zoomed')
-            elif state == "minimized":
-                root.state('iconic')
-
-            # Set minimum size
-            root.minsize(800, 600)
-
-        except Exception as e:
-            print(f"Warning: Failed to apply window preferences: {e}")
-
-    def save_from_window(self, root):
-        """Save preferences from tkinter window"""
-        try:
-            # Save geometry (only if not maximized/minimized)
-            state = root.state()
-            if state == "normal":
-                geometry = root.geometry()
-                self.set_window_geometry(geometry)
-
-            # Save state
-            self.set_window_state(state)
-
-        except Exception as e:
-            print(f"Warning: Failed to save window preferences: {e}")
 
 class ProcessingParameters:
     """NMR processing parameters manager"""
@@ -447,50 +400,3 @@ class ProcessingParameters:
         """Set series processing options"""
         for key, value in options.items():
             self.config_manager.set(f"series_options.{key}", value)
-
-    def export_parameters(self, file_path):
-        """Export processing parameters to file"""
-        params = {
-            'detection_params': self.get_detection_params(),
-            'fitting_params': self.get_fitting_params(),
-            'display_options': self.get_display_options(),
-            'series_options': self.get_series_options(),
-            'processing_mode': self.get_processing_mode(),
-            'exported_at': datetime.now().isoformat()
-        }
-
-        try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(params, f, indent=2)
-            return True
-        except Exception as e:
-            print(f"Failed to export parameters: {e}")
-            return False
-
-    def import_parameters(self, file_path):
-        """Import processing parameters from file"""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                params = json.load(f)
-
-            # Import each section
-            if 'detection_params' in params:
-                self.set_detection_params(**params['detection_params'])
-
-            if 'fitting_params' in params:
-                self.set_fitting_params(**params['fitting_params'])
-
-            if 'display_options' in params:
-                self.set_display_options(**params['display_options'])
-
-            if 'series_options' in params:
-                self.set_series_options(**params['series_options'])
-
-            if 'processing_mode' in params:
-                self.set_processing_mode(params['processing_mode'])
-
-            return True
-
-        except Exception as e:
-            print(f"Failed to import parameters: {e}")
-            return False

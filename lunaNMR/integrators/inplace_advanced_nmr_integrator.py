@@ -479,80 +479,6 @@ class InPlaceAdvancedNMRIntegrator:
 
         return detected_peaks
 
-    def _find_best_peak_in_window(self, search_window, x_offset, y_offset, ref_x_ppm, ref_y_ppm, assignment):
-        """Find the best peak candidate within a search window"""
-        if search_window.size == 0:
-            return self._create_failed_detection(ref_x_ppm, ref_y_ppm, assignment, "Empty search window")
-
-        # Find points above threshold in window
-        abs_window = np.abs(search_window)
-        mask = abs_window > self.threshold
-
-        if not np.any(mask):
-            return self._create_failed_detection(ref_x_ppm, ref_y_ppm, assignment, "No points above threshold")
-
-        # Find local maxima
-        candidates = []
-        coords = np.argwhere(mask)
-
-        for coord in coords:
-            local_y, local_x = coord
-            global_y = local_y + y_offset
-            global_x = local_x + x_offset
-
-            # Check if this is a local maximum
-            if self._is_local_maximum(search_window, local_y, local_x):
-                intensity = search_window[local_y, local_x]
-                ppm_x, ppm_y = self.point_to_ppm(global_y, global_x)
-                snr = abs(intensity) / self.noise_level if self.noise_level > 0 else 0
-
-                # Calculate distance from reference
-                distance = np.sqrt((ppm_x - ref_x_ppm)**2 + (ppm_y - ref_y_ppm)**2)
-
-                candidates.append({
-                    'ppm_x': ppm_x,
-                    'ppm_y': ppm_y,
-                    'x_point': global_x,
-                    'y_point': global_y,
-                    'intensity': intensity,
-                    'snr': snr,
-                    'distance': distance,
-                    'quality_score': snr * abs(intensity) / (distance + 0.1)  # Combined score
-                })
-
-        if not candidates:
-            return self._create_failed_detection(ref_x_ppm, ref_y_ppm, assignment, "No local maxima found")
-
-        # Select best candidate (highest quality score)
-        best_candidate = max(candidates, key=lambda x: x['quality_score'])
-
-        # Validate minimum SNR - use GUI S/N threshold if available
-        effective_snr_threshold = MINIMUM_SNR  # Default fallback
-        if hasattr(self, 'sn_threshold') and self.sn_threshold:
-            effective_snr_threshold = self.sn_threshold
-        elif hasattr(self, 'sn_detection_params') and 'min_snr' in self.sn_detection_params:
-            effective_snr_threshold = self.sn_detection_params['min_snr']
-
-        if best_candidate['snr'] < effective_snr_threshold:
-            return self._create_failed_detection(ref_x_ppm, ref_y_ppm, assignment, f"SNR too low: {best_candidate['snr']:.1f}")
-
-        # Create successful detection
-        return {
-            'assignment': assignment,
-            'ppm_x': best_candidate['ppm_x'],
-            'ppm_y': best_candidate['ppm_y'],
-            'x_point': best_candidate['x_point'],
-            'y_point': best_candidate['y_point'],
-            'intensity': best_candidate['intensity'],
-            'snr': best_candidate['snr'],
-            'detected': True,
-            'reference_retained': False,
-            'detection_quality': 'Excellent' if best_candidate['snr'] > 10 else
-                               'Good' if best_candidate['snr'] > 5 else 'Fair',
-            'distance_from_reference': best_candidate['distance'],
-            'quality_score': best_candidate['quality_score']
-        }
-
     def _is_local_maximum(self, window, y, x):
         """Check if a point is a local maximum within a 3x3 neighborhood"""
         h, w = window.shape
@@ -950,15 +876,6 @@ class InPlaceAdvancedNMRIntegrator:
             print(f"Detected {len(detected)} peaks above threshold (will be matched to peak list)")
 
         return detected
-
-    def match_peaks_to_list(self):
-        """Match detected peaks to reference list (legacy compatibility)"""
-        if self.use_reference_detection:
-            print("Using reference-based detection - matching not needed")
-            return self.fitted_peaks
-
-        # Traditional matching for non-reference mode
-        return self._match_traditional()
 
     def _match_traditional(self):
         """Traditional peak matching (legacy method)"""

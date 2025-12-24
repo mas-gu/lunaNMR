@@ -43,8 +43,6 @@ class ParallelPeakFitter:
         else:
             self.max_workers = max_workers
 
-        print(f" Parallel fitting initialized with {self.max_workers} workers (75% of {cpu_count()} cores)")
-
     def fit_peaks_parallel(self, peak_list, progress_callback=None, all_peaks_context=None):
         """
         Fit multiple peaks in parallel
@@ -72,6 +70,10 @@ class ParallelPeakFitter:
                     'pos_y': float(row['Position_Y'])
                 })
 
+        # Serialize integrator data ONCE (not per-peak) for efficiency
+        # This avoids redundant serialization of large nmr_data arrays
+        shared_integrator_data = self._serialize_integrator_data()
+
         # Prepare peak data for parallel processing
         peak_tasks = []
         for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
@@ -85,11 +87,10 @@ class ParallelPeakFitter:
                 'peak_x': peak_x,
                 'peak_y': peak_y,
                 'assignment': assignment,
-                'integrator_data': self._serialize_integrator_data(),
+                'integrator_data': shared_integrator_data,
                 'all_peaks_context': all_peaks_context
             })
 
-        print(f" Starting parallel fitting of {len(peak_tasks)} peaks...")
         start_time = time.time()
 
         # Create multiprocessing pool and fit peaks
@@ -99,12 +100,10 @@ class ParallelPeakFitter:
 
         try:
             # Test if multiprocessing works with a simple task first
-            print(f" Testing multiprocessing with {self.max_workers} workers...")
             with Pool(processes=self.max_workers) as test_pool:
                 test_result = test_pool.apply(_test_worker, ("test",))
                 if test_result != "test_ok":
                     raise Exception(f"Multiprocessing test failed: {test_result}")
-            print(f" Multiprocessing test successful")
 
             with Pool(processes=self.max_workers) as pool:
                 # Submit all tasks and collect results
@@ -122,18 +121,11 @@ class ParallelPeakFitter:
                             # Check if it's an actual successful result or error report
                             if 'error' in result:
                                 failed_fits += 1
-                                print(f"❌ Peak {peak_number} ({assignment}): {result['error']}")
-                                if 'traceback' in result:
-                                    print(f"   Traceback: {result['traceback']}")
                             else:
                                 results.append(result)
                                 successful_fits += 1
-                                r_squared = result.get('avg_r_squared', 0)
-                                print(f"✅ Peak {peak_number} ({assignment}): R²={r_squared:.3f}")
                         else:
                             failed_fits += 1
-                            error_msg = result.get('error', 'Unknown error') if result else 'No result returned'
-                            print(f"❌ Peak {peak_number} ({assignment}): {error_msg}")
 
                         # Progress callback
                         if progress_callback:
@@ -142,19 +134,12 @@ class ParallelPeakFitter:
 
                     except mp.TimeoutError:
                         failed_fits += 1
-                        print(f" Peak {peak_number} ({assignment}): Timeout (>120s)")
                     except Exception as e:
                         failed_fits += 1
-                        print(f"Peak {peak_number} ({assignment}): Error - {str(e)}")
 
         except Exception as e:
-            print(f"❌ Parallel processing failed: {e}")
             # Fallback to sequential processing
             return self._fit_peaks_sequential_fallback(peak_list, progress_callback)
-
-        elapsed_time = time.time() - start_time
-        print(f" Parallel fitting completed in {elapsed_time:.1f}s")
-        print(f" Results: {successful_fits} successful, {failed_fits} failed")
 
         return results
 
@@ -205,15 +190,12 @@ class ParallelPeakFitter:
                 if result:
                     result['peak_number'] = peak_number
                     results.append(result)
-                    print(f"✅ Peak {peak_number} ({assignment}): Sequential fit successful")
-                else:
-                    print(f"❌ Peak {peak_number} ({assignment}): Sequential fit failed")
 
                 if progress_callback:
                     progress_callback(i + 1, len(peak_list), assignment)
 
             except Exception as e:
-                print(f" Peak {peak_number} ({assignment}): Sequential error - {str(e)}")
+                pass  # Silent failure - results list tracks success
 
         return results
 
@@ -301,12 +283,6 @@ def _test_worker(test_data):
     return "test_ok"
 
 
-def _init_worker():
-    """Initialize worker processes"""
-    # Set up worker process (if needed)
-    pass
-
-
 # Gaussian Mixture Model implementation for very close peaks
 class GaussianMixtureModel:
     """Gaussian Mixture Model for overlapping peak detection and fitting"""
@@ -378,10 +354,8 @@ class GaussianMixtureModel:
             }
 
         except ImportError:
-            print("⚠️ sklearn not available, GMM fitting disabled")
             return None
         except Exception as e:
-            print(f"GMM fitting failed: {e}")
             return None
 
     def _estimate_n_peaks(self, x_data, y_data, max_peaks=6):

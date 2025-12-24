@@ -680,8 +680,10 @@ class PeakNavigator(QWidget):
                     assignment = row.get('Assignment', f"Ref{i+1}")
                     x_coord = float(row.get('Position_X', 0))
                     y_coord = float(row.get('Position_Y', 0))
-                    height = ""
-                    self.reference_peaks.append([assignment, x_coord, y_coord, height])
+                    height = row.get('Height', row.get('Intensity', ''))
+                    # R² at index 4 for reference peaks (used by refresh_peak_list)
+                    r_squared = row.get('R_Squared', None)
+                    self.reference_peaks.append([assignment, x_coord, y_coord, height, r_squared])
 
             # Handle numpy array or list
             # v0.9 format from main_window: [assignment, x_coord, y_coord, height, peak_id]
@@ -715,7 +717,7 @@ class PeakNavigator(QWidget):
         """Load detected peaks data.
 
         Args:
-            fitted_peaks: Fitted peaks data in various formats
+            fitted_peaks: Fitted peaks data in various formats (fit results list or DataFrame)
         """
         self.detected_peaks = []
 
@@ -723,16 +725,19 @@ class PeakNavigator(QWidget):
             return
 
         try:
-            # Handle list of dictionaries
+            # Handle list of dictionaries (fit results format)
             if isinstance(fitted_peaks, list) and fitted_peaks and isinstance(fitted_peaks[0], dict):
                 for i, peak in enumerate(fitted_peaks):
-                    x_coord = peak.get('ppm_x', peak.get('Position_X', 0))
-                    y_coord = peak.get('ppm_y', peak.get('Position_Y', 0))
+                    # Support multiple key formats for coordinates
+                    x_coord = peak.get('center_x', peak.get('ppm_x', peak.get('Position_X', 0)))
+                    y_coord = peak.get('center_y', peak.get('ppm_y', peak.get('Position_Y', 0)))
                     assignment = peak.get('assignment', peak.get('Assignment', f"Det{i+1}"))
 
                     if x_coord != 0 and y_coord != 0:
-                        height = peak.get('height', peak.get('intensity', ""))
-                        self.detected_peaks.append([assignment, float(x_coord), float(y_coord), height, i])
+                        height = peak.get('height', peak.get('intensity', peak.get('amplitude', "")))
+                        r_squared = peak.get('r_squared', None)
+                        # Format: [assignment, x, y, height, peak_id, r_squared]
+                        self.detected_peaks.append([assignment, float(x_coord), float(y_coord), height, i, r_squared])
 
             # Handle pandas DataFrame
             elif hasattr(fitted_peaks, 'iloc') and hasattr(fitted_peaks, 'columns'):
@@ -741,7 +746,9 @@ class PeakNavigator(QWidget):
                     x_coord = float(row.get('Position_X', 0))
                     y_coord = float(row.get('Position_Y', 0))
                     if x_coord != 0 and y_coord != 0:
-                        self.detected_peaks.append([assignment, x_coord, y_coord, ""])
+                        height = row.get('Height', row.get('Intensity', ''))
+                        r_squared = row.get('R_Squared', None)
+                        self.detected_peaks.append([assignment, x_coord, y_coord, height, i, r_squared])
 
         except Exception as e:
             print(f"Peak Navigator: Error loading detected peaks: {e}")
@@ -917,18 +924,6 @@ class PeakNavigator(QWidget):
     def _get_current_peak_list(self) -> List[List[Any]]:
         """Get currently active peak list."""
         return self.reference_peaks if self.selected_peak_type == "reference" else self.detected_peaks
-
-    def _format_height_display(self, height: Any) -> str:
-        """Format height value for display."""
-        if isinstance(height, str):
-            return height
-        elif height and height != "":
-            if isinstance(height, (int, float)):
-                return f"{height:.2e}"
-            else:
-                return str(height)
-        else:
-            return ""
 
     def _add_quality_indicator(self, assignment: str, r_squared: Optional[float], r2_str: str) -> str:
         """Add quality indicator emoji to assignment based on R² thresholds.

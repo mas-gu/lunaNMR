@@ -20,6 +20,7 @@ from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
 from lunaNMR.utils.parameter_manager import NMRParameterManager
+from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
 class MultiSpectrumProcessor:
     """
@@ -45,15 +46,10 @@ class MultiSpectrumProcessor:
             self.integrator.fitting_parameters.update(
                 self.voigt_params.get('fitting_params', {})
             )
-            print("✅ MultiSpectrumProcessor: Extracted gui_params from nested structure")
-            print(f"   fix_positions={self.integrator.gui_params.get('fix_positions', False)}")
-            print(f"   fix_linewidths={self.integrator.gui_params.get('fix_linewidths', False)}")
-            print(f"   use_parallel_processing={self.integrator.gui_params.get('use_parallel_processing', False)}")
         else:
             # Flat structure (backward compatibility)
             self.integrator.gui_params = self.voigt_params.copy()
             self.integrator.fitting_parameters.update(self.voigt_params)
-            print("✅ MultiSpectrumProcessor: Using flat parameter structure")
 
         # Initialize output folder for retrocompatibility
         self.output_folder = None
@@ -65,177 +61,73 @@ class MultiSpectrumProcessor:
             self.use_ps2d_linewidth_reuse = self.voigt_params['gui_params'].get('use_ps2d_linewidth_reuse', False)
 
         self.reference_linewidths = {}  # Stores {assignment: {x_sigma, x_gamma, y_sigma, y_gamma}}
-        if self.use_ps2d_linewidth_reuse:
-            print("   🔒 PS2D Linewidth Reuse ENABLED in MultiSpectrumProcessor")
-            print("      Reference spectrum linewidths will be fixed for all series spectra")
 
         # Cascade mode state (for sequential peak position propagation)
         self.peak_source_mode = None
         self.previous_fitted_results = None  # Stores fitted results from spectrum N for cascade to N+1
 
-    def _refine_peak_positions_cascade(self, previous_fitted_results: List[Dict],
-                                        gui_params: Dict[str, Any]) -> pd.DataFrame:
-        """
-        Refine peak positions using top contour centroid from previous spectrum.
+        # Cluster locking: Store reference spectrum clusters by assignment
+        # This ensures consistent peak grouping across all spectra in series
+        self.reference_clusters_by_assignment = None  # List of lists of assignments
 
-        This function implements cascade mode position propagation:
-        - Takes fitted positions from spectrum N-1
-        - For each peak, finds local maximum in spectrum N using _calculate_top_contour_center()
-        - If refinement fails, keeps peak at original position (NEVER drops peaks)
-        - Returns refined positions as DataFrame for fitting spectrum N
-
-        CRITICAL: Output DataFrame will have EXACTLY the same number of peaks as input.
-        Peaks are never dropped - they keep their last known position if refinement fails.
-
-        Parameters:
-        -----------
-        previous_fitted_results : list of dict
-            Fitted results from previous spectrum (contains 'center_x', 'center_y', 'assignment')
-        gui_params : dict
-            GUI parameters containing 'centroid_window_x_ppm' and 'centroid_window_y_ppm'
-
-        Returns:
-        --------
-        pd.DataFrame : Refined peak positions with columns ['Assignment', 'Position_X', 'Position_Y']
-                      Length guaranteed equal to len(previous_fitted_results)
-        """
-        print(f"   🔄 CASCADE MODE: Refining {len(previous_fitted_results)} peak positions using top contour centroid")
-
-        # Extract GUI parameters for centroid refinement
-        max_shift_x = gui_params.get('centroid_window_x_ppm', 0.01)
-        max_shift_y = gui_params.get('centroid_window_y_ppm', 0.10)
-
-        #print(f"      Search windows: F2={max_shift_x:.3f} ppm, F1={max_shift_y:.3f} ppm")
-
-        refined_peaks = []
-        refinement_count = 0
-        fallback_count = 0
-
-        for i, peak in enumerate(previous_fitted_results):
-            # ROBUST POSITION EXTRACTION: Try all possible key combinations
-            prev_x_ppm = None
-            prev_y_ppm = None
-
-            # Try center_x, center_y (fitted result keys)
-            if 'center_x' in peak and 'center_y' in peak:
-                prev_x_ppm = peak['center_x']
-                prev_y_ppm = peak['center_y']
-            # Try Position_X, Position_Y (reference peak list keys)
-            elif 'Position_X' in peak and 'Position_Y' in peak:
-                prev_x_ppm = peak['Position_X']
-                prev_y_ppm = peak['Position_Y']
-            # Try peak_x, peak_y (alternative keys)
-            elif 'peak_x' in peak and 'peak_y' in peak:
-                prev_x_ppm = peak['peak_x']
-                prev_y_ppm = peak['peak_y']
-            # Try peak_position tuple
-            elif 'peak_position' in peak and len(peak.get('peak_position', [])) >= 2:
-                prev_x_ppm = peak['peak_position'][0]
-                prev_y_ppm = peak['peak_position'][1]
-            # Try pos_f2, pos_f1 (PS2D keys)
-            elif 'pos_f2' in peak and 'pos_f1' in peak:
-                prev_x_ppm = peak['pos_f2']
-                prev_y_ppm = peak['pos_f1']
-
-            # Extract assignment (try multiple keys)
-            assignment = peak.get('assignment', peak.get('Assignment', peak.get('peak_id', f'Peak_{i+1}')))
-
-            # CRITICAL: If position extraction fails, use a safe fallback
-            if prev_x_ppm is None or prev_y_ppm is None:
-                #print(f"      ⚠️ Peak {assignment}: Could not extract position (keys: {list(peak.keys())})")
-                #print(f"         Using fallback: keeping peak in list with last valid position")
-
-                # Try to get ANY numeric values as fallback
-                for key in peak.keys():
-                    if 'x' in key.lower() and prev_x_ppm is None:
-                        try:
-                            prev_x_ppm = float(peak[key])
-                        except (ValueError, TypeError):
-                            pass
-                    if 'y' in key.lower() and prev_y_ppm is None:
-                        try:
-                            prev_y_ppm = float(peak[key])
-                        except (ValueError, TypeError):
-                            pass
-
-                # Absolute fallback: use center of spectrum range
-                if prev_x_ppm is None:
-                    prev_x_ppm = float(np.mean(self.integrator.ppm_x_axis))
-                    print(f"         Using spectrum center F2: {prev_x_ppm:.3f} ppm")
-                if prev_y_ppm is None:
-                    prev_y_ppm = float(np.mean(self.integrator.ppm_y_axis))
-                    print(f"         Using spectrum center F1: {prev_y_ppm:.3f} ppm")
-
-                fallback_count += 1
-
-            # REFINEMENT: Try to find local maximum with error handling
-            refined_x = prev_x_ppm
-            refined_y = prev_y_ppm
-
-            try:
-                # Convert ppm to pixel indices in CURRENT spectrum
-                x_idx = np.argmin(np.abs(self.integrator.ppm_x_axis - prev_x_ppm))
-                y_idx = np.argmin(np.abs(self.integrator.ppm_y_axis - prev_y_ppm))
-
-                # Call existing _calculate_top_contour_center() with GUI parameters
-                # This function already has fallback logic: returns original position if no maximum found
-                refined_x, refined_y = self.integrator._calculate_top_contour_center(
-                    y_idx=y_idx,
-                    x_idx=x_idx,
-                    intensity_band=0.05,  # ±5% around maximum
-                    max_shift_x=max_shift_x,
-                    max_shift_y=max_shift_y
-                )
-
-                # Track if position changed significantly
-                shift_distance = np.sqrt((refined_x - prev_x_ppm)**2 + (refined_y - prev_y_ppm)**2)
-                if shift_distance > 0.001:  # Only count shifts >0.001 ppm
-                    refinement_count += 1
-
-            except Exception as e:
-                # If refinement fails for ANY reason, keep original position
-                print(f"      ⚠️ Peak {assignment}: Refinement failed ({e}), keeping original position")
-                refined_x = prev_x_ppm
-                refined_y = prev_y_ppm
-                fallback_count += 1
-
-            # ALWAYS add peak to list (NEVER drop peaks)
-            refined_peaks.append({
-                'Assignment': assignment,
-                'Position_X': float(refined_x),
-                'Position_Y': float(refined_y)
-            })
-
-        # CRITICAL VALIDATION: Ensure peak count is preserved
-        if len(refined_peaks) != len(previous_fitted_results):
-            error_msg = f"CASCADE MODE ERROR: Peak count mismatch! Input: {len(previous_fitted_results)}, Output: {len(refined_peaks)}"
-            print(f"      ❌ {error_msg}")
-            raise ValueError(error_msg)
-
-        print(f"      ✅ Refined {refinement_count}/{len(refined_peaks)} peaks (shift >0.001 ppm)")
-        if fallback_count > 0:
-            print(f"      ℹ️  {fallback_count}/{len(refined_peaks)} peaks used fallback (kept original position)")
-
-        return pd.DataFrame(refined_peaks)
+        # Learned statistics from reference spectrum (PASS 1 learning)
+        # Used as initial guesses for spectrum 2+ (not fixed, just better starting point)
+        # Format: {'lw_f1_median': float, 'lw_f2_median': float, 'lw_f1_mad': float,
+        #          'lw_f2_mad': float, 'n_samples': int, 'alpha': float}
+        self.reference_spectrum_statistics = None
 
     def process_nmr_series(self, nmr_files: List[str], reference_peaks: pd.DataFrame,
                           output_folder: str, peak_source_mode: str = 'reference',
-                          progress_callback: Optional[callable] = None) -> Dict[str, Any]:
+                          progress_callback: Optional[callable] = None,
+                          extract_delays: bool = False,
+                          pre_detected_peaks: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """
         Main entry point for processing NMR series.
         Returns comprehensive results in both new and legacy-compatible formats.
+
+        Args:
+            nmr_files: List of NMR spectrum file paths
+            reference_peaks: DataFrame with peak positions
+            output_folder: Folder for output files
+            peak_source_mode: 'reference', 'detected', or 'cascade'
+            progress_callback: Optional callback for progress updates
+            extract_delays: If True, extract delay values from filenames and use as headers
+            pre_detected_peaks: Optional list of already-detected peaks from GUI (skips detection for spectrum 1)
         """
         self.reference_peaks = reference_peaks.copy()
+        self.pre_detected_peaks = pre_detected_peaks  # Store for cascade mode spectrum 1
         self.output_folder = output_folder
         self.progress_callback = progress_callback
         self.processing_active = True
         self.peak_source_mode = peak_source_mode  # Store for cascade mode
         self.previous_fitted_results = None  # Initialize cascade tracking
+        self.extract_delays = extract_delays  # Store for output file generation
 
-        # Log cascade mode status
-        if peak_source_mode == 'cascade':
-            print("🔗 CASCADE MODE ENABLED: Peak positions will propagate sequentially (n→n+1→n+2→...)")
-            print("   Using top contour centroid refinement between spectra with GUI parameters")
+        # Build original reference position dictionary for cascade mode drift limiting
+        # Maps assignment -> (x_ppm, y_ppm) for absolute bounds enforcement
+        self.original_reference_positions = {}
+        for _, row in reference_peaks.iterrows():
+            assignment = row.get('Assignment', '')
+            if assignment:
+                self.original_reference_positions[str(assignment)] = (
+                    row['Position_X'],
+                    row['Position_Y']
+                )
+
+        # Build delay/column mapping if extract_delays is enabled
+        # Maps spectrum_name -> unique column name (e.g., "50", "50_2" for duplicates)
+        self.delay_mapping = {}
+        if extract_delays:
+            from lunaNMR.utils.delay_extractor import DelayExtractor
+            extractor = DelayExtractor()
+
+            # Get filenames
+            filenames = [os.path.basename(f) for f in nmr_files]
+
+            # Build column mapping (handles duplicates automatically)
+            self.delay_mapping = extractor.build_column_mapping(filenames)
+
+
 
         # Track processing duration
         start_time = datetime.now()
@@ -282,7 +174,7 @@ class MultiSpectrumProcessor:
                     batch_results['results'][spectrum_name] = spectrum_result
 
                 except Exception as e:
-                    print(f" Failed to process {spectrum_name}: {e}")
+                    log_error(f"Failed to process {spectrum_name}: {e}")
                     batch_results['results'][spectrum_name] = {
                         'success': False,
                         'error': str(e),
@@ -319,7 +211,7 @@ class MultiSpectrumProcessor:
             return batch_results_obj
 
         except Exception as e:
-            print(f" Multi-spectrum processing failed: {e}")
+            log_error(f"Multi-spectrum processing failed: {e}")
             # Return BatchResults object even on error for consistent interface
             error_result = BatchResults()
             error_result.errors.append({'error': str(e)})
@@ -358,10 +250,6 @@ class MultiSpectrumProcessor:
         # Restore essential components
         for attr, value in essential_components.items():
             setattr(self.integrator, attr, value)
-            print(f"   ♻️ Restored {attr}")
-
-        # USE PROPER LOADING: Let integrator handle loading correctly
-        print(f"   🔄 Loading NMR file using integrator's load method: {nmr_file}")
 
         # First attempt: Use integrator's load method
         # OPTIMIZATION: Skip nucleus auto-detection for spectra 2+ (use reference config)
@@ -369,16 +257,11 @@ class MultiSpectrumProcessor:
         load_success = False
         try:
             load_success = self.integrator.load_nmr_file(nmr_file, skip_nucleus_detection=skip_detection)
-            if load_success:
-                print(f"   ✅ NMR file loaded successfully via load_nmr_file()")
-            else:
-                print(f"   ⚠️ load_nmr_file() returned False, trying fallback")
-        except Exception as e:
-            print(f"   ⚠️ load_nmr_file() failed: {e}, trying fallback")
+        except Exception:
+            pass  # Will try fallback
 
         # Fallback: Direct loading only if regular loading fails
         if not load_success or self.integrator.nmr_data is None:
-            print(f"   🔄 Attempting direct loading fallback")
             try:
                 import nmrglue as ng
                 self.integrator.nmr_dict, self.integrator.nmr_data = ng.pipe.read(nmr_file)
@@ -392,19 +275,15 @@ class MultiSpectrumProcessor:
                     detected_nucleus = self.integrator._detect_nucleus_type()
                     if detected_nucleus:
                         self.integrator.auto_detected_nucleus = detected_nucleus
-                        print(f"   🔬 Auto-detected nucleus type: {detected_nucleus}-HSQC (fallback path)")
-                elif skip_detection:
-                    print(f"   ⏭️  Skipping nucleus auto-detection (using reference spectrum configuration)")
 
                 # Only estimate noise if not already done
                 if not hasattr(self.integrator, 'noise_level'):
                     self.integrator._estimate_noise_level()
 
                 self.integrator.nmr_file_path = nmr_file
-                print(f"   ✅ Direct loading successful: {self.integrator.nmr_data.shape}")
 
             except Exception as e:
-                print(f"   ❌ Direct loading also failed: {e}")
+                log_error(f"Direct loading failed: {e}")
                 raise IOError(f"All loading methods failed for: {nmr_file}")
 ##
 
@@ -413,78 +292,106 @@ class MultiSpectrumProcessor:
         if (self.integrator.nmr_data is None or
             self.integrator.ppm_x_axis is None or
             self.integrator.ppm_y_axis is None):
-            print(f"❌ NMR data verification failed for {spectrum_name}")
-            print(f"   nmr_data: {type(self.integrator.nmr_data)}")
-            print(f"   ppm_x_axis: {type(self.integrator.ppm_x_axis)}")
-            print(f"   ppm_y_axis: {type(self.integrator.ppm_y_axis)}")
+            log_error(f"NMR data verification failed for {spectrum_name}")
             raise IOError(f"NMR data not properly loaded after direct loading: {nmr_file}")
 
-        print(f"✅ NMR data verified for {spectrum_name}: {self.integrator.nmr_data.shape}")
-
         # DETECTION-BASED MATCHING: Choose reference source based on mode
-        # Exact 1-to-1 copy from v0.9 multi_spectrum_processor.py:418-479
         if self.peak_source_mode == 'reference':
-            # REFERENCE MODE: Always use original reference peaks (fixed reference for all spectra)
-            print(f"🔍 REFERENCE MODE: Spectrum {spectrum_number} - using original reference peaks")
+            # REFERENCE MODE: Always use original reference peaks
             self.integrator.peak_list = self.reference_peaks.copy()
 
         elif self.peak_source_mode in ['cascade', 'detected']:
             # CASCADE/DETECTED MODE: Use n-1 fitted results for spectrum 2+
             if spectrum_number > 1 and self.previous_fitted_results is not None:
-                print(f"🔍 {self.peak_source_mode.upper()} MODE: Spectrum {spectrum_number} - using spectrum {spectrum_number-1} fitted positions as reference")
-
                 # Convert previous fitted results to reference DataFrame format
                 detection_reference = self._convert_fitted_results_to_reference_df(self.previous_fitted_results)
-                print(f"   📋 Created reference from {len(detection_reference)} fitted peaks from spectrum {spectrum_number-1}")
-
-                # Set reference in integrator for detection
                 self.integrator.peak_list = detection_reference.copy()
             else:
                 # Spectrum 1: Use provided reference peaks
-                print(f"🔍 {self.peak_source_mode.upper()} MODE: Spectrum {spectrum_number} - using provided reference peaks")
                 self.integrator.peak_list = self.reference_peaks.copy()
         else:
             # Fallback for unknown mode
-            print(f"⚠️ Unknown peak_source_mode '{self.peak_source_mode}', using reference peaks")
+            log_warning(f"Unknown peak_source_mode '{self.peak_source_mode}', using reference peaks")
             self.integrator.peak_list = self.reference_peaks.copy()
 
-        # RUN PEAK DETECTION: Detect all peaks, then match to reference
-        # This recenters each peak around the actual peak top in the current spectrum
-        # Exact 1-to-1 copy from v0.9 multi_spectrum_processor.py:444-479
-        print(f"   🎯 Running peak detection (detect all → match to reference for recentering)...")
+        # OPTION A: SKIP DETECTION FOR SPECTRUM 2+ IN CASCADE MODE
+        # In cascade mode, spectrum 1 runs full detection to find peak positions.
+        # Spectrum 2+ skips detection entirely and uses spectrum N-1's fitted positions directly.
+        # This prevents detection from finding different positions in different spectra,
+        # which was causing peaks to jump dramatically (e.g., peak 168.0 jumping 0.48 ppm in 15N).
 
-        # Ensure noise level is estimated
-        if not hasattr(self.integrator, 'noise_level') or self.integrator.noise_level is None:
-            self.integrator._estimate_noise_level()
+        if self.peak_source_mode == 'cascade' and spectrum_number > 1:
+            # CASCADE MODE SPECTRUM 2+: Skip detection, use reference positions directly
+            # peak_list already contains positions from previous spectrum's fitted results
 
-        # Call the same detection method used by GUI - this finds actual peak positions
-        detected_peaks = self.integrator._detect_peaks_reference_based()
+            # INTENSITY SAMPLING: Read actual intensities from current spectrum
+            self._sample_intensities_for_peak_list()
 
-        if detected_peaks and len(detected_peaks) > 0:
-            print(f"   ✅ Detection complete: {len(detected_peaks)} peaks matched and recentered")
+        elif self.peak_source_mode == 'cascade' and spectrum_number == 1 and self.pre_detected_peaks:
+            # CASCADE MODE SPECTRUM 1 WITH PRE-DETECTED PEAKS:
+            # User already ran detection in GUI - use those peaks directly, skip detection
+            log_info(f"Using {len(self.pre_detected_peaks)} pre-detected peaks from GUI (skipping detection)")
 
-            # Convert detected peaks (fitted_peaks) to DataFrame format for fitting
-            # This is the same conversion that GUI does (line 3283-3286 in main_gui.py)
+            # Convert pre-detected peaks to DataFrame format
             detected_peak_data = []
-            for peak in detected_peaks:
+            for peak in self.pre_detected_peaks:
                 detected_peak_data.append({
-                    'Assignment': peak.get('assignment', 'Unknown'),
-                    'Position_X': peak.get('ppm_x', 0),
-                    'Position_Y': peak.get('ppm_y', 0),
-                    'Height': peak.get('intensity', 0),
-                    'Intensity': peak.get('intensity', 0)
+                    'Assignment': peak.get('assignment', peak.get('Assignment', 'Unknown')),
+                    'Position_X': peak.get('ppm_x', peak.get('peak_x', peak.get('Position_X', 0))),
+                    'Position_Y': peak.get('ppm_y', peak.get('peak_y', peak.get('Position_Y', 0))),
+                    'Height': peak.get('intensity', peak.get('Height', 0)),
+                    'Intensity': peak.get('intensity', peak.get('Intensity', 0))
                 })
 
             detected_df = pd.DataFrame(detected_peak_data)
-
-            # CRITICAL: Replace peak_list with detected positions (not reference positions)
-            # This ensures fitting uses DETECTED/RECENTERED positions, just like GUI
             self.integrator.peak_list = detected_df
-            print(f"   ✅ peak_list now contains DETECTED positions (fitting will use recentered peaks)")
+
+            # Sample intensities from current spectrum at these positions
+            self._sample_intensities_for_peak_list()
 
         else:
-            print(f"   ⚠️ No peaks detected - using reference positions as fallback")
-            # Keep the reference peak_list (already set above)
+            # SPECTRUM 1 WITHOUT PRE-DETECTED PEAKS OR NON-CASCADE MODE: Run full detection
+
+            # Ensure noise level is estimated
+            if not hasattr(self.integrator, 'noise_level') or self.integrator.noise_level is None:
+                self.integrator._estimate_noise_level()
+
+            # Only add dummy peaks for FIRST spectrum in series
+            # Subsequent spectra should use the same peak list (including dummies from spectrum 1)
+            original_auto_add_dummy = getattr(self.integrator, 'auto_add_dummy_peaks', False)
+            if spectrum_number > 1:
+                self.integrator.auto_add_dummy_peaks = False
+
+            # Call the same detection method used by GUI - this finds actual peak positions
+            detected_peaks = self.integrator._detect_peaks_reference_based()
+
+            # Restore original setting
+            self.integrator.auto_add_dummy_peaks = original_auto_add_dummy
+
+            if detected_peaks and len(detected_peaks) > 0:
+                log_info(f"Detection complete: {len(detected_peaks)} peaks matched and recentered")
+
+                # Convert detected peaks (fitted_peaks) to DataFrame format for fitting
+                # This is the same conversion that GUI does (line 3283-3286 in main_gui.py)
+                detected_peak_data = []
+                for peak in detected_peaks:
+                    detected_peak_data.append({
+                        'Assignment': peak.get('assignment', 'Unknown'),
+                        'Position_X': peak.get('ppm_x', 0),
+                        'Position_Y': peak.get('ppm_y', 0),
+                        'Height': peak.get('intensity', 0),
+                        'Intensity': peak.get('intensity', 0)
+                    })
+
+                detected_df = pd.DataFrame(detected_peak_data)
+
+                # CRITICAL: Replace peak_list with detected positions (not reference positions)
+                # This ensures fitting uses DETECTED/RECENTERED positions, just like GUI
+                self.integrator.peak_list = detected_df
+
+            else:
+                log_warning("No peaks detected - using reference positions as fallback")
+                # Keep the reference peak_list (already set above)
 
         # USE SHARED SingleSpectrumProcessor LOGIC (NO DUPLICATION)
         # Create a temporary parameter manager with current voigt_params
@@ -520,7 +427,7 @@ class MultiSpectrumProcessor:
                 )
 
         # OPTION C FIX: Use PUBLIC API - same path as "Fit All Peaks"
-        print(f"🔄 Using SingleSpectrumProcessor.process_peak_list() for spectrum {spectrum_number}/{total_spectra}")
+        log_progress(f"Processing spectrum {spectrum_number}/{total_spectra}")
 
         # Extract parameters from appropriate level
         if 'gui_params' in self.voigt_params:
@@ -530,21 +437,61 @@ class MultiSpectrumProcessor:
             use_parallel = self.voigt_params.get('use_parallel_processing', False)
             use_voigt = self.voigt_params.get('use_voigt_fitting', True)
 
+        # Get cascade drift limit setting (default ON)
+        if 'processing_options' in self.voigt_params:
+            enable_cascade_drift_limit = self.voigt_params['processing_options'].get('enable_cascade_drift_limit', True)
+        else:
+            enable_cascade_drift_limit = self.voigt_params.get('enable_cascade_drift_limit', True)
+
+        # Only pass reference positions if cascade mode AND drift limit enabled
+        use_drift_limit = (self.peak_source_mode == 'cascade' and enable_cascade_drift_limit)
+
         processing_options = {
             'use_parallel': use_parallel,
             'use_global_optimization': False,
-            'use_voigt_fitting': use_voigt
+            'use_voigt_fitting': use_voigt,
+            # Pass original reference positions for cascade mode drift limiting
+            # Only if cascade mode AND drift limit enabled
+            'original_reference_positions': self.original_reference_positions if use_drift_limit else None,
+            'enable_cascade_drift_limit': enable_cascade_drift_limit
         }
 
-        print(f"   Processing options: parallel={use_parallel}, voigt={use_voigt}")
+        if self.peak_source_mode == 'cascade':
+            pass  # Cascade mode uses drift limiting
+
+        # CLUSTER LOCKING: Use reference spectrum clusters for consistent grouping
+        # Spectrum 1: compute clusters fresh, then store them
+        # Spectrum 2+: use locked clusters from spectrum 1
+        locked_clusters = None
+        if spectrum_number > 1 and self.reference_clusters_by_assignment is not None:
+            locked_clusters = self.reference_clusters_by_assignment
+
+        # LEARNED STATISTICS: Use reference spectrum statistics as initial guesses
+        # Spectrum 1: run full learning cycle (PASS 1 → PASS 1-bis → PASS 2)
+        # Spectrum 2+: skip PASS 1 learning, use reference stats as initial guesses
+        pre_learned_statistics = None
+        if spectrum_number > 1 and self.reference_spectrum_statistics is not None:
+            pre_learned_statistics = self.reference_spectrum_statistics
 
         # This calls _sync_parameters_to_integrator() internally, ensuring proper parameter flow
         # CRITICAL: Use integrator.peak_list which now contains DETECTED positions (not reference_peaks)
-        fitted_results = single_processor.process_peak_list(
+        fitted_results, learned_statistics = single_processor.process_peak_list(
             self.integrator.peak_list,
             processing_options,
-            series_progress_callback
+            series_progress_callback,
+            locked_clusters_by_assignment=locked_clusters,
+            pre_learned_statistics=pre_learned_statistics
         )
+
+        # Extract and store clusters from reference spectrum (spectrum 1)
+        if spectrum_number == 1 and self.reference_clusters_by_assignment is None:
+            self.reference_clusters_by_assignment = single_processor.extract_clusters_by_assignment(
+                self.integrator.peak_list
+            )
+
+        # Store learned statistics from reference spectrum (spectrum 1)
+        if spectrum_number == 1 and learned_statistics is not None:
+            self.reference_spectrum_statistics = learned_statistics
 
         # Post-process results: Add spectrum metadata and handle linewidth reuse
         successful_fits = 0
@@ -562,11 +509,10 @@ class MultiSpectrumProcessor:
 
         total_peaks = len(self.integrator.peak_list)
         success_rate = (successful_fits / total_peaks * 100) if total_peaks > 0 else 0
-        print(f"✅ Spectrum {spectrum_number} integration complete: {successful_fits}/{total_peaks} successful ({success_rate:.1f}%)")
+        log_progress(f"Spectrum {spectrum_number} complete: {successful_fits}/{total_peaks} successful ({success_rate:.1f}%)")
 
         # Store fitted results for next spectrum (used by all modes now)
         self.previous_fitted_results = fitted_results
-        print(f"   💾 Stored fitted results for spectrum {spectrum_number + 1}")
 
         return {
             'success': successful_fits > 0,
@@ -585,6 +531,11 @@ class MultiSpectrumProcessor:
         This creates a reference peak list from fitted results that can be used
         as input for peak detection in the next spectrum.
 
+        IMPORTANT: Uses DETECTED positions (peak_x/peak_y) instead of FITTED positions
+        (center_x/center_y) to prevent position drift accumulation in cascade mode.
+        Fitted positions can drift during 2D optimization, especially for overlapping
+        clusters, causing errors to compound across spectra.
+
         Args:
             fitted_results: List of fitting result dictionaries
 
@@ -597,10 +548,13 @@ class MultiSpectrumProcessor:
         peak_data = []
         for result in fitted_results:
             if result and result.get('success', False):
-                # Extract fitted position (center_x, center_y from fitting)
-                # If not available, fall back to peak_x, peak_y
-                pos_x = result.get('center_x', result.get('peak_x', 0))
-                pos_y = result.get('center_y', result.get('peak_y', 0))
+                # CRITICAL FIX: Use DETECTED position (peak_x, peak_y) NOT fitted position
+                # (center_x, center_y). Fitted positions can drift during 2D multi-peak
+                # optimization, causing cascade errors to compound.
+                # peak_x/peak_y = where detection found the peak in the current spectrum
+                # center_x/center_y = where 2D fitter placed the peak (can be wrong)
+                pos_x = result.get('peak_x', result.get('center_x', 0))
+                pos_y = result.get('peak_y', result.get('center_y', 0))
 
                 peak_data.append({
                     'Assignment': result.get('assignment', 'Unknown'),
@@ -610,8 +564,23 @@ class MultiSpectrumProcessor:
                     'Intensity': result.get('volume', result.get('intensity', 0))
                 })
             else:
-                # Failed fit - use original reference position
+                # Failed fit - use original reference position or previous position for dummies
                 assignment = result.get('assignment', 'Unknown') if result else 'Unknown'
+
+                # For dummy peaks, use position from result (previous fitted position)
+                # since they don't exist in original reference_peaks
+                if isinstance(assignment, str) and assignment.startswith('dummy_'):
+                    pos_x = result.get('peak_x', result.get('center_x', 0)) if result else 0
+                    pos_y = result.get('peak_y', result.get('center_y', 0)) if result else 0
+                    if pos_x != 0 or pos_y != 0:
+                        peak_data.append({
+                            'Assignment': assignment,
+                            'Position_X': pos_x,
+                            'Position_Y': pos_y,
+                            'Height': result.get('height', 0) if result else 0,
+                            'Intensity': result.get('intensity', 0) if result else 0
+                        })
+                    continue
 
                 # Try to find in original reference peaks
                 matching_ref = self.reference_peaks[
@@ -636,6 +605,10 @@ class MultiSpectrumProcessor:
         """
         Creates a single, tidy CSV file from all series results.
         This format is ideal for external analysis and plotting.
+
+        When extract_delays is enabled, the spectrum_name column uses delay values (e.g., "50")
+        instead of filenames. Duplicate delays get unique suffixes (e.g., "50_2" for the second
+        spectrum at 50ms). This improves compatibility with DynamiXs.
         """
         if not batch_results.get('results'):
             return
@@ -645,11 +618,24 @@ class MultiSpectrumProcessor:
             if not result_data.get('success', False):
                 continue
 
+            # Determine column header: use delay column name if extract_delays enabled
+            if getattr(self, 'extract_delays', False) and hasattr(self, 'delay_mapping'):
+                column_name = self.delay_mapping.get(spectrum_name)
+                if column_name is not None:
+                    # Use unique column name (e.g., "50" or "50_2" for duplicates)
+                    spectrum_header = column_name
+                else:
+                    # Fallback to filename without extension
+                    spectrum_header = os.path.splitext(spectrum_name)[0]
+            else:
+                # Use filename without extension
+                spectrum_header = os.path.splitext(spectrum_name)[0]
+
             # Use the standardized integration results
             integration_results = result_data.get('integration_results', [])
             for peak in integration_results:
                 row = {
-                    'spectrum_name': os.path.splitext(spectrum_name)[0],
+                    'spectrum_name': spectrum_header,
                     'assignment': peak.get('assignment', 'Unknown'),
                     'peak_number': peak.get('peak_number', 0),
                     'ppm_x': peak.get('ppm_x', 0.0),
@@ -679,7 +665,8 @@ class MultiSpectrumProcessor:
             else:
                 tidy_df_formatted[col] = tidy_df_formatted[col].apply(lambda x: f'{x:.1f}' if pd.notna(x) else '')
         tidy_df_formatted.to_csv(tidy_file, index=False)
-        print(f"✨ Created tidy results file for easy analysis: {tidy_file}")
+
+        log_info(f"Created tidy results file: {tidy_file}")
 
     def _convert_to_batch_results(self, batch_results_dict: Dict[str, Any],
                                    start_time, end_time) -> 'BatchResults':
@@ -777,13 +764,8 @@ class MultiSpectrumProcessor:
                     if not matching_ref.empty:
                         ref_x = float(matching_ref['Position_X'].iloc[0])
                         ref_y = float(matching_ref['Position_Y'].iloc[0])
-                        print(f"   🎯 Found reference coordinates for {assignment}: ({ref_x:.3f}, {ref_y:.1f})")
-                    else:
-                        print(f"   ⚠️ No reference match found for assignment: {assignment} (type: {type(assignment)})")
                 except Exception as e:
-                    print(f"   ⚠️ Error getting reference coordinates for {assignment}: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    log_warning(f"Error getting reference coordinates for {assignment}: {e}")
 
             # Initialize with reference coordinates as defaults
             peak_data = {
@@ -938,8 +920,6 @@ class MultiSpectrumProcessor:
                 elif 'fitting_quality' in fit_result:
                     quality = str(fit_result['fitting_quality'])
 
-                print(f"   📊 Peak {assignment}: height={height:.1e}, snr={snr:.1f}, r²={r_squared:.3f}, quality={quality}")
-
                 # Volume extraction - CRITICAL: Use volume from fit_result if available
                 # For PS2D fits, 'volume' is the fitted intensity parameter
                 # For 1D fits, calculate from height and linewidths
@@ -947,11 +927,9 @@ class MultiSpectrumProcessor:
                 if 'volume' in fit_result:
                     # PS2D fitter returns 'volume' (fitted intensity parameter)
                     volume = float(fit_result['volume'])
-                    print(f"   📊 Peak {assignment}: Using PS2D volume (fitted intensity) = {volume:.2e}")
                 elif 'intensity' in fit_result:
                     # Alternative name for volume
                     volume = float(fit_result['intensity'])
-                    print(f"   📊 Peak {assignment}: Using fitted intensity = {volume:.2e}")
                 elif x_fit and y_fit and height > 0:
                     # Calculate volume from Voigt parameters for 1D fits
                     x_sigma = x_fit.get('sigma', 0)
@@ -963,7 +941,6 @@ class MultiSpectrumProcessor:
                         x_fwhm = 2 * np.sqrt(2 * np.log(2)) * x_sigma + 2 * x_gamma
                         y_fwhm = 2 * np.sqrt(2 * np.log(2)) * y_sigma + 2 * y_gamma
                         volume = abs(height) * x_fwhm * y_fwhm
-                        print(f"   📊 Peak {assignment}: Calculated volume from 1D fit = {volume:.2e}")
 
                 # Update peak data with fitted values
                 peak_data.update({
@@ -1008,11 +985,6 @@ class MultiSpectrumProcessor:
                 if 'all_peaks' in fit_result:
                     peak_data['all_peaks'] = fit_result['all_peaks']
 
-                print(f"   ✅ Peak {assignment}: fitted=({final_x:.3f}, {final_y:.1f}), ref=({ref_x:.3f}, {ref_y:.1f})")
-
-            else:
-                print(f"   ❌ Peak {assignment}: fit failed, using reference coordinates ({ref_x:.3f}, {ref_y:.1f})")
-
             standardized_results.append(peak_data)
 
         return standardized_results
@@ -1054,7 +1026,7 @@ class MultiSpectrumProcessor:
             # Format with 3 decimals for Reference_X/Y, 1 decimal for other columns
             tracking_df_formatted = self._format_dataframe_for_csv(tracking_df)
             tracking_df_formatted.to_csv(tracking_file, index=False)
-            print(f"✅ Created comprehensive peak tracking: {tracking_file}")
+            log_info(f"Created comprehensive peak tracking: {tracking_file}")
 
             # Create matrix files
             self._create_intensity_matrix(tracking_df)
@@ -1069,7 +1041,12 @@ class MultiSpectrumProcessor:
             self._create_summary_statistics_file(batch_results)
 
     def _create_peak_tracking_table(self, batch_results: Dict[str, Any]) -> pd.DataFrame:
-        """Create comprehensive peak tracking table"""
+        """Create comprehensive peak tracking table.
+
+        When extract_delays is enabled, column names use delay values (e.g., "50_Height")
+        instead of filenames (e.g., "T1_50ms_Height"). Duplicate delays get unique
+        suffixes (e.g., "50_2_Height" for the second spectrum at 50ms).
+        """
         all_peaks_data = []
 
         for peak_idx, ref_peak in self.reference_peaks.iterrows():
@@ -1082,7 +1059,15 @@ class MultiSpectrumProcessor:
 
             # Add data for each spectrum
             for spectrum_name, result_data in batch_results['results'].items():
-                spectrum_key = os.path.splitext(spectrum_name)[0]
+                # Determine column key: use delay column name if extract_delays enabled
+                if getattr(self, 'extract_delays', False) and hasattr(self, 'delay_mapping'):
+                    column_name = self.delay_mapping.get(spectrum_name)
+                    if column_name is not None:
+                        spectrum_key = column_name
+                    else:
+                        spectrum_key = os.path.splitext(spectrum_name)[0]
+                else:
+                    spectrum_key = os.path.splitext(spectrum_name)[0]
                 found_peak = False
 
                 if result_data.get('success', False):
@@ -1216,7 +1201,7 @@ class MultiSpectrumProcessor:
         # Format with 3 decimals for Reference_X/Y, 1 decimal for other columns
         intensity_detected_data_formatted = self._format_dataframe_for_csv(intensity_detected_data)
         intensity_detected_data_formatted.to_csv(detected_intensity_file, index=False)
-        print(f"✅ Created detected intensity matrix: {detected_intensity_file}")
+        log_info(f"Created detected intensity matrix: {detected_intensity_file}")
 
     def _create_volume_matrix(self, tracking_df: pd.DataFrame):
         """Create peak volume matrix file"""
@@ -1231,7 +1216,7 @@ class MultiSpectrumProcessor:
         # Format with 3 decimals for Reference_X/Y, 1 decimal for other columns
         volume_data_formatted = self._format_dataframe_for_csv(volume_data)
         volume_data_formatted.to_csv(volume_file, index=False)
-        print(f"✅ Created volume matrix: {volume_file}")
+        log_info(f"Created volume matrix: {volume_file}")
 
     def _create_per_spectrum_files(self, batch_results: Dict[str, Any]):
         """
@@ -1294,7 +1279,7 @@ class MultiSpectrumProcessor:
                 spectrum_df_formatted = self._format_dataframe_for_csv(spectrum_df)
                 spectrum_df_formatted.to_csv(spectrum_file, index=False)
 
-        print(f"✅ Created per-spectrum CSV files in: {per_spectrum_folder}")
+        log_info(f"Created per-spectrum CSV files in: {per_spectrum_folder}")
 
     def _create_summary_statistics_file(self, batch_results: Dict[str, Any]):
         """Create summary statistics file"""
@@ -1317,7 +1302,7 @@ class MultiSpectrumProcessor:
     def cancel_processing(self):
         """Cancel current processing operation"""
         self.processing_active = False
-        print("⏹️ Multi-spectrum processing cancelled")
+        log_info("Multi-spectrum processing cancelled")
 
     def _extract_and_store_linewidth(self, result, assignment):
         """
@@ -1349,74 +1334,61 @@ class MultiSpectrumProcessor:
                 'y_r_squared': y_fit.get('r_squared', 0)
             }
 
-            print(f"      Stored linewidths for {assignment}: "
-                  f"σ_x={x_fit.get('sigma', 0):.4f}, γ_x={x_fit.get('gamma', 0):.4f}")
-
         except Exception as e:
-            print(f"   ⚠️ Could not extract linewidths for {assignment}: {e}")
+            log_warning(f"Could not extract linewidths for {assignment}: {e}")
 
-    def _build_linewidth_constraints(self, assignment):
+    def _sample_intensities_for_peak_list(self):
         """
-        Build linewidth constraints from reference values (PS2D C++ style)
+        Sample intensities from current spectrum at each peak position.
 
-        C++ PS2D approach (peakfit.cpp:588-606):
-        - Linewidths from plane 1 are COPIED to subsequent planes
-        - They are FIXED (not optimized) for planes 2, 3, 4, ...
-        - Only intensity is fitted for subsequent planes (~40% speedup)
+        This is critical for cascade mode spectrum N+1: positions come from
+        spectrum N-1, but intensities must come from the CURRENT spectrum
+        for proper fitter initialization.
 
-        Python implementation:
-        - Return very tight bounds around reference values (effectively fixes them)
-        - Allow ±1% tolerance for numerical stability
-
-        Parameters
-        ----------
-        assignment : str
-            Peak assignment to get constraints for
-
-        Returns
-        -------
-        dict or None : Linewidth constraints compatible with fit_voigt_profile
-            {
-                'x': {'sigma_bounds': (min, max), 'gamma_bounds': (min, max)},
-                'y': {'sigma_bounds': (min, max), 'gamma_bounds': (min, max)}
-            }
+        Without this, T1/T2 experiments fail because initial intensity guess
+        (from spectrum 1) is very different from actual intensity (spectrum N).
         """
-        if not self.reference_linewidths or assignment not in self.reference_linewidths:
-            return None
+        if self.integrator.nmr_data is None:
+            log_warning("Cannot sample intensities: nmr_data is None")
+            return
 
-        ref_lw = self.reference_linewidths[assignment]
+        if self.integrator.ppm_x_axis is None or self.integrator.ppm_y_axis is None:
+            log_warning("Cannot sample intensities: ppm axes not available")
+            return
 
-        # PS2D EXACT approach: FIX linewidths to reference values
-        # Use very tight bounds (±1%) to effectively fix them while maintaining numerical stability
-        tolerance = 0.01  # 1% tolerance for numerical stability
+        ppm_x = self.integrator.ppm_x_axis
+        ppm_y = self.integrator.ppm_y_axis
+        nmr_data = self.integrator.nmr_data
 
-        constraints = {
-            'x': {
-                'sigma_bounds': (
-                    ref_lw['x_sigma'] * (1 - tolerance),
-                    ref_lw['x_sigma'] * (1 + tolerance)
-                ),
-                'gamma_bounds': (
-                    ref_lw['x_gamma'] * (1 - tolerance),
-                    ref_lw['x_gamma'] * (1 + tolerance)
-                )
-            },
-            'y': {
-                'sigma_bounds': (
-                    ref_lw['y_sigma'] * (1 - tolerance),
-                    ref_lw['y_sigma'] * (1 + tolerance)
-                ),
-                'gamma_bounds': (
-                    ref_lw['y_gamma'] * (1 - tolerance),
-                    ref_lw['y_gamma'] * (1 + tolerance)
-                )
-            }
-        }
+        sampled_count = 0
+        for idx, row in self.integrator.peak_list.iterrows():
+            try:
+                pos_x = row['Position_X']
+                pos_y = row['Position_Y']
 
-        return constraints
+                # Convert ppm to array indices
+                x_idx = np.argmin(np.abs(ppm_x - pos_x))
+                y_idx = np.argmin(np.abs(ppm_y - pos_y))
+
+                # Ensure indices are within bounds
+                x_idx = np.clip(x_idx, 0, nmr_data.shape[1] - 1)
+                y_idx = np.clip(y_idx, 0, nmr_data.shape[0] - 1)
+
+                # Sample intensity at peak position
+                intensity = float(nmr_data[y_idx, x_idx])
+
+                # Update peak_list with sampled intensity
+                self.integrator.peak_list.at[idx, 'Height'] = intensity
+                self.integrator.peak_list.at[idx, 'Intensity'] = intensity
+
+                sampled_count += 1
+
+            except Exception as e:
+                assignment = row.get('Assignment', 'Unknown')
+                log_warning(f"Could not sample intensity for {assignment}: {e}")
 
 
-## GM added 
+## GM added
 
 class BatchResults:
     """Container for batch processing results with analysis capabilities"""
@@ -1545,10 +1517,6 @@ class SeriesAnalyzer:
     def __init__(self):
         self.results = None
 
-    def load_results(self, batch_results):
-        """Load batch results for analysis"""
-        self.results = batch_results
-
     def analyze_detection_trends(self):
         """Analyze detection rate trends across series"""
         if self.results is None or not hasattr(self.results, 'results') or not self.results.results:
@@ -1667,5 +1635,5 @@ class SeriesAnalyzer:
                 json.dump(analysis_data, f, indent=2, default=str)
             return True
         except Exception as e:
-            print(f"Failed to export analysis: {e}")
+            log_error(f"Failed to export analysis: {e}")
             return False

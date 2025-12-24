@@ -22,6 +22,7 @@ from lunaNMR.gui.components.matplotlib_widget import (
 )
 from lunaNMR.gui.components.series_plotter import SeriesPlotter
 from lunaNMR.gui.components.spectrum_plotter import SpectrumPlotter
+from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
 
 __all__ = [
     "ProgressDialog",
@@ -40,5 +41,6 @@ __all__ = [
     "MatplotlibWidget",
     "MatplotlibMultiAxesWidget",
     "SeriesPlotter",
-    "SpectrumPlotter"
+    "SpectrumPlotter",
+    "NMRNavigationHandler"
 ]

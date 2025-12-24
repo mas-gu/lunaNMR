@@ -123,11 +123,7 @@ class FontManager:
             "✔️": "[CHECK]",
             "⏹️": "[STOP]"
         }
-    
-    def get_emoji_font(self):
-        """Get the configured emoji font."""
-        return self.emoji_font
-    
+
     def get_text_with_emoji_support(self, text):
         """Convert emoji characters to fallback text if needed."""
         if self.emoji_font or not hasattr(self, 'emoji_replacements'):

@@ -151,7 +151,6 @@ class EnhancedPeakPicker:
             return max(noise_level, 1e-10)  # Avoid zero noise
 
         except Exception as e:
-            print(f"Noise estimation failed: {e}")
             return np.std(data_2d) * 0.1  # Fallback
 
     def preprocess_data_for_detection(self, data_2d, sigma=None, adaptive_smoothing=True):
@@ -459,8 +458,6 @@ class EnhancedPeakPicker:
             min_snr = self.detection_parameters['min_snr']
 
         filtered_peaks = [p for p in peaks if p.get('snr', 0) >= min_snr]
-
-        print(f"SNR filtering: {len(peaks)} → {len(filtered_peaks)} peaks (SNR ≥ {min_snr})")
         return filtered_peaks
 
     def detect_overlapping_peaks(self, peaks, overlap_threshold=None):
@@ -500,7 +497,6 @@ class EnhancedPeakPicker:
                         peak['cluster_id'] = -1
 
             except Exception as e:
-                print(f"Clustering failed: {e}")
                 # Mark all as non-overlapping if clustering fails
                 for peak in peaks:
                     peak['overlapping'] = False
@@ -564,7 +560,6 @@ class EnhancedPeakPicker:
                 peak['fit_quality'] = 0.0
 
         except Exception as e:
-            print(f"Fit validation failed for peak at ({peak['ppm_x']:.3f}, {peak['ppm_y']:.1f}): {e}")
             peak['fit_validation'] = 'error'
             peak['fit_quality'] = 0.0
 
@@ -583,18 +578,14 @@ class EnhancedPeakPicker:
         5. Optional fit-based validation
         6. Final quality assessment
         """
-        print(f"🔍 Starting hierarchical peak detection...")
-
         # Step 1: Initial detection
         initial_peaks = self.detect_peaks_2d_initial(data_2d, ppm_x_axis, ppm_y_axis, nucleus_type)
-        print(f"   Initial detection: {len(initial_peaks)} peaks found")
 
         if len(initial_peaks) == 0:
             return []
 
         # Step 2: Hierarchical intensity-based detection
         hierarchical_peaks = self.hierarchical_peak_refinement(initial_peaks, data_2d)
-        print(f"   Hierarchical refinement: {len(initial_peaks)} → {len(hierarchical_peaks)} peaks")
 
         # Step 3: Enhanced SNR filtering with adaptive thresholds
         snr_filtered = self.filter_peaks_by_snr_adaptive(hierarchical_peaks, data_2d)
@@ -604,13 +595,9 @@ class EnhancedPeakPicker:
 
         # Step 5: Optional fit validation with enhanced criteria
         if validate_fits and len(overlap_analyzed) > 0:
-            print(f"   Validating peaks by enhanced Voigt fitting...")
             validated_peaks = []
 
             for i, peak in enumerate(overlap_analyzed):
-                if i % max(1, len(overlap_analyzed) // 10) == 0:  # Progress indicator
-                    print(f"   Validating peak {i+1}/{len(overlap_analyzed)}")
-
                 validated_peak = self.validate_peak_by_fitting_enhanced(data_2d, ppm_x_axis, ppm_y_axis, peak)
 
                 # Enhanced validation criteria for small and overlapping peaks
@@ -619,7 +606,6 @@ class EnhancedPeakPicker:
                     validated_peaks.append(validated_peak)
 
             final_peaks = validated_peaks
-            print(f"   Enhanced validation: {len(overlap_analyzed)} → {len(final_peaks)} peaks")
         else:
             final_peaks = overlap_analyzed
 
@@ -645,12 +631,7 @@ class EnhancedPeakPicker:
             'nucleus_type': nucleus_type or 'auto-detected'
         }
 
-        print(f"✅ Peak detection complete: {len(final_peaks)} high-quality peaks")
         return final_peaks
-
-    def get_detection_stats(self):
-        """Return statistics from last detection"""
-        return self.last_detection_stats.copy()
 
     def hierarchical_peak_refinement(self, initial_peaks, data_2d):
         """
@@ -1039,20 +1020,6 @@ class EnhancedPeakPicker:
             peak_data.append(row)
 
         return pd.DataFrame(peak_data)
-
-
-# Convenience function
-def detect_peaks_enhanced(data_2d, ppm_x_axis, ppm_y_axis, nucleus_type=None, validate_fits=True):
-    """
-    Convenience function for enhanced peak detection
-
-    Returns both peak list and DataFrame
-    """
-    picker = EnhancedPeakPicker()
-    peaks = picker.comprehensive_peak_detection(data_2d, ppm_x_axis, ppm_y_axis, nucleus_type, validate_fits)
-    df = picker.export_peaks_to_dataframe(peaks)
-
-    return peaks, df
 
 
 if __name__ == "__main__":

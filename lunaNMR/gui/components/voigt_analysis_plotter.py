@@ -188,11 +188,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.show_residuals = visible
         self.refresh_plot()
 
-    def toggle_cross_sections(self, visible):
-        """Toggle cross-sections display"""
-        self.show_cross_sections = visible
-        self.refresh_plot()
-
     def toggle_peak_clipping(self, enabled):
         """Toggle individual peak clipping to fit region
 

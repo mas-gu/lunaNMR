@@ -195,48 +195,6 @@ class QualityCategorizer:
             }
         }
 
-    def get_threshold_info(self) -> Dict:
-        """Get information about current thresholds"""
-        return {
-            'name': self.thresholds.name,
-            'description': self.thresholds.description,
-            'thresholds': {
-                'excellent': self.thresholds.excellent,
-                'good': self.thresholds.good,
-                'fair': self.thresholds.fair
-            }
-        }
-
-    def print_analysis(self, r_squared_values: Union[List[float], np.ndarray], show_ml_info: bool = True):
-        """
-        Print formatted quality analysis (maintains backward compatibility).
-
-        Args:
-            r_squared_values: Array or list of R² values
-            show_ml_info: Whether to show ML suitability information
-        """
-        analysis = self.categorize_batch(r_squared_values)
-        stats = analysis['statistics']
-        categories = analysis['categories']
-
-        print(f"\n📊 Quality Analysis ({stats['total_samples']} samples with R²) - {self.thresholds.name} Thresholds:")
-        print(f"   Average R²: {stats['average_r_squared']:.3f}")
-        print(f"   Median R²:  {stats['median_r_squared']:.3f}")
-        print(f"   Range: {stats['min_r_squared']:.3f} - {stats['max_r_squared']:.3f}")
-        print(f"   Std Dev: {stats['std_r_squared']:.3f}")
-
-        print(f"\n   📈 Quality Categories:")
-        for category_name in ['excellent', 'good', 'fair', 'poor']:
-            cat = categories[category_name]
-            category_display = category_name.title()
-            print(f"   {category_display:10} ({cat['threshold']}): {cat['count']:3d} ({cat['percentage']:4.1f}%)")
-
-        if show_ml_info:
-            ml_suit = analysis['ml_suitability']
-            print(f"\n   🤖 ML Training Suitability:")
-            print(f"   Suitable   (≥{self.thresholds.fair:.2f}):     {ml_suit['suitable_for_training']['count']:3d} ({ml_suit['suitable_for_training']['percentage']:4.1f}%)")
-            print(f"   Marginal   ({self.thresholds.fair*0.8:.2f}-{self.thresholds.fair:.2f}):   {ml_suit['marginal_for_training']['count']:3d} ({ml_suit['marginal_for_training']['percentage']:4.1f}%)")
-            print(f"   Unsuitable (<{self.thresholds.fair*0.8:.2f}):     {ml_suit['unsuitable_for_training']['count']:3d} ({ml_suit['unsuitable_for_training']['percentage']:4.1f}%)")
 
 # Convenience functions for backward compatibility
 def get_quality_categorizer(mode: str = 'scientific', config: Optional[Dict] = None) -> QualityCategorizer:

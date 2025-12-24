@@ -8,11 +8,12 @@ Date: 2025
 
 import threading
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import pandas as pd
 import numpy as np
 
 from datetime import datetime
+from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
 class SingleSpectrumProcessor:
     """
@@ -46,7 +47,9 @@ class SingleSpectrumProcessor:
 
     def process_peak_list(self, peak_list: pd.DataFrame,
                          processing_options: Optional[Dict] = None,
-                         progress_callback: Optional[callable] = None) -> List[Dict]:
+                         progress_callback: Optional[callable] = None,
+                         locked_clusters_by_assignment: Optional[List[List[str]]] = None,
+                         pre_learned_statistics: Optional[Dict] = None) -> Tuple[List[Dict], Optional[Dict]]:
         """
         Process all peaks in a peak list using specified options
 
@@ -54,9 +57,19 @@ class SingleSpectrumProcessor:
             peak_list: DataFrame with columns Position_X, Position_Y, Assignment
             processing_options: Dict with processing preferences
             progress_callback: Function to call for progress updates (progress, task, log_msg, failed)
+            locked_clusters_by_assignment: Optional pre-computed clusters from reference spectrum.
+                If provided, these clusters are used instead of recalculating, ensuring
+                consistent peak grouping across all spectra in a series.
+                Format: List of lists of assignment strings, e.g. [['Peak1', 'Peak2'], ['Peak3']]
+            pre_learned_statistics: Optional linewidth statistics learned from reference spectrum.
+                If provided, PASS 1 learning is skipped and these values are used as initial
+                guesses (not fixed constraints). Format:
+                {'lw_f1_median': float, 'lw_f2_median': float, 'lw_f1_mad': float,
+                 'lw_f2_mad': float, 'n_samples': int, 'alpha': float}
 
         Returns:
-            List of fitting results
+            Tuple of (fitted_results: List[Dict], learned_statistics: Optional[Dict])
+            learned_statistics is the spectrum statistics learned during PASS 1 (None if skipped)
         """
         if processing_options is None:
             processing_options = {
@@ -67,32 +80,37 @@ class SingleSpectrumProcessor:
 
         self.progress_callback = progress_callback
         self.processing_active = True
+        self._locked_clusters_by_assignment = locked_clusters_by_assignment  # Store for internal methods
+        self._pre_learned_statistics = pre_learned_statistics  # Store for parallel fitting
+        # Store original reference positions for cascade mode absolute drift limiting
+        self._original_reference_positions = processing_options.get('original_reference_positions') if processing_options else None
 
         try:
             # Update integrator parameters from parameter manager
             self._sync_parameters_to_integrator()
 
             # Choose processing strategy
+            # Returns tuple: (fitted_results, learned_statistics)
             if processing_options.get('use_global_optimization', False):
-                return self._process_with_global_optimization(peak_list)
+                results = self._process_with_global_optimization(peak_list)
+                return (results, None)  # Global optimization doesn't learn statistics
             elif processing_options.get('use_parallel', False):
                 # Check if we're in a test environment with Mock objects
                 if hasattr(self.integrator, '__class__') and 'Mock' in str(type(self.integrator)):
-                    print("🧪 Test environment detected (Mock integrator), forcing sequential processing")
-                    return self._process_with_sequential_fitting(peak_list)
+                    log_info("Test environment detected (Mock integrator), forcing sequential processing")
+                    results = self._process_with_sequential_fitting(peak_list)
+                    return (results, None)  # Sequential doesn't learn statistics yet
                 else:
                     return self._process_with_parallel_fitting(peak_list)
             else:
-                return self._process_with_sequential_fitting(peak_list)
-##
-
-
+                results = self._process_with_sequential_fitting(peak_list)
+                return (results, None)  # Sequential doesn't learn statistics yet
 
         except Exception as e:
-            print(f"❌ Error in process_peak_list: {e}")
+            log_error(f"Error in process_peak_list: {e}")
             if self.progress_callback:
                 self.progress_callback(0, f"Processing failed: {e}", None, True)
-            return []
+            return ([], None)
         finally:
             self.processing_active = False
 
@@ -115,7 +133,7 @@ class SingleSpectrumProcessor:
         # Apply GUI parameters
         self.integrator.gui_params = params['gui_params']
 
-        print("✅ Single spectrum processor parameters synchronized")
+        log_info("Single spectrum processor parameters synchronized")
 
     def _process_with_sequential_fitting(self, peak_list: pd.DataFrame) -> List[Dict]:
         """Process peaks one by one (most reliable method)"""
@@ -128,7 +146,7 @@ class SingleSpectrumProcessor:
 
         # CRITICAL: Measure intensities if missing
         if 'Height' not in peak_list.columns and 'Intensity' not in peak_list.columns:
-            print("   ⚠️ Peak list missing Height/Intensity - measuring now from spectrum...")
+            log_warning("Peak list missing Height/Intensity - measuring now from spectrum...")
             if self.integrator.nmr_data is not None:
                 data = self.integrator.nmr_data
                 x_axis = self.integrator.ppm_x_axis
@@ -154,9 +172,9 @@ class SingleSpectrumProcessor:
                 # Update integrator's copy too
                 self.integrator.peak_list = peak_list
 
-                print(f"   ✅ Measured intensities for {len(intensities)} peaks")
+                log_info(f"Measured intensities for {len(intensities)} peaks")
             else:
-                print("   ❌ Cannot measure intensities - no spectrum data loaded")
+                log_error("Cannot measure intensities - no spectrum data loaded")
 
         # Build all_peaks_context for 2D overlap detection and routing
         all_peaks_context = []
@@ -172,11 +190,18 @@ class SingleSpectrumProcessor:
                 'intensity': intensity  # Preserve peak picker intensity
             })
 
-        print(f"🔄 Starting cluster-based sequential fitting of {total_count} peaks")
-        #print(f"   🎯 2D overlap detection enabled with {len(all_peaks_context)} peaks context")
+        log_progress(f"Starting cluster-based sequential fitting of {total_count} peaks")
 
         # STEP 1: Identify overlap clusters (graph-based, finds transitive overlaps)
-        clusters = self.integrator.identify_overlap_clusters(all_peaks_context)
+        # If locked clusters are provided (from reference spectrum), use those instead
+        if hasattr(self, '_locked_clusters_by_assignment') and self._locked_clusters_by_assignment is not None:
+            log_info("Using LOCKED clusters from reference spectrum")
+            clusters = self._convert_locked_clusters_to_positions(
+                self._locked_clusters_by_assignment, all_peaks_context
+            )
+            log_info(f"Converted {len(clusters)} locked clusters to current positions")
+        else:
+            clusters = self.integrator.identify_overlap_clusters(all_peaks_context)
 
         # STEP 2: Build peak position → metadata mapping for result retrieval
         peak_metadata = {}  # (x_ppm, y_ppm) → (peak_number, assignment, index)
@@ -196,7 +221,7 @@ class SingleSpectrumProcessor:
 
         for cluster_idx, cluster in enumerate(clusters):
             if not self.processing_active:
-                print("⏹️ Processing cancelled")
+                log_warning("Processing cancelled")
                 break
 
             cluster_size = len(cluster)
@@ -219,7 +244,7 @@ class SingleSpectrumProcessor:
                 if self.progress_callback:
                     self.progress_callback(progress, task_desc, None)
 
-                print(f"   🎯 Fitting isolated peak {peak_number}: {assignment} at ({peak_x:.3f}, {peak_y:.1f})")
+                log_info(f"Fitting isolated peak {peak_number}: {assignment} at ({peak_x:.3f}, {peak_y:.1f})")
 
                 # Fit single peak (routes through consensus or standard 1D)
                 result = self.integrator.enhanced_peak_fitting(
@@ -235,20 +260,20 @@ class SingleSpectrumProcessor:
 
                     quality = result.get('fitting_quality', 'Unknown')
                     r_squared = result.get('avg_r_squared', 0)
-                    print(f"     ✅ Success: {quality} (R² = {r_squared:.3f})")
+                    log_info(f"Success: {quality} (R² = {r_squared:.3f})")
                     # Log individual peak success for progress dialog
                     if self.progress_callback:
                         self.progress_callback(progress, task_desc, f"{assignment} fitted (R²={r_squared:.3f})")
                 else:
                     self.stats['failed_fits'] += 1
-                    print(f"     ❌ Failed: Could not fit peak")
+                    log_warning(f"Failed: Could not fit peak")
                     # Log individual peak failure for progress dialog
                     if self.progress_callback:
                         self.progress_callback(progress, task_desc, f"{assignment} failed")
 
             else:
                 # Overlap group - 2D simultaneous fitting ONCE
-                print(f"   🎯 Fitting overlap cluster {cluster_idx+1}: {cluster_size} peaks (simultaneous 2D)")
+                log_info(f"Fitting overlap cluster {cluster_idx+1}: {cluster_size} peaks (simultaneous 2D)")
 
                 # Update progress for cluster processing
                 task_desc = f"PASS 2: Fitting overlap cluster {cluster_idx+1}/{len(clusters)}\n{cluster_size} peaks (simultaneous 2D)"
@@ -260,7 +285,7 @@ class SingleSpectrumProcessor:
                 for peak_pos in cluster:
                     meta = peak_metadata.get(peak_pos)
                     if meta:
-                        print(f"      • Peak {meta['peak_number']}: {meta['assignment']} at ({peak_pos[0]:.3f}, {peak_pos[1]:.1f})")
+                        log_info(f"  Peak {meta['peak_number']}: {meta['assignment']} at ({peak_pos[0]:.3f}, {peak_pos[1]:.1f})")
                         cluster_assignments.append(meta['assignment'])
                     else:
                         cluster_assignments.append('Unknown')
@@ -295,8 +320,6 @@ class SingleSpectrumProcessor:
 
                     cluster_dicts.append(peak_dict)
 
-                #print(f"   🔍 DEBUG cluster_dicts[0] = {cluster_dicts[0]}")
-
                 # Extract fix_positions and fix_linewidths from GUI parameters
                 fix_positions = self.integrator.gui_params.get('fix_positions', False)
                 fix_linewidths = self.integrator.gui_params.get('fix_linewidths', False)
@@ -307,7 +330,8 @@ class SingleSpectrumProcessor:
                     target_assignment,
                     peak_assignments=cluster_assignments,
                     fix_positions=fix_positions,
-                    fix_linewidths=fix_linewidths
+                    fix_linewidths=fix_linewidths,
+                    reference_positions=self._original_reference_positions
                 )
 
                 if group_result and group_result.get('success', False):
@@ -316,7 +340,7 @@ class SingleSpectrumProcessor:
 
                     # Safety check: ensure region extraction succeeded
                     if region_2d is None:
-                        print(f"   ❌ Failed to extract 2D region for visualization")
+                        log_error("Failed to extract 2D region for visualization")
                         self.stats['failed_fits'] += len(cluster)
                         continue
 
@@ -325,23 +349,42 @@ class SingleSpectrumProcessor:
                         region_2d, group_result['peaks']
                     )
 
-                    # Extract result for EACH peak in cluster
-                    for peak_x, peak_y in cluster:
+                    # OPTIMAL MATCHING using Hungarian algorithm
+                    # This ensures 1-to-1 matching and prevents peak swapping
+                    from scipy.optimize import linear_sum_assignment
+
+                    # Build cost matrix: distance from each original peak to each fitted peak
+                    cluster_peaks = [(peak_x, peak_y) for peak_x, peak_y in cluster
+                                    if peak_metadata.get((peak_x, peak_y)) is not None]
+                    fitted_peaks = group_result['peaks']
+
+                    if len(cluster_peaks) > 0 and len(fitted_peaks) > 0:
+                        cost_matrix = np.zeros((len(cluster_peaks), len(fitted_peaks)))
+                        for i, (peak_x, peak_y) in enumerate(cluster_peaks):
+                            for j, peak_fit in enumerate(fitted_peaks):
+                                fit_x = peak_fit['pos_f2']
+                                fit_y = peak_fit['pos_f1']
+                                cost_matrix[i, j] = np.sqrt((fit_x - peak_x)**2 + (fit_y - peak_y)**2)
+
+                        # Hungarian algorithm: find optimal 1-to-1 assignment
+                        row_indices, col_indices = linear_sum_assignment(cost_matrix)
+
+                        # Create mapping: original peak index → fitted peak index
+                        peak_to_fit_mapping = dict(zip(row_indices, col_indices))
+                    else:
+                        peak_to_fit_mapping = {}
+
+                    # Extract result for EACH peak using optimal matching
+                    for i, (peak_x, peak_y) in enumerate(cluster_peaks):
                         meta = peak_metadata.get((peak_x, peak_y))
                         if meta is None:
                             continue
 
-                        # Find matching peak in group_result
-                        best_match = None
-                        min_dist = float('inf')
-                        for peak_fit in group_result['peaks']:
-                            # NMRPipe: F1=Y, F2=X
-                            fit_x = peak_fit['pos_f2']
-                            fit_y = peak_fit['pos_f1']
-                            dist = np.sqrt((fit_x - peak_x)**2 + (fit_y - peak_y)**2)
-                            if dist < min_dist:
-                                min_dist = dist
-                                best_match = peak_fit
+                        # Get optimally matched fitted peak
+                        if i in peak_to_fit_mapping:
+                            best_match = fitted_peaks[peak_to_fit_mapping[i]]
+                        else:
+                            best_match = None
 
                         if best_match:
                             # Convert 2D fit result to standard format WITH VISUALIZATION DATA
@@ -400,19 +443,19 @@ class SingleSpectrumProcessor:
 
                             results_cache[(peak_x, peak_y)] = result
                             self.stats['successful_fits'] += 1
-                            print(f"      ✅ Peak {meta['peak_number']} fitted: R² = {group_result['r_squared']:.3f}")
+                            log_info(f"Peak {meta['peak_number']} fitted: R² = {group_result['r_squared']:.3f}")
                             # Log individual peak success for progress dialog
                             if self.progress_callback:
                                 self.progress_callback(progress, task_desc, f"{meta['assignment']} fitted (R²={group_result['r_squared']:.3f})")
                         else:
                             self.stats['failed_fits'] += 1
-                            print(f"      ❌ Peak {meta['peak_number']}: No match found in 2D result")
+                            log_warning(f"Peak {meta['peak_number']}: No match found in 2D result")
                             # Log individual peak failure for progress dialog
                             if self.progress_callback:
                                 self.progress_callback(progress, task_desc, f"{meta['assignment']} failed")
                 else:
                     # 2D fitting failed for entire cluster
-                    print(f"   ⚠️ 2D fitting failed for cluster {cluster_idx+1}")
+                    log_warning(f"2D fitting failed for cluster {cluster_idx+1}")
                     for peak_pos in cluster:
                         meta = peak_metadata.get(peak_pos)
                         if meta:
@@ -468,33 +511,57 @@ class SingleSpectrumProcessor:
         # Calculate actual success rate from stats (not all results, since we add placeholders)
         successful_count = self.stats.get('successful_fits', 0)
         success_rate = (successful_count / total_count * 100) if total_count > 0 else 0
-        print(f"✅ Sequential fitting complete: {successful_count}/{total_count} successful ({success_rate:.1f}%)")
+        log_info(f"Sequential fitting complete: {successful_count}/{total_count} successful ({success_rate:.1f}%)")
 
         return fitted_results
 
-    def _process_with_parallel_fitting(self, peak_list: pd.DataFrame) -> List[Dict]:
-        """Enhanced parallel processing using complete Voigt fitting pipeline"""
-        
-        print(f"🚀 Starting enhanced parallel processing of {len(peak_list)} peaks")
-        
+    def _process_with_parallel_fitting(self, peak_list: pd.DataFrame) -> Tuple[List[Dict], Optional[Dict]]:
+        """Enhanced parallel processing using complete Voigt fitting pipeline
+
+        Returns:
+            Tuple of (fitted_results, learned_statistics)
+        """
+
+        log_progress(f"Starting enhanced parallel processing of {len(peak_list)} peaks")
+
+        # Get locked clusters if available (for series integration)
+        locked_clusters = getattr(self, '_locked_clusters_by_assignment', None)
+        if locked_clusters is not None:
+            log_info(f"Parallel mode: Using {len(locked_clusters)} locked clusters from reference")
+
+        # Get pre-learned statistics if available (from reference spectrum)
+        pre_learned_statistics = getattr(self, '_pre_learned_statistics', None)
+        if pre_learned_statistics is not None:
+            log_info("Parallel mode: Using pre-learned statistics (skipping PASS 1)")
+
         # Check if enhanced parallel fitting is available
-        if (hasattr(self.integrator, 'enhanced_fitter') and 
+        if (hasattr(self.integrator, 'enhanced_fitter') and
             hasattr(self.integrator.enhanced_fitter, 'enhanced_peak_fitting_parallel')):
-            
+
             #print("✨ Using enhanced parallel Voigt fitting")
-            
-            # Define progress callback for parallel processing  
+
+            # Define progress callback for parallel processing
             def parallel_progress_callback(progress, status, current_item):
                 if self.progress_callback and self.processing_active:
                     self.progress_callback(progress, status, current_item)
-            
+
             try:
                 # Use new complete parallel implementation
-                fitted_results = self.integrator.enhanced_fitter.enhanced_peak_fitting_parallel(
-                    peak_list, 
+                # Returns tuple: (fitted_results, learned_statistics)
+                result = self.integrator.enhanced_fitter.enhanced_peak_fitting_parallel(
+                    peak_list,
                     use_parallel=True,
-                    progress_callback=parallel_progress_callback
+                    progress_callback=parallel_progress_callback,
+                    locked_clusters_by_assignment=locked_clusters,
+                    pre_learned_statistics=pre_learned_statistics
                 )
+
+                # Handle both old (list) and new (tuple) return formats
+                if isinstance(result, tuple):
+                    fitted_results, learned_statistics = result
+                else:
+                    fitted_results = result
+                    learned_statistics = None
                 
                 # Ensure results is a list
                 if not isinstance(fitted_results, list):
@@ -506,24 +573,24 @@ class SingleSpectrumProcessor:
                         result['processing_mode'] = 'enhanced_parallel'
                         if 'peak_number' not in result:
                             result['peak_number'] = i + 1
-                
-                print(f"✅ Enhanced parallel processing completed: {len(fitted_results)} results")
-                return fitted_results
-                
+
+                log_info(f"Enhanced parallel processing completed: {len(fitted_results)} results")
+                return (fitted_results, learned_statistics)
+
             except Exception as e:
-                print(f"⚠️ Enhanced parallel processing failed: {e}")
-                print("🔄 Falling back to original parallel implementation")
+                log_warning(f"Enhanced parallel processing failed: {e}")
+                log_info("Falling back to original parallel implementation")
                 # Fall through to existing parallel implementation
-        
+
         # Fallback to existing ParallelPeakFitter (unchanged)
         try:
             from lunaNMR.processors.parallel_fitting import ParallelPeakFitter
-            
-            print(f"🔄 Using original parallel fitting for {len(peak_list)} peaks")
-            
+
+            log_info(f"Using original parallel fitting for {len(peak_list)} peaks")
+
             # Create parallel fitter
             parallel_fitter = ParallelPeakFitter(self.integrator)
-            
+
             # Define progress callback for original parallel processing
             def original_parallel_progress_callback(completed, total, current_assignment):
                 if self.progress_callback and self.processing_active:
@@ -533,29 +600,30 @@ class SingleSpectrumProcessor:
                         f"Original parallel fitting: {completed}/{total} completed",
                         f"Processing peaks in parallel"
                     )
-            
+
             # Run original parallel fitting
             fitted_results = parallel_fitter.fit_peaks_parallel(peak_list, original_parallel_progress_callback)
-            
+
             # Add metadata to results
             for i, result in enumerate(fitted_results):
                 if result:
                     result['processing_mode'] = 'original_parallel'
                     if 'peak_number' not in result:
                         result['peak_number'] = i + 1
-            
-            return fitted_results
-            
+
+            return (fitted_results, None)  # Original parallel doesn't learn statistics
+
         except Exception as e:
-            print(f"❌ Original parallel fitting also failed: {e}")
-            print("🔄 Falling back to sequential processing")
-            return self._process_with_sequential_fitting(peak_list)
+            log_error(f"Original parallel fitting also failed: {e}")
+            log_info("Falling back to sequential processing")
+            results = self._process_with_sequential_fitting(peak_list)
+            return (results, None)
 
     def _process_with_global_optimization(self, peak_list: pd.DataFrame) -> List[Dict]:
         """Process peaks using global optimization"""
 
         try:
-            print(f"🎯 Starting global optimization of {len(peak_list)} peaks")
+            log_progress(f"Starting global optimization of {len(peak_list)} peaks")
 
             # Convert peak list to format expected by global optimization
             peak_tuples = []
@@ -598,13 +666,13 @@ class SingleSpectrumProcessor:
                 success_rate = summary.get('final_success_rate', 0)
                 optimization_rounds = summary.get('total_rounds', 0)
 
-                print(f"✅ Global optimization complete: {success_rate:.1f}% success rate after {optimization_rounds} rounds")
+                log_info(f"Global optimization complete: {success_rate:.1f}% success rate after {optimization_rounds} rounds")
 
             return fitted_results
 
         except Exception as e:
-            print(f"❌ Global optimization failed: {e}")
-            print("🔄 Falling back to sequential processing")
+            log_error(f"Global optimization failed: {e}")
+            log_info("Falling back to sequential processing")
             return self._process_with_sequential_fitting(peak_list)
 
     def get_processing_summary(self, fitted_results: List[Dict], total_peaks: int) -> Dict[str, Any]:
@@ -642,16 +710,107 @@ class SingleSpectrumProcessor:
             'processing_stats': self.stats.copy()
         }
 
-    def reset_statistics(self):
-        """Reset processing statistics"""
-        self.stats = {
-            'total_processed': 0,
-            'successful_fits': 0,
-            'failed_fits': 0,
-            'average_quality': 0.0
-        }
-
     def cancel_processing(self):
         """Cancel current processing operation"""
         self.processing_active = False
-        print("⏹️ Single spectrum processing cancelled")
+        log_warning("Single spectrum processing cancelled")
+
+    def _convert_locked_clusters_to_positions(
+        self,
+        locked_clusters_by_assignment: List[List[str]],
+        all_peaks_context: List[Dict]
+    ) -> List[List[Tuple[float, float]]]:
+        """
+        Convert assignment-based locked clusters to position-based clusters.
+
+        This allows using reference spectrum clusters with current spectrum positions,
+        ensuring consistent peak grouping across all spectra in a series.
+
+        Args:
+            locked_clusters_by_assignment: List of clusters, each cluster is a list
+                of assignment strings, e.g. [['Peak1', 'Peak2'], ['Peak3']]
+            all_peaks_context: Current spectrum's peak context with positions
+
+        Returns:
+            List of clusters in position format: [[(x1, y1), (x2, y2)], [(x3, y3)], ...]
+        """
+        # Build assignment → position mapping from current spectrum
+        assignment_to_position = {}
+        for peak in all_peaks_context:
+            assignment = str(peak.get('assignment', ''))
+            x = peak.get('x_ppm') or peak.get('pos_x')
+            y = peak.get('y_ppm') or peak.get('pos_y')
+            if assignment and x is not None and y is not None:
+                assignment_to_position[assignment] = (x, y)
+
+        # Convert each cluster from assignments to positions
+        position_clusters = []
+        for cluster_assignments in locked_clusters_by_assignment:
+            cluster_positions = []
+            for assignment in cluster_assignments:
+                if assignment in assignment_to_position:
+                    cluster_positions.append(assignment_to_position[assignment])
+                else:
+                    log_warning(f"Locked cluster assignment '{assignment}' not found in current spectrum")
+
+            if cluster_positions:
+                position_clusters.append(cluster_positions)
+
+        return position_clusters
+
+    def extract_clusters_by_assignment(
+        self,
+        peak_list: pd.DataFrame
+    ) -> List[List[str]]:
+        """
+        Extract clusters as assignment lists from a peak list.
+
+        Call this after processing the reference spectrum to get clusters
+        that can be locked for subsequent spectra.
+
+        Args:
+            peak_list: DataFrame with Position_X, Position_Y, Assignment columns
+
+        Returns:
+            List of clusters by assignment: [['Peak1', 'Peak2'], ['Peak3'], ...]
+        """
+        # Build all_peaks_context
+        all_peaks_context = []
+        for _, row in peak_list.iterrows():
+            all_peaks_context.append({
+                'assignment': str(row.get('Assignment', 'Unknown')),
+                'x_ppm': float(row['Position_X']),
+                'y_ppm': float(row['Position_Y']),
+                'pos_x': float(row['Position_X']),
+                'pos_y': float(row['Position_Y'])
+            })
+
+        # Get position-based clusters
+        position_clusters = self.integrator.identify_overlap_clusters(all_peaks_context)
+
+        # Build position → assignment mapping
+        position_to_assignment = {}
+        for peak in all_peaks_context:
+            x = peak.get('x_ppm') or peak.get('pos_x')
+            y = peak.get('y_ppm') or peak.get('pos_y')
+            assignment = peak.get('assignment', 'Unknown')
+            if x is not None and y is not None:
+                position_to_assignment[(x, y)] = assignment
+
+        # Convert position clusters to assignment clusters
+        assignment_clusters = []
+        for cluster_positions in position_clusters:
+            cluster_assignments = []
+            for pos in cluster_positions:
+                assignment = position_to_assignment.get(pos)
+                if assignment:
+                    cluster_assignments.append(assignment)
+            if cluster_assignments:
+                assignment_clusters.append(cluster_assignments)
+
+        log_info(f"Extracted {len(assignment_clusters)} clusters by assignment")
+        for i, cluster in enumerate(assignment_clusters[:5]):  # Show first 5
+            if len(cluster) > 1:
+                log_info(f"  Cluster {i+1}: {cluster}")
+
+        return assignment_clusters

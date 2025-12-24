@@ -17,6 +17,7 @@ from PySide6.QtCore import Qt, Signal
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget, MatplotlibMultiAxesWidget
+from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
@@ -230,11 +231,15 @@ class SpectrumViewerDialog(BaseDialog):
 
         self.contour_widget = MatplotlibWidget(
             parent=contour_group,
-            toolbar=True,
+            toolbar=False,
             figsize=(8, 6),
             dpi=100
         )
         contour_layout.addWidget(self.contour_widget)
+
+        # Attach navigation handler for pan/zoom
+        self._nav_handler = NMRNavigationHandler()
+        self._nav_handler.attach(self.contour_widget)
         contour_group.setLayout(contour_layout)
 
         layout.addWidget(contour_group, stretch=2)
@@ -427,12 +432,6 @@ class SpectrumViewerDialog(BaseDialog):
         if self.voigt_3d_plotter:
             self.voigt_3d_plotter.toggle_individual_peaks(checked)
 
-    def _on_toggle_labels_3d(self, checked):
-        """Toggle peak labels visibility."""
-        self.show_peak_labels_3d = checked
-        if self.voigt_3d_plotter:
-            self.voigt_3d_plotter.toggle_peak_labels(checked)
-
     def _on_toggle_resid_3d(self, checked):
         """Toggle residuals visibility."""
         self.show_resid_3d = checked
@@ -444,12 +443,6 @@ class SpectrumViewerDialog(BaseDialog):
         self.limit_peak_display_3d = checked
         if self.voigt_3d_plotter:
             self.voigt_3d_plotter.toggle_peak_clipping(checked)
-
-    def _on_residual_mode_changed(self, mode):
-        """Handle residual mode change."""
-        self.residual_mode_3d = mode
-        if self.voigt_3d_plotter:
-            self.voigt_3d_plotter.set_residual_mode(mode)
 
     def _create_right_panel(self) -> QWidget:
         """Create the right panel with peak navigator and info."""
@@ -987,24 +980,6 @@ class SpectrumViewerDialog(BaseDialog):
 
         logger.debug(f"No stored Voigt result found for {assignment}")
         return None
-
-    def _on_3d_intensity_changed(self, value: int):
-        """Handle intensity scale slider change for 3D Voigt plot.
-
-        Based on v0.9 _on_intensity_scale_change_3d() (main_gui.py:816-827).
-        """
-        # Update the label
-        if hasattr(self, 'intensity_3d_label'):
-            self.intensity_3d_label.setText(f"{value}%")
-
-        if self.voigt_3d_plotter and hasattr(self.voigt_3d_plotter, 'current_result'):
-            scale = value / 100.0
-            # Re-plot with new intensity scale if there's a current result
-            if self.voigt_3d_plotter.current_result:
-                self.voigt_3d_plotter.plot_voigt_analysis_3d(
-                    self.voigt_3d_plotter.current_result,
-                    intensity_scale=scale
-                )
 
     def _on_3d_colormap_changed(self, scheme: str):
         """Handle color scheme change for 3D Voigt plot.

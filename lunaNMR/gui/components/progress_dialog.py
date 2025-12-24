@@ -243,9 +243,17 @@ class ProgressDialog(BaseDialog):
     def _create_task_section(self, parent_layout: QVBoxLayout):
         """Create current task display section."""
         task_frame = QFrame()
+        task_frame.setObjectName("taskFrame")
+        task_frame.setStyleSheet(f"""
+            QFrame#taskFrame {{
+                background-color: {PANEL_BG_COLOR};
+                border-radius: {FRAME_CORNER_RADIUS}px;
+                padding: {SPACING_SM}px;
+            }}
+        """)
         task_layout = QVBoxLayout(task_frame)
         task_layout.setSpacing(SPACING_SM)
-        task_layout.setContentsMargins(0, 0, 0, 0)
+        task_layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
 
         # Title label
         title_label = QLabel("Current Task:")
@@ -255,7 +263,7 @@ class ProgressDialog(BaseDialog):
         title_label.setFont(title_font)
         title_label.setStyleSheet(f"color: {PRIMARY_TEXT};")
 
-        # Task content label (sized for 3 lines of text)
+        # Task content label (sized for 3 lines of text) - use full width
         self.task_label = QLabel("Starting...")
         task_font = QFont()
         task_font.setPointSize(10)
@@ -263,9 +271,13 @@ class ProgressDialog(BaseDialog):
         self.task_label.setStyleSheet(f"color: {PRIMARY_TEXT};")
         self.task_label.setWordWrap(True)
         self.task_label.setMinimumHeight(60)
+        self.task_label.setSizePolicy(
+            self.task_label.sizePolicy().horizontalPolicy(),
+            self.task_label.sizePolicy().verticalPolicy()
+        )
 
         task_layout.addWidget(title_label)
-        task_layout.addWidget(self.task_label, 0, Qt.AlignLeft)
+        task_layout.addWidget(self.task_label)  # No alignment constraint - use full width
 
         parent_layout.addWidget(task_frame)
 
@@ -468,7 +480,7 @@ class ProgressDialog(BaseDialog):
         self._update_statistics(value)
 
     @Slot(str, bool)
-    def add_log_message(self, message: str, is_error: bool = False):
+    def add_log_message(self, message: str, is_error: bool = False, count_in_stats: bool = True):
         """
         Add a message to the log (THREAD-SAFE).
 
@@ -477,6 +489,8 @@ class ProgressDialog(BaseDialog):
         Args:
             message: Log message
             is_error: Whether this is an error message
+            count_in_stats: Whether to count this message in success/failure statistics
+                           Set to False for optimization/calibration steps
         """
         if not self._show_details:
             return
@@ -494,11 +508,28 @@ class ProgressDialog(BaseDialog):
             self.log_text.verticalScrollBar().maximum()
         )
 
-        # Track success/failure
-        if is_error:
-            self.failed_tasks += 1
-        else:
-            self.completed_tasks += 1
+        # Track success/failure only if counting is enabled
+        if count_in_stats:
+            if is_error:
+                self.failed_tasks += 1
+            else:
+                self.completed_tasks += 1
+
+    def reset_statistics(self, reset_timer: bool = False):
+        """
+        Reset success/failure counters.
+
+        Call this before starting the main fitting phase to exclude
+        optimization/calibration steps from the final statistics.
+
+        Args:
+            reset_timer: If True, also reset the elapsed time counter.
+                        Default False to keep cumulative timing from dialog start.
+        """
+        self.completed_tasks = 0
+        self.failed_tasks = 0
+        if reset_timer:
+            self.start_time = datetime.now()
 
     @Slot(str)
     def complete(self, message: str = "Processing completed"):

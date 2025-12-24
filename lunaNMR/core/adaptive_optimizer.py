@@ -111,8 +111,6 @@ class AdaptiveOptimizer:
         """
         # Check minimum peaks requirement
         if len(isolated_peaks) < self.MIN_PEAKS_FOR_OPTIMIZATION:
-            print(f"WARNING: Only {len(isolated_peaks)} isolated peaks (minimum: {self.MIN_PEAKS_FOR_OPTIMIZATION})")
-            print("Falling back to default parameters")
             return self._get_fallback_params(median_lw_f1, median_lw_f2, reason="insufficient_peaks")
 
         # Split into train/validation sets
@@ -123,18 +121,6 @@ class AdaptiveOptimizer:
 
         n_combinations = len(self.MULTIPLIERS) ** 2
         n_fits_per_combo = len(train_peaks) + len(val_peaks)
-        est_time_sec = n_fits_per_combo * n_combinations * 0.2
-
-        print(f"\n{'='*60}")
-        print(f"   GRID SEARCH PARAMETER OPTIMIZATION")
-        print(f"{'='*60}")
-        print(f"   Training peaks:   {len(train_peaks)}")
-        print(f"   Validation peaks: {len(val_peaks)}")
-        print(f"   Median LW: F1={median_lw_f1:.4f} ppm, F2={median_lw_f2:.5f} ppm")
-        print(f"   Grid: {len(self.MULTIPLIERS)}×{len(self.MULTIPLIERS)} = {n_combinations} combinations")
-        print(f"   Total fits: {n_fits_per_combo * n_combinations} ({n_fits_per_combo} peaks × {n_combinations} combos)")
-        print(f"   Estimated time: ~{est_time_sec/60:.1f} minutes")
-        print(f"{'='*60}")
 
         # Grid search
         best_score = -np.inf
@@ -145,9 +131,6 @@ class AdaptiveOptimizer:
             combo_start = time.time()
             radF1 = mult_f1 * median_lw_f1
             radF2 = mult_f2 * median_lw_f2
-
-            print(f"\n   [{combo_idx+1}/{n_combinations}] Testing F1={mult_f1:.1f}× ({radF1:.4f} ppm), F2={mult_f2:.1f}× ({radF2:.5f} ppm)")
-            print(f"       Fitting {len(train_peaks)} training peaks...", end=" ", flush=True)
 
             # Evaluate on training set
             train_scores = []
@@ -186,14 +169,11 @@ class AdaptiveOptimizer:
 
             # Check if we got enough training scores
             if len(train_scores) == 0:
-                print(f"FAILED (0/{len(train_peaks)} succeeded)")
                 continue
 
             train_score = np.mean(train_scores)
-            print(f"done ({len(train_scores)}/{len(train_peaks)} OK, score={train_score:.3f})")
 
             # Evaluate on validation set
-            print(f"       Fitting {len(val_peaks)} validation peaks...", end=" ", flush=True)
             val_scores = []
             val_failures = 0
             for peak_idx, peak in enumerate(val_peaks):
@@ -226,14 +206,10 @@ class AdaptiveOptimizer:
                     continue
 
             if len(val_scores) == 0:
-                print(f"FAILED (0/{len(val_peaks)} succeeded)")
                 continue
 
             val_score = np.mean(val_scores)
             combo_time = time.time() - combo_start
-
-            print(f"done ({len(val_scores)}/{len(val_peaks)} OK, score={val_score:.3f})")
-            print(f"       ✓ Combination complete in {combo_time:.1f}s")
 
             # Record in history
             self.search_history.append({
@@ -261,8 +237,6 @@ class AdaptiveOptimizer:
 
         # Check if optimization succeeded
         if best_params is None or best_score < 0.6:
-            print(f"\nWARNING: Optimization failed or poor score ({best_score:.3f})")
-            print("Falling back to default parameters")
             return self._get_fallback_params(median_lw_f1, median_lw_f2, reason="poor_score")
 
         # Build result
@@ -285,10 +259,6 @@ class AdaptiveOptimizer:
             'search_history': self.search_history,
             'success': True
         }
-
-        # Print summary
-        total_elapsed = time.time() - opt_start_time
-        self._print_optimization_summary(total_elapsed)
 
         return self.optimization_results
 
@@ -457,44 +427,6 @@ class AdaptiveOptimizer:
             'fallback_reason': reason
         }
 
-    def _print_optimization_summary(self, elapsed_seconds: float = None):
-        """Print summary of optimization results."""
-        if self.optimization_results is None:
-            return
-
-        r = self.optimization_results
-
-        print(f"\n{'='*60}")
-        print(f"   ADAPTIVE OPTIMIZATION COMPLETE")
-        print(f"{'='*60}")
-        if elapsed_seconds is not None:
-            if elapsed_seconds >= 60:
-                minutes = int(elapsed_seconds // 60)
-                seconds = elapsed_seconds % 60
-                print(f"   Total time: {minutes}m {seconds:.1f}s")
-            else:
-                print(f"   Total time: {elapsed_seconds:.1f}s")
-        print(f"   Training peaks:   {r['n_train']}")
-        print(f"   Validation peaks: {r['n_val']}")
-        print(f"{'='*60}")
-        print()
-        print("   OPTIMAL PARAMETERS:")
-        print(f"   radF1 = {r['radF1']:.4f} ppm ({r['multiplier_f1']:.1f}× median_LW)")
-        print(f"   radF2 = {r['radF2']:.5f} ppm ({r['multiplier_f2']:.1f}× median_LW)")
-        print(f"   overlap_threshold_y = {r['overlap_threshold_y']:.4f} ppm (linked)")
-        print(f"   overlap_threshold_x = {r['overlap_threshold_x']:.5f} ppm (linked)")
-        print()
-        print("   PERFORMANCE:")
-        print(f"   Training score:     {r['train_score']:.3f}")
-        print(f"   Validation score:   {r['validation_score']:.3f}")
-        print(f"   Generalization gap: {r['generalization_gap']:.3f}")
-
-        if r['generalization_gap'] > 0.1:
-            print("   WARNING: Large gap suggests possible overfitting")
-
-        print(f"{'='*60}\n")
-
-
 def estimate_noise_level(spectrum: np.ndarray, method: str = 'corner') -> float:
     """
     Estimate noise level from 2D spectrum.
@@ -537,64 +469,6 @@ def estimate_noise_level(spectrum: np.ndarray, method: str = 'corner') -> float:
 
     else:
         raise ValueError(f"Unknown noise estimation method: {method}")
-
-
-def save_series_params(params: Dict[str, Any], filepath: str):
-    """
-    Save series parameters to JSON file.
-
-    Parameters
-    ----------
-    params : dict
-        Series parameters including optimal values and cluster assignments
-    filepath : str
-        Output file path
-    """
-    # Convert numpy types to native Python for JSON serialization
-    def convert_for_json(obj):
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, (np.float32, np.float64)):
-            return float(obj)
-        elif isinstance(obj, (np.int32, np.int64)):
-            return int(obj)
-        elif isinstance(obj, dict):
-            return {k: convert_for_json(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [convert_for_json(v) for v in obj]
-        return obj
-
-    params_json = convert_for_json(params)
-    params_json['timestamp'] = datetime.now().isoformat()
-
-    with open(filepath, 'w') as f:
-        json.dump(params_json, f, indent=2)
-
-    print(f"Series parameters saved to: {filepath}")
-
-
-def load_series_params(filepath: str) -> Dict[str, Any]:
-    """
-    Load series parameters from JSON file.
-
-    Parameters
-    ----------
-    filepath : str
-        Input file path
-
-    Returns
-    -------
-    dict : Series parameters
-    """
-    with open(filepath, 'r') as f:
-        params = json.load(f)
-
-    print(f"Series parameters loaded from: {filepath}")
-    print(f"  radF1 = {params.get('radF1', 'N/A')}")
-    print(f"  radF2 = {params.get('radF2', 'N/A')}")
-    print(f"  Created: {params.get('timestamp', 'unknown')}")
-
-    return params
 
 
 def create_series_params(optimization_result: Dict[str, Any],

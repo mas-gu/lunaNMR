@@ -61,6 +61,7 @@ from lunaNMR.core.ps2d_config import set_ps2d_config, get_ps2d_config
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.utils.config_manager import ConfigurationManager, UserPreferences, ProcessingParameters
 from lunaNMR.utils.parameter_manager import NMRParameterManager
+from lunaNMR.utils.project_manager import ProjectManager
 
 # Import processors (will be instantiated when needed)
 from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
@@ -99,6 +100,12 @@ class PeakDetectionWorker(QThread):
             logger.info(f"Starting peak detection in background (mode={self.workflow_mode})")
             self.progress_updated.emit(10, "Preparing detection...")
 
+            # Set OutputManager callback for this thread so log_* functions route to GUI
+            from lunaNMR.utils.output_manager import OutputManager
+            def progress_callback(progress, task, log_msg=None, failed=False):
+                self.progress_updated.emit(int(progress) if progress >= 0 else 50, log_msg or task)
+            OutputManager.set_callback(progress_callback)
+
             # Check if NMR data is loaded
             if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
                 self.detection_failed.emit("No NMR data loaded. Please load a spectrum first.")
@@ -130,6 +137,10 @@ class PeakDetectionWorker(QThread):
         except Exception as e:
             logger.error(f"Peak detection failed: {e}", exc_info=True)
             self.detection_failed.emit(f"Detection error: {str(e)}")
+        finally:
+            # Clear OutputManager callback for this thread
+            from lunaNMR.utils.output_manager import OutputManager
+            OutputManager.set_callback(None)
 
 
 class VoigtFittingWorker(QThread):
@@ -172,6 +183,7 @@ class VoigtFittingWorker(QThread):
 
             # Import SingleSpectrumProcessor (v0o9 pattern)
             from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
+            from lunaNMR.utils.output_manager import OutputManager
 
             # Create processor with integrator and parameter manager
             processor = SingleSpectrumProcessor(self.integrator, self.param_manager)
@@ -181,11 +193,15 @@ class VoigtFittingWorker(QThread):
                 log_text = log_msg if log_msg else ""
                 self.progress_updated.emit(int(progress), task, log_text)
 
+            # Set OutputManager callback for this thread so log_* functions route to GUI
+            OutputManager.set_callback(progress_callback)
+
             self.progress_updated.emit(10, "Starting peak fitting...", "")
 
             # Process peak list using SingleSpectrumProcessor (exact v0o9 logic)
             # This internally handles PS2D multi-peak fitting
-            fitted_results = processor.process_peak_list(
+            # Returns tuple: (fitted_results, learned_statistics)
+            fitted_results, learned_statistics = processor.process_peak_list(
                 self.integrator.peak_list,
                 self.processing_options,
                 progress_callback
@@ -201,6 +217,7 @@ class VoigtFittingWorker(QThread):
 
             # Add fitted_results to summary for GUI update
             summary['fitted_results'] = fitted_results
+            summary['learned_statistics'] = learned_statistics
 
             self.progress_updated.emit(100, "Fitting complete", "")
             logger.info(f"Voigt fitting complete: {summary['successful_peaks']}/{summary['total_peaks']} successful")
@@ -211,6 +228,10 @@ class VoigtFittingWorker(QThread):
         except Exception as e:
             logger.error(f"Voigt fitting failed: {e}", exc_info=True)
             self.fitting_failed.emit(f"Fitting error: {str(e)}")
+        finally:
+            # Clear OutputManager callback for this thread
+            from lunaNMR.utils.output_manager import OutputManager
+            OutputManager.set_callback(None)
 
 
 class LunaNMRMainWindow(BaseWindow):
@@ -315,6 +336,16 @@ class LunaNMRMainWindow(BaseWindow):
         self.batch_results = None
         self.series_output_folder = None
 
+        # Project management
+        self.current_project_path = None  # Path to currently loaded .lunaNMR project
+        self.series_all_results = None  # For reopening multi-spectrum viewer
+        self.project_manager = None  # Initialized after self is fully set up
+
+        # DynamiXs state (for project save/load)
+        self.dynamixs_state = None  # DynamiXs dialog parameters
+        self.dynamixs_file_refs = None  # DynamiXs input file paths
+        self.dynamixs_dialog = None  # Reference to open DynamiXs dialog
+
         # ===== Selection State =====
         self.selected_peak_info = None  # {type, index, data}
         self.selected_peak_number = 1  # For peak navigation
@@ -350,7 +381,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.use_adaptive_optimization = True  # Grid search for optimal radF1/radF2
         self.use_ps2d_multi_peak = True
         self.fix_linewidths = False
-        self.fix_positions = True
+        self.fix_positions = False
 
         # ===== Peak Detection Parameters (Expert Mode) =====
         # Detection parameters from parameter_manager defaults
@@ -367,6 +398,9 @@ class LunaNMRMainWindow(BaseWindow):
         self.centroid_window_y_ppm = 0.1   # Y-window size in ppm (15N dimension)
         self.use_centroid_refinement = True  # Enable centroid refinement
         self.centroid_noise_multiplier = 2.0  # Noise threshold for centroid
+
+        # Auto-add dummy peaks (for peak_list mode only)
+        self.auto_add_dummy_peaks = True  # Auto-add nearby unmatched peaks
 
         # ===== Peak Detection Parameters (for series integration) =====
         self.height_threshold = 0.1  # Peak height threshold
@@ -404,6 +438,7 @@ class LunaNMRMainWindow(BaseWindow):
         # ===== Series Integration Parameters (Expert Mode) =====
         self.use_ps2d_linewidth_reuse = False  # PS2D Linewidth Reuse for ~40% speedup
         self.series_peak_source = "cascade"    # "detected" or "cascade"
+        self.enable_cascade_drift_limit = True  # Enforce absolute drift limits in cascade mode (ON by default)
 
         # ===== Expert Mode Dialog State =====
         self.params_visible = False           # Peak Detection Parameters visibility
@@ -858,6 +893,9 @@ class LunaNMRMainWindow(BaseWindow):
             self.workflow_mode = "sn_threshold"
             logger.debug(f"Workflow mode: sn_threshold (checked={checked}, S/N params visible, visible={self.sn_params_widget.isVisible()})")
 
+        # Enable/disable auto-add dummy peaks checkbox based on workflow mode
+        self._update_auto_add_dummy_enabled()
+
         self.update_status(f"Workflow mode: {self.workflow_mode}")
 
     def on_workflow_sn_changed(self, checked):
@@ -881,7 +919,19 @@ class LunaNMRMainWindow(BaseWindow):
             self.workflow_mode = "peak_list"
             logger.debug(f"Workflow mode: peak_list (checked={checked}, S/N params hidden)")
 
+        # Enable/disable auto-add dummy peaks checkbox based on workflow mode
+        self._update_auto_add_dummy_enabled()
+
         self.update_status(f"Workflow mode: {self.workflow_mode}")
+
+    def _update_auto_add_dummy_enabled(self):
+        """Enable/disable auto-add dummy peaks checkbox based on workflow mode.
+
+        Only enabled in peak_list mode (grayed out in S/N threshold mode).
+        """
+        if hasattr(self, 'expert_auto_add_dummy_cb'):
+            enabled = (self.workflow_mode == "peak_list")
+            self.expert_auto_add_dummy_cb.setEnabled(enabled)
 
     # ===== Button Style Helpers =====
 
@@ -1441,13 +1491,6 @@ class LunaNMRMainWindow(BaseWindow):
             self.voigt_3d_plotter.toggle_individual_peaks(checked)
         logger.debug(f"3D Voigt: Show Individual Peaks = {checked}")
 
-    def _on_show_peak_labels_3d_change(self, checked: bool):
-        """Handle Peak Labels checkbox toggle for 3D Voigt plot (v0o9 line 1864)."""
-        self.show_peak_labels_3d = checked
-        if hasattr(self, 'voigt_3d_plotter') and self.voigt_3d_plotter:
-            self.voigt_3d_plotter.toggle_peak_labels(checked)
-        logger.debug(f"3D Voigt: Show Peak Labels = {checked}")
-
     def _on_show_resid_3d_change(self, checked: bool):
         """Handle Residuals checkbox toggle for 3D Voigt plot (v0o9 line 1867)."""
         self.show_resid_3d = checked
@@ -1461,13 +1504,6 @@ class LunaNMRMainWindow(BaseWindow):
         if hasattr(self, 'voigt_3d_plotter') and self.voigt_3d_plotter:
             self.voigt_3d_plotter.toggle_peak_clipping(checked)
         logger.debug(f"3D Voigt: Limit Peak Extent = {checked}")
-
-    def _on_residual_mode_3d_change(self, mode: str):
-        """Handle residual mode radio button change for 3D Voigt plot (v0o9 lines 1883, 1887)."""
-        self.residual_mode_3d = mode
-        if hasattr(self, 'voigt_3d_plotter') and self.voigt_3d_plotter:
-            self.voigt_3d_plotter.set_residual_mode(mode)
-        logger.debug(f"3D Voigt: Residual Mode = {mode}")
 
     def on_apply_shift(self):
         """Apply coordinate offsets to all peaks in the current peak list.
@@ -2122,6 +2158,17 @@ class LunaNMRMainWindow(BaseWindow):
         self.expert_centroid_y_spin.valueChanged.connect(self._on_expert_param_change)
         params_frame_layout.addWidget(self.expert_centroid_y_spin, 4, 2)
 
+        # Row 5: Auto-add dummy peaks checkbox (peak_list mode only)
+        self.expert_auto_add_dummy_cb = QCheckBox("Auto-add nearby unmatched peaks")
+        self.expert_auto_add_dummy_cb.setChecked(self.auto_add_dummy_peaks)
+        self.expert_auto_add_dummy_cb.setToolTip(
+            "Automatically add peaks detected in spectrum but not in user peak list.\n"
+            "Uses 3rd percentile intensity threshold and 3× overlap proximity.\n"
+            "Only applies to Peak List mode (grayed out in S/N Threshold mode)."
+        )
+        self.expert_auto_add_dummy_cb.stateChanged.connect(self._on_auto_add_dummy_change)
+        params_frame_layout.addWidget(self.expert_auto_add_dummy_cb, 5, 0, 1, 4)
+
         self.expert_params_frame.setVisible(False)
         detection_layout.addWidget(self.expert_params_frame)
 
@@ -2450,6 +2497,25 @@ class LunaNMRMainWindow(BaseWindow):
         series_layout.addWidget(detected_radio)
         series_layout.addWidget(cascade_radio)
 
+        # Cascade drift limit checkbox (indented under cascade mode)
+        drift_limit_row = QHBoxLayout()
+        drift_limit_row.addSpacing(20)  # Indent to show it's related to cascade mode
+        self.expert_cascade_drift_check = QCheckBox("🔒 Enforce max drift from reference")
+        self.expert_cascade_drift_check.setChecked(self.enable_cascade_drift_limit)
+        self.expert_cascade_drift_check.stateChanged.connect(self._on_cascade_drift_limit_change)
+        self.expert_cascade_drift_check.setToolTip(
+            "When enabled, peak positions are constrained to stay within max drift\n"
+            "of their ORIGINAL reference positions (15N: ±0.10/±0.05, 13C: ±0.05/±0.05 ppm).\n"
+            "This prevents unbounded drift accumulation across many spectra.\n"
+            "Disable if you expect large genuine chemical shift changes."
+        )
+        drift_limit_row.addWidget(self.expert_cascade_drift_check)
+        drift_limit_hint = QLabel("(15N: ±0.10/±0.05, 13C: ±0.05/±0.05 ppm)")
+        drift_limit_hint.setStyleSheet("font-size: 10px; color: gray;")
+        drift_limit_row.addWidget(drift_limit_hint)
+        drift_limit_row.addStretch()
+        series_layout.addLayout(drift_limit_row)
+
         content_layout.addWidget(series_group)
 
         # =================== ADDITIONAL EXPERT OPTIONS SECTION ===================
@@ -2586,6 +2652,11 @@ class LunaNMRMainWindow(BaseWindow):
             self.integrator.set_threshold_multiplier(self.noise_threshold)
 
         logger.info(f"Expert params updated: search_x={self.search_window_x}, search_y={self.search_window_y}, noise={self.noise_threshold}")
+
+    def _on_auto_add_dummy_change(self, state):
+        """Handle auto-add dummy peaks checkbox change."""
+        self.auto_add_dummy_peaks = (state == Qt.Checked)
+        logger.info(f"Auto-add dummy peaks: {self.auto_add_dummy_peaks}")
 
     def _on_expert_detection_size_change(self):
         """Handle detection rectangle size changes."""
@@ -2806,6 +2877,14 @@ class LunaNMRMainWindow(BaseWindow):
             self.series_peak_source = "cascade"
         logger.info(f"Series peak source: {self.series_peak_source}")
 
+    def _on_cascade_drift_limit_change(self, state):
+        """Handle cascade drift limit toggle."""
+        self.enable_cascade_drift_limit = (state == 2)  # Qt.CheckState.Checked = 2
+        if self.enable_cascade_drift_limit:
+            logger.info("Cascade drift limit ENABLED - positions bounded to nucleus-specific max drift from reference")
+        else:
+            logger.info("Cascade drift limit DISABLED - positions can drift freely in cascade mode")
+
     def on_reset_results(self):
         """Handle Reset Results button click.
 
@@ -2895,9 +2974,12 @@ class LunaNMRMainWindow(BaseWindow):
         main_spectrum_layout.setContentsMargins(0, 0, 0, 0)  # Zero margins for full space
         main_spectrum_layout.setSpacing(0)
 
-        # Create SpectrumPlotter with toolbar
-        self.spectrum_plotter = SpectrumPlotter(parent=main_spectrum_tab, toolbar=True)
+        # Create SpectrumPlotter (no toolbar - uses custom navigation)
+        self.spectrum_plotter = SpectrumPlotter(parent=main_spectrum_tab)
         main_spectrum_layout.addWidget(self.spectrum_plotter)
+
+        # Connect peak edit signal (Shift+click = add, Ctrl+click = delete)
+        self.spectrum_plotter.peak_edit_requested.connect(self._on_peak_edit_with_modifier)
 
         # Add Main Spectrum tab first
         tab_widget.addTab(main_spectrum_tab, "Main Spectrum")
@@ -2945,48 +3027,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.peak_navigator.peak_analysis_requested.connect(self._on_peak_analysis_requested)
 
         return self.peak_navigator
-
-    def _add_placeholder_tab(self, tab_widget: QTabWidget, title: str, description: str):
-        """Add a placeholder tab to the tab widget.
-
-        Args:
-            tab_widget: The tab widget to add to
-            title: Tab title
-            description: Placeholder description text
-        """
-        # Create placeholder widget
-        placeholder = QWidget()
-        layout = QVBoxLayout(placeholder)
-        layout.setContentsMargins(SPACING_LG, SPACING_LG, SPACING_LG, SPACING_LG)
-        layout.setAlignment(Qt.AlignCenter)
-
-        # Add title
-        title_label = QLabel(title)
-        title_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
-                color: {PRIMARY_TEXT};
-                font-weight: bold;
-            }}
-        """)
-        title_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title_label)
-
-        # Add description
-        desc_label = QLabel(description)
-        desc_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: {FONT_SIZE_BODY}px;
-                color: {PRIMARY_TEXT};
-                padding: {SPACING_MD}px;
-            }}
-        """)
-        desc_label.setWordWrap(True)
-        desc_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(desc_label)
-
-        # Add tab
-        tab_widget.addTab(placeholder, title)
 
     def _create_voigt_2d_tab(self) -> QWidget:
         """Create the Voigt 2D Analysis tab with VoigtAnalysisPlotter.
@@ -3897,6 +3937,21 @@ class LunaNMRMainWindow(BaseWindow):
         # === File Menu (v0o9 lines 980-987) ===
         file_menu = menu_bar.addMenu("&File")
 
+        # Project management actions
+        open_project_action = QAction("Open Project...", self)
+        open_project_action.triggered.connect(self.open_project)
+        file_menu.addAction(open_project_action)
+
+        save_project_action = QAction("Save Project", self)
+        save_project_action.triggered.connect(self.save_project)
+        file_menu.addAction(save_project_action)
+
+        save_project_as_action = QAction("Save Project As...", self)
+        save_project_as_action.triggered.connect(self.save_project_as)
+        file_menu.addAction(save_project_as_action)
+
+        file_menu.addSeparator()
+
         export_peak_list_action = QAction("Export Peak List...", self)
         export_peak_list_action.triggered.connect(self.export_peak_list)
         file_menu.addAction(export_peak_list_action)
@@ -3905,74 +3960,11 @@ class LunaNMRMainWindow(BaseWindow):
         export_results_action.triggered.connect(self.export_results)
         file_menu.addAction(export_results_action)
 
-        save_config_action = QAction("Save Configuration...", self)
-        save_config_action.triggered.connect(self.save_config)
-        file_menu.addAction(save_config_action)
-
         file_menu.addSeparator()
 
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-
-        # === Processing Menu (v0o9 lines 989-998) ===
-        process_menu = menu_bar.addMenu("&Processing")
-
-        detect_peaks_action = QAction("Detect Peaks", self)
-        detect_peaks_action.triggered.connect(self.on_detect_peaks)
-        process_menu.addAction(detect_peaks_action)
-
-        integrate_peaks_action = QAction("Integrate Peaks", self)
-        integrate_peaks_action.triggered.connect(self.integrate_peaks)
-        process_menu.addAction(integrate_peaks_action)
-
-        fit_selected_action = QAction("Fit Selected Peak", self)
-        fit_selected_action.triggered.connect(self.fit_selected_peak)
-        process_menu.addAction(fit_selected_action)
-
-        fit_all_action = QAction("Fit All Peaks", self)
-        fit_all_action.triggered.connect(self.on_fit_spectrum)
-        process_menu.addAction(fit_all_action)
-
-        process_menu.addSeparator()
-
-        series_integration_action = QAction("Start Series Integration", self)
-        series_integration_action.triggered.connect(self.start_series_integration)
-        process_menu.addAction(series_integration_action)
-
-        # === View Menu (v0o9 lines 1000-1018) ===
-        view_menu = menu_bar.addMenu("&View")
-
-        reset_zoom_action = QAction("Reset Zoom", self)
-        reset_zoom_action.triggered.connect(self.reset_view)
-        view_menu.addAction(reset_zoom_action)
-
-        center_peak_action = QAction("Center on Selected Peak", self)
-        center_peak_action.triggered.connect(self.center_on_selected_peak)
-        view_menu.addAction(center_peak_action)
-
-        view_menu.addSeparator()
-
-        # Checkable menu items for display toggles
-        self.show_detected_action = QAction("Show Detected Peaks", self)
-        self.show_detected_action.setCheckable(True)
-        self.show_detected_action.setChecked(self.show_detected)
-        self.show_detected_action.triggered.connect(self._on_show_detected_toggled)
-        view_menu.addAction(self.show_detected_action)
-
-        self.show_assigned_action = QAction("Show Reference Peaks", self)
-        self.show_assigned_action.setCheckable(True)
-        self.show_assigned_action.setChecked(self.show_assigned)
-        self.show_assigned_action.triggered.connect(self._on_show_assigned_toggled)
-        view_menu.addAction(self.show_assigned_action)
-
-        self.show_fitted_action = QAction("Show Fitted Curves", self)
-        self.show_fitted_action.setCheckable(True)
-        self.show_fitted_action.setChecked(self.show_fitted_curves)
-        self.show_fitted_action.triggered.connect(self._on_show_fitted_toggled)
-        view_menu.addAction(self.show_fitted_action)
-
-        view_menu.addSeparator()
 
         # === Results Analysis Menu (v0o9 lines 1020-1029) ===
         results_menu = menu_bar.addMenu("&Results Analysis")
@@ -3990,6 +3982,10 @@ class LunaNMRMainWindow(BaseWindow):
         multi_viewer_action = QAction("Multi-Spectrum Overlay Viewer...", self)
         multi_viewer_action.triggered.connect(self.open_multi_spectrum_viewer)
         results_menu.addAction(multi_viewer_action)
+
+        series_manager_action = QAction("Manage Saved Series...", self)
+        series_manager_action.triggered.connect(self.open_series_manager)
+        results_menu.addAction(series_manager_action)
 
         results_menu.addSeparator()
 
@@ -4011,21 +4007,6 @@ class LunaNMRMainWindow(BaseWindow):
         dynamixs_action = QAction("DynamiXs Relaxation Analysis", self)
         dynamixs_action.triggered.connect(self.launch_dynamixs)
         modules_menu.addAction(dynamixs_action)
-
-        # === Tools Menu (v0o9 lines 1036-1041) ===
-        tools_menu = menu_bar.addMenu("&Tools")
-
-        config_action = QAction("Configuration...", self)
-        config_action.triggered.connect(self.open_config_dialog)
-        tools_menu.addAction(config_action)
-
-        statistics_action = QAction("Statistics", self)
-        statistics_action.triggered.connect(self.show_statistics)
-        tools_menu.addAction(statistics_action)
-
-        validate_action = QAction("Validate Files", self)
-        validate_action.triggered.connect(self.validate_current_files)
-        tools_menu.addAction(validate_action)
 
         # === Help Menu (v0o9 lines 1043-1047) ===
         help_menu = menu_bar.addMenu("&Help")
@@ -4407,23 +4388,60 @@ class LunaNMRMainWindow(BaseWindow):
         """Open multi-spectrum overlay viewer (v0o9 lines 7525-7575).
 
         Displays multiple spectra overlaid for comparison.
+        If multiple series exist, prompts user to select which one to view.
         """
         import os
-        from PySide6.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox, QInputDialog
         from lunaNMR.gui.dialogs import MultiSpectrumViewerDialog
 
-        # Validate data exists
-        if not hasattr(self, 'batch_results') or not self.batch_results:
+        # Check for multiple saved series
+        saved_series = getattr(self, 'saved_series', {}) or {}
+
+        # If multiple series exist, prompt user to select one
+        if len(saved_series) > 1:
+            # Build list of options with spectrum counts
+            options = []
+            for name, batch in saved_series.items():
+                count = len(batch.results) if hasattr(batch, 'results') else 0
+                options.append(f"{name} ({count} spectra)")
+
+            selected, ok = QInputDialog.getItem(
+                self,
+                "Select Series",
+                "Multiple series integrations found.\nSelect which one to view:",
+                options,
+                0,  # Default to first item
+                False  # Not editable
+            )
+
+            if not ok or not selected:
+                return
+
+            # Extract series name from selection
+            series_name = selected.rsplit(' (', 1)[0]
+            batch_results = saved_series.get(series_name)
+
+            if not batch_results:
+                QMessageBox.warning(self, "Error", f"Could not load series '{series_name}'")
+                return
+        elif len(saved_series) == 1:
+            # Only one series, use it directly
+            series_name = list(saved_series.keys())[0]
+            batch_results = saved_series[series_name]
+        elif hasattr(self, 'batch_results') and self.batch_results:
+            # Fallback to batch_results for backward compatibility
+            batch_results = self.batch_results
+        else:
             QMessageBox.warning(self, "No Data",
                 "No series results available. Run series integration first.")
             return
 
         # Get data folder from batch_results metadata (preferred) or fallback to current_nmr_folder
         data_folder = None
-        if hasattr(self.batch_results, 'metadata'):
-            data_folder = self.batch_results.metadata.get('data_folder')
-        elif isinstance(self.batch_results, dict):
-            metadata = self.batch_results.get('metadata', {})
+        if hasattr(batch_results, 'metadata'):
+            data_folder = batch_results.metadata.get('data_folder')
+        elif isinstance(batch_results, dict):
+            metadata = batch_results.get('metadata', {})
             data_folder = metadata.get('data_folder')
 
         # Fallback to current_nmr_folder if not in metadata
@@ -4434,8 +4452,8 @@ class LunaNMRMainWindow(BaseWindow):
 
         # Get all results as list
         all_results = []
-        if hasattr(self.batch_results, 'results'):
-            for name, result in self.batch_results.results.items():
+        if hasattr(batch_results, 'results'):
+            for name, result in batch_results.results.items():
                 result_copy = result.copy()
                 result_copy['spectrum_name'] = name
 
@@ -4462,6 +4480,15 @@ class LunaNMRMainWindow(BaseWindow):
         dialog.show()  # Non-modal
 
         self.update_status(f"Multi-spectrum viewer opened with {len(all_results)} spectra")
+
+    def open_series_manager(self):
+        """Open Series Manager dialog for viewing/renaming/deleting saved series."""
+        from lunaNMR.gui.dialogs import SeriesManagerDialog
+
+        dialog = SeriesManagerDialog(parent=self, main_window=self)
+        dialog.exec()
+
+        self.update_status("Series manager closed")
 
     def export_data_matrix(self):
         """Export comprehensive data matrix (v0o9 lines 7100-7230).
@@ -4835,48 +4862,22 @@ class LunaNMRMainWindow(BaseWindow):
     # =================== MODULES MENU HANDLERS ===================
 
     def launch_dynamixs(self):
-        """Launch DynamiXs Relaxation Analysis (v0o9 lines 7656-7700).
+        """Launch DynamiXs Relaxation Analysis as embedded dialog.
 
-        Launches DynamiXs as an independent subprocess.
+        Opens DynamiXs as an embedded dialog within lunaNMR, allowing full
+        state synchronization and project save/load integration.
         """
-        from PySide6.QtWidgets import QMessageBox
-        import subprocess
-        import sys
-        import os
+        from lunaNMR.gui.dialogs import DynamiXsDialog
 
-        try:
-            # Path to DynamiXs directory
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            dynamixs_path = os.path.join(current_dir, "..", "..", "modules", "dynamiXs")
-            launcher_path = os.path.join(dynamixs_path, "run_dynamixs_gui.py")
+        # Reuse existing dialog if already open
+        if hasattr(self, 'dynamixs_dialog') and self.dynamixs_dialog and self.dynamixs_dialog.isVisible():
+            self.dynamixs_dialog.raise_()
+            self.dynamixs_dialog.activateWindow()
+            return
 
-            # Check if DynamiXs directory exists
-            if not os.path.exists(dynamixs_path):
-                QMessageBox.critical(self, "Module Not Found",
-                    f"DynamiXs module directory not found.\n"
-                    f"Expected location: {dynamixs_path}")
-                return
-
-            # Check if launcher script exists
-            if not os.path.exists(launcher_path):
-                QMessageBox.critical(self, "Launcher Not Found",
-                    f"DynamiXs launcher script not found.\n"
-                    f"Expected location: {launcher_path}")
-                return
-
-            # Launch DynamiXs as independent subprocess
-            subprocess.Popen([sys.executable, launcher_path],
-                           cwd=dynamixs_path,
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.PIPE)
-
-            QMessageBox.information(self, "Module Launched",
-                "DynamiXs Relaxation Analysis has been launched successfully.\n"
-                "The module will open in a separate window.")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Launch Error",
-                f"Failed to launch DynamiXs module:\n{str(e)}")
+        # Create and show new dialog
+        self.dynamixs_dialog = DynamiXsDialog(parent=self, main_window=self)
+        self.dynamixs_dialog.show()
 
     # =================== TOOLS MENU HANDLERS ===================
 
@@ -5273,6 +5274,10 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 except (ValueError, AttributeError):
                     pass
 
+            # Sync auto-add dummy peaks setting
+            if hasattr(self, 'auto_add_dummy_peaks'):
+                self.integrator.auto_add_dummy_peaks = self.auto_add_dummy_peaks
+
             # Sync workflow mode
             if hasattr(self, 'workflow_mode'):
                 workflow_mode = self.workflow_mode
@@ -5288,77 +5293,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         except Exception as e:
             logger.error(f"Failed to sync parameters to integrator: {e}")
             # Continue - don't fail the whole operation for parameter sync issues
-
-    def closeEvent(self, event):
-        """Handle window close event.
-
-        This ensures:
-        - User preferences are saved
-        - Active processing is stopped gracefully
-        - Resources are cleaned up
-
-        Args:
-            event: QCloseEvent from Qt
-        """
-        logger.info("Main window closing")
-
-        # Check if processing is active
-        if self.processing_active or self.integration_active:
-            reply = QMessageBox.question(
-                self,
-                "Processing Active",
-                "Processing is currently active. Are you sure you want to quit?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-
-            if reply == QMessageBox.No:
-                event.ignore()
-                return
-
-        # Save user preferences using QSettings
-        try:
-            from PySide6.QtCore import QSettings
-
-            settings = QSettings("LunaNMR", "LunaNMR_v1")
-
-            # Save window geometry
-            settings.setValue("window/geometry", self.saveGeometry())
-            settings.setValue("window/state", self.saveState())
-
-            # Save splitter positions
-            if hasattr(self, 'main_splitter'):
-                settings.setValue("splitter/main", self.main_splitter.saveState())
-
-            # Save last used directories
-            settings.setValue("paths/last_nmr_folder", self.current_nmr_folder or "")
-            settings.setValue("paths/last_peak_folder", self.current_peak_folder or "")
-
-            # Save display options
-            settings.setValue("display/show_detected", self.show_detected)
-            settings.setValue("display/show_assigned", self.show_assigned)
-            settings.setValue("display/show_fitted_curves", self.show_fitted_curves)
-            settings.setValue("display/show_ellipses", self.show_ellipses)
-
-            # Save contour settings
-            settings.setValue("contour/levels", self.contour_levels)
-            settings.setValue("contour/min", self.contour_min)
-            settings.setValue("contour/increment", self.contour_increment)
-
-            logger.info("User preferences saved to QSettings")
-        except Exception as e:
-            logger.error(f"Failed to save preferences: {e}")
-
-        # Stop any active processing
-        if self.processing_active:
-            self.processing_active = False
-
-        if self.integration_active:
-            self.integration_active = False
-
-        # Accept the close event
-        event.accept()
-        logger.info("Main window closed")
 
     # ===== Control Center Button Handlers =====
 
@@ -5535,8 +5469,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         for peak in fitted_peaks:
             data['Assignment'].append(peak.get('assignment', 'Unknown'))
-            data['Position_X'].append(peak.get('ppm_x', 0.0))
-            data['Position_Y'].append(peak.get('ppm_y', 0.0))
+            # Check multiple key variants: fitting uses peak_x/peak_y, detection uses ppm_x/ppm_y
+            data['Position_X'].append(peak.get('ppm_x', peak.get('peak_x', 0.0)))
+            data['Position_Y'].append(peak.get('ppm_y', peak.get('peak_y', 0.0)))
             data['Height'].append(peak.get('intensity', 0.0))
             data['Intensity'].append(peak.get('intensity', 0.0))
             data['SNR'].append(peak.get('snr', 0.0))
@@ -5639,11 +5574,31 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         )
 
         # Connect worker signals to dialog and handlers
+        # Track fitting phase for statistics counting
+        # PASS 1 = calibration (learn linewidths) - don't count
+        # OPTIMIZE = grid search - don't count
+        # PASS 1-bis = re-fit isolated with optimal params - don't count (intermediate)
+        # PASS 2 = final multi-peak cluster fitting - COUNT
+        fitting_phase = [None]  # Track current phase: None, 'pass1bis', 'pass2'
+
         def on_fitting_progress(p, t, log):
             """Handle progress update and add to detailed log."""
             progress_dialog.update_progress(p, f"{t}\n{log}" if log else t)
+
+            # Track phase transitions (don't reset timer - keep cumulative)
+            if t:
+                if "PASS 2" in t and fitting_phase[0] != 'pass2':
+                    # Entering PASS 2 - reset counters, start counting
+                    fitting_phase[0] = 'pass2'
+                    progress_dialog.reset_statistics(reset_timer=False)
+                elif "PASS 1-bis" in t and fitting_phase[0] is None:
+                    # Entering PASS 1-bis - track but don't count yet
+                    fitting_phase[0] = 'pass1bis'
+
             if log:
-                progress_dialog.add_log_message(log, is_error=False)
+                # Only count in statistics during PASS 2
+                count_this = (fitting_phase[0] == 'pass2')
+                progress_dialog.add_log_message(log, is_error=False, count_in_stats=count_this)
 
         self.fitting_worker.progress_updated.connect(on_fitting_progress)
         self.fitting_worker.fitting_complete.connect(
@@ -5687,10 +5642,11 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 standardized_results = []
                 for result in summary['fitted_results']:
                     # Create standardized structure matching v0o9 detection workflow
+                    # Check multiple key variants: fitting uses peak_x/peak_y, detection uses ppm_x/ppm_y
                     standardized_result = {
                         'assignment': result.get('Assignment', result.get('assignment', '')),
-                        'ppm_x': float(result.get('Position_X', result.get('ppm_x', 0))),
-                        'ppm_y': float(result.get('Position_Y', result.get('ppm_y', 0))),
+                        'ppm_x': float(result.get('Position_X', result.get('ppm_x', result.get('peak_x', 0)))),
+                        'ppm_y': float(result.get('Position_Y', result.get('ppm_y', result.get('peak_y', 0)))),
                         'detected': True,
                         'fitted': True
                     }
@@ -6202,6 +6158,31 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
     # ===== Peak Editing Helper Methods (v0o9 lines 5632-6001) =====
 
+    def _on_peak_edit_with_modifier(self, x_ppm: float, y_ppm: float, modifiers):
+        """Handle peak editing via modifier keys (Shift/Ctrl + click).
+
+        This is the new modifier-based peak editing that works with the
+        NMRNavigationHandler. It allows adding and deleting peaks without
+        entering a separate edit mode.
+
+        Args:
+            x_ppm: X coordinate in ppm where clicked
+            y_ppm: Y coordinate in ppm where clicked
+            modifiers: Qt.KeyboardModifiers indicating which keys are held
+        """
+        if modifiers & Qt.ShiftModifier:
+            # Shift+Click: Add new peak at position
+            self.add_new_peak(x_ppm, y_ppm)
+            logger.info(f"Shift+Click: Added peak at ({x_ppm:.4f}, {y_ppm:.4f})")
+        elif modifiers & Qt.ControlModifier:
+            # Ctrl+Click: Delete nearest peak
+            peak_info = self.find_nearest_peak(x_ppm, y_ppm)
+            if peak_info:
+                self.delete_selected_peak(peak_info)
+                logger.info(f"Ctrl+Click: Deleted peak near ({x_ppm:.4f}, {y_ppm:.4f})")
+            else:
+                logger.warning(f"Ctrl+Click: No peak found near ({x_ppm:.4f}, {y_ppm:.4f})")
+
     def on_peak_edit_click(self, event):
         """Handle mouse clicks in peak edit mode (v0o9 line 5632)."""
         if not self.peak_edit_mode or event.inaxes != self.spectrum_plotter.ax:
@@ -6546,6 +6527,286 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             import traceback
             traceback.print_exc()
 
+    # ===== Project Management =====
+
+    def _get_project_manager(self) -> ProjectManager:
+        """Get or create ProjectManager instance."""
+        if self.project_manager is None:
+            self.project_manager = ProjectManager(self)
+        return self.project_manager
+
+    def open_project(self):
+        """Open a saved project bundle."""
+        from PySide6.QtWidgets import QFileDialog
+        from lunaNMR.gui.dialogs.missing_files_dialog import MissingFilesDialog
+
+        # Check for unsaved changes
+        if not self._check_unsaved_changes():
+            return
+
+        # Get project path
+        project_path = QFileDialog.getExistingDirectory(
+            self,
+            "Open Project",
+            str(Path.home()),
+        )
+
+        if not project_path:
+            return
+
+        project_path = Path(project_path)
+
+        # Validate it's a .lunaNMR bundle
+        if not project_path.suffix == '.lunaNMR' and not project_path.name.endswith('.lunaNMR'):
+            QMessageBox.warning(
+                self,
+                "Invalid Project",
+                "Please select a .lunaNMR project folder."
+            )
+            return
+
+        # Check for missing files before loading
+        pm = self._get_project_manager()
+        missing_files = pm.get_missing_files_structured(project_path)
+
+        remapped_paths = {}
+        skipped_files = set()
+
+        # Show dialog if there are missing files
+        if missing_files:
+            dialog = MissingFilesDialog(self, missing_files=missing_files)
+            if not dialog.exec():
+                # User cancelled
+                return
+
+            remapped_paths = dialog.get_remapped_paths()
+            skipped_files = dialog.get_skipped_files()
+
+        # Load project
+        success, error_messages, summary = pm.load_project(project_path)
+
+        if success:
+            self.current_project_path = project_path
+
+            # Apply path remapping
+            if remapped_paths:
+                pm.apply_path_remapping(remapped_paths)
+
+            # Log skipped files
+            if skipped_files:
+                logger.info(f"Skipped files: {skipped_files}")
+
+            # Refresh display
+            self._refresh_after_project_load()
+
+            self.update_status(f"Project loaded: {project_path.name}")
+            logger.info(f"Project loaded from {project_path}")
+
+            # Show summary popup
+            self._show_load_summary(project_path, summary)
+        else:
+            QMessageBox.critical(
+                self,
+                "Load Failed",
+                f"Failed to load project:\n{', '.join(error_messages)}"
+            )
+
+    def save_project(self):
+        """Save project to current path, or prompt for path if none."""
+        if self.current_project_path is None:
+            self.save_project_as()
+        else:
+            self._do_save_project(self.current_project_path)
+
+    def save_project_as(self):
+        """Save project to a new location."""
+        from PySide6.QtWidgets import QFileDialog
+
+        # Suggest a name based on NMR file
+        suggested_name = "untitled.lunaNMR"
+        if self.current_nmr_file:
+            suggested_name = Path(self.current_nmr_file).stem + ".lunaNMR"
+
+        project_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Project As",
+            str(Path.home() / suggested_name),
+            "LunaNMR Project (*.lunaNMR)"
+        )
+
+        if not project_path:
+            return
+
+        project_path = Path(project_path)
+
+        # Ensure .lunaNMR extension
+        if not project_path.suffix == '.lunaNMR':
+            project_path = project_path.with_suffix('.lunaNMR')
+
+        self._do_save_project(project_path)
+
+    def _do_save_project(self, project_path: Path):
+        """Actually save the project to the given path."""
+        pm = self._get_project_manager()
+        success, summary = pm.save_project(project_path)
+
+        if success:
+            self.current_project_path = project_path
+            self.update_status(f"Project saved: {project_path.name}")
+            logger.info(f"Project saved to {project_path}")
+
+            # Show summary popup
+            self._show_save_summary(project_path, summary)
+        else:
+            QMessageBox.critical(
+                self,
+                "Save Failed",
+                "Failed to save project. Check logs for details."
+            )
+
+    def _show_save_summary(self, project_path: Path, summary: dict):
+        """Show a popup summarizing what was saved."""
+        lines = [f"Project saved: {project_path.name}", ""]
+
+        # General items
+        if summary.get('saved_items'):
+            lines.append("Saved items:")
+            for item in summary['saved_items']:
+                lines.append(f"  • {item}")
+
+        # DynamiXs summary
+        dynamixs = summary.get('dynamixs', {})
+        if dynamixs:
+            lines.append("")
+            lines.append("DynamiXs Analysis:")
+
+            if 't1t2_fitting' in dynamixs:
+                t1t2 = dynamixs['t1t2_fitting']
+                experiments = t1t2.get('fitted_experiments', [])
+                if experiments:
+                    exp_str = ', '.join(e.replace('_', ' ').title() for e in experiments)
+                    lines.append(f"  • T1/T2 Fitting: {exp_str}")
+
+            if 'spectral_density' in dynamixs:
+                lines.append("  • Spectral Density: Analysis complete")
+
+            if 'model_free' in dynamixs:
+                lines.append("  • Model Free: Analysis complete")
+
+        if not dynamixs and len(summary.get('saved_items', [])) <= 2:
+            lines.append("")
+            lines.append("No analysis results to save.")
+            lines.append("Complete analyses in DynamiXs to save results.")
+
+        logger.info(f"Showing save summary popup")
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Project Saved")
+        msg.setText("\n".join(lines))
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowModality(Qt.ApplicationModal)
+        msg.raise_()
+        msg.activateWindow()
+        msg.exec()
+
+    def _show_load_summary(self, project_path: Path, summary: dict):
+        """Show a popup summarizing what was loaded."""
+        lines = [f"Project loaded: {project_path.name}", ""]
+
+        # General items
+        if summary.get('loaded_items'):
+            lines.append("Loaded items:")
+            for item in summary['loaded_items']:
+                lines.append(f"  • {item}")
+
+        # DynamiXs summary
+        dynamixs = summary.get('dynamixs', {})
+        if dynamixs:
+            lines.append("")
+            lines.append("DynamiXs Analysis:")
+
+            if 't1t2_fitting' in dynamixs:
+                t1t2 = dynamixs['t1t2_fitting']
+                experiments = t1t2.get('fitted_experiments', [])
+                if experiments:
+                    exp_str = ', '.join(e.replace('_', ' ').title() for e in experiments)
+                    lines.append(f"  • T1/T2 Fitting: {exp_str}")
+
+            if 'spectral_density' in dynamixs:
+                lines.append("  • Spectral Density: Analysis complete")
+
+            if 'model_free' in dynamixs:
+                lines.append("  • Model Free: Analysis complete")
+
+            lines.append("")
+            lines.append("Open DynamiXs to view results.")
+        else:
+            lines.append("")
+            lines.append("No DynamiXs analysis results in project.")
+
+        logger.info(f"Showing load summary popup")
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Project Loaded")
+        msg.setText("\n".join(lines))
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowModality(Qt.ApplicationModal)
+        msg.raise_()
+        msg.activateWindow()
+        msg.exec()
+
+    def _check_unsaved_changes(self) -> bool:
+        """Check for unsaved changes and prompt user.
+
+        Returns:
+            True if OK to proceed (no changes or user chose to discard)
+            False if user cancelled
+        """
+        # For now, always return True - we can add change tracking later
+        # TODO: Implement change tracking to detect unsaved modifications
+        return True
+
+    def _refresh_after_project_load(self):
+        """Refresh UI after loading a project."""
+        # Update file labels
+        self.update_file_status_labels(
+            nmr_file=self.current_nmr_file,
+            peak_file=self.current_peak_file
+        )
+
+        # Sync fit results to integrator.fitted_peaks BEFORE loading spectrum
+        # (load_nmr_file uses integrator.fitted_peaks for peak display)
+        if self.last_fitting_results:
+            self.integrator.fitted_peaks = self.last_fitting_results
+            logger.info(f"Synced {len(self.last_fitting_results)} fit results to integrator.fitted_peaks")
+
+        # Refresh spectrum display if NMR file is loaded
+        if self.current_nmr_file and Path(self.current_nmr_file).exists():
+            try:
+                self.load_nmr_file(self.current_nmr_file)
+            except Exception as e:
+                logger.warning(f"Could not reload spectrum: {e}")
+
+        # Update peak navigator with reference peaks and fit results
+        if hasattr(self, 'peak_navigator'):
+            # Load reference peaks from peak list
+            if self.integrator.peak_list is not None:
+                self.peak_navigator.load_reference_peaks(self.integrator.peak_list)
+
+            # Load detected/fitted peaks from fit results
+            if self.last_fitting_results:
+                self.peak_navigator.load_detected_peaks(self.last_fitting_results)
+            else:
+                self.peak_navigator.refresh_peak_list()
+
+        # Update Voigt analysis plotter if fit results exist
+        if hasattr(self, 'voigt_plotter') and self.last_fitting_results:
+            try:
+                # Select first peak to display
+                if len(self.last_fitting_results) > 0:
+                    self.voigt_plotter.display_results(self.last_fitting_results[0])
+                    logger.info(f"Loaded {len(self.last_fitting_results)} fit results into Voigt plotter")
+            except Exception as e:
+                logger.warning(f"Could not update Voigt plotter: {e}")
+
     # ===== Test Spectrum Creation =====
 
     def create_test_spectrum(self):
@@ -6634,21 +6895,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             self.update_status(f"Error plotting test spectrum: {e}")
 
 # ===== Module-level functions for testing =====
-
-def create_test_window() -> LunaNMRMainWindow:
-    """Create a test instance of the main window.
-
-    This is useful for:
-    - Development and testing
-    - Demonstrating the window structure
-    - Verifying the layout and components
-
-    Returns:
-        LunaNMRMainWindow instance ready to display
-    """
-    window = LunaNMRMainWindow()
-    return window
-
 
 def main():
     """Launch the main window for testing."""

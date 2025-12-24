@@ -1,0 +1,32 @@
+main (5options)
+> format_data (empty option)
+> fit_T1_T2
+  > T1
+    > import_data
+    > results_name
+    > start_analysis (2 options single core or mutlti core)
+    > display_results
+  > T2
+    > import_data
+    > results_name
+    > start_analysis (2 options single core or mutlti core)
+    > display_results
+> spectral_density
+  > import_data
+  > results_name
+  > start_analysis (2 options single core or multi core)
+    > 1 field
+    > 2 fields
+  > display_results
+> plot_data
+  > plot_dual_field_data
+    > import_data
+    > results_name
+    > start_analysis
+    > display_results
+  > compare_datasets.py
+    > import_data
+    > results_name
+    > start_analysis
+    > display_results
+> cpmg (empty option)

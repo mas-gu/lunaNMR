@@ -132,106 +132,32 @@ class Ps2dDataSelector:
             'window_ppm': radius_ppm  # FIXED value, not adaptive
         }
 
-    def select_data_2d_elliptical(self,
-                                   f1_data: np.ndarray,
-                                   f2_data: np.ndarray,
-                                   intensity: np.ndarray,
-                                   peak_f1_pos: float,
-                                   peak_f2_pos: float) -> Dict:
-        """
-        Select 2D data using FIXED elliptical window.
 
-        ``
-        Doub radius = SQR((_F1-peak[k].appF1)/peak[k].radF1) +
-                      SQR((_F2-peak[k].appF2)/peak[k].radF2);
-        if (radius <= 1.0) {
-            f1[sizecounter] = _F1;
-            f2[sizecounter] = _F2;
-            y[sizecounter] = intensity;
-            ++sizecounter;
-        }
-        ```
+def get_cluster_window_scale(n_peaks: int) -> float:
+    """
+    Calculate window scaling factor based on cluster size.
 
-        Parameters
-        ----------
-        f1_data : np.ndarray
-            F1 dimension data (indirect, 15N/13C ppm)
-        f2_data : np.ndarray
-            F2 dimension data (direct, 1H ppm)
-        intensity : np.ndarray
-            Intensity values
-        peak_f1_pos : float
-            Peak position in F1 (ppm)
-        peak_f2_pos : float
-            Peak position in F2 (ppm)
+    Larger clusters need larger fitting windows to capture all peaks
+    and their tails properly.
 
-        Returns
-        -------
-        dict : Selected data following  structure
-        """
-        radius_squared = ((f1_data - peak_f1_pos) / self.radF1) ** 2 + \
-                        ((f2_data - peak_f2_pos) / self.radF2) ** 2
+    Parameters
+    ----------
+    n_peaks : int
+        Number of peaks in the cluster
 
-        # Include points where radius <= 1.0 (inside ellipse)
-        mask = radius_squared <= 1.0
-
-        return {
-            'f1_selected': f1_data[mask],
-            'f2_selected': f2_data[mask],
-            'intensity_selected': intensity[mask],
-            'mask': mask,
-            'radF1_used': self.radF1,
-            'radF2_used': self.radF2,
-            'n_points_selected': np.sum(mask)
-        }
-
-    def get_window_boundaries(self, peak_pos: float, dimension: str = 'x') -> Tuple[float, float]:
-        """
-        Get window boundaries for plotting/display .
-
-         calculation:
-        ```
-        imin = (Int)(((peak.f1+peak.radF1)*obsF1 - firstF1)/deltaF1 + 0.5);
-        imax = (Int)(((peak.f1-peak.radF1)*obsF1 - firstF1)/deltaF1 + 0.5);
-        ```
-
-        Simplified for ppm scale: [peak_pos - radius, peak_pos + radius]
-
-        Parameters
-        ----------
-        peak_pos : float
-            Peak position (ppm)
-        dimension : str
-            'x' or 'y'
-
-        Returns
-        -------
-        tuple : (min_ppm, max_ppm)
-        """
-        if dimension == 'x':
-            radius = self.radF2
-        else:
-            radius = self.radF1
-
-        return (peak_pos - radius, peak_pos + radius)
-
-    def get_integration_info(self) -> Dict:
-        """
-        Get current integration window settings (for logging/debugging).
-
-        Returns
-        -------
-        dict : Window configuration matching 
-        """
-        return {
-            'radF1_ppm': self.radF1,
-            'radF2_ppm': self.radF2,
-            'spectrum_type': self.spectrum_type,
-            'source': ' lines 181-182',
-            'method': 'FIXED elliptical window (no adaptation)',
-            'f1_dimension': '15N/13C (indirect)',
-            'f2_dimension': '1H (direct)'
-        }
+    Returns
+    -------
+    float
+        Scaling factor for radF1 and radF2
+    """
+    if n_peaks <= 2:
+        return 1.0      # Small cluster: default window
+    elif n_peaks <= 4:
+        return 1.25     # Medium: 25% larger
+    elif n_peaks <= 6:
+        return 1.5      # Large: 50% larger
+    else:
+        return 2.0      # Very large: double window
 
 
 def select_data_2d_for_overlap_group(f1_data: np.ndarray,
@@ -240,7 +166,8 @@ def select_data_2d_for_overlap_group(f1_data: np.ndarray,
                                       peak_positions: list,
                                       radF1: float = None,
                                       radF2: float = None,
-                                      config=None) -> Dict:
+                                      config=None,
+                                      scale_by_cluster_size: bool = True) -> Dict:
     """
     Select 2D data for overlap group using UNION of elliptical windows
 
@@ -278,6 +205,12 @@ def select_data_2d_for_overlap_group(f1_data: np.ndarray,
         Ellipse radius in F2 dimension (default from config)
     config : PS2DConfig, optional
         Configuration object. If None, uses global config.
+    scale_by_cluster_size : bool, optional
+        If True (default), scale window size based on number of peaks:
+        - 1-2 peaks: 1.0× (default)
+        - 3-4 peaks: 1.25× (25% larger)
+        - 5-6 peaks: 1.5× (50% larger)
+        - 7+ peaks: 2.0× (double)
 
     Returns:
     --------
@@ -299,6 +232,15 @@ def select_data_2d_for_overlap_group(f1_data: np.ndarray,
             radF1 = config.radF1_selector
         if radF2 is None:
             radF2 = config.radF2_selector
+
+    # Scale window size based on cluster size (Option B)
+    # Larger clusters need larger windows to capture all peaks and their tails
+    if scale_by_cluster_size:
+        n_peaks = len(peak_positions)
+        scale_factor = get_cluster_window_scale(n_peaks)
+        if scale_factor != 1.0:
+            radF1 = radF1 * scale_factor
+            radF2 = radF2 * scale_factor
 
     # Flatten inputs if needed
     f1_flat = f1_data.ravel()

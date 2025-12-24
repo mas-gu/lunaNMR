@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
     QGroupBox, QScrollArea, QWidget, QColorDialog, QMessageBox,
     QSpinBox, QDoubleSpinBox, QSplitter, QListWidget, QListWidgetItem,
-    QTabWidget, QSlider, QComboBox, QTextEdit
+    QTabWidget, QSlider, QComboBox, QTextEdit, QStackedWidget
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont
@@ -131,8 +131,17 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.voigt_2d_plotter = None
         self.voigt_3d_plotter = None
 
+        # Peak Mode navigation state
+        self.navigation_mode = 'spectrum'  # 'spectrum' or 'peak'
+        self.master_peak_list = []  # All unique peaks by assignment
+        self.peak_spectrum_map = {}  # assignment -> list of spectrum indices
+        self.selected_master_peak_idx = None  # Currently selected peak in Peak Mode
+
         # Initialize spectra data
         self._initialize_spectra()
+
+        # Build peak-spectrum mapping for Peak Mode
+        self._build_peak_spectrum_map()
 
         # Build UI
         self.setup_ui()
@@ -175,6 +184,71 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 self.visible_spectra.add(spectrum_name)
 
             logger.debug(f"Initialized spectrum {spectrum_name} with {len(fitted_peaks)} fitted peaks")
+
+    def _build_peak_spectrum_map(self):
+        """Build mapping from peak assignments to spectrum indices.
+
+        Creates:
+            - master_peak_list: List of unique peaks by assignment (from first spectrum)
+            - peak_spectrum_map: Dict mapping assignment -> list of spectrum indices where peak exists
+
+        Coordinates for master_peak_list come from first spectrum's peaks.
+        R² is left blank in master list (shown as "—").
+        """
+        self.peak_spectrum_map = {}
+        self.master_peak_list = []
+        reference_peaks = {}  # assignment -> peak data from first spectrum
+
+        # First pass: collect all assignments and their spectrum indices
+        for spec_idx, spec in enumerate(self.spectra):
+            fitted_peaks = spec.get('fitted_peaks', [])
+            for peak in fitted_peaks:
+                assignment = peak.get('assignment', peak.get('Assignment', ''))
+                if not assignment:
+                    continue
+
+                # Track which spectra have this peak
+                if assignment not in self.peak_spectrum_map:
+                    self.peak_spectrum_map[assignment] = []
+                self.peak_spectrum_map[assignment].append(spec_idx)
+
+                # Use first spectrum's coordinates as reference
+                if assignment not in reference_peaks:
+                    reference_peaks[assignment] = peak
+
+        # Build master_peak_list from reference peaks
+        # Use first spectrum's order if possible
+        if self.spectra and self.spectra[0].get('fitted_peaks'):
+            first_spectrum_peaks = self.spectra[0]['fitted_peaks']
+            seen_assignments = set()
+
+            for peak in first_spectrum_peaks:
+                assignment = peak.get('assignment', peak.get('Assignment', ''))
+                if assignment and assignment not in seen_assignments:
+                    seen_assignments.add(assignment)
+                    # Create master peak entry (R² left blank)
+                    master_peak = {
+                        'assignment': assignment,
+                        'center_x': peak.get('center_x', peak.get('peak_x', peak.get('ppm_x', peak.get('pos_f2', 0)))),
+                        'center_y': peak.get('center_y', peak.get('peak_y', peak.get('ppm_y', peak.get('pos_f1', 0)))),
+                        'r_squared': None,  # Leave blank for master list
+                        'quality': ''
+                    }
+                    self.master_peak_list.append(master_peak)
+
+            # Add any peaks from other spectra not in first spectrum
+            for assignment, peak in reference_peaks.items():
+                if assignment not in seen_assignments:
+                    master_peak = {
+                        'assignment': assignment,
+                        'center_x': peak.get('center_x', peak.get('peak_x', peak.get('ppm_x', peak.get('pos_f2', 0)))),
+                        'center_y': peak.get('center_y', peak.get('peak_y', peak.get('ppm_y', peak.get('pos_f1', 0)))),
+                        'r_squared': None,
+                        'quality': ''
+                    }
+                    self.master_peak_list.append(master_peak)
+
+        logger.debug(f"Built peak_spectrum_map with {len(self.master_peak_list)} unique peaks")
 
     def _get_fitted_peaks(self, spec_idx: int) -> List[Dict]:
         """Get fitted peaks for a spectrum.
@@ -396,9 +470,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
         """Create the overlay view tab with contour plot and peak navigator.
 
         Based on v0.9 multi_spectrum_viewer.py overlay tab structure.
-        Includes Select Spectrum and Peak Navigator panels on the right.
+        Simple layout: spectrum selector and peak navigator (no mode toggle here).
         """
         from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
+        from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
 
         tab = QWidget()
         layout = QHBoxLayout()
@@ -413,10 +488,14 @@ class MultiSpectrumViewerDialog(BaseDialog):
         # Create matplotlib widget for contour plot
         self.plot_widget = MatplotlibWidget(
             parent=left_panel,
-            toolbar=True,
+            toolbar=False,
             figsize=(8, 6),
             dpi=100
         )
+
+        # Attach navigation handler for pan/zoom
+        self._nav_handler = NMRNavigationHandler()
+        self._nav_handler.attach(self.plot_widget)
 
         # Initialize plot with placeholder text
         self.plot_widget.axes.set_title("Select spectra to display overlay")
@@ -433,13 +512,13 @@ class MultiSpectrumViewerDialog(BaseDialog):
         left_panel.setLayout(left_layout)
         layout.addWidget(left_panel, stretch=7)
 
-        # Right panel (30%): Spectrum selector and Peak Navigator (20% larger than 25%)
+        # Right panel (30%): Spectrum selector and peak navigator
         right_panel = QWidget()
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(SPACING_SM)
 
-        # Spectrum selector for overlay
+        # Spectrum selector
         spec_group = QGroupBox("Select Spectrum")
         spec_group.setStyleSheet(self._get_group_style())
         spec_layout = QVBoxLayout()
@@ -455,17 +534,16 @@ class MultiSpectrumViewerDialog(BaseDialog):
         spec_group.setLayout(spec_layout)
         right_layout.addWidget(spec_group)
 
-        # Peak navigator for overlay (table-based)
+        # Peak navigator
         peak_group = QGroupBox("Peak Navigator")
         peak_group.setStyleSheet(self._get_group_style())
         peak_layout = QVBoxLayout()
 
-        # Use table-based PeakNavigatorTable for consistent UI with main GUI
         self.overlay_peak_table = PeakNavigatorTable()
         self.overlay_peak_table.peak_selected.connect(self._on_overlay_peak_selected_by_index)
         peak_layout.addWidget(self.overlay_peak_table)
 
-        # Show Peaks checkbox - toggle peak markers on overlay plot
+        # Show Peaks checkbox
         self.show_peaks_checkbox = QCheckBox("Show Peak Markers")
         self.show_peaks_checkbox.setChecked(True)
         self.show_peaks_checkbox.toggled.connect(self._on_toggle_peak_markers)
@@ -488,6 +566,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         """Create the Voigt analysis tab with spectrum/peak selection and VoigtAnalysisPlotter.
 
         Based on v0.9 setup_voigt_analysis_tab() (multi_spectrum_viewer.py:819-902).
+        Includes mode toggle for Spectrum Mode and Peak Mode navigation.
         """
         from lunaNMR.gui.components.voigt_analysis_plotter import VoigtAnalysisPlotter
 
@@ -514,13 +593,51 @@ class MultiSpectrumViewerDialog(BaseDialog):
         left_panel.setLayout(left_layout)
         layout.addWidget(left_panel, stretch=7)
 
-        # Right panel (30%): Spectrum and peak selection (20% larger)
+        # Right panel (30%): Mode toggle + swappable selector panels
         right_panel = QWidget()
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(SPACING_SM)
 
-        # Spectrum selector
+        # Mode toggle button at top
+        self.voigt_mode_toggle_btn = QPushButton("Spectrum Mode")
+        self.voigt_mode_toggle_btn.setCheckable(True)
+        self.voigt_mode_toggle_btn.setChecked(False)  # Start in Spectrum Mode
+        self.voigt_mode_toggle_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {SECONDARY_BUTTON_BG};
+                color: {SECONDARY_BUTTON_TEXT};
+                border: 1px solid {SECONDARY_BUTTON_BORDER};
+                border-radius: {BUTTON_CORNER_RADIUS}px;
+                padding: {SPACING_SM}px {SPACING_MD}px;
+                font-size: {FONT_SIZE_BODY}px;
+                font-weight: bold;
+            }}
+            QPushButton:checked {{
+                background-color: {PRIMARY_BUTTON_BG};
+                color: {PRIMARY_BUTTON_TEXT};
+                border: none;
+            }}
+            QPushButton:hover {{
+                background-color: {SECONDARY_BUTTON_HOVER};
+            }}
+            QPushButton:checked:hover {{
+                background-color: {PRIMARY_BUTTON_HOVER};
+            }}
+        """)
+        self.voigt_mode_toggle_btn.clicked.connect(self._toggle_voigt_navigation_mode)
+        right_layout.addWidget(self.voigt_mode_toggle_btn)
+
+        # QStackedWidget for swappable panels
+        self.voigt_mode_stack = QStackedWidget()
+
+        # === Page 0: Spectrum Mode (Select Spectrum on top, Peak Navigator below) ===
+        spectrum_mode_page = QWidget()
+        spectrum_mode_layout = QVBoxLayout()
+        spectrum_mode_layout.setContentsMargins(0, 0, 0, 0)
+        spectrum_mode_layout.setSpacing(SPACING_SM)
+
+        # Spectrum selector for Spectrum Mode
         spec_group = QGroupBox("Select Spectrum")
         spec_group.setStyleSheet(self._get_group_style())
         spec_layout = QVBoxLayout()
@@ -534,20 +651,78 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.voigt_spectrum_list.itemClicked.connect(self._on_voigt_spectrum_selected)
         spec_layout.addWidget(self.voigt_spectrum_list)
         spec_group.setLayout(spec_layout)
-        right_layout.addWidget(spec_group)
+        spectrum_mode_layout.addWidget(spec_group)
 
-        # Peak navigator (table-based)
+        # Peak navigator for Spectrum Mode
         peak_group = QGroupBox("Peak Navigator")
         peak_group.setStyleSheet(self._get_group_style())
         peak_layout = QVBoxLayout()
 
-        # Use table-based PeakNavigatorTable for consistent UI
         self.voigt_peak_table = PeakNavigatorTable()
         self.voigt_peak_table.peak_selected.connect(self._on_voigt_peak_selected_by_index)
         peak_layout.addWidget(self.voigt_peak_table)
 
         peak_group.setLayout(peak_layout)
-        right_layout.addWidget(peak_group, stretch=1)
+        spectrum_mode_layout.addWidget(peak_group, stretch=1)
+
+        spectrum_mode_page.setLayout(spectrum_mode_layout)
+        self.voigt_mode_stack.addWidget(spectrum_mode_page)
+
+        # === Page 1: Peak Mode (Select Peak on top, Spectrum Navigator below) ===
+        peak_mode_page = QWidget()
+        peak_mode_layout = QVBoxLayout()
+        peak_mode_layout.setContentsMargins(0, 0, 0, 0)
+        peak_mode_layout.setSpacing(SPACING_SM)
+
+        # Peak selector for Peak Mode (master peak list)
+        peak_select_group = QGroupBox("Select Peak")
+        peak_select_group.setStyleSheet(self._get_group_style())
+        peak_select_layout = QVBoxLayout()
+
+        self.voigt_peak_mode_peak_table = PeakNavigatorTable()
+        self.voigt_peak_mode_peak_table.peak_selected.connect(self._on_voigt_peak_mode_peak_selected)
+        self.voigt_peak_mode_peak_table.load_peaks(self.master_peak_list)
+        peak_select_layout.addWidget(self.voigt_peak_mode_peak_table)
+
+        peak_select_group.setLayout(peak_select_layout)
+        peak_mode_layout.addWidget(peak_select_group, stretch=1)
+
+        # Spectrum navigator for Peak Mode
+        spectrum_nav_group = QGroupBox("Spectrum Navigator")
+        spectrum_nav_group.setStyleSheet(self._get_group_style())
+        spectrum_nav_layout = QVBoxLayout()
+
+        self.voigt_peak_mode_spectrum_list = QListWidget()
+        self.voigt_peak_mode_spectrum_list.setMaximumHeight(120)
+        # Connect both click and keyboard navigation (arrow keys)
+        self.voigt_peak_mode_spectrum_list.itemClicked.connect(self._on_voigt_peak_mode_spectrum_selected)
+        self.voigt_peak_mode_spectrum_list.currentRowChanged.connect(self._on_voigt_peak_mode_spectrum_row_changed)
+        spectrum_nav_layout.addWidget(self.voigt_peak_mode_spectrum_list)
+
+        # Navigation buttons for Peak Mode spectrum navigation
+        nav_btn_layout = QHBoxLayout()
+        nav_btn_layout.setSpacing(SPACING_SM)
+
+        self.voigt_peak_mode_prev_btn = QPushButton("◀ Prev")
+        self.voigt_peak_mode_prev_btn.setStyleSheet(self._get_nav_button_style())
+        self.voigt_peak_mode_prev_btn.clicked.connect(self._on_voigt_peak_mode_prev_spectrum)
+        self.voigt_peak_mode_prev_btn.setEnabled(False)
+        nav_btn_layout.addWidget(self.voigt_peak_mode_prev_btn)
+
+        self.voigt_peak_mode_next_btn = QPushButton("Next ▶")
+        self.voigt_peak_mode_next_btn.setStyleSheet(self._get_nav_button_style())
+        self.voigt_peak_mode_next_btn.clicked.connect(self._on_voigt_peak_mode_next_spectrum)
+        self.voigt_peak_mode_next_btn.setEnabled(False)
+        nav_btn_layout.addWidget(self.voigt_peak_mode_next_btn)
+
+        spectrum_nav_layout.addLayout(nav_btn_layout)
+        spectrum_nav_group.setLayout(spectrum_nav_layout)
+        peak_mode_layout.addWidget(spectrum_nav_group)
+
+        peak_mode_page.setLayout(peak_mode_layout)
+        self.voigt_mode_stack.addWidget(peak_mode_page)
+
+        right_layout.addWidget(self.voigt_mode_stack, stretch=1)
 
         right_panel.setLayout(right_layout)
         layout.addWidget(right_panel, stretch=3)
@@ -690,13 +865,51 @@ class MultiSpectrumViewerDialog(BaseDialog):
         left_panel.setLayout(left_layout)
         layout.addWidget(left_panel, stretch=7)
 
-        # Right panel (30%): Spectrum and peak selection (20% larger)
+        # Right panel (30%): Mode toggle + swappable selector panels
         right_panel = QWidget()
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(SPACING_SM)
 
-        # Spectrum selector for 3D
+        # Mode toggle button at top
+        self.voigt_3d_mode_toggle_btn = QPushButton("Spectrum Mode")
+        self.voigt_3d_mode_toggle_btn.setCheckable(True)
+        self.voigt_3d_mode_toggle_btn.setChecked(False)  # Start in Spectrum Mode
+        self.voigt_3d_mode_toggle_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {SECONDARY_BUTTON_BG};
+                color: {SECONDARY_BUTTON_TEXT};
+                border: 1px solid {SECONDARY_BUTTON_BORDER};
+                border-radius: {BUTTON_CORNER_RADIUS}px;
+                padding: {SPACING_SM}px {SPACING_MD}px;
+                font-size: {FONT_SIZE_BODY}px;
+                font-weight: bold;
+            }}
+            QPushButton:checked {{
+                background-color: {PRIMARY_BUTTON_BG};
+                color: {PRIMARY_BUTTON_TEXT};
+                border: none;
+            }}
+            QPushButton:hover {{
+                background-color: {SECONDARY_BUTTON_HOVER};
+            }}
+            QPushButton:checked:hover {{
+                background-color: {PRIMARY_BUTTON_HOVER};
+            }}
+        """)
+        self.voigt_3d_mode_toggle_btn.clicked.connect(self._toggle_voigt_3d_navigation_mode)
+        right_layout.addWidget(self.voigt_3d_mode_toggle_btn)
+
+        # QStackedWidget for swappable panels
+        self.voigt_3d_mode_stack = QStackedWidget()
+
+        # === Page 0: Spectrum Mode (Select Spectrum on top, Peak Navigator below) ===
+        spectrum_mode_page = QWidget()
+        spectrum_mode_layout = QVBoxLayout()
+        spectrum_mode_layout.setContentsMargins(0, 0, 0, 0)
+        spectrum_mode_layout.setSpacing(SPACING_SM)
+
+        # Spectrum selector for Spectrum Mode
         spec_group = QGroupBox("Select Spectrum")
         spec_group.setStyleSheet(self._get_group_style())
         spec_layout = QVBoxLayout()
@@ -710,20 +923,78 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.voigt_3d_spectrum_list.itemClicked.connect(self._on_voigt_3d_spectrum_selected)
         spec_layout.addWidget(self.voigt_3d_spectrum_list)
         spec_group.setLayout(spec_layout)
-        right_layout.addWidget(spec_group)
+        spectrum_mode_layout.addWidget(spec_group)
 
-        # Peak navigator for 3D (table-based)
+        # Peak navigator for Spectrum Mode
         peak_group = QGroupBox("Peak Navigator")
         peak_group.setStyleSheet(self._get_group_style())
         peak_layout = QVBoxLayout()
 
-        # Use table-based PeakNavigatorTable for consistent UI
         self.voigt_3d_peak_table = PeakNavigatorTable()
         self.voigt_3d_peak_table.peak_selected.connect(self._on_voigt_3d_peak_selected_by_index)
         peak_layout.addWidget(self.voigt_3d_peak_table)
 
         peak_group.setLayout(peak_layout)
-        right_layout.addWidget(peak_group, stretch=1)
+        spectrum_mode_layout.addWidget(peak_group, stretch=1)
+
+        spectrum_mode_page.setLayout(spectrum_mode_layout)
+        self.voigt_3d_mode_stack.addWidget(spectrum_mode_page)
+
+        # === Page 1: Peak Mode (Select Peak on top, Spectrum Navigator below) ===
+        peak_mode_page = QWidget()
+        peak_mode_layout = QVBoxLayout()
+        peak_mode_layout.setContentsMargins(0, 0, 0, 0)
+        peak_mode_layout.setSpacing(SPACING_SM)
+
+        # Peak selector for Peak Mode (master peak list)
+        peak_select_group = QGroupBox("Select Peak")
+        peak_select_group.setStyleSheet(self._get_group_style())
+        peak_select_layout = QVBoxLayout()
+
+        self.voigt_3d_peak_mode_peak_table = PeakNavigatorTable()
+        self.voigt_3d_peak_mode_peak_table.peak_selected.connect(self._on_voigt_3d_peak_mode_peak_selected)
+        self.voigt_3d_peak_mode_peak_table.load_peaks(self.master_peak_list)
+        peak_select_layout.addWidget(self.voigt_3d_peak_mode_peak_table)
+
+        peak_select_group.setLayout(peak_select_layout)
+        peak_mode_layout.addWidget(peak_select_group, stretch=1)
+
+        # Spectrum navigator for Peak Mode
+        spectrum_nav_group = QGroupBox("Spectrum Navigator")
+        spectrum_nav_group.setStyleSheet(self._get_group_style())
+        spectrum_nav_layout = QVBoxLayout()
+
+        self.voigt_3d_peak_mode_spectrum_list = QListWidget()
+        self.voigt_3d_peak_mode_spectrum_list.setMaximumHeight(120)
+        # Connect both click and keyboard navigation (arrow keys)
+        self.voigt_3d_peak_mode_spectrum_list.itemClicked.connect(self._on_voigt_3d_peak_mode_spectrum_selected)
+        self.voigt_3d_peak_mode_spectrum_list.currentRowChanged.connect(self._on_voigt_3d_peak_mode_spectrum_row_changed)
+        spectrum_nav_layout.addWidget(self.voigt_3d_peak_mode_spectrum_list)
+
+        # Navigation buttons for Peak Mode spectrum navigation
+        nav_btn_layout = QHBoxLayout()
+        nav_btn_layout.setSpacing(SPACING_SM)
+
+        self.voigt_3d_peak_mode_prev_btn = QPushButton("◀ Prev")
+        self.voigt_3d_peak_mode_prev_btn.setStyleSheet(self._get_nav_button_style())
+        self.voigt_3d_peak_mode_prev_btn.clicked.connect(self._on_voigt_3d_peak_mode_prev_spectrum)
+        self.voigt_3d_peak_mode_prev_btn.setEnabled(False)
+        nav_btn_layout.addWidget(self.voigt_3d_peak_mode_prev_btn)
+
+        self.voigt_3d_peak_mode_next_btn = QPushButton("Next ▶")
+        self.voigt_3d_peak_mode_next_btn.setStyleSheet(self._get_nav_button_style())
+        self.voigt_3d_peak_mode_next_btn.clicked.connect(self._on_voigt_3d_peak_mode_next_spectrum)
+        self.voigt_3d_peak_mode_next_btn.setEnabled(False)
+        nav_btn_layout.addWidget(self.voigt_3d_peak_mode_next_btn)
+
+        spectrum_nav_layout.addLayout(nav_btn_layout)
+        spectrum_nav_group.setLayout(spectrum_nav_layout)
+        peak_mode_layout.addWidget(spectrum_nav_group)
+
+        peak_mode_page.setLayout(peak_mode_layout)
+        self.voigt_3d_mode_stack.addWidget(peak_mode_page)
+
+        right_layout.addWidget(self.voigt_3d_mode_stack, stretch=1)
 
         right_panel.setLayout(right_layout)
         layout.addWidget(right_panel, stretch=3)
@@ -890,6 +1161,27 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 subcontrol-origin: margin;
                 left: {SPACING_SM}px;
                 padding: 0 {SPACING_SM}px;
+            }}
+        """
+
+    def _get_nav_button_style(self) -> str:
+        """Get navigation button style for Peak Mode."""
+        return f"""
+            QPushButton {{
+                background-color: {SECONDARY_BUTTON_BG};
+                color: {SECONDARY_BUTTON_TEXT};
+                border: 1px solid {SECONDARY_BUTTON_BORDER};
+                border-radius: {BUTTON_CORNER_RADIUS}px;
+                padding: {SPACING_SM}px {SPACING_MD}px;
+                font-size: {FONT_SIZE_BODY}px;
+            }}
+            QPushButton:hover {{
+                background-color: {SECONDARY_BUTTON_HOVER};
+            }}
+            QPushButton:disabled {{
+                background-color: #f0f0f0;
+                color: #aaaaaa;
+                border-color: #cccccc;
             }}
         """
 
@@ -1451,19 +1743,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         logger.debug(f"No stored Voigt result found for {assignment}")
         return None
 
-    def _on_3d_intensity_changed(self, value: int):
-        """Handle intensity scale slider change for 3D Voigt plot.
-
-        Based on v0.9 main_gui.py - uses set_intensity_scale() method.
-        """
-        # Update the label
-        if hasattr(self, 'intensity_3d_label'):
-            self.intensity_3d_label.setText(f"{value}%")
-
-        # Use set_intensity_scale() method on the plotter
-        if self.voigt_3d_plotter:
-            self.voigt_3d_plotter.set_intensity_scale(float(value))
-
     def _on_3d_colormap_changed(self, scheme: str):
         """Handle color scheme change for 3D Voigt plot.
 
@@ -1492,12 +1771,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         if self.voigt_3d_plotter:
             self.voigt_3d_plotter.toggle_individual_peaks(checked)
 
-    def _on_toggle_labels_3d(self, checked):
-        """Toggle peak labels visibility."""
-        self.show_peak_labels_3d = checked
-        if self.voigt_3d_plotter:
-            self.voigt_3d_plotter.toggle_peak_labels(checked)
-
     def _on_toggle_resid_3d(self, checked):
         """Toggle residuals visibility."""
         self.show_resid_3d = checked
@@ -1509,12 +1782,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.limit_peak_display_3d = checked
         if self.voigt_3d_plotter:
             self.voigt_3d_plotter.toggle_peak_clipping(checked)
-
-    def _on_residual_mode_changed(self, mode):
-        """Handle residual mode change."""
-        self.residual_mode_3d = mode
-        if self.voigt_3d_plotter:
-            self.voigt_3d_plotter.set_residual_mode(mode)
 
     # ===== Overlay Tab Methods =====
 
@@ -1642,3 +1909,321 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         except Exception as e:
             logger.error(f"Error plotting peak markers: {e}")
+
+    # ===== Voigt Tab Peak Mode Methods =====
+
+    def _toggle_voigt_navigation_mode(self):
+        """Toggle between Spectrum Mode and Peak Mode for Voigt Analysis tab."""
+        if self.voigt_mode_toggle_btn.isChecked():
+            # Switch to Peak Mode
+            self.navigation_mode = 'peak'
+            self.voigt_mode_toggle_btn.setText("Peak Mode")
+            self.voigt_mode_stack.setCurrentIndex(1)
+            # Reset to first peak
+            if self.master_peak_list:
+                self.voigt_peak_mode_peak_table.select_peak(0)
+            logger.debug("Voigt tab: Switched to Peak Mode")
+        else:
+            # Switch to Spectrum Mode
+            self.navigation_mode = 'spectrum'
+            self.voigt_mode_toggle_btn.setText("Spectrum Mode")
+            self.voigt_mode_stack.setCurrentIndex(0)
+            # Reset to first spectrum
+            if self.voigt_spectrum_list.count() > 0:
+                self.voigt_spectrum_list.setCurrentRow(0)
+                item = self.voigt_spectrum_list.item(0)
+                if item:
+                    self._on_voigt_spectrum_selected(item)
+            logger.debug("Voigt tab: Switched to Spectrum Mode")
+
+    def _on_voigt_peak_mode_peak_selected(self, peak_idx: int):
+        """Handle peak selection in Peak Mode for Voigt tab."""
+        if peak_idx < 0 or peak_idx >= len(self.master_peak_list):
+            return
+
+        self.selected_master_peak_idx = peak_idx
+        peak = self.master_peak_list[peak_idx]
+        assignment = peak.get('assignment', '')
+
+        # Get list of spectra that have this peak
+        spectra_with_peak = self.peak_spectrum_map.get(assignment, [])
+
+        # Update spectrum navigator list with grayed-out items
+        self._update_voigt_peak_mode_spectrum_list(spectra_with_peak)
+
+        logger.debug(f"Voigt Peak Mode: Selected peak {assignment}, found in {len(spectra_with_peak)} spectra")
+
+    def _update_voigt_peak_mode_spectrum_list(self, spectra_with_peak: List[int]):
+        """Update the Peak Mode spectrum list for Voigt tab."""
+        self.voigt_peak_mode_spectrum_list.clear()
+        self._voigt_peak_mode_available_spectra = []
+
+        for i, spec in enumerate(self.spectra):
+            item = QListWidgetItem(spec['name'])
+            item.setData(Qt.UserRole, i)
+
+            if i in spectra_with_peak:
+                item.setFlags(item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                self._voigt_peak_mode_available_spectra.append(i)
+            else:
+                item.setFlags(item.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsEnabled)
+                item.setForeground(QColor('#aaaaaa'))
+
+            self.voigt_peak_mode_spectrum_list.addItem(item)
+
+        # Update navigation button states
+        has_multiple = len(self._voigt_peak_mode_available_spectra) > 1
+        self.voigt_peak_mode_prev_btn.setEnabled(has_multiple)
+        self.voigt_peak_mode_next_btn.setEnabled(has_multiple)
+
+        # Select first available spectrum and plot
+        if self._voigt_peak_mode_available_spectra:
+            first_idx = self._voigt_peak_mode_available_spectra[0]
+            self.voigt_peak_mode_spectrum_list.setCurrentRow(first_idx)
+            self._select_voigt_spectrum_for_peak_mode(first_idx)
+
+    def _on_voigt_peak_mode_spectrum_selected(self, item: QListWidgetItem):
+        """Handle spectrum selection in Peak Mode for Voigt tab (click)."""
+        spec_idx = item.data(Qt.UserRole)
+
+        if not hasattr(self, '_voigt_peak_mode_available_spectra'):
+            return
+        if spec_idx not in self._voigt_peak_mode_available_spectra:
+            return
+
+        self._select_voigt_spectrum_for_peak_mode(spec_idx)
+
+    def _on_voigt_peak_mode_spectrum_row_changed(self, row: int):
+        """Handle spectrum selection in Peak Mode for Voigt tab (keyboard navigation)."""
+        if row < 0:
+            return
+
+        item = self.voigt_peak_mode_spectrum_list.item(row)
+        if item is None:
+            return
+
+        spec_idx = item.data(Qt.UserRole)
+
+        if not hasattr(self, '_voigt_peak_mode_available_spectra'):
+            return
+        if spec_idx not in self._voigt_peak_mode_available_spectra:
+            return
+
+        self._select_voigt_spectrum_for_peak_mode(spec_idx)
+
+    def _select_voigt_spectrum_for_peak_mode(self, spec_idx: int):
+        """Select a spectrum in Peak Mode and plot Voigt analysis."""
+        self.selected_spectrum_index = spec_idx
+
+        if self.selected_master_peak_idx is None or self.selected_master_peak_idx >= len(self.master_peak_list):
+            return
+
+        peak = self.master_peak_list[self.selected_master_peak_idx]
+        assignment = peak.get('assignment', '')
+
+        # Find the peak index in this spectrum's peak list
+        fitted_peaks = self._get_fitted_peaks(spec_idx)
+        for i, p in enumerate(fitted_peaks):
+            p_assignment = p.get('assignment', p.get('Assignment', ''))
+            if p_assignment == assignment:
+                self.selected_peak_index = i
+                break
+
+        # Plot the Voigt analysis
+        self._plot_voigt_analysis()
+        logger.debug(f"Voigt Peak Mode: Selected spectrum {spec_idx} for peak {assignment}")
+
+    def _on_voigt_peak_mode_prev_spectrum(self):
+        """Navigate to previous available spectrum in Voigt Peak Mode."""
+        if not hasattr(self, '_voigt_peak_mode_available_spectra') or not self._voigt_peak_mode_available_spectra:
+            return
+
+        current_row = self.voigt_peak_mode_spectrum_list.currentRow()
+        try:
+            current_pos = self._voigt_peak_mode_available_spectra.index(current_row)
+            new_pos = (current_pos - 1) % len(self._voigt_peak_mode_available_spectra)
+            new_idx = self._voigt_peak_mode_available_spectra[new_pos]
+            self.voigt_peak_mode_spectrum_list.setCurrentRow(new_idx)
+            self._select_voigt_spectrum_for_peak_mode(new_idx)
+        except ValueError:
+            if self._voigt_peak_mode_available_spectra:
+                new_idx = self._voigt_peak_mode_available_spectra[0]
+                self.voigt_peak_mode_spectrum_list.setCurrentRow(new_idx)
+                self._select_voigt_spectrum_for_peak_mode(new_idx)
+
+    def _on_voigt_peak_mode_next_spectrum(self):
+        """Navigate to next available spectrum in Voigt Peak Mode."""
+        if not hasattr(self, '_voigt_peak_mode_available_spectra') or not self._voigt_peak_mode_available_spectra:
+            return
+
+        current_row = self.voigt_peak_mode_spectrum_list.currentRow()
+        try:
+            current_pos = self._voigt_peak_mode_available_spectra.index(current_row)
+            new_pos = (current_pos + 1) % len(self._voigt_peak_mode_available_spectra)
+            new_idx = self._voigt_peak_mode_available_spectra[new_pos]
+            self.voigt_peak_mode_spectrum_list.setCurrentRow(new_idx)
+            self._select_voigt_spectrum_for_peak_mode(new_idx)
+        except ValueError:
+            if self._voigt_peak_mode_available_spectra:
+                new_idx = self._voigt_peak_mode_available_spectra[0]
+                self.voigt_peak_mode_spectrum_list.setCurrentRow(new_idx)
+                self._select_voigt_spectrum_for_peak_mode(new_idx)
+
+    # ===== 3D Voigt Tab Peak Mode Methods =====
+
+    def _toggle_voigt_3d_navigation_mode(self):
+        """Toggle between Spectrum Mode and Peak Mode for 3D Voigt Analysis tab."""
+        if self.voigt_3d_mode_toggle_btn.isChecked():
+            # Switch to Peak Mode
+            self.navigation_mode = 'peak'
+            self.voigt_3d_mode_toggle_btn.setText("Peak Mode")
+            self.voigt_3d_mode_stack.setCurrentIndex(1)
+            # Reset to first peak
+            if self.master_peak_list:
+                self.voigt_3d_peak_mode_peak_table.select_peak(0)
+            logger.debug("3D Voigt tab: Switched to Peak Mode")
+        else:
+            # Switch to Spectrum Mode
+            self.navigation_mode = 'spectrum'
+            self.voigt_3d_mode_toggle_btn.setText("Spectrum Mode")
+            self.voigt_3d_mode_stack.setCurrentIndex(0)
+            # Reset to first spectrum
+            if self.voigt_3d_spectrum_list.count() > 0:
+                self.voigt_3d_spectrum_list.setCurrentRow(0)
+                item = self.voigt_3d_spectrum_list.item(0)
+                if item:
+                    self._on_voigt_3d_spectrum_selected(item)
+            logger.debug("3D Voigt tab: Switched to Spectrum Mode")
+
+    def _on_voigt_3d_peak_mode_peak_selected(self, peak_idx: int):
+        """Handle peak selection in Peak Mode for 3D Voigt tab."""
+        if peak_idx < 0 or peak_idx >= len(self.master_peak_list):
+            return
+
+        self.selected_master_peak_idx = peak_idx
+        peak = self.master_peak_list[peak_idx]
+        assignment = peak.get('assignment', '')
+
+        # Get list of spectra that have this peak
+        spectra_with_peak = self.peak_spectrum_map.get(assignment, [])
+
+        # Update spectrum navigator list with grayed-out items
+        self._update_voigt_3d_peak_mode_spectrum_list(spectra_with_peak)
+
+        logger.debug(f"3D Voigt Peak Mode: Selected peak {assignment}, found in {len(spectra_with_peak)} spectra")
+
+    def _update_voigt_3d_peak_mode_spectrum_list(self, spectra_with_peak: List[int]):
+        """Update the Peak Mode spectrum list for 3D Voigt tab."""
+        self.voigt_3d_peak_mode_spectrum_list.clear()
+        self._voigt_3d_peak_mode_available_spectra = []
+
+        for i, spec in enumerate(self.spectra):
+            item = QListWidgetItem(spec['name'])
+            item.setData(Qt.UserRole, i)
+
+            if i in spectra_with_peak:
+                item.setFlags(item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                self._voigt_3d_peak_mode_available_spectra.append(i)
+            else:
+                item.setFlags(item.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsEnabled)
+                item.setForeground(QColor('#aaaaaa'))
+
+            self.voigt_3d_peak_mode_spectrum_list.addItem(item)
+
+        # Update navigation button states
+        has_multiple = len(self._voigt_3d_peak_mode_available_spectra) > 1
+        self.voigt_3d_peak_mode_prev_btn.setEnabled(has_multiple)
+        self.voigt_3d_peak_mode_next_btn.setEnabled(has_multiple)
+
+        # Select first available spectrum and plot
+        if self._voigt_3d_peak_mode_available_spectra:
+            first_idx = self._voigt_3d_peak_mode_available_spectra[0]
+            self.voigt_3d_peak_mode_spectrum_list.setCurrentRow(first_idx)
+            self._select_voigt_3d_spectrum_for_peak_mode(first_idx)
+
+    def _on_voigt_3d_peak_mode_spectrum_selected(self, item: QListWidgetItem):
+        """Handle spectrum selection in Peak Mode for 3D Voigt tab (click)."""
+        spec_idx = item.data(Qt.UserRole)
+
+        if not hasattr(self, '_voigt_3d_peak_mode_available_spectra'):
+            return
+        if spec_idx not in self._voigt_3d_peak_mode_available_spectra:
+            return
+
+        self._select_voigt_3d_spectrum_for_peak_mode(spec_idx)
+
+    def _on_voigt_3d_peak_mode_spectrum_row_changed(self, row: int):
+        """Handle spectrum selection in Peak Mode for 3D Voigt tab (keyboard navigation)."""
+        if row < 0:
+            return
+
+        item = self.voigt_3d_peak_mode_spectrum_list.item(row)
+        if item is None:
+            return
+
+        spec_idx = item.data(Qt.UserRole)
+
+        if not hasattr(self, '_voigt_3d_peak_mode_available_spectra'):
+            return
+        if spec_idx not in self._voigt_3d_peak_mode_available_spectra:
+            return
+
+        self._select_voigt_3d_spectrum_for_peak_mode(spec_idx)
+
+    def _select_voigt_3d_spectrum_for_peak_mode(self, spec_idx: int):
+        """Select a spectrum in Peak Mode and plot 3D Voigt analysis."""
+        self.selected_spectrum_index = spec_idx
+
+        if self.selected_master_peak_idx is None or self.selected_master_peak_idx >= len(self.master_peak_list):
+            return
+
+        peak = self.master_peak_list[self.selected_master_peak_idx]
+        assignment = peak.get('assignment', '')
+
+        # Find the peak index in this spectrum's peak list
+        fitted_peaks = self._get_fitted_peaks(spec_idx)
+        for i, p in enumerate(fitted_peaks):
+            p_assignment = p.get('assignment', p.get('Assignment', ''))
+            if p_assignment == assignment:
+                self.selected_peak_index = i
+                break
+
+        # Plot the 3D Voigt analysis
+        self._plot_voigt_analysis_3d()
+        logger.debug(f"3D Voigt Peak Mode: Selected spectrum {spec_idx} for peak {assignment}")
+
+    def _on_voigt_3d_peak_mode_prev_spectrum(self):
+        """Navigate to previous available spectrum in 3D Voigt Peak Mode."""
+        if not hasattr(self, '_voigt_3d_peak_mode_available_spectra') or not self._voigt_3d_peak_mode_available_spectra:
+            return
+
+        current_row = self.voigt_3d_peak_mode_spectrum_list.currentRow()
+        try:
+            current_pos = self._voigt_3d_peak_mode_available_spectra.index(current_row)
+            new_pos = (current_pos - 1) % len(self._voigt_3d_peak_mode_available_spectra)
+            new_idx = self._voigt_3d_peak_mode_available_spectra[new_pos]
+            self.voigt_3d_peak_mode_spectrum_list.setCurrentRow(new_idx)
+            self._select_voigt_3d_spectrum_for_peak_mode(new_idx)
+        except ValueError:
+            if self._voigt_3d_peak_mode_available_spectra:
+                new_idx = self._voigt_3d_peak_mode_available_spectra[0]
+                self.voigt_3d_peak_mode_spectrum_list.setCurrentRow(new_idx)
+                self._select_voigt_3d_spectrum_for_peak_mode(new_idx)
+
+    def _on_voigt_3d_peak_mode_next_spectrum(self):
+        """Navigate to next available spectrum in 3D Voigt Peak Mode."""
+        if not hasattr(self, '_voigt_3d_peak_mode_available_spectra') or not self._voigt_3d_peak_mode_available_spectra:
+            return
+
+        current_row = self.voigt_3d_peak_mode_spectrum_list.currentRow()
+        try:
+            current_pos = self._voigt_3d_peak_mode_available_spectra.index(current_row)
+            new_pos = (current_pos + 1) % len(self._voigt_3d_peak_mode_available_spectra)
+            new_idx = self._voigt_3d_peak_mode_available_spectra[new_pos]
+            self.voigt_3d_peak_mode_spectrum_list.setCurrentRow(new_idx)
+            self._select_voigt_3d_spectrum_for_peak_mode(new_idx)
+        except ValueError:
+            if self._voigt_3d_peak_mode_available_spectra:
+                new_idx = self._voigt_3d_peak_mode_available_spectra[0]
+                self.voigt_3d_peak_mode_spectrum_list.setCurrentRow(new_idx)
+                self._select_voigt_3d_spectrum_for_peak_mode(new_idx)

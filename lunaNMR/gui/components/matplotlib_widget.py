@@ -62,7 +62,7 @@ class MatplotlibWidget(QWidget):
         toolbar (NavigationToolbar2QT or None): Navigation toolbar if enabled
 
     Example:
-        widget = MatplotlibWidget(parent=self, toolbar=True, figsize=(8, 6))
+        widget = MatplotlibWidget(parent=self, figsize=(8, 6))
         widget.axes.plot([1, 2, 3], [1, 4, 9])
         widget.refresh()
     """
@@ -70,7 +70,7 @@ class MatplotlibWidget(QWidget):
     def __init__(
         self,
         parent=None,
-        toolbar=True,
+        toolbar=False,
         figsize=(8, 6),
         dpi=100,
         tight_layout=True
@@ -80,7 +80,7 @@ class MatplotlibWidget(QWidget):
 
         Args:
             parent: Parent Qt widget
-            toolbar: If True, include navigation toolbar
+            toolbar: If True, include navigation toolbar (default False)
             figsize: Figure size in inches (width, height)
             dpi: Dots per inch for figure resolution
             tight_layout: If True, use tight_layout for better spacing
@@ -201,26 +201,6 @@ class MatplotlibWidget(QWidget):
         default_kwargs.update(kwargs)
         self.axes.set_title(title, **default_kwargs)
 
-    def set_labels(self, xlabel: str = None, ylabel: str = None, **kwargs):
-        """
-        Set axis labels with design system styling.
-
-        Args:
-            xlabel: X-axis label text
-            ylabel: Y-axis label text
-            **kwargs: Additional arguments passed to set_xlabel/set_ylabel
-        """
-        default_kwargs = {
-            'fontsize': 10,
-            'color': PRIMARY_TEXT
-        }
-        default_kwargs.update(kwargs)
-
-        if xlabel:
-            self.axes.set_xlabel(xlabel, **default_kwargs)
-        if ylabel:
-            self.axes.set_ylabel(ylabel, **default_kwargs)
-
     def add_subplot(self, nrows: int, ncols: int, index: int):
         """
         Add a subplot to the figure.
@@ -266,48 +246,6 @@ class MatplotlibWidget(QWidget):
         }
         default_kwargs.update(kwargs)
         self.figure.savefig(filename, **default_kwargs)
-
-    def configure_grid(self, visible: bool = True, **kwargs):
-        """
-        Configure the axes grid.
-
-        Args:
-            visible: Show/hide grid
-            **kwargs: Additional arguments passed to axes.grid()
-        """
-        default_kwargs = {
-            'alpha': 0.3,
-            'linestyle': '--',
-            'linewidth': 0.5
-        }
-        default_kwargs.update(kwargs)
-        self.axes.grid(visible, **default_kwargs)
-
-    def set_axes_background(self, color: str = None):
-        """
-        Set the axes background color.
-
-        Args:
-            color: Hex color string or None to use design system default
-        """
-        if color is None:
-            color = FRAME_BG_COLOR
-
-        mpl_color = self._hex_to_mpl_color(color)
-        self.axes.set_facecolor(mpl_color)
-
-    def enable_toolbar(self):
-        """Enable the navigation toolbar if it was disabled."""
-        if self.toolbar is None:
-            self.toolbar = NavigationToolbar2QT(self.canvas, self)
-            self.layout.insertWidget(0, self.toolbar)
-
-    def disable_toolbar(self):
-        """Disable and remove the navigation toolbar."""
-        if self.toolbar is not None:
-            self.layout.removeWidget(self.toolbar)
-            self.toolbar.deleteLater()
-            self.toolbar = None
 
 
 class MatplotlibMultiAxesWidget(MatplotlibWidget):
@@ -394,19 +332,3 @@ class MatplotlibMultiAxesWidget(MatplotlibWidget):
         """Clear all subplots."""
         for ax in self.axes_list:
             ax.clear()
-
-    def get_axes_at(self, row: int, col: int):
-        """
-        Get axes at specific grid position.
-
-        Args:
-            row: Row index (0-indexed)
-            col: Column index (0-indexed)
-
-        Returns:
-            Axes object at (row, col) or None if out of bounds
-        """
-        index = row * self.ncols + col
-        if 0 <= index < len(self.axes_list):
-            return self.axes_list[index]
-        return None

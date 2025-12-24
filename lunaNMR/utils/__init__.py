@@ -33,6 +33,33 @@ try:
 except ImportError:
     pass
 
+try:
+    from .delay_extractor import DelayExtractor
+except ImportError:
+    pass
+
+try:
+    from .relaxation_data_bridge import RelaxationDataBridge
+except ImportError:
+    pass
+
+try:
+    from .output_manager import (
+        OutputManager,
+        OutputLevel,
+        log_progress,
+        log_info,
+        log_warning,
+        log_error
+    )
+except ImportError:
+    pass
+
+try:
+    from .project_manager import ProjectManager
+except ImportError:
+    pass
+
 __all__ = [
     'ConfigManager',
     'FileManager',
@@ -41,5 +68,14 @@ __all__ = [
     'FontManager',
     'get_font_manager',
     'configure_emoji_support',
-    'get_display_text'
+    'get_display_text',
+    'DelayExtractor',
+    'RelaxationDataBridge',
+    'OutputManager',
+    'OutputLevel',
+    'log_progress',
+    'log_info',
+    'log_warning',
+    'log_error',
+    'ProjectManager',
 ]

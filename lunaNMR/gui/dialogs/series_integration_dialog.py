@@ -6,6 +6,7 @@ import glob
 import re
 import logging
 import threading
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 import pandas as pd
@@ -13,7 +14,7 @@ import pandas as pd
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QRadioButton,
     QGroupBox, QListWidget, QListWidgetItem, QProgressBar,
-    QTextEdit, QButtonGroup, QMessageBox, QFileDialog
+    QTextEdit, QButtonGroup, QMessageBox, QFileDialog, QCheckBox, QFrame
 )
 from PySide6.QtCore import Qt, Signal, QThread, QObject
 
@@ -25,10 +26,28 @@ from lunaNMR.gui.styles.design_system import (
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
-    FRAME_BG_COLOR
+    FRAME_BG_COLOR,
+    SUCCESS_GREEN, DESTRUCTIVE_BUTTON_BG, DESTRUCTIVE_BUTTON_HOVER,
+    DESTRUCTIVE_BUTTON_TEXT, INFO_BLUE
 )
 
 logger = logging.getLogger(__name__)
+
+
+def natural_sort_key(s: str) -> list:
+    """Generate a sort key for natural (human) sorting.
+
+    Treats embedded numbers as integers for proper numeric ordering.
+    Example: ["8ms", "54ms", "102ms"] instead of ["102ms", "54ms", "8ms"]
+
+    Args:
+        s: String to generate sort key for
+
+    Returns:
+        List of strings and integers for comparison
+    """
+    return [int(text) if text.isdigit() else text.lower()
+            for text in re.split(r'(\d+)', str(s))]
 
 
 class ProcessingWorker(QObject):
@@ -38,24 +57,35 @@ class ProcessingWorker(QObject):
     finished = Signal(object)  # batch_results
     error = Signal(str)
 
-    def __init__(self, processor, nmr_files, reference_peaks, peak_source_mode, voigt_params):
+    def __init__(self, processor, nmr_files, reference_peaks, peak_source_mode, voigt_params,
+                 extract_delays: bool = False, pre_detected_peaks=None):
         super().__init__()
         self.processor = processor
         self.nmr_files = nmr_files
         self.reference_peaks = reference_peaks
         self.peak_source_mode = peak_source_mode
         self.voigt_params = voigt_params
+        self.extract_delays = extract_delays
+        self.pre_detected_peaks = pre_detected_peaks
         self._cancelled = False
+        self._paused = False
 
     def cancel(self):
         self._cancelled = True
         if self.processor:
             self.processor.processing_active = False
 
+    def set_paused(self, paused: bool):
+        """Set pause state."""
+        self._paused = paused
+        if self.processor:
+            self.processor.paused = paused
+
     def run(self):
         """Run the series processing."""
         try:
             from lunaNMR.processors.multi_spectrum_processor import MultiSpectrumProcessor
+            from lunaNMR.utils.output_manager import OutputManager
             import os
             from datetime import datetime
 
@@ -72,6 +102,9 @@ class ProcessingWorker(QObject):
                 current = int(progress_pct * total / 100)
                 self.progress.emit(current, total, log_msg or task_desc)
                 return True
+
+            # Set OutputManager callback for this thread so log_* functions route to GUI
+            OutputManager.set_callback(progress_callback)
 
             processor.processing_active = True
 
@@ -91,7 +124,9 @@ class ProcessingWorker(QObject):
                 reference_peaks=self.reference_peaks,
                 output_folder=output_folder,
                 peak_source_mode=self.peak_source_mode,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                extract_delays=self.extract_delays,
+                pre_detected_peaks=self.pre_detected_peaks
             )
 
             if not self._cancelled:
@@ -101,6 +136,10 @@ class ProcessingWorker(QObject):
             import traceback
             logger.error(f"Series processing error: {e}\n{traceback.format_exc()}")
             self.error.emit(str(e))
+        finally:
+            # Clear OutputManager callback for this thread
+            from lunaNMR.utils.output_manager import OutputManager
+            OutputManager.set_callback(None)
 
 
 class SeriesIntegrationDialog(BaseDialog):
@@ -143,6 +182,20 @@ class SeriesIntegrationDialog(BaseDialog):
         self.worker = None
         self.thread = None
         self.nmr_files = []
+        self.current_series_name = None  # Name for current series integration
+
+        # Progress tracking
+        self.start_time = None  # Set when processing starts
+        self.completed_tasks = 0
+        self.failed_tasks = 0
+        self.total_spectra = 0
+        self.current_spectrum_idx = 0
+        self.current_spectrum_name = ""
+        self.first_spectrum_time = None  # Time to complete first spectrum (for ETA)
+        self.last_spectrum_start = None  # When current spectrum started
+
+        # State flags
+        self._is_paused = False
 
         # Build UI
         self.setup_ui()
@@ -195,7 +248,7 @@ class SeriesIntegrationDialog(BaseDialog):
 
     def _create_peak_source_section(self) -> QGroupBox:
         """Create peak source selection section."""
-        group = QGroupBox("Peak Source")
+        group = QGroupBox("🎯 Peak Source")
         group.setStyleSheet(self._get_group_style())
 
         layout = QVBoxLayout()
@@ -203,31 +256,24 @@ class SeriesIntegrationDialog(BaseDialog):
 
         self.peak_source_group = QButtonGroup(self)
 
+        # Cascade mode option (default)
+        self.cascade_radio = QRadioButton("Cascade Mode (refine positions across series)")
+        self.cascade_radio.setToolTip("Start with detected/reference peaks, refine positions for each spectrum")
+        self.peak_source_group.addButton(self.cascade_radio)
+        layout.addWidget(self.cascade_radio)
+
         # Detected peaks option
         self.detected_radio = QRadioButton("Use Detected Peaks (from 'Fit All Peaks')")
         self.detected_radio.setToolTip("Use peaks detected and fitted in the current spectrum")
         self.peak_source_group.addButton(self.detected_radio)
         layout.addWidget(self.detected_radio)
 
-        # Reference peaks option
-        self.reference_radio = QRadioButton("Use Reference Peak List (from loaded file)")
-        self.reference_radio.setToolTip("Use peak positions from the loaded peak list file")
-        self.peak_source_group.addButton(self.reference_radio)
-        layout.addWidget(self.reference_radio)
-
-        # Cascade mode option
-        self.cascade_radio = QRadioButton("Cascade Mode (refine positions across series)")
-        self.cascade_radio.setToolTip("Start with reference peaks, refine positions for each spectrum")
-        self.peak_source_group.addButton(self.cascade_radio)
-        layout.addWidget(self.cascade_radio)
-
-        # Default selection
-        self.detected_radio.setChecked(True)
+        # Default selection: Cascade mode
+        self.cascade_radio.setChecked(True)
 
         # Connect signals for terminal feedback
-        self.detected_radio.toggled.connect(self._on_peak_source_detected)
-        self.reference_radio.toggled.connect(self._on_peak_source_reference)
         self.cascade_radio.toggled.connect(self._on_peak_source_cascade)
+        self.detected_radio.toggled.connect(self._on_peak_source_detected)
 
         group.setLayout(layout)
         return group
@@ -235,21 +281,16 @@ class SeriesIntegrationDialog(BaseDialog):
     def _on_peak_source_detected(self, checked: bool):
         """Handle detected peaks radio button toggle."""
         if checked:
-            print("🔘 Peak source: DETECTED - Using peaks from 'Fit All Peaks'")
-
-    def _on_peak_source_reference(self, checked: bool):
-        """Handle reference peaks radio button toggle."""
-        if checked:
-            print("🔘 Peak source: REFERENCE - Using peaks from loaded peak list file")
+            print("Peak source: DETECTED - Using peaks from 'Fit All Peaks'")
 
     def _on_peak_source_cascade(self, checked: bool):
         """Handle cascade mode radio button toggle."""
         if checked:
-            print("🔘 Peak source: CASCADE - Refining positions across series")
+            print("Peak source: CASCADE - Refining positions across series")
 
     def _create_file_list_section(self) -> QGroupBox:
         """Create NMR file list section."""
-        group = QGroupBox("NMR Files to Process")
+        group = QGroupBox("📁 NMR Files to Process")
         group.setStyleSheet(self._get_group_style())
 
         layout = QVBoxLayout()
@@ -273,36 +314,100 @@ class SeriesIntegrationDialog(BaseDialog):
         """)
         layout.addWidget(self.file_list)
 
-        # Browse button
-        browse_layout = QHBoxLayout()
-        browse_layout.addStretch()
+        # Bottom row with Extract delays checkbox and Browse button
+        bottom_layout = QHBoxLayout()
+
+        # Extract delays checkbox (for relaxation experiments)
+        self.extract_delays_checkbox = QCheckBox("Extract delays from filenames")
+        self.extract_delays_checkbox.setToolTip(
+            "For relaxation experiments: extract delay values from filenames (e.g., T1_50ms.ft → 50)\n"
+            "and use as column headers in output. Improves compatibility with DynamiXs."
+        )
+        self.extract_delays_checkbox.toggled.connect(self._on_extract_delays_toggled)
+        bottom_layout.addWidget(self.extract_delays_checkbox)
+
+        bottom_layout.addStretch()
+
         browse_btn = QPushButton("Change Folder...")
         browse_btn.clicked.connect(self._browse_folder)
-        browse_layout.addWidget(browse_btn)
-        layout.addLayout(browse_layout)
+        bottom_layout.addWidget(browse_btn)
+
+        layout.addLayout(bottom_layout)
+
+        # Delay info label (shown when extract delays is enabled)
+        self.delay_info_label = QLabel("")
+        self.delay_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-style: italic;")
+        self.delay_info_label.setVisible(False)
+        layout.addWidget(self.delay_info_label)
 
         group.setLayout(layout)
         return group
 
     def _create_progress_section(self) -> QGroupBox:
-        """Create progress display section."""
-        group = QGroupBox("Progress")
+        """Create progress display section (Voigt Fitting dialog style)."""
+        group = QGroupBox("📊 Progress")
         group.setStyleSheet(self._get_group_style())
 
         layout = QVBoxLayout()
 
-        # Progress bar
+        # Progress bar with built-in percentage text (styled via main.qss)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("%p%")  # Show percentage inside bar
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setMinimumHeight(24)
         layout.addWidget(self.progress_bar)
 
-        # Status label
-        self.status_label = QLabel("Ready to start")
-        self.status_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {PRIMARY_TEXT};")
-        layout.addWidget(self.status_label)
+        # Current Task frame (like Voigt Fitting)
+        task_frame = QFrame()
+        task_frame.setStyleSheet("""
+            QFrame {
+                background-color: #F5F5F5;
+                border: 1px solid #C7C7CC;
+                border-radius: 6px;
+            }
+        """)
+        task_layout = QVBoxLayout(task_frame)
+        task_layout.setContentsMargins(10, 6, 10, 6)
 
-        # Log area
+        task_header = QLabel("Current Task:")
+        task_header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-weight: bold; border: none; background: transparent;")
+        task_layout.addWidget(task_header)
+
+        self.status_label = QLabel("Ready to start")
+        self.status_label.setStyleSheet(f"font-size: {FONT_SIZE_BODY}px; color: {PRIMARY_TEXT}; border: none; background: transparent;")
+        task_layout.addWidget(self.status_label)
+
+        layout.addWidget(task_frame)
+
+        # Statistics frame with icons (like Voigt Fitting)
+        stats_frame = QFrame()
+        stats_frame.setStyleSheet("""
+            QFrame {
+                background-color: #F5F5F5;
+                border: 1px solid #C7C7CC;
+                border-radius: 6px;
+            }
+        """)
+        stats_layout = QVBoxLayout(stats_frame)
+        stats_layout.setContentsMargins(10, 6, 10, 6)
+
+        stats_header = QLabel("📈 Statistics")
+        stats_header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-weight: bold; border: none; background: transparent;")
+        stats_layout.addWidget(stats_header)
+
+        self.stats_label = QLabel("🔄 Elapsed: -- | ⏱ ETA: --\n✓ Spectra: 0/0")
+        self.stats_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {PRIMARY_TEXT}; border: none; background: transparent;")
+        stats_layout.addWidget(self.stats_label)
+
+        layout.addWidget(stats_frame)
+
+        # Log area with header (like Voigt Fitting "Detailed Log")
+        log_header = QLabel("📋 Detailed Log")
+        log_header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-weight: bold; margin-top: 4px; border: none; background: transparent;")
+        layout.addWidget(log_header)
+
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setMaximumHeight(100)
@@ -312,7 +417,7 @@ class SeriesIntegrationDialog(BaseDialog):
                 font-size: 10px;
                 background-color: #F5F5F5;
                 border: 1px solid #C7C7CC;
-                border-radius: 4px;
+                border-radius: 6px;
             }
         """)
         layout.addWidget(self.log_text)
@@ -321,36 +426,28 @@ class SeriesIntegrationDialog(BaseDialog):
         return group
 
     def _create_button_row(self) -> QHBoxLayout:
-        """Create button row."""
+        """Create button row with Voigt Fitting-style colored buttons."""
         layout = QHBoxLayout()
 
-        # Start button
-        self.start_btn = QPushButton("Start Integration")
+        # Start button - Green with icon (matching Voigt Fitting style)
+        self.start_btn = QPushButton("▶ Start Integration")
         self.start_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
-        self.start_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {PRIMARY_BUTTON_BG};
-                color: {PRIMARY_BUTTON_TEXT};
-                border: none;
-                border-radius: {BUTTON_CORNER_RADIUS}px;
-                padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {PRIMARY_BUTTON_HOVER};
-            }}
-            QPushButton:disabled {{
-                background-color: #C7C7CC;
-            }}
-        """)
+        self.start_btn.setStyleSheet(self._get_green_button_style())
         self.start_btn.clicked.connect(self._start_processing)
         layout.addWidget(self.start_btn)
 
-        # Cancel button
-        self.cancel_btn = QPushButton("Cancel")
+        # Pause button - Red with icon (matching Voigt Fitting style)
+        self.pause_btn = QPushButton("⏸ Pause")
+        self.pause_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
+        self.pause_btn.setStyleSheet(self._get_red_button_style())
+        self.pause_btn.clicked.connect(self._on_pause_clicked)
+        self.pause_btn.setEnabled(False)
+        layout.addWidget(self.pause_btn)
+
+        # Cancel button - Red with icon (matching Voigt Fitting style)
+        self.cancel_btn = QPushButton("✕ Cancel")
         self.cancel_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
-        self.cancel_btn.setStyleSheet(self._get_secondary_button_style())
+        self.cancel_btn.setStyleSheet(self._get_red_button_style())
         self.cancel_btn.clicked.connect(self._cancel_processing)
         self.cancel_btn.setEnabled(False)
         layout.addWidget(self.cancel_btn)
@@ -359,7 +456,7 @@ class SeriesIntegrationDialog(BaseDialog):
 
         # Results viewer buttons (enabled after processing completes)
         # Browse Results button hidden but code kept for future use
-        self.browse_results_btn = QPushButton("Browse Results")
+        self.browse_results_btn = QPushButton("📋 Browse Results")
         self.browse_results_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         self.browse_results_btn.setStyleSheet(self._get_secondary_button_style())
         self.browse_results_btn.setToolTip("Browse individual spectrum results")
@@ -367,18 +464,19 @@ class SeriesIntegrationDialog(BaseDialog):
         self.browse_results_btn.setEnabled(False)
         self.browse_results_btn.setVisible(False)  # Hidden but functional
 
-        self.overlay_viewer_btn = QPushButton("Overlay Viewer")
+        # Overlay Viewer button - Blue with icon
+        self.overlay_viewer_btn = QPushButton("📊 Overlay Viewer")
         self.overlay_viewer_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
-        self.overlay_viewer_btn.setStyleSheet(self._get_secondary_button_style())
+        self.overlay_viewer_btn.setStyleSheet(self._get_blue_button_style())
         self.overlay_viewer_btn.setToolTip("View multiple spectra overlaid")
         self.overlay_viewer_btn.clicked.connect(self._open_overlay_viewer)
         self.overlay_viewer_btn.setEnabled(False)
         layout.addWidget(self.overlay_viewer_btn)
 
-        # Close button
-        self.close_btn = QPushButton("Close")
+        # Close button - Green with icon (matching Voigt Fitting style)
+        self.close_btn = QPushButton("✓ Close")
         self.close_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
-        self.close_btn.setStyleSheet(self._get_secondary_button_style())
+        self.close_btn.setStyleSheet(self._get_green_button_style())
         self.close_btn.clicked.connect(self.close)
         layout.addWidget(self.close_btn)
 
@@ -420,6 +518,66 @@ class SeriesIntegrationDialog(BaseDialog):
             }}
         """
 
+    def _get_green_button_style(self) -> str:
+        """Get green success button style (matching Voigt Fitting dialog)."""
+        return f"""
+            QPushButton {{
+                background-color: {SUCCESS_GREEN};
+                color: white;
+                border: none;
+                border-radius: {BUTTON_CORNER_RADIUS}px;
+                padding: {SPACING_SM}px {SPACING_MD}px;
+                font-size: {FONT_SIZE_BODY}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #2DB84E;
+            }}
+            QPushButton:disabled {{
+                background-color: #A8E6B5;
+            }}
+        """
+
+    def _get_red_button_style(self) -> str:
+        """Get red control button style (matching Voigt Fitting dialog)."""
+        return f"""
+            QPushButton {{
+                background-color: {DESTRUCTIVE_BUTTON_BG};
+                color: {DESTRUCTIVE_BUTTON_TEXT};
+                border: none;
+                border-radius: {BUTTON_CORNER_RADIUS}px;
+                padding: {SPACING_SM}px {SPACING_MD}px;
+                font-size: {FONT_SIZE_BODY}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {DESTRUCTIVE_BUTTON_HOVER};
+            }}
+            QPushButton:disabled {{
+                background-color: #F5B5B2;
+            }}
+        """
+
+    def _get_blue_button_style(self) -> str:
+        """Get blue info button style (matching Voigt Fitting dialog)."""
+        return f"""
+            QPushButton {{
+                background-color: {INFO_BLUE};
+                color: white;
+                border: none;
+                border-radius: {BUTTON_CORNER_RADIUS}px;
+                padding: {SPACING_SM}px {SPACING_MD}px;
+                font-size: {FONT_SIZE_BODY}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #4A8DD4;
+            }}
+            QPushButton:disabled {{
+                background-color: #B5D4F5;
+            }}
+        """
+
     def _populate_file_list(self):
         """Populate the NMR file list from current folder."""
         self.file_list.clear()
@@ -433,16 +591,14 @@ class SeriesIntegrationDialog(BaseDialog):
             self.file_info_label.setText("No NMR folder selected")
             return
 
-        # Get NMR files
+        # Get NMR files (unsorted - will be sorted by _refresh_file_list_display)
         self.nmr_files = self._get_nmr_files(nmr_folder)
 
-        # Populate list
-        for f in self.nmr_files:
-            item = QListWidgetItem(os.path.basename(f))
-            item.setData(Qt.UserRole, f)
-            self.file_list.addItem(item)
-
+        # Update info label
         self.file_info_label.setText(f"{len(self.nmr_files)} files found in {os.path.basename(nmr_folder)}")
+
+        # Refresh display with correct ordering (by delay if checkbox enabled)
+        self._refresh_file_list_display()
 
     def _get_nmr_files(self, folder: str) -> List[str]:
         """Get all NMR files from folder.
@@ -454,12 +610,95 @@ class SeriesIntegrationDialog(BaseDialog):
             pattern = os.path.join(folder, f"*.{ext}")
             files.extend(glob.glob(pattern))
 
-        # Natural sort
-        def natural_sort_key(s):
-            return [int(text) if text.isdigit() else text.lower()
-                    for text in re.split(r'(\d+)', s)]
-
         return sorted(files, key=natural_sort_key)
+
+    def _on_extract_delays_toggled(self, checked: bool):
+        """Handle extract delays checkbox toggle."""
+        if checked:
+            print("✓ Extract delays ENABLED - Will use delay values as column headers")
+        else:
+            print("○ Extract delays DISABLED - Will use spectrum filenames as headers")
+            self.delay_info_label.setVisible(False)
+
+        # Re-populate file list to show correct order
+        self._refresh_file_list_display()
+
+    def _update_delay_info(self):
+        """Update the delay info label based on current file list."""
+        if not self.extract_delays_checkbox.isChecked():
+            self.delay_info_label.setVisible(False)
+            return
+
+        if not self.nmr_files:
+            self.delay_info_label.setText("No files to extract delays from")
+            self.delay_info_label.setVisible(True)
+            return
+
+        # Use delay extractor to get delay info
+        from lunaNMR.utils.delay_extractor import DelayExtractor
+        extractor = DelayExtractor()
+
+        files_with_delays = extractor.sort_files_by_delay(self.nmr_files)
+
+        if not files_with_delays:
+            self.delay_info_label.setText("⚠ No delays found in filenames (expected pattern: _50ms or _1s)")
+            self.delay_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: #FF6B6B; font-style: italic;")
+        else:
+            delays = [d for _, d in files_with_delays]
+            missing = len(self.nmr_files) - len(files_with_delays)
+
+            info_text = f"✓ Found {len(delays)} delays: {min(delays):.0f}ms - {max(delays):.0f}ms"
+            if missing > 0:
+                info_text += f" ({missing} files without delays)"
+
+            self.delay_info_label.setText(info_text)
+            self.delay_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-style: italic;")
+
+        self.delay_info_label.setVisible(True)
+
+    def _refresh_file_list_display(self):
+        """Refresh file list display with correct ordering.
+
+        When extract delays is enabled, files are sorted by delay value.
+        Otherwise, files are sorted alphabetically.
+        """
+        if not self.nmr_files:
+            return
+
+        self.file_list.clear()
+
+        if self.extract_delays_checkbox.isChecked():
+            # Sort by delay value using delay extractor
+            from lunaNMR.utils.delay_extractor import DelayExtractor
+            extractor = DelayExtractor()
+
+            # Get files sorted by delay with sequence numbers
+            files_with_sequence = extractor.sort_files_with_sequence(self.nmr_files)
+
+            # Update nmr_files to be in sorted order
+            self.nmr_files = [f for f, _, _ in files_with_sequence]
+
+            # Populate list with delay info
+            for filepath, delay_ms, sequence in files_with_sequence:
+                basename = os.path.basename(filepath)
+                # Show delay value next to filename
+                col_name = extractor.get_column_name(delay_ms, sequence)
+                display_text = f"{basename}  →  {col_name}ms"
+                item = QListWidgetItem(display_text)
+                item.setData(Qt.UserRole, filepath)
+                self.file_list.addItem(item)
+
+            # Update delay info label
+            self._update_delay_info()
+        else:
+            # Sort alphabetically (natural sort)
+            self.nmr_files = sorted(self.nmr_files, key=natural_sort_key)
+
+            # Populate list without delay info
+            for filepath in self.nmr_files:
+                item = QListWidgetItem(os.path.basename(filepath))
+                item.setData(Qt.UserRole, filepath)
+                self.file_list.addItem(item)
 
     def _browse_folder(self):
         """Browse for NMR folder."""
@@ -474,6 +713,63 @@ class SeriesIntegrationDialog(BaseDialog):
                 self.main_window.current_nmr_folder = folder
             self._populate_file_list()
 
+    def _prompt_series_name(self) -> str:
+        """Prompt user for series name before starting integration.
+
+        Returns:
+            Series name if provided, None if cancelled.
+        """
+        from PySide6.QtWidgets import QInputDialog
+
+        # Generate suggested name from folder
+        suggested_name = "Series_1"
+        if self.main_window and hasattr(self.main_window, 'current_nmr_folder'):
+            folder = self.main_window.current_nmr_folder
+            if folder:
+                suggested_name = os.path.basename(folder)
+
+        # Check for existing series to avoid duplicates
+        existing_series = getattr(self.main_window, 'saved_series', {}) if self.main_window else {}
+        if suggested_name in existing_series:
+            # Append number to make unique
+            base_name = suggested_name
+            counter = 2
+            while f"{base_name}_{counter}" in existing_series:
+                counter += 1
+            suggested_name = f"{base_name}_{counter}"
+
+        # Show input dialog
+        name, ok = QInputDialog.getText(
+            self,
+            "Series Name",
+            "Enter a name for this series integration:",
+            text=suggested_name
+        )
+
+        if not ok or not name.strip():
+            return None
+
+        # Validate name (no special characters that could cause file issues)
+        name = name.strip()
+        invalid_chars = '<>:"/\\|?*'
+        for char in invalid_chars:
+            name = name.replace(char, '_')
+
+        # Check if name already exists
+        if name in existing_series:
+            result = QMessageBox.question(
+                self,
+                "Series Exists",
+                f"A series named '{name}' already exists.\n\n"
+                "Do you want to overwrite it?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if result != QMessageBox.Yes:
+                return None
+
+        return name
+
     def _start_processing(self):
         """Start series processing."""
         # Validate
@@ -484,6 +780,13 @@ class SeriesIntegrationDialog(BaseDialog):
         if not self.main_window:
             QMessageBox.warning(self, "Error", "Main window reference not available.")
             return
+
+        # Prompt for series name
+        series_name = self._prompt_series_name()
+        if series_name is None:
+            return  # User cancelled
+
+        self.current_series_name = series_name
 
         # Get peak source
         peak_source_mode = "detected"
@@ -501,16 +804,6 @@ class SeriesIntegrationDialog(BaseDialog):
                 self.main_window.integrator.fitted_peaks
             )
 
-        elif self.reference_radio.isChecked():
-            peak_source_mode = "reference"
-            if not hasattr(self.main_window.integrator, 'peak_list') or self.main_window.integrator.peak_list.empty:
-                QMessageBox.warning(
-                    self, "No Peak List",
-                    "No reference peak list loaded. Load a peak list file first."
-                )
-                return
-            reference_peaks = self.main_window.integrator.peak_list.copy()
-
         elif self.cascade_radio.isChecked():
             peak_source_mode = "cascade"
             if not hasattr(self.main_window.integrator, 'peak_list') or self.main_window.integrator.peak_list.empty:
@@ -521,21 +814,51 @@ class SeriesIntegrationDialog(BaseDialog):
                 return
             reference_peaks = self.main_window.integrator.peak_list.copy()
 
+        # For cascade mode, check if user already ran detection (fitted_peaks available)
+        pre_detected_peaks = None
+        if peak_source_mode == "cascade":
+            if hasattr(self.main_window.integrator, 'fitted_peaks') and self.main_window.integrator.fitted_peaks:
+                pre_detected_peaks = self.main_window.integrator.fitted_peaks
+                self._log(f"Using {len(pre_detected_peaks)} pre-detected peaks from GUI")
+            else:
+                self._log("No pre-detected peaks - will run detection on first spectrum")
+
         # Get parameters
         voigt_params = self._get_voigt_params()
+
+        # Get extract delays option
+        extract_delays = self.extract_delays_checkbox.isChecked()
 
         # Update UI
         self.start_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
+        self.pause_btn.setEnabled(True)
+        self.pause_btn.setText("⏸ Pause")
         self.progress_bar.setValue(0)
         self.status_label.setText("Starting...")
         self.log_text.clear()
-        self._log(f"Starting series integration: {len(self.nmr_files)} spectra, {len(reference_peaks)} peaks")
+
+        # Initialize timing and counters
+        self.start_time = datetime.now()
+        self.completed_tasks = 0
+        self.failed_tasks = 0
+        self.total_spectra = len(self.nmr_files)
+        self.current_spectrum_idx = 0
+        self.current_spectrum_name = ""
+        self.first_spectrum_time = None
+        self.last_spectrum_start = datetime.now()
+        self._is_paused = False
+        self.stats_label.setText("Starting...")
+
+        delay_msg = " (extract delays enabled)" if extract_delays else ""
+        self._log(f"Starting series integration: {len(self.nmr_files)} spectra, {len(reference_peaks)} peaks{delay_msg}")
 
         # Create worker and thread
         self.thread = QThread()
         self.worker = ProcessingWorker(
-            None, self.nmr_files, reference_peaks, peak_source_mode, voigt_params
+            None, self.nmr_files, reference_peaks, peak_source_mode, voigt_params,
+            extract_delays=extract_delays,
+            pre_detected_peaks=pre_detected_peaks
         )
         self.worker.moveToThread(self.thread)
 
@@ -557,18 +880,68 @@ class SeriesIntegrationDialog(BaseDialog):
         self._log("Cancelling...")
         self.status_label.setText("Cancelling...")
 
+    def _on_pause_clicked(self):
+        """Toggle pause state."""
+        self._is_paused = not self._is_paused
+
+        if self._is_paused:
+            self.pause_btn.setText("▶ Resume")
+            self.status_label.setText("Paused...")
+            if self.worker:
+                self.worker.set_paused(True)
+        else:
+            self.pause_btn.setText("⏸ Pause")
+            if self.worker:
+                self.worker.set_paused(False)
+
     def _on_progress(self, current: int, total: int, message: str):
-        """Handle progress update."""
-        if total > 0:
-            percent = int(current / total * 100)
+        """Handle progress update with elapsed time and ETA."""
+        import re
+
+        # Parse spectrum index from message (format: "Processing spectrum N/M" or "Loading filename")
+        spectrum_match = re.search(r'spectrum\s+(\d+)/(\d+)', message or '', re.IGNORECASE)
+        if spectrum_match:
+            spectrum_idx = int(spectrum_match.group(1))
+            total_spectra = int(spectrum_match.group(2))
+        else:
+            # Fallback to passed values
+            spectrum_idx = current + 1  # current is 0-based from callback
+            total_spectra = total if total > 0 else len(self.nmr_files)
+
+        # Track spectrum changes for ETA calculation
+        if spectrum_idx != self.current_spectrum_idx:
+            now = datetime.now()
+
+            # If moving to spectrum 2, we just finished spectrum 1 - record first spectrum time
+            if spectrum_idx == 2 and self.last_spectrum_start:
+                self.first_spectrum_time = (now - self.last_spectrum_start).total_seconds()
+
+            # Update tracking
+            self.current_spectrum_idx = spectrum_idx
+            self.last_spectrum_start = now
+            self.total_spectra = total_spectra
+
+        # Calculate progress: completed spectra / total
+        # spectrum_idx is 1-based and represents current (in-progress), so completed = idx - 1
+        completed = spectrum_idx - 1
+        if total_spectra > 0:
+            percent = int((completed / total_spectra) * 100)
             self.progress_bar.setValue(percent)
 
-        status = f"Processing spectrum {current}/{total}"
-        if message:
-            status += f": {message}"
+        # Extract spectrum name from message (e.g., "Loading T1_50ms.ft")
+        loading_match = re.search(r'Loading\s+(\S+)', message or '')
+        if loading_match:
+            self.current_spectrum_name = loading_match.group(1)
+
+        # Update status - simple display of current spectrum
+        status = f"Processing: {self.current_spectrum_name}" if self.current_spectrum_name else f"Spectrum {spectrum_idx}/{total_spectra}"
         self.status_label.setText(status)
 
-        if message:
+        # Update statistics with ETA
+        self._update_statistics(spectrum_idx, total_spectra)
+
+        # Log significant messages only (not every progress tick)
+        if message and 'Loading' in message:
             self._log(message)
 
     def _on_finished(self, batch_results):
@@ -576,7 +949,15 @@ class SeriesIntegrationDialog(BaseDialog):
         self.batch_results = batch_results
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
+        self.pause_btn.setEnabled(False)
         self.progress_bar.setValue(100)
+
+        # Calculate total time
+        if self.start_time:
+            total_time = datetime.now() - self.start_time
+            total_time_str = str(total_time).split('.')[0]
+        else:
+            total_time_str = "N/A"
 
         if batch_results:
             # Handle both dict format and BatchResults object
@@ -586,6 +967,12 @@ class SeriesIntegrationDialog(BaseDialog):
                 summary = batch_results.get('summary', {})
             else:
                 summary = {}
+
+            # Update final stats
+            self.stats_label.setText(
+                f"Completed in: {total_time_str}\n"
+                f"Successful: {summary.get('successful', 0)} | Failed: {summary.get('failed', 0)}"
+            )
 
             self.status_label.setText(
                 f"Complete: {summary.get('successful', 0)}/{summary.get('total_spectra', 0)} spectra processed"
@@ -598,7 +985,22 @@ class SeriesIntegrationDialog(BaseDialog):
 
             # Store results in main window
             if self.main_window:
+                # Store as current batch_results (for backward compatibility)
                 self.main_window.batch_results = batch_results
+
+                # Also store in saved_series dict with the series name
+                if not hasattr(self.main_window, 'saved_series'):
+                    self.main_window.saved_series = {}
+
+                series_name = self.current_series_name or "Unnamed_Series"
+
+                # Add metadata to batch_results
+                if hasattr(batch_results, 'metadata'):
+                    batch_results.metadata['series_name'] = series_name
+                    batch_results.metadata['spectrum_count'] = len(batch_results.results) if hasattr(batch_results, 'results') else 0
+
+                self.main_window.saved_series[series_name] = batch_results
+                self._log(f"Series saved as: '{series_name}'")
 
             self.processing_complete.emit(batch_results)
 
@@ -617,14 +1019,16 @@ class SeriesIntegrationDialog(BaseDialog):
             )
         else:
             self.status_label.setText("Processing completed (no results)")
+            self.stats_label.setText(f"Completed in: {total_time_str}\nNo results available")
             self._log("Warning: No results returned")
 
     def _on_error(self, error_msg: str):
         """Handle processing error."""
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
+        self.pause_btn.setEnabled(False)
         self.status_label.setText(f"Error: {error_msg}")
-        self._log(f"ERROR: {error_msg}")
+        self._log(f"ERROR: {error_msg}", is_error=True)
 
         QMessageBox.critical(
             self,
@@ -698,8 +1102,30 @@ class SeriesIntegrationDialog(BaseDialog):
 
                 all_results.append(result_copy)
 
-        # Sort by spectrum name for consistent ordering
-        all_results.sort(key=lambda x: x.get('spectrum_name', ''))
+        # Sort results: by delay if extract_delays was enabled, otherwise by natural sort
+        if self.extract_delays_checkbox.isChecked():
+            # Sort by delay value, handling duplicates (e.g., "50", "50_2", "100")
+            from lunaNMR.utils.delay_extractor import DelayExtractor
+            extractor = DelayExtractor()
+
+            def delay_sort_key(result):
+                name = result.get('spectrum_name', '')
+                # Parse delay from column name format (e.g., "50", "50_2")
+                parsed = extractor.parse_column_name(str(name))
+                if parsed:
+                    delay, sequence = parsed
+                    return (delay, sequence, str(name))
+                # Try extracting from filename pattern
+                delay = extractor.extract_delay_ms(str(name))
+                if delay is not None:
+                    return (delay, 1, str(name))
+                # Put unrecognized at the end
+                return (float('inf'), 0, str(name))
+
+            all_results.sort(key=delay_sort_key)
+        else:
+            # Sort by spectrum name using natural sort (8ms < 54ms < 102ms, not alphabetical)
+            all_results.sort(key=lambda x: natural_sort_key(x.get('spectrum_name', '')))
 
         # Get file manager from main window
         file_manager = getattr(self.main_window, 'file_manager', None) if self.main_window else None
@@ -713,9 +1139,50 @@ class SeriesIntegrationDialog(BaseDialog):
 
         self._log(f"Opened multi-spectrum overlay viewer with {len(all_results)} spectra")
 
-    def _log(self, message: str):
-        """Add message to log."""
-        self.log_text.append(message)
+    def _log(self, message: str, is_error: bool = False):
+        """Add timestamped message to log with icons (Voigt Fitting style)."""
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        icon = "✕" if is_error else "✓"
+        log_entry = f"[{timestamp}] {icon}  {message}"
+
+        self.log_text.append(log_entry)
+
+        # Auto-scroll to bottom
+        self.log_text.verticalScrollBar().setValue(
+            self.log_text.verticalScrollBar().maximum()
+        )
+
+    def _update_statistics(self, current_spectrum: int, total_spectra: int):
+        """Update elapsed time and ETA display."""
+        if self.start_time is None:
+            return
+
+        elapsed = datetime.now() - self.start_time
+        elapsed_str = str(elapsed).split('.')[0]  # Remove microseconds
+
+        # Calculate ETA based on first spectrum time
+        # ETA = first_spectrum_time * 4 * remaining_spectra (rough estimate)
+        completed = current_spectrum - 1  # current is 1-based, in-progress
+        remaining = total_spectra - completed
+
+        if self.first_spectrum_time and remaining > 0:
+            # Use first spectrum time * 4 as estimate per spectrum
+            eta_seconds = self.first_spectrum_time * 4 * remaining
+            eta_str = str(timedelta(seconds=int(eta_seconds)))
+        elif completed > 0:
+            # Fallback: use elapsed / completed * remaining
+            avg_time = elapsed.total_seconds() / completed
+            eta_seconds = avg_time * remaining
+            eta_str = str(timedelta(seconds=int(eta_seconds)))
+        else:
+            eta_str = "Calculating..."
+
+        # Update stats label with icons (Voigt Fitting style)
+        stats_text = (
+            f"🔄 Elapsed: {elapsed_str} | ⏱ ETA: {eta_str}\n"
+            f"✓ Spectra: {current_spectrum}/{total_spectra}"
+        )
+        self.stats_label.setText(stats_text)
 
     def _convert_fitted_peaks_to_dataframe(self, fitted_peaks: List[Dict]) -> pd.DataFrame:
         """Convert fitted peaks to DataFrame format.
@@ -802,6 +1269,7 @@ class SeriesIntegrationDialog(BaseDialog):
             'processing_options': {
                 'use_parallel_processing': getattr(self.main_window, 'use_parallel_processing', False),
                 'use_global_optimization': getattr(self.main_window, 'use_global_optimization', False),
+                'enable_cascade_drift_limit': getattr(self.main_window, 'enable_cascade_drift_limit', True),
             }
         }
 

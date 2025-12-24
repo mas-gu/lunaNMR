@@ -103,6 +103,16 @@ class PS2DConfig:
             'pos_margin_f2': 0.05,        # 1H position movement limit (ppm)
 
             # ================================================================
+            # Maximum drift from reference (cascade mode absolute bounds)
+            # ================================================================
+            # In cascade mode, peaks can drift from spectrum to spectrum.
+            # These limits enforce ABSOLUTE bounds relative to ORIGINAL reference.
+            # Set enable_cascade_drift_limit=False in Expert Mode to disable this feature.
+            'enable_cascade_drift_limit': True,  # ON by default, can disable in Expert Mode
+            'max_drift_f1': 0.05,          # Max 15N drift from original reference (ppm)
+            'max_drift_f2': 0.02,          # Max 1H drift from original reference (ppm)
+
+            # ================================================================
             # Cluster size limits
             # ================================================================
             'max_cluster_size': 8,        # Maximum peaks in overlap group
@@ -165,8 +175,16 @@ class PS2DConfig:
             'tooclose_threshold': 0.8,       # Elliptical distance threshold for L/G and intensity constraints
 
             # Position bounds (moderate for peak movement)
-            'pos_margin_f1': 0.05,        # Allow ±0.04 ppm movement (relaxed)
-            'pos_margin_f2': 0.02,        # Allow ±0.04 ppm movement
+            'pos_margin_f1': 0.05,        # Allow ±0.05 ppm movement per spectrum
+            'pos_margin_f2': 0.02,        # Allow ±0.02 ppm movement per spectrum
+
+            # Maximum drift from reference (cascade mode absolute bounds)
+            # In cascade mode, peaks can drift from spectrum to spectrum.
+            # These limits enforce ABSOLUTE bounds relative to ORIGINAL reference.
+            # Set enable_cascade_drift_limit=False in Expert Mode to disable this feature.
+            'enable_cascade_drift_limit': True,  # ON by default, can disable in Expert Mode
+            'max_drift_f1': 0.03,         # Max 13C drift from original reference (ppm)
+            'max_drift_f2': 0.02,         # Max 1H drift from original reference (ppm)
 
             # Cluster size limits
             'max_cluster_size': 8,        # Maximum peaks in overlap group

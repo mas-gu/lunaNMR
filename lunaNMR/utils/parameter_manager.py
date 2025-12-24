@@ -8,8 +8,9 @@ Author: Guillaume Mas
 Date: 2025
 """
 
-import tkinter as tk
+#import tkinter as tk
 from typing import Dict, Any, List, Optional
+from lunaNMR.utils.output_manager import log_info, log_warning
 
 class NMRParameterManager:
     """
@@ -144,24 +145,39 @@ class NMRParameterManager:
         for gui_var_name, param_name in gui_variable_mapping.items():
             if hasattr(gui_object, gui_var_name):
                 gui_var = getattr(gui_object, gui_var_name)
-                if hasattr(gui_var, 'get'):
-                    try:
+                try:
+                    # Handle both Qt/tkinter widgets (.get() method) and plain attributes
+                    if hasattr(gui_var, 'get') and callable(gui_var.get):
+                        # Widget with .get() method (tkinter variable or similar)
                         value = gui_var.get()
-                        # Validate the parameter
-                        validated_value = self._validate_parameter(param_name, value)
-                        self.current_params[param_name] = validated_value
-                        updated_params[param_name] = validated_value
-                    except Exception as e:
-                        print(f"⚠️ Error updating parameter {param_name}: {e}")
+                    elif hasattr(gui_var, 'value') and callable(gui_var.value):
+                        # Qt widget with .value() method (QSpinBox, QDoubleSpinBox)
+                        value = gui_var.value()
+                    elif hasattr(gui_var, 'isChecked') and callable(gui_var.isChecked):
+                        # Qt checkbox with .isChecked() method
+                        value = gui_var.isChecked()
+                    elif isinstance(gui_var, (int, float, bool, str, type(None))):
+                        # Plain Python attribute (int, float, bool, str, None)
+                        value = gui_var
+                    else:
+                        # Unknown type - skip
+                        continue
 
-        print(f"✅ Parameter Manager updated {len(updated_params)} parameters from GUI")
+                    # Validate the parameter
+                    validated_value = self._validate_parameter(param_name, value)
+                    self.current_params[param_name] = validated_value
+                    updated_params[param_name] = validated_value
+                except Exception as e:
+                    log_warning(f"Error updating parameter {param_name}: {e}")
+
+        log_info(f"Parameter Manager updated {len(updated_params)} parameters from GUI")
         return updated_params.copy()
 
     def _validate_parameter(self, param_name: str, value: Any) -> Any:
         """Validate a parameter value against its definition"""
 
         if param_name not in self.parameter_definitions:
-            print(f"⚠️ Unknown parameter: {param_name}")
+            log_warning(f"Unknown parameter: {param_name}")
             return value
 
         definition = self.parameter_definitions[param_name]
@@ -177,16 +193,16 @@ class NMRParameterManager:
             else:
                 validated_value = value
         except (ValueError, TypeError):
-            print(f"⚠️ Type conversion failed for {param_name}: {value}")
+            log_warning(f"Type conversion failed for {param_name}: {value}")
             return definition['default']
 
         # Range validation (for numeric types)
         if definition['type'] in [int, float]:
             if 'min' in definition and validated_value < definition['min']:
-                print(f"⚠️ {param_name} value {validated_value} below minimum {definition['min']}")
+                log_warning(f"{param_name} value {validated_value} below minimum {definition['min']}")
                 validated_value = definition['min']
             elif 'max' in definition and validated_value > definition['max']:
-                print(f"⚠️ {param_name} value {validated_value} above maximum {definition['max']}")
+                log_warning(f"{param_name} value {validated_value} above maximum {definition['max']}")
                 validated_value = definition['max']
 
         return validated_value
@@ -294,53 +310,12 @@ class NMRParameterManager:
         """Reset all parameters to default values"""
         for param_name, definition in self.parameter_definitions.items():
             self.current_params[param_name] = definition['default']
-        print("✅ All parameters reset to defaults")
-
-    # =====================================
-    # SIMPLIFIED PARAMETER METHODS (Priority 1)
-    # =====================================
-
-    def enable_simplified_mode(self, **simplified_params):
-        """
-        Enable simplified parameter mode with 3-5 core parameters.
-
-        This implements Priority 1 improvements by reducing parameter complexity.
-
-        Parameters:
-        -----------
-        sensitivity : float, optional
-            Detection sensitivity (0-1)
-        window_scale : float, optional
-            Window sizing scale factor (0.1-10.0)
-        quality_target : float, optional
-            Target fitting quality (0.3-1.0)
-        noise_estimation_method : str, optional
-            Noise estimation method
-        baseline_method : str, optional
-            Baseline estimation method
-        """
-        if not self.simplified_manager:
-            print("❌ Simplified parameter manager not available")
-            return
-
-        self.use_simplified_mode = True
-
-        # Update simplified parameters if provided
-        if simplified_params:
-            self.simplified_manager.update_simplified_parameters(**simplified_params)
-
-        print("✅ Simplified parameter mode enabled")
-        print(self.simplified_manager.get_parameter_summary())
-
-    def disable_simplified_mode(self):
-        """Disable simplified parameter mode and return to legacy parameters"""
-        self.use_simplified_mode = False
-        print("✅ Simplified parameter mode disabled - using legacy parameters")
+        log_info("All parameters reset to defaults")
 
     def update_simplified_parameters(self, **kwargs):
         """Update simplified parameters when in simplified mode"""
         if not self.use_simplified_mode or not self.simplified_manager:
-            print("⚠️ Not in simplified mode or manager not available")
+            log_warning("Not in simplified mode or manager not available")
             return
 
         self.simplified_manager.update_simplified_parameters(**kwargs)
@@ -381,13 +356,6 @@ class NMRParameterManager:
             # Use legacy parameters
             return self.get_integrator_parameters()
 
-    def get_simplified_summary(self):
-        """Get summary of current simplified parameters"""
-        if self.simplified_manager:
-            return self.simplified_manager.get_parameter_summary()
-        else:
-            return "Simplified parameter manager not available"
-
     def validate_simplified_parameters(self):
         """Validate simplified parameters"""
         if self.simplified_manager:
@@ -395,30 +363,3 @@ class NMRParameterManager:
             return is_valid, errors
         else:
             return True, []
-
-    def export_parameters(self, filename: str):
-        """Export current parameters to a file"""
-        try:
-            import json
-            with open(filename, 'w') as f:
-                json.dump(self.current_params, f, indent=2)
-            print(f"✅ Parameters exported to {filename}")
-        except Exception as e:
-            print(f"❌ Failed to export parameters: {e}")
-
-    def import_parameters(self, filename: str):
-        """Import parameters from a file"""
-        try:
-            import json
-            with open(filename, 'r') as f:
-                imported_params = json.load(f)
-
-            # Validate and update parameters
-            for param_name, value in imported_params.items():
-                if param_name in self.parameter_definitions:
-                    validated_value = self._validate_parameter(param_name, value)
-                    self.current_params[param_name] = validated_value
-
-            print(f"✅ Parameters imported from {filename}")
-        except Exception as e:
-            print(f"❌ Failed to import parameters: {e}")

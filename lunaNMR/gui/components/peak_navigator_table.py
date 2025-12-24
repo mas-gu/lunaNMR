@@ -132,26 +132,6 @@ class PeakNavigatorTable(QWidget):
 
         layout.addLayout(btn_layout)
 
-    def _get_primary_button_style(self) -> str:
-        """Get primary button style."""
-        return f"""
-            QPushButton {{
-                background-color: {PRIMARY_BUTTON_BG};
-                color: {PRIMARY_BUTTON_TEXT};
-                border: none;
-                border-radius: {BUTTON_CORNER_RADIUS}px;
-                padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
-            }}
-            QPushButton:hover {{
-                background-color: {PRIMARY_BUTTON_HOVER};
-            }}
-            QPushButton:disabled {{
-                background-color: #cccccc;
-                color: #888888;
-            }}
-        """
-
     def _get_secondary_button_style(self) -> str:
         """Get secondary button style."""
         return f"""
@@ -363,10 +343,6 @@ class PeakNavigatorTable(QWidget):
         if 0 <= index < len(self.peaks):
             self.table.selectRow(index)
             self.table.scrollToItem(self.table.item(index, 0))
-
-    def get_selected_index(self) -> Optional[int]:
-        """Return currently selected peak index."""
-        return self.selected_index
 
     def clear(self):
         """Clear all peaks from the table."""

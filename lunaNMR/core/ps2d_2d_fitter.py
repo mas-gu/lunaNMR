@@ -7,7 +7,7 @@ PS2D 2D Multi-Peak Fitter - Simultaneous 2D Voigt Fitting
 for resolving closely-spaced overlapping peaks in 2D NMR spectra.
 
 1. Simultaneous 2D fitting of multiple overlapping peaks
-2. 5-stage Levenberg-Marquardt optimization strategy
+2. n-stage Levenberg-Marquardt optimization strategy
 3. Union of elliptical windows for overlap group data selection
 4. Relative numerical derivatives with analytical intensity derivatives
 
@@ -25,7 +25,7 @@ Traditional 1D cross-section fitting fails because:
 2D simultaneous fitting resolves both peaks correctly by using full 2D lineshape.
 
 Date: 2025-10-06
-Version: 1.0 - EXACT_PS2D_2D_CLONE
+Version: 1.0 
 """
 
 import numpy as np
@@ -44,6 +44,8 @@ from .ps2d_style_fitter import (
 )
 from .ps2d_config import get_ps2d_config
 from scipy.special import wofz
+
+from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
 # Import training data collector (optional)
 try:
@@ -191,79 +193,32 @@ class Ps2dMultiPeakFitter2D:
         """
         NPAR_VOIGT = 8
 
-        # Extract L/G ratios for F1 dimension (15N/13C)
-        lg_ratios_f1 = []
-        for i in range(n_peaks):
-            offset = i * NPAR_VOIGT
-            lw_lor_f1 = params[offset + 1]  # Lorentzian FWHM F1
-            lw_gau_f1 = params[offset + 2]  # Gaussian FWHM F1
-            lg_ratio_f1 = self._calculate_lg_ratio(lw_lor_f1, lw_gau_f1)
-            lg_ratios_f1.append(lg_ratio_f1)
+        # VECTORIZED: Extract all L/G ratios at once using NumPy indexing
+        # Parameter order: pos_f1(0), lw_lor_f1(1), pos_f2(2), lw_lor_f2(3),
+        #                  lw_gau_f1(4), lw_gau_f2(5), intensity(6), baseline(7)
+        offsets = np.arange(n_peaks) * NPAR_VOIGT
 
-        # Extract L/G ratios for F2 dimension (1H)
-        lg_ratios_f2 = []
-        for i in range(n_peaks):
-            offset = i * NPAR_VOIGT
-            lw_lor_f2 = params[offset + 4]  # Lorentzian FWHM F2
-            lw_gau_f2 = params[offset + 5]  # Gaussian FWHM F2
-            lg_ratio_f2 = self._calculate_lg_ratio(lw_lor_f2, lw_gau_f2)
-            lg_ratios_f2.append(lg_ratio_f2)
+        # F1 dimension (15N/13C): lw_lor_f1 at index 1, lw_gau_f1 at index 4
+        lw_lor_f1 = params[offsets + 1]
+        lw_gau_f1 = params[offsets + 4]
+        total_f1 = lw_lor_f1 + lw_gau_f1
+        # Vectorized L/G ratio with safe division
+        lg_ratios_f1 = np.where(total_f1 > 1e-10, lw_lor_f1 / total_f1, 0.5)
 
-        # Calculate variance for each dimension
-        mean_f1 = np.mean(lg_ratios_f1)
-        mean_f2 = np.mean(lg_ratios_f2)
+        # F2 dimension (1H): lw_lor_f2 at index 3, lw_gau_f2 at index 5
+        lw_lor_f2 = params[offsets + 3]
+        lw_gau_f2 = params[offsets + 5]
+        total_f2 = lw_lor_f2 + lw_gau_f2
+        lg_ratios_f2 = np.where(total_f2 > 1e-10, lw_lor_f2 / total_f2, 0.5)
 
-        variance_f1 = np.sum((lg_ratios_f1 - mean_f1)**2) / n_peaks
-        variance_f2 = np.sum((lg_ratios_f2 - mean_f2)**2) / n_peaks
+        # Calculate variance for each dimension (np.var uses N denominator by default)
+        variance_f1 = np.var(lg_ratios_f1)
+        variance_f2 = np.var(lg_ratios_f2)
 
         # Total penalty: sum of variances in both dimensions
         total_penalty = variance_f1 + variance_f2
 
         return total_penalty
-
-    def _calculate_intensity_ratio_penalty(self, params: np.ndarray, n_peaks: int,
-                                          target_ratios: List[float]) -> float:
-        """
-        Calculate penalty for deviation from target intensity ratios.
-
-        Gently guides fitted intensity ratios toward measured ratios from raw data,
-        without forcing them (soft constraint).
-
-        Parameters:
-        -----------
-        params : np.ndarray
-            Flattened parameter array for all peaks
-        n_peaks : int
-            Number of peaks in cluster
-        target_ratios : List[float]
-            Target intensity ratios from raw data (normalized to max=1.0)
-
-        Returns:
-        --------
-        float : Sum of squared deviations from target ratios
-        """
-        NPAR_VOIGT = 8
-
-        # Extract current fitted intensities
-        current_intensities = []
-        for i in range(n_peaks):
-            offset = i * NPAR_VOIGT
-            current_intensities.append(params[offset + 6])
-
-        # Calculate current ratios (normalized to max=1.0)
-        max_intensity = max(current_intensities)
-        if max_intensity < 1e-10:  # Avoid division by zero
-            return 0.0
-
-        current_ratios = [I / max_intensity for I in current_intensities]
-
-        # Calculate penalty: sum of squared deviations from target ratios
-        penalty = 0.0
-        for i in range(n_peaks):
-            deviation = current_ratios[i] - target_ratios[i]
-            penalty += deviation**2
-
-        return penalty
 
     def _fit_stage1_with_lg_penalty(self, model_function, jacobian_function, x, y, p0, bounds, fixed_params, n_peaks):
         """
@@ -582,7 +537,9 @@ class Ps2dMultiPeakFitter2D:
                           fix_positions: bool = False,
                           fix_linewidths: bool = False,
                           data_mask: np.ndarray = None,
-                          spectrum_statistics: Dict = None) -> Dict:
+                          spectrum_statistics: Dict = None,
+                          reference_positions: Dict = None,
+                          peak_assignments: List[str] = None) -> Dict:
         """
         Fit multiple overlapping 2D Voigt peaks simultaneously
 
@@ -611,6 +568,11 @@ class Ps2dMultiPeakFitter2D:
             Keys: 'lw_f1_median', 'lw_f1_mad', 'lw_f2_median', 'lw_f2_mad'.
             PS2D uses union of elliptical windows
             If None, all data points are used (NOT recommended for overlapping peaks).
+        reference_positions : dict, optional
+            Mapping of assignment -> (x_ppm, y_ppm) for cascade mode absolute drift limiting.
+            If provided, position bounds are clipped to stay within max_drift of original reference.
+        peak_assignments : list of str, optional
+            Assignment names for each peak, needed for reference_positions lookup.
 
         Returns:
         --------
@@ -683,14 +645,10 @@ class Ps2dMultiPeakFitter2D:
             n_masked = np.sum(mask_flat)
             if self.verbose:
                 n_total = len(y_flat)
-                #print(f"   📊 Data masking: {n_masked}/{n_total} points ({100*n_masked/n_total:.1f}%) inside elliptical windows")
                 sys.stdout.flush()
         else:
             mask_flat = np.ones(len(y_flat), dtype=bool)
             y_flat_masked = y_flat
-            if self.verbose:
-                print(f"   ⚠️  No data mask - fitting ALL points in rectangle (not PS2D-compliant)")
-                sys.stdout.flush()
 
         # Create wrapper functions for optimizer
         def model_function(f1_f2_dummy, *p):
@@ -777,17 +735,6 @@ class Ps2dMultiPeakFitter2D:
             absolute_max_lw_f1 = min(config.max_linewidth_f1, learned_max_f1)
             absolute_max_lw_f2 = min(config.max_linewidth_f2, learned_max_f2)
 
-            if self.verbose:
-                n_samples = spectrum_statistics.get('n_samples', 0)
-                print(f"      📊 Using learned bounds from PASS1 (n={n_samples}, α={alpha:.0f}×MAD):")
-                print(f"         F1: median={median_f1:.4f}, MAD={mad_f1:.4f} → max={absolute_max_lw_f1:.4f} ppm (cap={config.max_linewidth_f1:.2f})")
-                print(f"         F2: median={median_f2:.5f}, MAD={mad_f2:.5f} → max={absolute_max_lw_f2:.5f} ppm (cap={config.max_linewidth_f2:.3f})")
-
-                # Warning if learned bounds exceed config cap
-                if learned_max_f1 > config.max_linewidth_f1:
-                    print(f"      ⚠️  Learned F1 bound ({learned_max_f1:.3f}) exceeds config cap - spectrum may have broad peaks")
-                if learned_max_f2 > config.max_linewidth_f2:
-                    print(f"      ⚠️  Learned F2 bound ({learned_max_f2:.4f}) exceeds config cap - spectrum may have broad peaks")
         else:
             # Fallback: use config defaults (nucleus-adaptive, 2-3× typical)
             absolute_max_lw_f1 = config.max_linewidth_f1
@@ -798,23 +745,6 @@ class Ps2dMultiPeakFitter2D:
         # Solution: Use max initial intensity across cluster to set bounds for all peaks
         max_initial_intensity = max(peak['intensity'] for peak in initial_peaks)
 
-        #if self.verbose:
-            #print(f"   📊 Initial linewidths (median across cluster):")
-            #print(f"      F1: Lor={median_lw_lor_f1:.4f}, Gau={median_lw_gau_f1:.4f} ppm")
-            #print(f"      F2: Lor={median_lw_lor_f2:.4f}, Gau={median_lw_gau_f2:.4f} ppm")
-            #print(f"   📊 Absolute linewidth bounds (allow nearly pure Gaussian):")
-            #print(f"      F1 ({config.nucleus_type}): [{absolute_min_lw_f1:.5f}, {absolute_max_lw_f1:.1f}] ppm (both Lor and Gau)")
-            #print(f"      F2 (1H): [{absolute_min_lw_f2:.5f}, {absolute_max_lw_f2:.1f}] ppm (both Lor and Gau)")
-
-            #print(f"   📊 Cluster intensity bounds: 0.1% to 500% of max initial ({max_initial_intensity:.2e})")
-            #if self.constrain_intensity_ratios and has_tooclose and len(initial_intensity_ratios) == n_peaks:
-            #    print(f"   🔗 Intensity ratio penalty enabled (λ={self.intensity_ratio_penalty_weight:.0f})")
-            #    print(f"      Peaks too close: applying ratio constraint")
-            #    print(f"      Target ratios: {[f'{r:.3f}' for r in initial_intensity_ratios]}")
-            #elif self.constrain_intensity_ratios and not has_tooclose:
-            #    print(f"   ℹ️  Intensity ratio penalty DISABLED for this cluster")
-            #    print(f"      Peaks sufficiently separated (no spectral ambiguity)")
-            #sys.stdout.flush()
 
         lower_bounds = []
         upper_bounds = []
@@ -866,6 +796,59 @@ class Ps2dMultiPeakFitter2D:
 
         bounds = (np.array(lower_bounds), np.array(upper_bounds))
 
+        # ====================================================================
+        # CASCADE MODE: Apply absolute drift limits from reference positions
+        # ====================================================================
+        # In cascade mode, peaks can drift from spectrum to spectrum.
+        # Without absolute bounds, drift accumulates: N spectra × pos_margin.
+        # This clipping enforces ABSOLUTE bounds relative to ORIGINAL reference.
+        #
+        # Bounds intersection: final_bound = max(per_spectrum_bound, absolute_bound)
+        # This clips positions to stay within max_drift of original reference.
+        # ====================================================================
+        if reference_positions and peak_assignments:
+            drift_clipped_count = 0
+            for i in range(n_peaks):
+                if i < len(peak_assignments):
+                    assignment = peak_assignments[i]
+                    if assignment in reference_positions:
+                        ref_x, ref_y = reference_positions[assignment]  # (x=F2=1H, y=F1=15N/13C)
+
+                        # Index of F1 position in bounds array (first param per peak)
+                        f1_idx = i * NPAR_VOIGT + 0
+                        # Index of F2 position in bounds array (fourth param per peak)
+                        f2_idx = i * NPAR_VOIGT + 3
+
+                        # Get current per-spectrum bounds
+                        current_lower_f1 = bounds[0][f1_idx]
+                        current_upper_f1 = bounds[1][f1_idx]
+                        current_lower_f2 = bounds[0][f2_idx]
+                        current_upper_f2 = bounds[1][f2_idx]
+
+                        # Compute absolute bounds from reference
+                        absolute_lower_f1 = ref_y - config.max_drift_f1
+                        absolute_upper_f1 = ref_y + config.max_drift_f1
+                        absolute_lower_f2 = ref_x - config.max_drift_f2
+                        absolute_upper_f2 = ref_x + config.max_drift_f2
+
+                        # Apply intersection (most restrictive bounds)
+                        new_lower_f1 = max(current_lower_f1, absolute_lower_f1)
+                        new_upper_f1 = min(current_upper_f1, absolute_upper_f1)
+                        new_lower_f2 = max(current_lower_f2, absolute_lower_f2)
+                        new_upper_f2 = min(current_upper_f2, absolute_upper_f2)
+
+                        # Check if clipping occurred
+                        if (new_lower_f1 != current_lower_f1 or new_upper_f1 != current_upper_f1 or
+                            new_lower_f2 != current_lower_f2 or new_upper_f2 != current_upper_f2):
+                            drift_clipped_count += 1
+
+                        # Update bounds
+                        bounds[0][f1_idx] = new_lower_f1
+                        bounds[1][f1_idx] = new_upper_f1
+                        bounds[0][f2_idx] = new_lower_f2
+                        bounds[1][f2_idx] = new_upper_f2
+
+
         # Log position constraints for diagnostics (showing last peak's margins as example)
         #if self.verbose:
         #    print(f"   🔒 Position constraints (adaptive, ~1.5× FWHM):")
@@ -908,17 +891,6 @@ class Ps2dMultiPeakFitter2D:
         y_pred_initial_masked = y_pred_initial[mask_flat]
         self._stage0_initial_chi2 = np.sum((y_flat_masked - y_pred_initial_masked)**2)
 
-        # ====================================================================
-        # STAGE 0: SKIPPED - Optimization (20-30% time reduction)
-        # ====================================================================
-        # Previous implementation: Stage 0 fitted intensity only with positions/widths fixed.
-        # Analysis: Stage 1 performs the same intensity fitting PLUS linewidth optimization,
-        #          making Stage 0 strictly redundant.
-        # Benefit: Skipping Stage 0 reduces total iterations by ~500 with no accuracy loss.
-        # Testing: Verified that starting directly with Stage 1 produces identical results.
-        #
-        # Stage 0 REMOVED - optimization starts directly at Stage 1
-        # ====================================================================
 
         # ====================================================================
         # STAGE 1: Fix positions, float linewidths + intensities
@@ -1025,81 +997,11 @@ class Ps2dMultiPeakFitter2D:
                 )
 
             total_iterations += info['iterations']
-            if self.verbose:
-                print(f"  Iterations: {info['iterations']}, χ² = {info['final_chi2']:.6e}")
-                # DIAGNOSTIC: Track intensity evolution through stages
-                #print(f"  📊 Intensity tracking (Stage 1 → after linewidth+intensity fit):")
-                for i in range(n_peaks):
-                    offset = i * NPAR_VOIGT
-                    intensity = params[offset + 6]
-                    lower = bounds[0][offset + 6]
-                    upper = bounds[1][offset + 6]
-                    at_lower = abs(intensity - lower) / max(abs(lower), 1e-10) < 0.01
-                    at_upper = abs(intensity - upper) / max(abs(upper), 1e-10) < 0.01
-                    bound_status = ""
-                    if at_lower:
-                        bound_status = " ⚠️  AT LOWER BOUND"
-                    elif at_upper:
-                        bound_status = " ⚠️  AT UPPER BOUND"
-                    #print(f"     Peak {i+1}: {intensity:.6e} (bounds: [{lower:.6e}, {upper:.6e}]){bound_status}")
-
-                # DIAGNOSTIC: Track linewidth evolution
-                #print(f"  📊 Linewidth tracking (Stage 1 → after linewidth+intensity fit):")
-                lg_ratios_f1 = []
-                lg_ratios_f2 = []
-                for i in range(n_peaks):
-                    offset = i * NPAR_VOIGT
-                    lw_lor_f1 = params[offset + 1]
-                    lw_gau_f1 = params[offset + 2]
-                    lw_lor_f2 = params[offset + 4]
-                    lw_gau_f2 = params[offset + 5]
-
-                    # Calculate L/G ratios
-                    lg_ratio_f1 = self._calculate_lg_ratio(lw_lor_f1, lw_gau_f1)
-                    lg_ratio_f2 = self._calculate_lg_ratio(lw_lor_f2, lw_gau_f2)
-                    lg_ratios_f1.append(lg_ratio_f1)
-                    lg_ratios_f2.append(lg_ratio_f2)
-
-                    # Check if at bounds
-                    at_bound_f1 = (abs(lw_lor_f1 - bounds[0][offset + 1]) < 0.001 or
-                                   abs(lw_lor_f1 - bounds[1][offset + 1]) < 0.001 or
-                                   abs(lw_gau_f1 - bounds[0][offset + 2]) < 0.001 or
-                                   abs(lw_gau_f1 - bounds[1][offset + 2]) < 0.001)
-                    at_bound_f2 = (abs(lw_lor_f2 - bounds[0][offset + 4]) < 0.001 or
-                                   abs(lw_lor_f2 - bounds[1][offset + 4]) < 0.001 or
-                                   abs(lw_gau_f2 - bounds[0][offset + 5]) < 0.001 or
-                                   abs(lw_gau_f2 - bounds[1][offset + 5]) < 0.001)
-
-                    bound_marker = ""
-                    if at_bound_f1 or at_bound_f2:
-                        bound_marker = " ⚠️  AT BOUND"
-
-                    total_lw_f1 = lw_lor_f1 + lw_gau_f1
-                    total_lw_f2 = lw_lor_f2 + lw_gau_f2
-                    #print(f"     Peak {i+1}: F1={total_lw_f1:.4f} ppm (L={lw_lor_f1:.4f}, G={lw_gau_f1:.4f}, L/G={lg_ratio_f1*100:.1f}%), "
-                    #      f"F2={total_lw_f2:.5f} ppm (L={lw_lor_f2:.5f}, G={lw_gau_f2:.5f}, L/G={lg_ratio_f2*100:.1f}%){bound_marker}")
-
-                # Report L/G ratio statistics if constraint was enabled
-                if self.lg_penalty_weight > 0.0:
-                    mean_f1 = np.mean(lg_ratios_f1) * 100
-                    std_f1 = np.std(lg_ratios_f1) * 100
-                    mean_f2 = np.mean(lg_ratios_f2) * 100
-                    std_f2 = np.std(lg_ratios_f2) * 100
-                    #print(f"  🔗 L/G ratio convergence:")
-                    #print(f"     F1: mean={mean_f1:.1f}%, std={std_f1:.1f}% (variance={std_f1**2:.2e})")
-                    #print(f"     F2: mean={mean_f2:.1f}%, std={std_f2:.1f}% (variance={std_f2**2:.2e})")
-                    penalty_final = self._calculate_lg_penalty(params, n_peaks)
-                    #print(f"     Penalty value: {penalty_final:.6e} (weighted contribution: {self.lg_penalty_weight * penalty_final:.2e})")
-
-                sys.stdout.flush()
 
         # ====================================================================
         # STAGE 2: Float positions (if allowed)
         # ====================================================================
         if not fix_positions:
-            #if self.verbose:
-            #    print("\nStage 2: Position refinement")
-            #    sys.stdout.flush()
 
             # Fix only spare parameters
             fixed_stage2 = {}
@@ -1118,36 +1020,10 @@ class Ps2dMultiPeakFitter2D:
             )
 
             total_iterations += info['iterations']
-            #if self.verbose:
-            #    print(f"  Iterations: {info['iterations']}, χ² = {info['final_chi2']:.6e}")
-            #    # DIAGNOSTIC: Track intensity evolution through stages
-            #    print(f"  📊 Intensity tracking (Stage 2 → after position refinement):")
-            #    for i in range(n_peaks):
-            #        offset = i * NPAR_VOIGT
-            #        intensity = params[offset + 6]
-            #        lower = bounds[0][offset + 6]
-            #        upper = bounds[1][offset + 6]
-            #        at_lower = abs(intensity - lower) / max(abs(lower), 1e-10) < 0.01
-            #        at_upper = abs(intensity - upper) / max(abs(upper), 1e-10) < 0.01
-            #        bound_status = ""
-            #        if at_lower:
-            #            bound_status = " ⚠️  AT LOWER BOUND"
-            #        elif at_upper:
-            #            bound_status = " ⚠️  AT UPPER BOUND"
-            #        print(f"     Peak {i+1}: {intensity:.6e} (bounds: [{lower:.6e}, {upper:.6e}]){bound_status}")
-            #    sys.stdout.flush()
 
         # ====================================================================
-        # STAGE 3: SKIPPED (3D-specific stage, not used for 2D)
+        # STAGE 3: Final global refinement
         # ====================================================================
-
-        # ====================================================================
-        # STAGE 4: Final global refinement
-        # ====================================================================
-        #if self.verbose:
-        #    print("\nStage 4: Final global refinement")
-        #    sys.stdout.flush()
-
         # DIAGNOSTIC: Save positions before Stage 4 for comparison
         positions_before_stage4 = []
         for i in range(n_peaks):
@@ -1188,10 +1064,6 @@ class Ps2dMultiPeakFitter2D:
                                   n_peaks >= 2)
 
         if apply_intensity_penalty:
-            #if self.verbose:
-            #    print(f"   🔗 Intensity ratio penalty enabled (λ={self.intensity_ratio_penalty_weight:.0f})")
-            #    print(f"      Target ratios: {[f'{r:.3f}' for r in initial_intensity_ratios]}")
-            #    sys.stdout.flush()
 
             params, cov, info = self._fit_stage4_with_intensity_penalty(
                 model_function=model_function,
@@ -1218,24 +1090,6 @@ class Ps2dMultiPeakFitter2D:
             )
 
         total_iterations += info['iterations']
-        if self.verbose:
-            print(f"  Iterations: {info['iterations']}, χ² = {info['final_chi2']:.6e}")
-            # DIAGNOSTIC: Track intensity evolution through stages
-            #print(f"  📊 Intensity tracking (Stage 4 → final global refinement):")
-            for i in range(n_peaks):
-                offset = i * NPAR_VOIGT
-                intensity = params[offset + 6]
-                lower = bounds[0][offset + 6]
-                upper = bounds[1][offset + 6]
-                at_lower = abs(intensity - lower) / max(abs(lower), 1e-10) < 0.01
-                at_upper = abs(intensity - upper) / max(abs(upper), 1e-10) < 0.01
-                bound_status = ""
-                if at_lower:
-                    bound_status = " ⚠️  AT LOWER BOUND"
-                elif at_upper:
-                    bound_status = " ⚠️  AT UPPER BOUND"
-                #print(f"     Peak {i+1}: {intensity:.6e} (bounds: [{lower:.6e}, {upper:.6e}]){bound_status}")
-            sys.stdout.flush()
 
         # ====================================================================
         # L/G RATIO CONSTRAINT: Apply after Stage 4 if enabled
@@ -1244,9 +1098,6 @@ class Ps2dMultiPeakFitter2D:
         # This can undo the L/G constraint applied in Stage 1
         # Solution: Re-apply constraint after Stage 4 optimization completes
         if self.lg_penalty_weight > 0.0 and not fix_linewidths:
-            #if self.verbose:
-            #    print("\n🔗 Applying L/G ratio constraint after Stage 4")
-            #    sys.stdout.flush()
 
             # Calculate current L/G ratios for F1 and F2 dimensions
             lg_ratios_f1 = []
@@ -1267,13 +1118,6 @@ class Ps2dMultiPeakFitter2D:
             mean_lg_f1 = np.mean(lg_ratios_f1)
             mean_lg_f2 = np.mean(lg_ratios_f2)
 
-            #if self.verbose:
-            #    print(f"   L/G ratios before enforcement:")
-            #    print(f"     F1: {[f'{lg*100:.1f}%' for lg in lg_ratios_f1]}")
-            #    print(f"     F2: {[f'{lg*100:.1f}%' for lg in lg_ratios_f2]}")
-            #    print(f"   Cluster mean: F1={mean_lg_f1*100:.1f}%, F2={mean_lg_f2*100:.1f}%")
-            #    sys.stdout.flush()
-
             # Directly enforce cluster mean L/G ratio
             for i in range(n_peaks):
                 offset = i * NPAR_VOIGT
@@ -1293,22 +1137,6 @@ class Ps2dMultiPeakFitter2D:
             for param_idx, fixed_value in fixed_stage4.items():
                 params[param_idx] = fixed_value
 
-            #if self.verbose:
-            #    # Recalculate L/G ratios after enforcement
-            #    lg_ratios_f1_after = []
-            #    lg_ratios_f2_after = []
-            #    for i in range(n_peaks):
-            #        offset = i * NPAR_VOIGT
-            #        lg_f1 = self._calculate_lg_ratio(params[offset + 1], params[offset + 2])
-            #        lg_f2 = self._calculate_lg_ratio(params[offset + 4], params[offset + 5])
-            #        lg_ratios_f1_after.append(lg_f1)
-            #        lg_ratios_f2_after.append(lg_f2)
-#
- #               print(f"   L/G ratios after enforcement:")
- #               print(f"     F1: {[f'{lg*100:.1f}%' for lg in lg_ratios_f1_after]}")
- #               print(f"     F2: {[f'{lg*100:.1f}%' for lg in lg_ratios_f2_after]}")
- #               sys.stdout.flush()
-
         # ====================================================================
         # INTENSITY RATIO CONSTRAINT: Apply after Stage 4 if enabled
         # ====================================================================
@@ -1322,21 +1150,6 @@ class Ps2dMultiPeakFitter2D:
         # Intensity ratio guidance is now applied in Stage 1 via gentle nudging
         # No post-Stage-4 hard clipping needed (hard clipping destroyed fit quality)
 
-# ====================================================================
-        # STAGE 6: DISABLED - Causes intensity collapse
-        # ====================================================================
-        # This experimental stage was causing catastrophic failures:
-        # - Intensities collapsed from 10^8 → 0.01
-        # - χ² → ∞ (infinite)
-        # - R² → negative (worse than mean)
-        #
-        # Root cause: Freezing positions/linewidths and refitting only intensities
-        # creates an ill-conditioned problem that causes parameter collapse.
-        #
-        # SOLUTION: Use Stage 4 results directly (all parameters refined together)
-        # ====================================================================
-
-        # Stage 6 disabled - use Stage 4 results
 
         # ====================================================================
         # Compute final R² and prepare results
@@ -1350,11 +1163,6 @@ class Ps2dMultiPeakFitter2D:
         ss_res = np.sum((y_flat_masked - y_fit_masked)**2)
         ss_tot = np.sum((y_flat_masked - np.mean(y_flat_masked))**2)
         r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
-
-        if self.verbose:
-            print(f"\nFinal R² = {r_squared:.6f}")
-            print(f"Total iterations: {total_iterations}")
-            sys.stdout.flush()
 
         # Pragmatic success criterion for 2D multi-peak fitting:
         # Accept result if ANY of:
@@ -1374,21 +1182,8 @@ class Ps2dMultiPeakFitter2D:
         if hasattr(self, '_stage0_initial_chi2'):
             chi2_reduction = self._stage0_initial_chi2 / info['final_chi2']
             chi2_reduction_success = chi2_reduction > 100
-            if self.verbose and chi2_reduction_success:
-                print(f"   📊 χ² reduced {chi2_reduction:.0f}× (from {self._stage0_initial_chi2:.2e} → {info['final_chi2']:.2e})")
 
         final_success = formal_convergence or pragmatic_r2_success or chi2_reduction_success
-
-        if self.verbose:
-            if chi2_reduction_success and not formal_convergence and not pragmatic_r2_success:
-                print(f"   ✅ Pragmatic acceptance: χ² reduced {chi2_reduction:.0f}× (excellent convergence despite negative R²)")
-            elif pragmatic_r2_success and not formal_convergence:
-                print(f"   ✅ Pragmatic acceptance: R² = {r_squared:.4f} > 0.2 (acceptable fit despite no formal convergence)")
-            elif formal_convergence:
-                print(f"   ✅ Formal convergence achieved (R² = {r_squared:.4f})")
-            else:
-                print(f"   ❌ Failed: R² = {r_squared:.4f} < 0.2, no convergence, χ² reduction insufficient")
-            sys.stdout.flush()
 
         # Extract fitted peaks and calculate derived quantities
         fitted_peaks = []

@@ -32,6 +32,8 @@ import sys
 import os
 from functools import partial
 
+from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
+
 # Adaptive optimization imports
 from lunaNMR.core.adaptive_optimizer import (
     AdaptiveOptimizer,
@@ -45,11 +47,9 @@ from lunaNMR.core.adaptive_optimizer import (
 # On Mac, 'spawn' is already the default, so this has no effect there
 try:
     mp.set_start_method('spawn', force=False)
-    #print(f"✅ Multiprocessing start method set to 'spawn' (Linux deadlock fix)")
 except RuntimeError:
     # Already set (can only be called once)
     current_method = mp.get_start_method()
-    #print(f"ℹ️  Multiprocessing start method already set to '{current_method}'")
 
 class ParallelVoigtProcessor:
     """
@@ -89,8 +89,6 @@ class ParallelVoigtProcessor:
         else:
             self.max_workers = max_workers
             
-        #print(f"🚀 ParallelVoigtProcessor initialized with {self.max_workers} workers")
-
     def set_series_params(self, series_params):
         """
         Set locked series parameters from reference spectrum.
@@ -104,15 +102,10 @@ class ParallelVoigtProcessor:
         """
         self.series_params = series_params
         if series_params:
-            print(f"   📦 Series parameters loaded from reference:")
-            print(f"      radF1={series_params.get('radF1', 'N/A'):.4f}, "
-                  f"radF2={series_params.get('radF2', 'N/A'):.5f}")
+            log_info(f"Series parameters loaded from reference: radF1={series_params.get('radF1', 'N/A'):.4f}, radF2={series_params.get('radF2', 'N/A'):.5f}")
 
-    def get_series_params(self):
-        """Get current series parameters (for passing to next spectrum)."""
-        return self.series_params
-
-    def fit_all_peaks_parallel(self, peak_list, progress_callback=None):
+    def fit_all_peaks_parallel(self, peak_list, progress_callback=None, locked_clusters_by_assignment=None,
+                                pre_learned_statistics=None):
         """
         Complete parallel workflow using IDENTICAL clustering algorithm as sequential mode.
 
@@ -122,14 +115,25 @@ class ParallelVoigtProcessor:
         Args:
             peak_list: DataFrame with peak information
             progress_callback: Optional progress callback function
+            locked_clusters_by_assignment: Optional pre-computed clusters from reference spectrum.
+                If provided, these clusters are used instead of recalculating.
+                Format: List of lists of assignment strings, e.g. [['Peak1', 'Peak2'], ['Peak3']]
+            pre_learned_statistics: Optional linewidth statistics from reference spectrum.
+                If provided, PASS 1 learning is SKIPPED and these values are used as initial
+                guesses for linewidth bounds. This speeds up fitting for spectrum 2+ in series.
+                Format: {'lw_f1_median': float, 'lw_f2_median': float, 'lw_f1_mad': float,
+                         'lw_f2_mad': float, 'n_samples': int, 'alpha': float}
 
         Returns:
-            List of fitting results (same format as sequential)
+            Tuple of (fitted_results, learned_statistics) where:
+                - fitted_results: List of fitting results (same format as sequential)
+                - learned_statistics: Dict with linewidth statistics learned from PASS 1,
+                  or None if pre_learned_statistics was provided (PASS 1 skipped)
         """
         if len(peak_list) == 0:
-            return []
+            return ([], None)
 
-        print(f"🔬 Starting cluster-based parallel fitting of {len(peak_list)} peaks")
+        log_progress(f"Starting cluster-based parallel fitting of {len(peak_list)} peaks")
         start_time = time.time()
 
         try:
@@ -145,12 +149,18 @@ class ParallelVoigtProcessor:
                     'pos_y': float(row['Position_Y']),
                     'intensity': intensity
                 })
-            print(f"   🎯 2D overlap detection enabled with {len(all_peaks_context)} peaks context")
+            log_info(f"2D overlap detection enabled with {len(all_peaks_context)} peaks context")
 
-            # STEP 2: Call identify_overlap_clusters() ONCE (CRITICAL for deterministic clustering)
-            # Use locked overlap thresholds from series_params if available (subsequent spectra)
-            if self.series_params:
-                print(f"   📦 Using locked parameters from reference spectrum")
+            # STEP 2: Get clusters - either locked or computed
+            if locked_clusters_by_assignment is not None:
+                # Use locked clusters from reference spectrum
+                log_info(f"Using LOCKED clusters from reference spectrum ({len(locked_clusters_by_assignment)} clusters)")
+                clusters = self._convert_locked_clusters_to_positions(
+                    locked_clusters_by_assignment, all_peaks_context
+                )
+            elif self.series_params:
+                # Use locked overlap thresholds from series_params
+                log_info("Using locked parameters from reference spectrum")
                 clusters = self.original_fitter.parent.identify_overlap_clusters(
                     all_peaks_context,
                     overlap_threshold_x=self.series_params['overlap_threshold_x'],
@@ -182,40 +192,59 @@ class ParallelVoigtProcessor:
             isolated_clusters = [c for c in clusters if len(c) == 1]
             multi_peak_clusters = [c for c in clusters if len(c) > 1]
 
-            print(f"   📊 Cluster breakdown: {len(isolated_clusters)} isolated, {len(multi_peak_clusters)} multi-peak")
+            log_info(f"Cluster breakdown: {len(isolated_clusters)} isolated, {len(multi_peak_clusters)} multi-peak")
 
             # ========== PASS 1: Fit isolated peaks to collect linewidth statistics ==========
-            spectrum_statistics = None
+            # Track whether we learned new statistics (for return value)
+            learned_statistics = None  # Will be set if we learn new stats
 
-            if len(isolated_clusters) > 0:
-                print(f"\n   🔬 PASS 1: Fitting {len(isolated_clusters)} isolated peaks to learn linewidth statistics...")
-                pass1_start = time.time()
+            # Check if pre-learned statistics are provided (from reference spectrum)
+            if pre_learned_statistics is not None:
+                # USE PRE-LEARNED STATISTICS: Skip PASS 1 learning entirely
+                log_info(f"USING PRE-LEARNED STATISTICS from reference spectrum (skipping PASS 1 learning)")
+                log_info(f"LW F1: {pre_learned_statistics['lw_f1_median']:.4f} ± {pre_learned_statistics['lw_f1_mad']:.4f} ppm")
+                log_info(f"LW F2: {pre_learned_statistics['lw_f2_median']:.5f} ± {pre_learned_statistics['lw_f2_mad']:.5f} ppm")
+                log_info(f"(From {pre_learned_statistics['n_samples']} fits in reference)")
 
-                # Prepare shared context WITHOUT spectrum_statistics (Pass 1)
-                shared_context_pass1 = self._prepare_shared_context(all_peaks_context, spectrum_statistics=None)
+                spectrum_statistics = pre_learned_statistics
+                isolated_results = []  # No PASS 1 results - will fit isolated peaks in PASS 2
 
-                # Create tasks for isolated peaks only
-                isolated_tasks = self._create_cluster_tasks(isolated_clusters, peak_metadata, peak_list, shared_context_pass1)
-
-                # Execute Pass 1 fitting in parallel
-                isolated_results = self._execute_parallel_cluster_fitting(isolated_tasks, progress_callback, pass_name="PASS 1")
-
-                # Collect spectrum-wide linewidth statistics from Pass 1 results
-                spectrum_statistics = self._collect_linewidth_statistics(isolated_results)
-
-                pass1_time = time.time() - pass1_start
-
-                if spectrum_statistics:
-                    print(f"   ✅ PASS 1 completed in {pass1_time:.1f}s")
-                    print(f"      📊 Learned statistics from {spectrum_statistics['n_samples']} good fits:")
-                    print(f"         F1: {spectrum_statistics['lw_f1_median']:.4f} ± {spectrum_statistics['lw_f1_mad']:.4f} ppm")
-                    print(f"         F2: {spectrum_statistics['lw_f2_median']:.5f} ± {spectrum_statistics['lw_f2_mad']:.5f} ppm")
-                    #print(f"         L/G ratios: F1={spectrum_statistics['lg_f1_median']:.2f}, F2={spectrum_statistics['lg_f2_median']:.2f}")
-                else:
-                    print(f"   ⚠️  PASS 1 completed but insufficient data for statistics (fallback to config)")
+                # For pre-learned mode, all peaks go to PASS 2 (no PASS 1 or PASS 1-bis)
+                # Isolated peaks will be fitted with pre-learned statistics as priors
             else:
-                print(f"   ⚠️  No isolated peaks found - skipping Pass 1, using config defaults")
-                isolated_results = []
+                # LEARN NEW STATISTICS: Run full PASS 1 cycle
+                spectrum_statistics = None
+
+                if len(isolated_clusters) > 0:
+                    log_progress(f"PASS 1: Fitting {len(isolated_clusters)} isolated peaks to learn linewidth statistics...")
+                    pass1_start = time.time()
+
+                    # Prepare shared context WITHOUT spectrum_statistics (Pass 1)
+                    shared_context_pass1 = self._prepare_shared_context(all_peaks_context, spectrum_statistics=None)
+
+                    # Create tasks for isolated peaks only
+                    isolated_tasks = self._create_cluster_tasks(isolated_clusters, peak_metadata, peak_list, shared_context_pass1)
+
+                    # Execute Pass 1 fitting in parallel
+                    isolated_results = self._execute_parallel_cluster_fitting(isolated_tasks, progress_callback, pass_name="PASS 1")
+
+                    # Collect spectrum-wide linewidth statistics from Pass 1 results
+                    spectrum_statistics = self._collect_linewidth_statistics(isolated_results)
+
+                    pass1_time = time.time() - pass1_start
+
+                    if spectrum_statistics:
+                        log_info(f"PASS 1 completed in {pass1_time:.1f}s")
+                        log_info(f"Learned statistics from {spectrum_statistics['n_samples']} good fits:")
+                        log_info(f"  F1: {spectrum_statistics['lw_f1_median']:.4f} ± {spectrum_statistics['lw_f1_mad']:.4f} ppm")
+                        log_info(f"  F2: {spectrum_statistics['lw_f2_median']:.5f} ± {spectrum_statistics['lw_f2_mad']:.5f} ppm")
+                        # Store for return (this is what we learned)
+                        learned_statistics = spectrum_statistics.copy()
+                    else:
+                        log_warning("PASS 1 completed but insufficient data for statistics (fallback to config)")
+                else:
+                    log_warning("No isolated peaks found - skipping Pass 1, using config defaults")
+                    isolated_results = []
 
             # ========== DEVIATION CHECK (for series integration) ==========
             if self.series_params and spectrum_statistics and spectrum_statistics.get('n_samples', 0) >= 5:
@@ -225,7 +254,7 @@ class ParallelVoigtProcessor:
                     series_params=self.series_params
                 )
                 if has_deviation:
-                    print(f"\n   ⚠️  LINEWIDTH DEVIATION WARNING: {warning_msg}")
+                    log_warning(f"LINEWIDTH DEVIATION WARNING: {warning_msg}")
 
             # ========== ADAPTIVE OPTIMIZATION (if enabled and not already have series_params) ==========
             optimal_params = None
@@ -234,7 +263,7 @@ class ParallelVoigtProcessor:
             # Only run optimization on reference spectrum (when series_params is None)
             # For subsequent spectra in series, use locked parameters from reference
             if self.enable_adaptive and not self.series_params and spectrum_statistics and spectrum_statistics.get('n_samples', 0) >= 10:
-                print(f"\n   🎯 ADAPTIVE OPTIMIZATION: Learning optimal parameters...")
+                log_progress("ADAPTIVE OPTIMIZATION: Learning optimal parameters...")
                 adaptive_start = time.time()
 
                 # Estimate noise level from spectrum
@@ -271,17 +300,8 @@ class ParallelVoigtProcessor:
                                 all_peaks_context=all_peaks_context
                             )
 
-                            # Debug: show first result structure
-                            if not _debug_shown[0] and result is not None:
-                                print(f"\n       DEBUG: First result type={type(result).__name__}")
-                                if isinstance(result, dict):
-                                    print(f"       DEBUG: Keys={list(result.keys())[:10]}")
-                                _debug_shown[0] = True
-
                         except Exception as e:
-                            if not _debug_shown[0]:
-                                print(f"\n       DEBUG: Exception in fit_single_peak: {e}")
-                                _debug_shown[0] = True
+                            pass  # Silently handle exceptions during optimization
                         finally:
                             # Always restore config (guaranteed to have old values)
                             config.radF1 = old_radF1
@@ -308,11 +328,11 @@ class ParallelVoigtProcessor:
                         self.optimal_params = optimal_params
 
                         adaptive_time = time.time() - adaptive_start
-                        print(f"   ✅ Adaptive optimization completed in {adaptive_time:.1f}s")
+                        log_info(f"Adaptive optimization completed in {adaptive_time:.1f}s")
 
                         # ========== RE-CLUSTER originally clustered peaks with optimal thresholds ==========
                         if len(original_multi_peak_clusters) > 0:
-                            print(f"\n   🔄 RE-CLUSTERING: Applying optimal overlap thresholds to {sum(len(c) for c in original_multi_peak_clusters)} clustered peaks...")
+                            log_info(f"RE-CLUSTERING: Applying optimal overlap thresholds to {sum(len(c) for c in original_multi_peak_clusters)} clustered peaks...")
 
                             # Extract only originally clustered peak positions
                             originally_clustered_peaks = []
@@ -336,20 +356,20 @@ class ParallelVoigtProcessor:
                             new_isolated_from_recluster = [c for c in new_clusters if len(c) == 1]
                             multi_peak_clusters = [c for c in new_clusters if len(c) > 1]
 
-                            print(f"      Re-clustering result: {len(new_isolated_from_recluster)} now isolated, {len(multi_peak_clusters)} multi-peak")
+                            log_info(f"Re-clustering result: {len(new_isolated_from_recluster)} now isolated, {len(multi_peak_clusters)} multi-peak")
 
                             # Add newly isolated peaks to isolated_clusters for PASS 1-bis
                             isolated_clusters = isolated_clusters + new_isolated_from_recluster
                     else:
-                        print(f"   ⚠️  Adaptive optimization failed - using default parameters")
+                        log_warning("Adaptive optimization failed - using default parameters")
                 else:
-                    print(f"   ⚠️  Insufficient good peaks for adaptive optimization ({len(good_isolated_peaks)} < 10)")
+                    log_warning(f"Insufficient good peaks for adaptive optimization ({len(good_isolated_peaks)} < 10)")
             elif self.enable_adaptive:
-                print(f"   ⚠️  Adaptive optimization skipped (insufficient PASS 1 statistics)")
+                log_warning("Adaptive optimization skipped (insufficient PASS 1 statistics)")
 
             # ========== PASS 1-bis: Re-fit isolated peaks with optimal parameters ==========
             if optimal_params and optimal_params.get('success') and len(isolated_clusters) > 0:
-                print(f"\n   🔬 PASS 1-bis: Re-fitting {len(isolated_clusters)} isolated peaks with optimal parameters...")
+                log_progress(f"PASS 1-bis: Re-fitting {len(isolated_clusters)} isolated peaks with optimal parameters...")
                 pass1bis_start = time.time()
 
                 # Prepare shared context with optimal parameters
@@ -365,28 +385,39 @@ class ParallelVoigtProcessor:
                 spectrum_statistics = self._collect_linewidth_statistics(isolated_results)
 
                 pass1bis_time = time.time() - pass1bis_start
-                print(f"   ✅ PASS 1-bis completed in {pass1bis_time:.1f}s")
+                log_info(f"PASS 1-bis completed in {pass1bis_time:.1f}s")
 
-            # ========== PASS 2: Fit multi-peak clusters using learned statistics ==========
+            # ========== PASS 2: Fit remaining clusters using learned/pre-learned statistics ==========
             multi_peak_results = []
 
-            if len(multi_peak_clusters) > 0:
-                print(f"\n   🔬 PASS 2: Fitting {len(multi_peak_clusters)} multi-peak clusters with learned statistics...")
+            # When using pre-learned statistics, isolated peaks weren't fitted in PASS 1/1-bis
+            # So we need to fit them here in PASS 2
+            if pre_learned_statistics is not None and len(isolated_results) == 0:
+                # Fit ALL clusters (isolated + multi-peak) with pre-learned stats
+                all_pass2_clusters = isolated_clusters + multi_peak_clusters
+                cluster_type_desc = "all peaks (isolated + multi-peak)"
+            else:
+                # Normal mode: only multi-peak clusters in PASS 2
+                all_pass2_clusters = multi_peak_clusters
+                cluster_type_desc = "multi-peak clusters"
+
+            if len(all_pass2_clusters) > 0:
+                log_progress(f"PASS 2: Fitting {len(all_pass2_clusters)} {cluster_type_desc} with {'pre-learned' if pre_learned_statistics else 'learned'} statistics...")
                 pass2_start = time.time()
 
                 # Prepare shared context WITH spectrum_statistics (Pass 2)
                 shared_context_pass2 = self._prepare_shared_context(all_peaks_context, spectrum_statistics=spectrum_statistics)
 
-                # Create tasks for multi-peak clusters
-                multi_peak_tasks = self._create_cluster_tasks(multi_peak_clusters, peak_metadata, peak_list, shared_context_pass2)
+                # Create tasks for clusters
+                pass2_tasks = self._create_cluster_tasks(all_pass2_clusters, peak_metadata, peak_list, shared_context_pass2)
 
                 # Execute Pass 2 fitting in parallel
-                multi_peak_results = self._execute_parallel_cluster_fitting(multi_peak_tasks, progress_callback, pass_name="PASS 2")
+                multi_peak_results = self._execute_parallel_cluster_fitting(pass2_tasks, progress_callback, pass_name="PASS 2")
 
                 pass2_time = time.time() - pass2_start
-                print(f"   ✅ PASS 2 completed in {pass2_time:.1f}s")
+                log_info(f"PASS 2 completed in {pass2_time:.1f}s")
             else:
-                print(f"   ⚠️  No multi-peak clusters found - skipping Pass 2")
+                log_warning("No clusters to fit in Pass 2")
 
             # ========== Consolidate results from both passes ==========
             all_cluster_results = isolated_results + multi_peak_results
@@ -410,22 +441,25 @@ class ParallelVoigtProcessor:
                     cluster_assignments=cluster_assignments,
                     reference_spectrum='current'  # Will be updated by GUI with actual filename
                 )
-                print(f"   📦 Series parameters saved for consistent series integration")
+                log_info("Series parameters saved for consistent series integration")
 
             elapsed_time = time.time() - start_time
-            print(f"\n✅ Two-pass parallel fitting completed in {elapsed_time:.1f}s")
-            print(f"   Results: {len(consolidated_results)} successful fits from {len(clusters)} clusters")
+            log_info(f"Two-pass parallel fitting completed in {elapsed_time:.1f}s")
+            log_info(f"Results: {len(consolidated_results)} successful fits from {len(clusters)} clusters")
             if spectrum_statistics:
-                print(f"   Improvement: Multi-peak clusters fitted with data-driven linewidth priors")
+                log_info("Improvement: Multi-peak clusters fitted with data-driven linewidth priors")
 
-            return consolidated_results
+            # Return tuple: (results, learned_statistics)
+            # learned_statistics is None if we used pre-learned stats (nothing new was learned)
+            return (consolidated_results, learned_statistics)
 
         except Exception as e:
-            print(f"❌ Parallel Voigt fitting failed: {e}")
-            print("🔄 Falling back to sequential processing")
+            log_error(f"Parallel Voigt fitting failed: {e}")
+            log_info("Falling back to sequential processing")
             import traceback
             traceback.print_exc()
-            return self._sequential_fallback(peak_list, progress_callback)
+            results = self._sequential_fallback(peak_list, progress_callback)
+            return (results, None)  # Sequential fallback doesn't learn statistics
 
         finally:
             # Always cleanup shared memory and force resource cleanup
@@ -444,6 +478,42 @@ class ParallelVoigtProcessor:
         # Force garbage collection to clear references
         import gc
         gc.collect()
+
+    def _convert_locked_clusters_to_positions(self, locked_clusters_by_assignment, all_peaks_context):
+        """
+        Convert assignment-based locked clusters to position-based clusters.
+
+        Args:
+            locked_clusters_by_assignment: List of clusters, each cluster is a list
+                of assignment strings, e.g. [['Peak1', 'Peak2'], ['Peak3']]
+            all_peaks_context: Current spectrum's peak context with positions
+
+        Returns:
+            List of clusters in position format: [[(x1, y1), (x2, y2)], [(x3, y3)], ...]
+        """
+        # Build assignment → position mapping from current spectrum
+        assignment_to_position = {}
+        for peak in all_peaks_context:
+            assignment = str(peak.get('assignment', ''))
+            x = peak.get('x_ppm') or peak.get('pos_x')
+            y = peak.get('y_ppm') or peak.get('pos_y')
+            if assignment and x is not None and y is not None:
+                assignment_to_position[assignment] = (x, y)
+
+        # Convert each cluster from assignments to positions
+        position_clusters = []
+        for cluster_assignments in locked_clusters_by_assignment:
+            cluster_positions = []
+            for assignment in cluster_assignments:
+                if assignment in assignment_to_position:
+                    cluster_positions.append(assignment_to_position[assignment])
+                else:
+                    log_warning(f"Locked cluster assignment '{assignment}' not found in current spectrum")
+
+            if cluster_positions:
+                position_clusters.append(cluster_positions)
+
+        return position_clusters
 
     def _collect_linewidth_statistics(self, fitting_results):
         """
@@ -542,13 +612,13 @@ class ParallelVoigtProcessor:
 
         n_samples = len(linewidth_stats['lw_f1'])
         if n_samples < MIN_SAMPLES:
-            print(f"   ⚠️  Insufficient isolated peaks for statistics ({successful_fits} good fits, {n_samples} valid LW)")
+            log_warning(f"Insufficient isolated peaks for statistics ({successful_fits} good fits, {n_samples} valid LW)")
             return None
 
         # Sample-size-dependent multiplier for bounds calculation
         if n_samples < RELIABLE_SAMPLES:
             alpha = 3.0  # Tighter bounds for small samples
-            print(f"   ⚠️  Small sample size (n={n_samples}), using α=3×MAD")
+            log_warning(f"Small sample size (n={n_samples}), using α=3×MAD")
         else:
             alpha = 5.0  # Standard multiplier for reliable statistics
 
@@ -587,18 +657,12 @@ class ParallelVoigtProcessor:
             List of dicts with x_ppm, y_ppm, r_squared, residuals for good peaks
         """
         good_peaks = []
-        _debug_done = False
         for cluster_result in fitting_results:
             if not cluster_result or not cluster_result.get('success'):
                 continue
             for peak_result in cluster_result.get('peak_results', []):
                 if not peak_result or not peak_result.get('success'):
                     continue
-
-                # Debug: show first peak_result structure
-                if not _debug_done:
-                    print(f"   DEBUG _extract: peak_result keys = {list(peak_result.keys())[:15]}")
-                    _debug_done = True
 
                 r_squared = peak_result.get('r_squared', 0)
                 if r_squared >= 0.70:
@@ -629,9 +693,9 @@ class ParallelVoigtProcessor:
             np.random.seed(42)  # Reproducibility
             indices = np.random.choice(n_total, max_peaks, replace=False)
             good_peaks = [good_peaks[i] for i in sorted(indices)]
-            print(f"   Sampled {max_peaks} peaks from {n_total} for optimization (R² ≥ 0.70)")
+            log_info(f"Sampled {max_peaks} peaks from {n_total} for optimization (R² >= 0.70)")
         else:
-            print(f"   Selected {n_total} peaks for optimization (R² ≥ 0.70)")
+            log_info(f"Selected {n_total} peaks for optimization (R² >= 0.70)")
 
         return good_peaks
 
@@ -715,18 +779,16 @@ class ParallelVoigtProcessor:
         if parent and hasattr(parent, 'gui_params') and parent.gui_params:
             gui_params = parent.gui_params
             use_ps2d = gui_params.get('use_ps2d_multi_peak', False)
-            #print(f"📋 Parallel: gui_params from parent integrator (use_ps2d_multi_peak={use_ps2d})")
             return gui_params
 
         # Fall back to fitter's gui_params
         if hasattr(self.original_fitter, 'gui_params') and self.original_fitter.gui_params:
             gui_params = self.original_fitter.gui_params
             use_ps2d = gui_params.get('use_ps2d_multi_peak', False)
-            #print(f"📋 Parallel: gui_params from fitter (use_ps2d_multi_peak={use_ps2d})")
             return gui_params
 
         # Last resort: empty dict
-        print(f"⚠️ Parallel: No gui_params found, using empty dict (PS2D multi-peak will NOT activate)")
+        log_warning("Parallel: No gui_params found, using empty dict (PS2D multi-peak will NOT activate)")
         return {}
 
     def _serialize_baseline_params(self):
@@ -833,12 +895,9 @@ class ParallelVoigtProcessor:
                 'radF1': getattr(config, 'radF1', 0.6),
                 'radF2': getattr(config, 'radF2', 0.06)
             }
-            #print(f"📋 Parallel: PS2D config serialized:")
-            #print(f"   nucleus={ps2d_dict['nucleus_type']}, radF1={ps2d_dict['radF1']:.3f}, radF2={ps2d_dict['radF2']:.4f}")
-            print(f"   max_iterations={ps2d_dict['max_iterations']}")
             return ps2d_dict
         except ImportError:
-            print(f"⚠️ Parallel: PS2D config not available, using defaults")
+            log_warning("Parallel: PS2D config not available, using defaults")
             return {}
 
     def _get_validation_thresholds(self):
@@ -922,9 +981,9 @@ class ParallelVoigtProcessor:
             }
             cluster_tasks.append(cluster_task)
 
-        print(f"📋 Created {len(cluster_tasks)} cluster-based tasks")
-        print(f"   Isolated peaks: {sum(1 for t in cluster_tasks if t['cluster_size'] == 1)}")
-        print(f"   Overlap groups: {sum(1 for t in cluster_tasks if t['cluster_size'] > 1)}")
+        log_info(f"Created {len(cluster_tasks)} cluster-based tasks")
+        log_info(f"  Isolated peaks: {sum(1 for t in cluster_tasks if t['cluster_size'] == 1)}")
+        log_info(f"  Overlap groups: {sum(1 for t in cluster_tasks if t['cluster_size'] > 1)}")
         return cluster_tasks
         
     def _execute_parallel_cluster_fitting(self, cluster_tasks, progress_callback, pass_name=None):
@@ -945,7 +1004,6 @@ class ParallelVoigtProcessor:
         total_peaks_processed = 0
 
         pass_prefix = f"{pass_name}: " if pass_name else ""
-        #print(f"⚡ Starting parallel cluster execution with {self.max_workers} workers")
 
         try:
             # Test multiprocessing capability first
@@ -974,7 +1032,7 @@ class ParallelVoigtProcessor:
 
                             # Progress reporting
                             r_squared = result.get('r_squared', 0)
-                            print(f"✅ Cluster {task_id + 1}: {result['peaks_fitted']} peaks, R²={r_squared:.3f}")
+                            log_info(f"Cluster {task_id + 1}: {result['peaks_fitted']} peaks, R²={r_squared:.3f}")
 
                             # Log individual peaks for progress dialog
                             if progress_callback:
@@ -988,10 +1046,7 @@ class ParallelVoigtProcessor:
                         else:
                             failed_clusters += 1
                             error_msg = result.get('error', 'Unknown error')
-                            print(f"❌ Cluster {task_id + 1}: {error_msg}")
-
-                            if 'traceback' in result:
-                                print(f"   Traceback: {result['traceback'][:200]}...")
+                            log_warning(f"Cluster {task_id + 1}: {error_msg}")
 
                             # Log failed cluster for progress dialog
                             if progress_callback:
@@ -1001,19 +1056,19 @@ class ParallelVoigtProcessor:
 
                     except mp.TimeoutError:
                         failed_clusters += 1
-                        print(f"⏰ Cluster {task_id + 1}: Timeout (>10 minutes)")
+                        log_warning(f"Cluster {task_id + 1}: Timeout (>10 minutes)")
                     except Exception as e:
                         failed_clusters += 1
-                        print(f"❌ Cluster {task_id + 1}: Execution error - {str(e)}")
+                        log_error(f"Cluster {task_id + 1}: Execution error - {str(e)}")
 
         except Exception as e:
-            print(f"❌ Parallel cluster execution failed: {e}")
+            log_error(f"Parallel cluster execution failed: {e}")
             raise  # Re-raise to trigger fallback
 
-        print(f"📊 Parallel cluster execution summary:")
-        print(f"   ✅ Successful clusters: {successful_clusters}")
-        print(f"   ❌ Failed clusters: {failed_clusters}")
-        print(f"   📈 Total peaks fitted: {total_peaks_processed}")
+        log_info("Parallel cluster execution summary:")
+        log_info(f"  Successful clusters: {successful_clusters}")
+        log_info(f"  Failed clusters: {failed_clusters}")
+        log_info(f"  Total peaks fitted: {total_peaks_processed}")
 
         return cluster_results
         
@@ -1051,9 +1106,6 @@ class ParallelVoigtProcessor:
                 if assignment:
                     results_by_assignment[str(assignment)] = peak_result
 
-        # DEBUG: Print what we have
-        #print(f"📋 Consolidation: {len(results_by_number)} results by peak_number, {len(results_by_assignment)} by assignment")
-        #print(f"   Available peak_numbers: {sorted(results_by_number.keys())[:10]}... (showing first 10)")
 
         # Return results in original peak_list order using peak_number match
         # CRITICAL: Add placeholders for failed fits to maintain 1:1 index mapping (same as sequential mode)
@@ -1107,20 +1159,20 @@ class ParallelVoigtProcessor:
                 failed_count += 1
 
         successful_count = len(consolidated_results) - failed_count
-        print(f"📋 Consolidated {len(consolidated_results)} peaks in original order (from {len(peak_list)} total peaks)")
-        print(f"   ✅ Successful fits: {successful_count}")
-        print(f"   ❌ Failed fits (placeholders): {failed_count}")
+        log_info(f"Consolidated {len(consolidated_results)} peaks in original order (from {len(peak_list)} total peaks)")
+        log_info(f"  Successful fits: {successful_count}")
+        log_info(f"  Failed fits (placeholders): {failed_count}")
 
         # Verify 1:1 mapping maintained
         if len(consolidated_results) != len(peak_list):
-            print(f"⚠️ WARNING: Peak count mismatch! {len(consolidated_results)} != {len(peak_list)}")
-            print(f"   This suggests a logic error in consolidation")
+            log_warning(f"Peak count mismatch! {len(consolidated_results)} != {len(peak_list)}")
+            log_warning("This suggests a logic error in consolidation")
 
         # Warn if success rate is very low
         if successful_count < len(peak_list) * 0.5:
             success_rate = (successful_count / len(peak_list) * 100) if len(peak_list) > 0 else 0
-            print(f"⚠️ WARNING: Low success rate: {successful_count}/{len(peak_list)} ({success_rate:.1f}%)")
-            print(f"   Many peaks failed to fit - check parameters or data quality")
+            log_warning(f"Low success rate: {successful_count}/{len(peak_list)} ({success_rate:.1f}%)")
+            log_warning("Many peaks failed to fit - check parameters or data quality")
 
         return consolidated_results
         
@@ -1128,7 +1180,7 @@ class ParallelVoigtProcessor:
         """
         Fallback to existing sequential processing if parallel fails.
         """
-        print("🔄 Using sequential fallback processing")
+        log_info("Using sequential fallback processing")
         # Call existing enhanced_peak_fitting method for each peak
         results = []
         for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
@@ -1147,10 +1199,10 @@ class ParallelVoigtProcessor:
                     progress_callback(progress, f"Sequential: {i+1}/{len(peak_list)}", assignment)
                     
             except Exception as e:
-                print(f"❌ Sequential fallback failed for peak {i+1}: {e}")
-                
+                log_error(f"Sequential fallback failed for peak {i+1}: {e}")
+
         return results
-        
+
     def _cleanup_shared_memory(self):
         """Clean up all shared memory blocks"""
         for shm in self.shared_memory_blocks:
@@ -1158,7 +1210,7 @@ class ParallelVoigtProcessor:
                 shm.close()
                 shm.unlink()
             except Exception as e:
-                print(f"⚠️ Warning: Could not cleanup shared memory: {e}")
+                log_warning(f"Could not cleanup shared memory: {e}")
         self.shared_memory_blocks.clear()
 
 
@@ -1245,18 +1297,37 @@ def _parallel_cluster_worker(cluster_task):
                     region_2d, group_result['peaks']
                 )
 
-                # Extract result for EACH peak in cluster (IDENTICAL to sequential)
-                for i, (peak_x, peak_y) in enumerate(cluster_task['cluster_positions']):
-                    # Find matching peak in group_result
-                    best_match = None
-                    min_dist = float('inf')
-                    for peak_fit in group_result['peaks']:
-                        fit_x = peak_fit['pos_f2']
-                        fit_y = peak_fit['pos_f1']
-                        dist = np.sqrt((fit_x - peak_x)**2 + (fit_y - peak_y)**2)
-                        if dist < min_dist:
-                            min_dist = dist
-                            best_match = peak_fit
+                # OPTIMAL MATCHING using Hungarian algorithm (IDENTICAL to sequential)
+                # This ensures 1-to-1 matching and prevents peak swapping
+                from scipy.optimize import linear_sum_assignment
+
+                cluster_positions = cluster_task['cluster_positions']
+                fitted_peaks = group_result['peaks']
+
+                if len(cluster_positions) > 0 and len(fitted_peaks) > 0:
+                    # Build cost matrix: distance from each original peak to each fitted peak
+                    cost_matrix = np.zeros((len(cluster_positions), len(fitted_peaks)))
+                    for i, (peak_x, peak_y) in enumerate(cluster_positions):
+                        for j, peak_fit in enumerate(fitted_peaks):
+                            fit_x = peak_fit['pos_f2']
+                            fit_y = peak_fit['pos_f1']
+                            cost_matrix[i, j] = np.sqrt((fit_x - peak_x)**2 + (fit_y - peak_y)**2)
+
+                    # Hungarian algorithm: find optimal 1-to-1 assignment
+                    row_indices, col_indices = linear_sum_assignment(cost_matrix)
+
+                    # Create mapping: original peak index → fitted peak index
+                    peak_to_fit_mapping = dict(zip(row_indices, col_indices))
+                else:
+                    peak_to_fit_mapping = {}
+
+                # Extract result for EACH peak using optimal matching
+                for i, (peak_x, peak_y) in enumerate(cluster_positions):
+                    # Get optimally matched fitted peak
+                    if i in peak_to_fit_mapping:
+                        best_match = fitted_peaks[peak_to_fit_mapping[i]]
+                    else:
+                        best_match = None
 
                     if best_match:
                         # Convert to standard format (IDENTICAL to sequential lines 338-387)
@@ -1350,10 +1421,9 @@ def _initialize_worker_fitter(shared_context):
     try:
         from lunaNMR.core.ps2d_2d_fitter import Ps2dMultiPeakFitter2D
         from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
-        #print(f"✅ Worker: PS2D 2D fitter modules imported successfully")
     except ImportError as e:
-        print(f"❌ Worker: PS2D 2D fitter imports failed - {e}")
-        print(f"   Workers will fall back to 1D fitting for overlapping peaks")
+        # Workers will fall back to 1D fitting for overlapping peaks
+        pass
 
     # 3. Reconstruct shared spectral data
     shared_spectrum = shared_memory.SharedMemory(
@@ -1388,8 +1458,6 @@ def _initialize_worker_fitter(shared_context):
     spectrum_statistics = shared_context.get('spectrum_statistics', None)
     if spectrum_statistics:
         worker_integrator.spectrum_statistics = spectrum_statistics
-        #print(f"✅ Worker: Spectrum statistics available (n={spectrum_statistics.get('n_samples', 0)} isolated peaks)")
-        #print(f"   F1={spectrum_statistics.get('lw_f1_median', 0):.4f} ppm, F2={spectrum_statistics.get('lw_f2_median', 0):.5f} ppm")
 
     # CRITICAL: Synchronize PS2D configuration
     ps2d_config = shared_context.get('ps2d_config', {})
@@ -1403,14 +1471,8 @@ def _initialize_worker_fitter(shared_context):
                 if hasattr(config, key):
                     setattr(config, key, value)
 
-            nucleus = ps2d_config.get('nucleus_type', 'Unknown')
-            radF1 = ps2d_config.get('radF1', 'N/A')
-            radF2 = ps2d_config.get('radF2', 'N/A')
-            max_iter = ps2d_config.get('max_iterations', 'N/A')
-            #print(f"✅ Worker: PS2D config synchronized (nucleus={nucleus})")
-            #print(f"   radF1={radF1}, radF2={radF2}, max_iterations={max_iter}")
         except ImportError:
-            print(f"⚠️ Worker: Could not synchronize PS2D config (module not available)")
+            pass  # Could not synchronize PS2D config
 
     # DEBUG: Verify gui_params were set
     #if worker_integrator.gui_params:
@@ -1429,7 +1491,6 @@ def _initialize_worker_fitter(shared_context):
         # CRITICAL: Update enhanced_fitter's parent reference to point to worker_integrator
         # This ensures enhanced_fitter calls adaptive_fit_1d on the correct integrator with gui_params
         worker_fitter.parent = worker_integrator
-        #print(f"✅ Worker: Enhanced fitter parent updated to worker_integrator")
         
         # Advanced settings
         _restore_fitting_windows(worker_fitter, shared_context['fitting_windows'])
@@ -1447,12 +1508,6 @@ def _initialize_worker_fitter(shared_context):
         'identify_overlap_clusters'
     ]
     missing_methods = [m for m in required_methods if not hasattr(worker_integrator, m)]
-
-    #if missing_methods:
-    #    print(f"⚠️ Worker missing PS2D methods: {missing_methods}")
-    #    print(f"   2D multi-peak fitting may fail, will fall back to 1D")
-    #else:
-        #print(f"✅ Worker: All PS2D 2D routing methods present")
 
     # Cleanup shared memory reference in worker
     try:
