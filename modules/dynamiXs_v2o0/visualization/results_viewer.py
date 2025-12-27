@@ -544,7 +544,7 @@ class ResultsViewer(QMainWindow):
 
     def _on_error_checkbox_change(self, state):
         """Handle error checkbox state change"""
-        self.show_errors = state == Qt.Checked.value
+        self.show_errors = self.error_checkbox.isChecked()
         if self.selected_params:
             self._update_plot_stacked()
         elif self.current_parameter == "ALL":

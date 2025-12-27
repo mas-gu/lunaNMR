@@ -30,7 +30,7 @@ import time
 import traceback
 import sys
 import os
-from functools import partial
+
 
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
@@ -686,8 +686,8 @@ class ParallelVoigtProcessor:
                         'fwhm_f2': peak_result.get('fwhm_f2')
                     })
 
-        # Cap at 30 peaks maximum - random sample if more available
-        max_peaks = 30
+        # Cap at 15 peaks maximum - random sample if more available
+        max_peaks = 15
         n_total = len(good_peaks)
         if n_total > max_peaks:
             np.random.seed(42)  # Reproducibility
@@ -1214,7 +1214,7 @@ class ParallelVoigtProcessor:
         self.shared_memory_blocks.clear()
 
 
-def _test_parallel_worker(test_data):
+def _test_parallel_worker(_test_data):
     """Simple test function for multiprocessing validation"""
     return "test_success"
 
@@ -1512,7 +1512,7 @@ def _initialize_worker_fitter(shared_context):
     # Cleanup shared memory reference in worker
     try:
         shared_spectrum.close()
-    except:
+    except Exception:
         pass
 
     return worker_integrator

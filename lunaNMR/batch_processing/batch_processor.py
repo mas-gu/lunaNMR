@@ -583,7 +583,7 @@ class BatchProcessor:
             # This is a fallback method that could parse from captured log output
             # For now, return None and rely on the direct attribute methods
             return None
-        except:
+        except Exception:
             return None
 
     def get_optimal_parameters(self, nucleus_type: str, spectrum_file: Path) -> Dict[str, Any]:
@@ -1017,7 +1017,6 @@ class BatchProcessor:
     def _fit_peaks_parallel_direct(self, detected_peaks: List[Dict], parameters: Dict[str, Any]) -> List[Dict]:
         """Parallel direct enhanced_peak_fitting using threading for ML data collection compatibility"""
         import threading
-        import queue
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         fitted_results = []

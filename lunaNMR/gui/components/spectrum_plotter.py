@@ -258,7 +258,7 @@ class SpectrumPlotter(MatplotlibWidget):
                 try:
                     if hasattr(self.colorbar, 'ax') and self.colorbar.ax in self.fig.axes:
                         self.fig.delaxes(self.colorbar.ax)
-                except:
+                except Exception:
                     pass
                 self.colorbar = None
                 self.colorbar_ax = None
@@ -286,7 +286,7 @@ class SpectrumPlotter(MatplotlibWidget):
             # Ensure main axes position is maintained
             try:
                 self.ax.set_position(self.main_axes_position)
-            except:
+            except Exception:
                 pass
 
     def plot_peaks(self, integrator, show_detected=True, show_assigned=True, **kwargs):
@@ -305,7 +305,7 @@ class SpectrumPlotter(MatplotlibWidget):
         for annotation in self.peak_annotations:
             try:
                 annotation.remove()
-            except:
+            except Exception:
                 pass
         self.peak_annotations.clear()
 

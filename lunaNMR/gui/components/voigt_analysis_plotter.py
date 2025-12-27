@@ -33,7 +33,7 @@ from PySide6.QtCore import Signal
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from mpl_toolkits.mplot3d import Axes3D
+
 from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, ListedColormap, Normalize
 from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator
@@ -158,6 +158,21 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.clip_individual_peaks = True  # ON by default
         self.peak_display_multiplier = 2.2  # Show peaks up to 2.2× fit ellipse radius
 
+        # Feature 7: Fixed axis limits for Peak Mode comparison
+        self.use_fixed_z_limits = False
+        self.fixed_z_min = None
+        self.fixed_z_max = None
+        self.use_fixed_xy_limits = False
+        self.fixed_x_min = None  # F2 (1H)
+        self.fixed_x_max = None
+        self.fixed_y_min = None  # F1 (15N)
+        self.fixed_y_max = None
+
+        # Feature 8: Preserve 3D view orientation between plots
+        self.preserved_elev = 25  # Default elevation
+        self.preserved_azim = 45  # Default azimuth
+        self.preserved_roll = 0   # Default roll
+
         # Initialize with placeholder message
         self._plot_no_data()
 
@@ -252,6 +267,56 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
         # Redraw canvas
         self.canvas.draw_idle()
+
+    def set_fixed_z_limits(self, z_min: float, z_max: float):
+        """Set fixed z-axis limits for Peak Mode comparison.
+
+        When set, the z-axis will use these limits instead of auto-scaling
+        to the current data. This allows visual comparison of intensity
+        changes across spectra.
+
+        Args:
+            z_min: Minimum z-axis value
+            z_max: Maximum z-axis value
+        """
+        self.fixed_z_min = z_min
+        self.fixed_z_max = z_max
+        self.use_fixed_z_limits = True
+
+    def clear_fixed_z_limits(self):
+        """Clear fixed z-limits and revert to auto-scaling."""
+        self.use_fixed_z_limits = False
+        self.fixed_z_min = None
+        self.fixed_z_max = None
+
+    def set_fixed_xy_limits(self, x_min: float, x_max: float, y_min: float, y_max: float):
+        """Set fixed x/y axis limits for Peak Mode comparison.
+
+        Args:
+            x_min: Minimum x-axis (F2/1H) value in ppm
+            x_max: Maximum x-axis (F2/1H) value in ppm
+            y_min: Minimum y-axis (F1/15N) value in ppm
+            y_max: Maximum y-axis (F1/15N) value in ppm
+        """
+        self.fixed_x_min = x_min
+        self.fixed_x_max = x_max
+        self.fixed_y_min = y_min
+        self.fixed_y_max = y_max
+        self.use_fixed_xy_limits = True
+
+    def clear_fixed_xy_limits(self):
+        """Clear fixed x/y limits and revert to auto-scaling."""
+        self.use_fixed_xy_limits = False
+        self.fixed_x_min = None
+        self.fixed_x_max = None
+        self.fixed_y_min = None
+        self.fixed_y_max = None
+
+    def reset_view_orientation(self):
+        """Reset 3D view orientation to defaults."""
+        self.preserved_elev = 25
+        self.preserved_azim = 45
+        self.preserved_roll = 0
 
     def refresh_plot(self):
         """Redraw current plot with new settings"""
@@ -735,6 +800,13 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         # Create 2D meshgrids for 3D plotting
         F2_ppm, F1_ppm = np.meshgrid(f2_ppm, f1_ppm)
 
+        # Save current view orientation before clearing
+        if self.ax_data is not None:
+            self.preserved_elev = self.ax_data.elev
+            self.preserved_azim = self.ax_data.azim
+            if hasattr(self.ax_data, 'roll'):
+                self.preserved_roll = self.ax_data.roll
+
         # Clear figure completely
         self.figure.clear()
         self.canvas.draw_idle()
@@ -950,7 +1022,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         ax_data.set_zlabel('Intensity', fontsize=9)
         ax_data.invert_xaxis()
         ax_data.invert_yaxis()
-        ax_data.view_init(elev=25, azim=45)
+        ax_data.view_init(elev=self.preserved_elev, azim=self.preserved_azim, roll=self.preserved_roll)
 
         # Limit tick labels
         ax_data.xaxis.set_major_locator(MaxNLocator(nbins=2))
@@ -969,8 +1041,17 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.auto_z_min = z_min_data
         self.auto_z_max = z_max_data
 
-        # Apply intensity scaling
-        self.apply_intensity_scale(self.intensity_scale_factor)
+        # Apply z-axis limits: fixed (for Peak Mode comparison) or auto-scaled
+        if self.use_fixed_z_limits and self.fixed_z_min is not None:
+            ax_data.set_zlim(self.fixed_z_min, self.fixed_z_max)
+            ax_data.set_autoscalez_on(False)
+        else:
+            self.apply_intensity_scale(self.intensity_scale_factor)
+
+        # Apply x/y axis limits: fixed (for Peak Mode comparison) or auto-scaled
+        if self.use_fixed_xy_limits and self.fixed_x_min is not None:
+            ax_data.set_xlim(self.fixed_x_min, self.fixed_x_max)
+            ax_data.set_ylim(self.fixed_y_min, self.fixed_y_max)
 
         # Panel 2: Residuals in separate panel (if enabled)
         if self.residual_mode == 'separate' and self.show_residuals and self.ax_resid is not None:
@@ -999,12 +1080,22 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             self.ax_resid.set_zlabel('Residuals', fontsize=9)
             self.ax_resid.invert_xaxis()
             self.ax_resid.invert_yaxis()
-            self.ax_resid.view_init(elev=25, azim=45)
+            self.ax_resid.view_init(elev=self.preserved_elev, azim=self.preserved_azim, roll=self.preserved_roll)
 
             self.ax_resid.xaxis.set_major_locator(MaxNLocator(nbins=2))
             self.ax_resid.yaxis.set_major_locator(MaxNLocator(nbins=2))
 
-            self.ax_resid.set_zlim(z_min_data, z_max_data)
+            # Match z-limits to data panel (fixed or auto)
+            if self.use_fixed_z_limits and self.fixed_z_min is not None:
+                self.ax_resid.set_zlim(self.fixed_z_min, self.fixed_z_max)
+            else:
+                self.ax_resid.set_zlim(z_min_data, z_max_data)
+
+            # Match x/y limits to data panel if fixed
+            if self.use_fixed_xy_limits and self.fixed_x_min is not None:
+                self.ax_resid.set_xlim(self.fixed_x_min, self.fixed_x_max)
+                self.ax_resid.set_ylim(self.fixed_y_min, self.fixed_y_max)
+
             self.ax_resid.set_title(f'Residuals (R²={r_squared:.3f})', fontsize=10, fontweight='bold')
 
         # Panel 3: Cross-sections (if enabled)

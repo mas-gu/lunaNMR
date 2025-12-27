@@ -159,7 +159,7 @@ class VoigtFittingWorker(QThread):
     fitting_complete = Signal(dict)            # summary dict
     fitting_failed = Signal(str)               # error_message
 
-    def __init__(self, integrator, param_manager, processing_options):
+    def __init__(self, integrator, param_manager, processing_options, peaks_to_fit=None):
         """Initialize the Voigt fitting worker.
 
         Args:
@@ -169,11 +169,13 @@ class VoigtFittingWorker(QThread):
                 - use_parallel: bool
                 - use_global_optimization: bool (optional, default False)
                 - use_voigt_fitting: bool
+            peaks_to_fit: DataFrame of peaks to fit. If None, uses integrator.peak_list
         """
         super().__init__()
         self.integrator = integrator
         self.param_manager = param_manager
         self.processing_options = processing_options
+        self.peaks_to_fit = peaks_to_fit
 
     def run(self):
         """Run Voigt fitting in background thread using SingleSpectrumProcessor."""
@@ -198,11 +200,14 @@ class VoigtFittingWorker(QThread):
 
             self.progress_updated.emit(10, "Starting peak fitting...", "")
 
+            # Use provided peaks_to_fit, or fall back to integrator.peak_list
+            peak_list = self.peaks_to_fit if self.peaks_to_fit is not None else self.integrator.peak_list
+
             # Process peak list using SingleSpectrumProcessor (exact v0o9 logic)
             # This internally handles PS2D multi-peak fitting
             # Returns tuple: (fitted_results, learned_statistics)
             fitted_results, learned_statistics = processor.process_peak_list(
-                self.integrator.peak_list,
+                peak_list,
                 self.processing_options,
                 progress_callback
             )
@@ -212,7 +217,7 @@ class VoigtFittingWorker(QThread):
             # Get comprehensive summary (v0o9 pattern)
             summary = processor.get_processing_summary(
                 fitted_results,
-                len(self.integrator.peak_list)
+                len(peak_list)
             )
 
             # Add fitted_results to summary for GUI update
@@ -386,8 +391,8 @@ class LunaNMRMainWindow(BaseWindow):
         # ===== Peak Detection Parameters (Expert Mode) =====
         # Detection parameters from parameter_manager defaults
         self.noise_threshold = 3.0
-        self.search_window_x = 0.08  # 1H dimension (ppm)
-        self.search_window_y = 0.8   # 15N dimension (ppm)
+        self.search_window_x = 0.01  # 1H dimension (ppm)
+        self.search_window_y = 0.04  # 15N dimension (ppm)
         self.detection_square_size = 3  # X-dimension/1H (pixels)
         self.detection_rectangle_y = 1  # Y-dimension/15N (pixels)
         self.detection_square_ppm_x = "0.000"  # Auto-calculated ppm conversion
@@ -1434,7 +1439,7 @@ class LunaNMRMainWindow(BaseWindow):
             # Cancel previous timer if exists
             try:
                 self._intensity_scale_timer_3d.stop()
-            except:
+            except Exception:
                 pass
 
         # Schedule update after 100ms delay
@@ -2098,8 +2103,8 @@ class LunaNMRMainWindow(BaseWindow):
         params_frame_layout.addWidget(self.expert_search_x_spin, 0, 1)
 
         self.expert_search_y_spin = QDoubleSpinBox()
-        self.expert_search_y_spin.setRange(0.05, 4.0)
-        self.expert_search_y_spin.setSingleStep(0.05)
+        self.expert_search_y_spin.setRange(0.01, 4.0)
+        self.expert_search_y_spin.setSingleStep(0.01)
         self.expert_search_y_spin.setDecimals(2)
         self.expert_search_y_spin.setValue(self.search_window_y)
         self.expert_search_y_spin.valueChanged.connect(self._on_expert_param_change)
@@ -2309,7 +2314,7 @@ class LunaNMRMainWindow(BaseWindow):
         ps2d_params_layout.addWidget(cluster_size_label, 4, 0)
 
         self.expert_max_cluster_spin = QSpinBox()
-        self.expert_max_cluster_spin.setRange(2, 15)
+        self.expert_max_cluster_spin.setRange(2, 50)
         self.expert_max_cluster_spin.setSingleStep(1)
         self.expert_max_cluster_spin.setValue(self.ps2d_max_cluster_size)
         self.expert_max_cluster_spin.setToolTip("Maximum peaks in overlap cluster for simultaneous 2D fitting")
@@ -2681,7 +2686,7 @@ class LunaNMRMainWindow(BaseWindow):
                     if hasattr(self, 'expert_det_ppm_label'):
                         self.expert_det_ppm_label.setText(self.detection_square_ppm_x)
                     return
-                except:
+                except Exception:
                     pass
         self.detection_square_ppm_x = "(load data to see ppm)"
         if hasattr(self, 'expert_det_ppm_label'):
@@ -5371,20 +5376,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         try:
             logger.info(f"Detection complete: {len(detected_peaks)} peaks detected")
 
-            # Convert fitted_peaks to DataFrame for peak_list
-            # This ensures consistency between detection and fitting steps
-            if self.integrator.fitted_peaks:
-                detected_df = self._convert_fitted_to_dataframe(self.integrator.fitted_peaks)
-                if detected_df is not None:
-                    # In peak_list mode, backup original reference list
-                    if self.workflow_mode == 'peak_list':
-                        if not hasattr(self.integrator, 'peak_list_original'):
-                            self.integrator.peak_list_original = self.integrator.peak_list.copy()
-
-                    # Set peak_list to detected positions
-                    self.integrator.peak_list = detected_df
-
             # Update peak navigator with detected peaks (if initialized)
+            # Note: peak_list remains unchanged (reference positions)
+            # Detection results are stored separately in integrator.fitted_peaks
             if self.peak_navigator is not None:
                 self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
             else:
@@ -5428,59 +5422,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         show_error(self, "Detection Failed", error_message)
 
     # ===== Peak Detection Helper Methods =====
-
-    def _convert_fitted_to_dataframe(self, fitted_peaks):
-        """Convert fitted_peaks list to peak_list DataFrame.
-
-        This ensures fitting uses detected positions, not reference positions.
-        Called after detection to replace reference peak_list with detected peaks.
-
-        Args:
-            fitted_peaks: List of peak dictionaries with keys:
-                - assignment: Peak label (e.g., 'G10')
-                - ppm_x: X-axis position in ppm
-                - ppm_y: Y-axis position in ppm
-                - intensity: Peak intensity/volume
-                - snr: Signal-to-noise ratio
-                - detected: Boolean detection flag
-                - detection_quality: Quality descriptor
-
-        Returns:
-            pandas.DataFrame with columns: Assignment, Position_X, Position_Y,
-            Height, Intensity, SNR, Detected, Detection_Quality
-            Returns None if fitted_peaks is empty.
-        """
-        import pandas as pd
-
-        if not fitted_peaks:
-            return None
-
-        # Extract data from fitted_peaks
-        data = {
-            'Assignment': [],
-            'Position_X': [],
-            'Position_Y': [],
-            'Height': [],
-            'Intensity': [],
-            'SNR': [],
-            'Detected': [],
-            'Detection_Quality': []
-        }
-
-        for peak in fitted_peaks:
-            data['Assignment'].append(peak.get('assignment', 'Unknown'))
-            # Check multiple key variants: fitting uses peak_x/peak_y, detection uses ppm_x/ppm_y
-            data['Position_X'].append(peak.get('ppm_x', peak.get('peak_x', 0.0)))
-            data['Position_Y'].append(peak.get('ppm_y', peak.get('peak_y', 0.0)))
-            data['Height'].append(peak.get('intensity', 0.0))
-            data['Intensity'].append(peak.get('intensity', 0.0))
-            data['SNR'].append(peak.get('snr', 0.0))
-            data['Detected'].append(peak.get('detected', False))
-            data['Detection_Quality'].append(peak.get('detection_quality', 'Unknown'))
-
-        df = pd.DataFrame(data)
-        logger.debug(f"Converted {len(fitted_peaks)} fitted_peaks to DataFrame")
-        return df
 
     def update_statistics_panel(self):
         """Update the Statistics panel with detection/fitting results.
@@ -5548,6 +5489,28 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                       "Peak list is empty. Please load peaks or run detection first.")
             return
 
+        # Determine which peaks to fit: use detected peaks if available, else reference
+        # fitted_peaks contains detected positions (from Detect button)
+        # peak_list contains reference positions (from loaded file)
+        peaks_to_fit = None
+        if hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
+            # Convert fitted_peaks (list of dicts) to DataFrame format
+            import pandas as pd
+            peaks_data = []
+            for peak in self.integrator.fitted_peaks:
+                peaks_data.append({
+                    'Assignment': peak.get('assignment', 'Unknown'),
+                    'Position_X': peak.get('ppm_x', 0.0),
+                    'Position_Y': peak.get('ppm_y', 0.0),
+                    'Height': peak.get('intensity', 0.0),
+                    'SNR': peak.get('snr', 0.0),
+                    'Detected': peak.get('detected', False)
+                })
+            peaks_to_fit = pd.DataFrame(peaks_data)
+            logger.info(f"Using detected peaks for fitting: {len(peaks_to_fit)} peaks")
+        else:
+            logger.info(f"Using reference peaks for fitting: {len(self.integrator.peak_list)} peaks")
+
         # Import progress dialog
         from lunaNMR.gui.components import ProgressDialog
 
@@ -5570,7 +5533,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         self.fitting_worker = VoigtFittingWorker(
             self.integrator,
             self.param_manager,
-            processing_options
+            processing_options,
+            peaks_to_fit=peaks_to_fit  # Use detected peaks if available
         )
 
         # Connect worker signals to dialog and handlers

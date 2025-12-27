@@ -83,7 +83,7 @@ class NMRParameterManager:
             'lw_gauss_15n': {'default': None, 'type': (type(None), float)},
 
             # Series Integration / PS2D Linewidth Reuse Parameters
-            'use_ps2d_linewidth_reuse': {'default': False, 'type': bool}  # Enable PS2D linewidth reuse from reference spectrum (C++ peakfit.cpp:586-607)
+            'use_ps2d_linewidth_reuse': {'default': False, 'type': bool}  
         }
 
         # Initialize current parameters with defaults

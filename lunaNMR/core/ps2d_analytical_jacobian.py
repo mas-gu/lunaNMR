@@ -33,8 +33,6 @@ Parameter Layout (NPAR_VOIGT = 8):
     [6] intensity   - Peak intensity
     [7] baseline    - Unused (spare)
 
-NOTE: This matches the ACTUAL code in multi_voigt_profile_2d (lines 202-209),
-      NOT the C++ documentation comment which has a different order.
 
 Author: Guillaume Mas
 Date: 2025

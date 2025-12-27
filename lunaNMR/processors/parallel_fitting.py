@@ -23,7 +23,7 @@ import pandas as pd
 from typing import List, Dict, Any, Tuple
 import time
 import traceback
-from functools import partial
+
 
 class ParallelPeakFitter:
     """Parallel peak fitting manager"""
@@ -278,7 +278,7 @@ def _fit_single_peak_worker(task_data):
         }
 
 
-def _test_worker(test_data):
+def _test_worker(_test_data):
     """Simple test function for multiprocessing"""
     return "test_ok"
 

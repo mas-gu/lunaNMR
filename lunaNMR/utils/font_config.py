@@ -91,7 +91,7 @@ class FontManager:
                 font = tkfont.Font(family=font_name, size=10)
                 # Test if the font can render a common emoji
                 return font
-            except:
+            except Exception:
                 continue
         return None
     
@@ -141,7 +141,7 @@ class FontManager:
         if use_emoji and self.emoji_font:
             try:
                 widget.configure(font=self.emoji_font)
-            except:
+            except Exception:
                 pass  # Fall back to default font
 
 

@@ -10,7 +10,6 @@ scikit-learn>=1.0.0
 
 # Performance optimization - REQUIRED for 2D multi-peak fitting
 # Provides 3-5× speedup for overlapping peak clusters (object mode with scipy.special.wofz)
-# Full 10-15× speedup would require porting PINT's C++ Faddeeva (~2-3 hours)
 # REQUIRED: System will not function properly without Numba acceleration
 numba>=0.57.0  # REQUIRED: 3-5× speedup for 2D multi-peak fitting
 

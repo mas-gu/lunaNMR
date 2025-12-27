@@ -86,10 +86,10 @@ class NMRFileManager:
                     if len(df.columns) == 1:
                         # Probably not comma-separated, try tab
                         df = pd.read_csv(file_path, sep='\t')
-                except:
+                except Exception:
                     try:
                         df = pd.read_csv(file_path, sep='\t')
-                    except:
+                    except Exception:
                         return False, "Could not parse file with comma or tab separators"
 
             # Clean column names (remove extra spaces)
@@ -166,10 +166,10 @@ class NMRFileManager:
                     if len(df.columns) == 1:
                         # Probably not comma-separated, try tab
                         df = pd.read_csv(file_path, sep='\t')
-                except:
+                except Exception:
                     try:
                         df = pd.read_csv(file_path, sep='\t')
-                    except:
+                    except Exception:
                         raise ValueError("Could not parse file with comma or tab separators")
 
             # Clean column names (remove extra spaces)

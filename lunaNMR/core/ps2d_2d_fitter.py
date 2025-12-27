@@ -651,12 +651,12 @@ class Ps2dMultiPeakFitter2D:
             y_flat_masked = y_flat
 
         # Create wrapper functions for optimizer
-        def model_function(f1_f2_dummy, *p):
+        def model_function(_f1_f2_dummy, *p):
             """Model function for optimizer (ignores x, uses stored grids)"""
             y_pred_full = multi_voigt_profile_2d(f1_grid, f2_grid, np.array(p), n_peaks).ravel()
             return y_pred_full[mask_flat]  # Return only masked points
 
-        def jacobian_function(f1_f2_dummy, p):
+        def jacobian_function(_f1_f2_dummy, p):
             """Jacobian function for optimizer"""
             jac_full = compute_multi_voigt_jacobian_2d(f1_grid, f2_grid, np.array(p), n_peaks)
             return jac_full[mask_flat, :]  # Return only masked rows

@@ -54,7 +54,7 @@ class MultiSpectrumProcessor:
         # Initialize output folder for retrocompatibility
         self.output_folder = None
 
-        # PS2D linewidth reuse configuration (C++ peakfit.cpp:586-607 logic)
+        # PS2D linewidth reuse configuration 
         self.use_ps2d_linewidth_reuse = self.voigt_params.get('use_ps2d_linewidth_reuse', False)
         if not self.use_ps2d_linewidth_reuse and 'gui_params' in self.voigt_params:
             # Try nested structure
@@ -819,7 +819,7 @@ class MultiSpectrumProcessor:
                 elif 'peak_position' in fit_result and fit_result['peak_position']:
                     try:
                         fitted_x = float(fit_result['peak_position'][0])
-                    except:
+                    except Exception:
                         pass
 
                 if y_fit and 'center' in y_fit and y_fit['center'] is not None:
@@ -829,7 +829,7 @@ class MultiSpectrumProcessor:
                 elif 'peak_position' in fit_result and fit_result['peak_position']:
                     try:
                         fitted_y = float(fit_result['peak_position'][1])
-                    except:
+                    except Exception:
                         pass
 
                 # Use fitted coordinates if available and valid, otherwise keep reference
@@ -870,7 +870,7 @@ class MultiSpectrumProcessor:
                                 detected_intensity = float(matching_peak['Height'].iloc[0])
                             elif 'Intensity' in matching_peak.columns:
                                 detected_intensity = float(matching_peak['Intensity'].iloc[0])
-                    except:
+                    except Exception:
                         pass
 
                 # Extract linewidths (FWHM in ppm)
@@ -1254,7 +1254,7 @@ class MultiSpectrumProcessor:
                         if not matching_ref.empty:
                             ref_x = float(matching_ref['Position_X'].iloc[0])
                             ref_y = float(matching_ref['Position_Y'].iloc[0])
-                    except:
+                    except Exception:
                         pass
 
                 peak_row = {
@@ -1306,9 +1306,7 @@ class MultiSpectrumProcessor:
 
     def _extract_and_store_linewidth(self, result, assignment):
         """
-        Extract linewidths from reference spectrum fit (PS2D C++ style)
-
-        C++ PS2D approach (peakfit.cpp:586-607):
+        Extract linewidths from reference spectrum fit 
         - Fit first plane/spectrum with full optimization
         - Extract linewidths (LW F1, LW F2, Voigt params)
         - Store for reuse in subsequent spectra

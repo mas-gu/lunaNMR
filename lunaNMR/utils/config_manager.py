@@ -227,7 +227,7 @@ class ConfigurationManager:
                     return json.load(f)
             else:
                 return {"nmr_files": [], "peak_files": []}
-        except:
+        except Exception:
             return {"nmr_files": [], "peak_files": []}
 
     def save_recent_files(self, recent_files):
@@ -236,7 +236,7 @@ class ConfigurationManager:
             with open(self.recent_files_file, 'w', encoding='utf-8') as f:
                 json.dump(recent_files, f, indent=2)
             return True
-        except:
+        except Exception:
             return False
 
     def add_recent_file(self, file_path, file_type):

@@ -405,7 +405,6 @@ class RelaxationDataBridge:
             Path to output CSV
         """
         from scipy.optimize import curve_fit
-        import tempfile
 
         # Step 1: Scan folder for spectra with delays
         files_with_delays = self.delay_extractor.scan_folder(spectra_folder)
@@ -536,7 +535,7 @@ class RelaxationDataBridge:
                                 maxfev=500
                             )
                             R_bootstrap.append(popt_bs[1])
-                        except:
+                        except Exception:
                             pass
 
                     if len(R_bootstrap) > 10:

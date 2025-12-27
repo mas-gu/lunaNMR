@@ -552,12 +552,18 @@ class FitViewer(QMainWindow):
 
     def _plot_single_field(self, ax, residue, meas_type, field):
         """Plot single field data"""
+        # Style the plot to match results viewers
+        ax.set_facecolor(FRAME_BG_COLOR)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
         # Get data key
         data_key = f"{field}_{meas_type}"
 
         if data_key not in self.data:
             ax.text(0.5, 0.5, f"No {meas_type} data for {field}",
-                   ha='center', va='center', transform=ax.transAxes)
+                   ha='center', va='center', transform=ax.transAxes,
+                   fontsize=12, color=SECONDARY_TEXT)
             ax.axis('off')
             return
 
@@ -570,7 +576,8 @@ class FitViewer(QMainWindow):
 
         if not fit_data:
             ax.text(0.5, 0.5, f"No data for residue {residue}",
-                   ha='center', va='center', transform=ax.transAxes)
+                   ha='center', va='center', transform=ax.transAxes,
+                   fontsize=12, color=SECONDARY_TEXT)
             ax.axis('off')
             return
 
@@ -583,9 +590,11 @@ class FitViewer(QMainWindow):
         t_value = fit_data['t2']
         t_error = fit_data['t2_err']
 
-        # Plot
-        ax.plot(time_points, intensities, 'bo', markersize=8, label='Data')
-        ax.plot(fit_time, fit_intensity, 'b-', linewidth=2, label='Fit')
+        # Plot with zorder for proper layering
+        ax.plot(time_points, intensities, 'o', color='#2196F3', markersize=8,
+               label='Data', zorder=3)
+        ax.plot(fit_time, fit_intensity, '-', color='#2196F3', linewidth=2,
+               label='Fit', zorder=2)
 
         # Annotation
         field_freq = metadata['field_freq']
@@ -595,15 +604,20 @@ class FitViewer(QMainWindow):
                fontsize=10, verticalalignment='top',
                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
-        # Labels
-        ax.set_xlabel(f"Time ({time_units})")
-        ax.set_ylabel("Signal Intensity")
-        ax.set_title(f"Residue {residue} - {meas_type}")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        # Labels with bold font
+        ax.set_xlabel(f"Time ({time_units})", fontsize=11, fontweight='bold')
+        ax.set_ylabel("Signal Intensity", fontsize=11, fontweight='bold')
+        ax.set_title(f"Residue {residue} - {meas_type}", fontsize=12, fontweight='bold')
+        ax.legend(loc='best', fontsize=9)
+        ax.grid(True, alpha=0.3, linestyle='--', zorder=1)
 
     def _plot_overlay(self, ax, residue, meas_type):
         """Plot overlay of both fields"""
+        # Style the plot to match results viewers
+        ax.set_facecolor(FRAME_BG_COLOR)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
         # Get data for both fields
         field1_key = f"field1_{meas_type}"
         field2_key = f"field2_{meas_type}"
@@ -613,7 +627,8 @@ class FitViewer(QMainWindow):
 
         if not has_field1 and not has_field2:
             ax.text(0.5, 0.5, f"No {meas_type} data available",
-                   ha='center', va='center', transform=ax.transAxes)
+                   ha='center', va='center', transform=ax.transAxes,
+                   fontsize=12, color=SECONDARY_TEXT)
             ax.axis('off')
             return
 
@@ -635,9 +650,14 @@ class FitViewer(QMainWindow):
 
         if not fit1 and not fit2:
             ax.text(0.5, 0.5, f"No data for residue {residue}",
-                   ha='center', va='center', transform=ax.transAxes)
+                   ha='center', va='center', transform=ax.transAxes,
+                   fontsize=12, color=SECONDARY_TEXT)
             ax.axis('off')
             return
+
+        # Colors matching results viewers
+        color_field1 = '#2196F3'  # Blue
+        color_field2 = '#FF9800'  # Orange
 
         # Plot Field 1 (blue)
         annotations = []
@@ -650,13 +670,15 @@ class FitViewer(QMainWindow):
             fit_time1 = fit1['fit_curve']['time']
             fit_intensity1 = fit1['fit_curve']['intensity']
 
-            ax.plot(time_points1, intensities1, 'bo', markersize=8, label=f"{metadata1['field_freq']} MHz data")
-            ax.plot(fit_time1, fit_intensity1, 'b-', linewidth=2, label=f"{metadata1['field_freq']} MHz fit")
+            ax.plot(time_points1, intensities1, 'o', color=color_field1, markersize=8,
+                   label=f"{metadata1['field_freq']} MHz data", zorder=3)
+            ax.plot(fit_time1, fit_intensity1, '-', color=color_field1, linewidth=2,
+                   label=f"{metadata1['field_freq']} MHz fit", zorder=2)
 
             annotations.append(f"{meas_type} ({metadata1['field_freq']} MHz) = {fit1['t2']:.2f} ± {fit1['t2_err']:.2f} {metadata1['time_units']}")
             time_units = metadata1['time_units']
 
-        # Plot Field 2 (red)
+        # Plot Field 2 (orange)
         if fit2:
             metadata2 = self.data[field2_key]['metadata']
             time_points2 = metadata2['time_points']
@@ -664,8 +686,10 @@ class FitViewer(QMainWindow):
             fit_time2 = fit2['fit_curve']['time']
             fit_intensity2 = fit2['fit_curve']['intensity']
 
-            ax.plot(time_points2, intensities2, 'ro', markersize=8, label=f"{metadata2['field_freq']} MHz data")
-            ax.plot(fit_time2, fit_intensity2, 'r-', linewidth=2, label=f"{metadata2['field_freq']} MHz fit")
+            ax.plot(time_points2, intensities2, 'o', color=color_field2, markersize=8,
+                   label=f"{metadata2['field_freq']} MHz data", zorder=3)
+            ax.plot(fit_time2, fit_intensity2, '-', color=color_field2, linewidth=2,
+                   label=f"{metadata2['field_freq']} MHz fit", zorder=2)
 
             annotations.append(f"{meas_type} ({metadata2['field_freq']} MHz) = {fit2['t2']:.2f} ± {fit2['t2_err']:.2f} {metadata2['time_units']}")
             time_units = metadata2['time_units']
@@ -676,12 +700,12 @@ class FitViewer(QMainWindow):
                fontsize=10, verticalalignment='top',
                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
-        # Labels
-        ax.set_xlabel(f"Time ({time_units})")
-        ax.set_ylabel("Signal Intensity")
-        ax.set_title(f"Residue {residue} - {meas_type}")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        # Labels with bold font
+        ax.set_xlabel(f"Time ({time_units})", fontsize=11, fontweight='bold')
+        ax.set_ylabel("Signal Intensity", fontsize=11, fontweight='bold')
+        ax.set_title(f"Residue {residue} - {meas_type}", fontsize=12, fontweight='bold')
+        ax.legend(loc='best', fontsize=9)
+        ax.grid(True, alpha=0.3, linestyle='--', zorder=1)
 
     def _show_blank_state(self):
         """Show blank plot with instruction message"""

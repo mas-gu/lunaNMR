@@ -16,7 +16,7 @@ Version: 1.0 -
 
 import numpy as np
 from scipy.special import wofz
-from scipy.linalg import LinAlgError as ScipyLinAlgError
+
 from typing import Dict, Tuple, Optional, List
 import warnings
 import sys
@@ -31,7 +31,7 @@ except ImportError:
     NUMBA_AVAILABLE = False
 
 # Import apriori linewidth estimator and global instance (self-contained, no circular deps)
-from .ps2d_multi_peak_fitter import Ps2dLinewidthEstimator, get_global_estimator
+from .ps2d_multi_peak_fitter import Ps2dLinewidthEstimator
 
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
@@ -89,7 +89,7 @@ def voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
                      lw_gauss_f1: float, lw_gauss_f2: float,
                      intensity: float) -> np.ndarray:
     """
-    2D Voigt profile computation (EXACT port from faddeeva.cpp lines 1929-1946)
+    2D Voigt profile computation
 
     Parameters:
     -----------
@@ -165,21 +165,7 @@ def multi_voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
     --------
     np.ndarray : Sum of all 2D Voigt profiles, same shape as f1/f2
 
-    Notes:
-    ------
-    ```cpp
-    for (Int i=0; i<nopeaks; i++) {
-        Doub sigmaF1 = a[4+i*NPAR_VOIGT]/sqrt(8*log(2));
-        Doub sigmaF2 = a[5+i*NPAR_VOIGT]/sqrt(8*log(2));
-        Doub gammaF1 = a[1+i*NPAR_VOIGT]/2.;
-        Doub gammaF2 = a[3+i*NPAR_VOIGT]/2.;
-        cmplx z1 = C(a[0+i*NPAR_VOIGT]-f1, gammaF1)/(sigmaF1*sqrtOf2);
-        cmplx z2 = C(a[2+i*NPAR_VOIGT]-f2, gammaF2)/(sigmaF2*sqrtOf2);
-        y += a[6+i*NPAR_VOIGT]*creal(FADDEEVA(w)(z1, 0.))*creal(FADDEEVA(w)(z2, 0.))/(sigmaF1*sigmaF2*2.*PI);
-    }
-    ```
-
-    Parameter mapping (C++ → Python):
+    Parameter mapping :
     - a[0+i*8] = pos_f1
     - a[1+i*8] = lw_lor_f1
     - a[2+i*8] = pos_f2
@@ -382,117 +368,7 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
     return jac
 
 
-def voigt_profile_1d(x: np.ndarray,
-                     pos: float, lw_lorentz: float, lw_gauss: float,
-                     intensity: float) -> np.ndarray:
-    """
-    1D Voigt profile - EXACT  clone (NO baseline)
-
-    Parameters:
-    -----------
-    x : np.ndarray
-        Frequency axis (ppm)
-    pos : float
-        Peak position (ppm)
-    lw_lorentz : float
-        Lorentzian FWHM (ppm)
-    lw_gauss : float
-        Gaussian FWHM (ppm)
-    intensity : float
-        Peak intensity
-
-    Returns:
-    --------
-    np.ndarray : Pure Voigt profile (NO baseline added)
-
-    Note:
-    -----
-    This matches  exactly - baseline must be removed BEFORE fitting
-    """
-
-    # Convert FWHM to sigma/gamma
-    sigma = lw_gauss / SQRT_8LN2
-    gamma = lw_lorentz / 2.0
-
-    # Prevent division by zero
-    sigma = max(sigma, 1e-10)
-
-    # Complex argument
-    z = ((pos - x) + 1j * gamma) / (sigma * SQRT_2)
-
-    # Faddeeva function
-    fade = np.real(wofz(z))
-
-    voigt = intensity * fade / (sigma * SQRT_2PI)
-
-    return voigt
-
-
 # ============================================================================
-# NUMERICAL DERIVATIVES WITH RELATIVE STEPPING 
-# ============================================================================
-
-def compute_voigt_jacobian_1d(x: np.ndarray, params: np.ndarray) -> np.ndarray:
-    """
-    Compute Jacobian with adaptive stepping (NO baseline)
-
-    Parameters:
-    -----------
-    x : np.ndarray
-        Frequency axis
-    params : np.ndarray
-        [pos, lw_lorentz, lw_gauss, intensity] - 4 parameters, NO baseline
-
-    Returns:
-    --------
-    np.ndarray : Jacobian matrix (n_points × 4)
-
-    Implementation:
-    ---------------
-    - Adaptive step sizing: step = sqrt(eps) × max(|param|, typical_scale)
-    - Parameter-specific scales prevent underflow/overflow
-    - Intensity derivative is ANALYTICAL: ∂y/∂A = y/A
-    """
-
-    n_points = len(x)
-    n_params = len(params)  # Should be 4 now
-    jac = np.zeros((n_points, n_params))
-
-    # Compute base function value
-    y_base = voigt_profile_1d(x, *params)
-
-    # Numerical derivatives for pos, lw_lorentz, lw_gauss (indices 0, 1, 2)
-    for i in range(3):  # Only first 3 parameters
-        params_perturbed = params.copy()
-
-        # Use relative step size for numerical derivative
-        params_perturbed[i] = params[i] * DERIV_STEP_MULTIPLIER
-        step_size = params_perturbed[i] - params[i]
-
-        y_perturbed = voigt_profile_1d(x, *params_perturbed)
-
-        # Derivative: (f(x+h) - f(x)) / h
-        jac[:, i] = (y_perturbed - y_base) / step_size
-
-    # Analytical derivative for intensity (
-    # ∂y/∂A = y/A
-    INTENSITY_THRESHOLD = 1e-6
-    if abs(params[3]) > INTENSITY_THRESHOLD:
-        jac[:, 3] = y_base / params[3]
-    else:
-        # Use numerical derivative for very small intensities
-        params_perturbed = params.copy()
-        if params[3] >= 0:
-            params_perturbed[3] = INTENSITY_THRESHOLD
-        else:
-            params_perturbed[3] = -INTENSITY_THRESHOLD
-        step_size = INTENSITY_THRESHOLD
-        y_perturbed = voigt_profile_1d(x, *params_perturbed)
-        jac[:, 3] = (y_perturbed - y_base) / step_size
-
-    return jac
-
-
 # ============================================================================
 # LEVENBERG-MARQUARDT WITH ADDITIVE DAMPING 
 # ============================================================================
@@ -762,255 +638,10 @@ class Ps2dStyleLevenbergMarquardt:
 
 
 # ============================================================================
-# MULTI-STAGE FITTING STRATEGY 
-# ============================================================================
-
-class MultiStageFitter:
-    """
-
-    Implements 4-stage progressive refinement :
-    - Stage 0: Fix positions/widths, fit only intensity (VOIGT initialization)
-    - Stage 1: Fix positions, float widths + intensity
-    - Stage 2: Float positions (if allowed)
-    - Stage 3: Refit all with refined parameters
-    - Stage 4: Final global fit
-
-    This strategy prevents local minima and reduces parameter correlation.
-    """
-
-    def __init__(self, verbose: bool = False):
-        """Initialize multi-stage fitter"""
-        self.verbose = verbose
-        self.optimizer = Ps2dStyleLevenbergMarquardt()
-
-    def fit_1d_voigt(self, x: np.ndarray, y: np.ndarray,
-                     initial_params: Dict,
-                     bounds: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-                     fix_position: bool = False,
-                     fix_linewidths: bool = False) -> Dict:
-        """
-        Fit 1D Voigt profile with multi-stage strategy - EXACT  (NO baseline)
-
-        Parameters:
-        -----------
-        x : np.ndarray
-            Frequency axis (ppm)
-        y : np.ndarray
-            Intensity data 
-        initial_params : dict
-            {'pos': float, 'lw_lorentz': float, 'lw_gauss': float,
-             'intensity': float}
-        bounds : tuple, optional
-            (lower, upper) bounds for each parameter
-        fix_position : bool
-            If True, peak position is fixed
-        fix_linewidths : bool
-            If True, linewidths are fixed
-
-        Returns:
-        --------
-        dict : Fitting results with optimized parameters
-
-        Note:
-        -----
-        NO baseline fitting - data must be baseline-corrected BEFORE calling this!
-        This matches  exactly.
-        """
-
-        # Convert initial params to array (4 parameters - NO baseline)
-        p0 = np.array([
-            initial_params['pos'],
-            initial_params['lw_lorentz'],
-            initial_params['lw_gauss'],
-            initial_params['intensity']
-        ])
-
-        # Validate bounds and clip initial parameters if needed
-        if bounds is not None:
-            lower_bounds, upper_bounds = bounds
-            p0_original = p0.copy()
-            p0 = np.clip(p0, lower_bounds, upper_bounds)
-
-        # ====================================================================
-        # STAGE 0: Fix positions and linewidths, fit intensity ONLY
-        # ====================================================================
-
-        fixed_stage0 = {0: p0[0], 1: p0[1], 2: p0[2]}  # Fix pos, lws ONLY
-
-        params, cov, info = self.optimizer.fit(
-            func=voigt_profile_1d,
-            jacobian=compute_voigt_jacobian_1d,
-            x=x, y=y, p0=p0,
-            bounds=bounds,
-            fixed_params=fixed_stage0
-        )
-
-        # ====================================================================
-        # STAGE 1: Fix positions, float linewidths + intensity
-        # ====================================================================
-        if not fix_linewidths:
-
-            fixed_stage1 = {0: params[0]}  # Fix position only
-
-            params, cov, info = self.optimizer.fit(
-                func=voigt_profile_1d,
-                jacobian=compute_voigt_jacobian_1d,
-                x=x, y=y, p0=params,
-                bounds=bounds,
-                fixed_params=fixed_stage1
-            )
-
-        # ====================================================================
-        # STAGE 2: Float positions (if allowed)
-        # ====================================================================
-        if not fix_position:
-
-            # No fixed params - all float
-            params, cov, info = self.optimizer.fit(
-                func=voigt_profile_1d,
-                jacobian=compute_voigt_jacobian_1d,
-                x=x, y=y, p0=params,
-                bounds=bounds,
-                fixed_params={}
-            )
-
-        # ====================================================================
-        # STAGE 3: Final refinement - all parameters float
-        # ====================================================================
-
-        params, cov, info = self.optimizer.fit(
-            func=voigt_profile_1d,
-            jacobian=compute_voigt_jacobian_1d,
-            x=x, y=y, p0=params,
-            bounds=bounds,
-            fixed_params={}
-        )
-
-        # Calculate R²
-        y_fit = voigt_profile_1d(x, *params)
-        ss_res = np.sum((y - y_fit)**2)
-        ss_tot = np.sum((y - np.mean(y))**2)
-        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
-
-        # Prepare result (NO baseline in output)
-        result = {
-            'success': info['success'],
-            'pos': params[0],
-            'lw_lorentz': params[1],
-            'lw_gauss': params[2],
-            'intensity': params[3],
-            'r_squared': r_squared,
-            'chi2': info['final_chi2'],
-            'iterations': info['iterations'],
-            'fitted_curve': y_fit,
-            'covariance': cov,
-            'params': params
-        }
-
-        return result
-
-
 # ============================================================================
 # CONVENIENCE FUNCTIONS
 # ============================================================================
 
-def fit_single_peak_ps2d_style(x_data: np.ndarray, y_data: np.ndarray,
-                                peak_position: float,
-                                initial_linewidth: float = None,
-                                all_peak_positions: List[float] = None,
-                                dimension: str = 'x',
-                                verbose: bool = False) -> Dict:
-    """
-    Fit a single Voigt peak using PS2D-style multi-stage fitting
-
-    This is the main entry point for fitting with  quality.
-    Now includes apriori linewidth estimation from spatial context.
-
-    Parameters:
-    -----------
-    x_data : np.ndarray
-        Frequency axis (ppm)
-    y_data : np.ndarray
-        Intensity data
-    peak_position : float
-        Initial guess for peak position (ppm)
-    initial_linewidth : float, optional
-        User-provided linewidth (ppm). If None, estimates from spatial analysis.
-    all_peak_positions : List[float], optional
-        All detected peak positions for spatial analysis context
-    dimension : str, optional
-        Dimension identifier ('x' for 1H, 'y' for 15N), default 'x'
-    verbose : bool
-        Print detailed fitting progress
-
-    Returns:
-    --------
-    dict : Fitting results
-    """
-
-    # ========================================================================
-    # ========================================================================
-    estimator = get_global_estimator()
-
-    if initial_linewidth is not None:
-        estimator.reference_peaks[dimension] = {
-            'lw_lorentz': initial_linewidth / 300.0,
-            'lw_gauss': initial_linewidth,
-            'assignment': 'user_override'
-        }
-
-    # Get optimized linewidths using three-tier hierarchy
-    lw_lorentz, lw_gauss = estimator.get_linewidth(
-        dimension=dimension,
-        x_data=x_data,
-        y_data=y_data,
-        all_peak_positions=all_peak_positions if all_peak_positions else [peak_position]
-    )
-
-    # Estimate initial parameters
-    # NOTE: Data is already baseline-corrected before calling this function
-    peak_idx = np.argmin(np.abs(x_data - peak_position))
-    intensity_guess = y_data[peak_idx]  # No baseline subtraction (data already corrected)
-
-    initial_params = {
-        'pos': peak_position,
-        'lw_lorentz': lw_lorentz,
-        'lw_gauss': lw_gauss,
-        'intensity': intensity_guess
-    }
-
-    # Set reasonable bounds (4 parameters: pos, lw_lor, lw_gauss, intensity)
-    ppm_range = abs(x_data[-1] - x_data[0])
-    lower_bounds = np.array([
-        peak_position - ppm_range * 0.2,  # position
-        lw_lorentz * 0.1,                  # lw_lorentz (use estimated value)
-        lw_gauss * 0.1,                    # lw_gauss (use estimated value)
-        0.0                                # intensity > 0
-    ])
-    upper_bounds = np.array([
-        peak_position + ppm_range * 0.2,
-        lw_lorentz * 10.0,                 # lw_lorentz (use estimated value)
-        lw_gauss * 10.0,                   # lw_gauss (use estimated value)
-        intensity_guess * 5.0
-    ])
-
-    # Fit using multi-stage strategy
-    fitter = MultiStageFitter(verbose=verbose)
-    result = fitter.fit_1d_voigt(x_data, y_data, initial_params,
-                                  bounds=(lower_bounds, upper_bounds))
-
-    # ========================================================================
-    # ========================================================================
-    # If fit successful with good quality, register fitted linewidths as reference
-    if result.get('success') and result.get('r_squared', 0) > 0.85:
-        estimator.register_fitted_peak(
-            dimension=dimension,
-            lw_lorentz=result['lw_lorentz'],
-            lw_gauss=result['lw_gauss'],
-            assignment=None  # Single peak - no assignment
-        )
-
-    return result
 
 
 # ============================================================================

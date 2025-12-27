@@ -3,7 +3,7 @@
 
 import os
 import logging
-from typing import Optional, Dict, List, Any, TYPE_CHECKING
+from typing import Optional, Dict, List, Any
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
@@ -136,6 +136,16 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.master_peak_list = []  # All unique peaks by assignment
         self.peak_spectrum_map = {}  # assignment -> list of spectrum indices
         self.selected_master_peak_idx = None  # Currently selected peak in Peak Mode
+
+        # Peak Mode axis locking (for comparing intensity/position across spectra)
+        self.lock_z_scale_to_reference = True  # ON by default
+        self.reference_z_min = None  # Captured from first spectrum
+        self.reference_z_max = None
+        self.lock_xy_to_reference = True  # ON by default
+        self.reference_x_min = None  # F2 (1H) ppm range
+        self.reference_x_max = None
+        self.reference_y_min = None  # F1 (15N) ppm range
+        self.reference_y_max = None
 
         # Initialize spectra data
         self._initialize_spectra()
@@ -988,6 +998,26 @@ class MultiSpectrumViewerDialog(BaseDialog):
         nav_btn_layout.addWidget(self.voigt_3d_peak_mode_next_btn)
 
         spectrum_nav_layout.addLayout(nav_btn_layout)
+
+        # Axis lock checkboxes for comparing across spectra
+        lock_layout = QHBoxLayout()
+        lock_layout.setSpacing(SPACING_SM)
+
+        self.lock_z_scale_checkbox = QCheckBox("Lock Z")
+        self.lock_z_scale_checkbox.setChecked(True)
+        self.lock_z_scale_checkbox.setToolTip("Lock intensity axis to first spectrum's scale")
+        self.lock_z_scale_checkbox.toggled.connect(self._on_lock_z_scale_toggled)
+        lock_layout.addWidget(self.lock_z_scale_checkbox)
+
+        self.lock_xy_checkbox = QCheckBox("Lock X/Y")
+        self.lock_xy_checkbox.setChecked(True)
+        self.lock_xy_checkbox.setToolTip("Lock chemical shift axes to first spectrum's range")
+        self.lock_xy_checkbox.toggled.connect(self._on_lock_xy_toggled)
+        lock_layout.addWidget(self.lock_xy_checkbox)
+
+        lock_layout.addStretch()
+        spectrum_nav_layout.addLayout(lock_layout)
+
         spectrum_nav_group.setLayout(spectrum_nav_layout)
         peak_mode_layout.addWidget(spectrum_nav_group)
 
@@ -2087,6 +2117,15 @@ class MultiSpectrumViewerDialog(BaseDialog):
             self.navigation_mode = 'spectrum'
             self.voigt_3d_mode_toggle_btn.setText("Spectrum Mode")
             self.voigt_3d_mode_stack.setCurrentIndex(0)
+            # Clear reference scales (not used in Spectrum Mode)
+            self.reference_z_min = None
+            self.reference_z_max = None
+            self.reference_x_min = None
+            self.reference_x_max = None
+            self.reference_y_min = None
+            self.reference_y_max = None
+            self.voigt_3d_plotter.clear_fixed_z_limits()
+            self.voigt_3d_plotter.clear_fixed_xy_limits()
             # Reset to first spectrum
             if self.voigt_3d_spectrum_list.count() > 0:
                 self.voigt_3d_spectrum_list.setCurrentRow(0)
@@ -2103,6 +2142,9 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.selected_master_peak_idx = peak_idx
         peak = self.master_peak_list[peak_idx]
         assignment = peak.get('assignment', '')
+
+        # Reset view orientation when selecting a new peak
+        self.voigt_3d_plotter.reset_view_orientation()
 
         # Get list of spectra that have this peak
         spectra_with_peak = self.peak_spectrum_map.get(assignment, [])
@@ -2138,6 +2180,8 @@ class MultiSpectrumViewerDialog(BaseDialog):
         # Select first available spectrum and plot
         if self._voigt_3d_peak_mode_available_spectra:
             first_idx = self._voigt_3d_peak_mode_available_spectra[0]
+            # Capture reference z-scale from first spectrum
+            self._capture_reference_z_scale(first_idx)
             self.voigt_3d_peak_mode_spectrum_list.setCurrentRow(first_idx)
             self._select_voigt_3d_spectrum_for_peak_mode(first_idx)
 
@@ -2188,6 +2232,26 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 self.selected_peak_index = i
                 break
 
+        # Apply reference z-scale if locked (for intensity comparison across spectra)
+        if self.lock_z_scale_to_reference and self.reference_z_min is not None:
+            self.voigt_3d_plotter.set_fixed_z_limits(
+                self.reference_z_min,
+                self.reference_z_max
+            )
+        else:
+            self.voigt_3d_plotter.clear_fixed_z_limits()
+
+        # Apply reference x/y if locked (for position comparison across spectra)
+        if self.lock_xy_to_reference and self.reference_x_min is not None:
+            self.voigt_3d_plotter.set_fixed_xy_limits(
+                self.reference_x_min,
+                self.reference_x_max,
+                self.reference_y_min,
+                self.reference_y_max
+            )
+        else:
+            self.voigt_3d_plotter.clear_fixed_xy_limits()
+
         # Plot the 3D Voigt analysis
         self._plot_voigt_analysis_3d()
         logger.debug(f"3D Voigt Peak Mode: Selected spectrum {spec_idx} for peak {assignment}")
@@ -2227,3 +2291,87 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 new_idx = self._voigt_3d_peak_mode_available_spectra[0]
                 self.voigt_3d_peak_mode_spectrum_list.setCurrentRow(new_idx)
                 self._select_voigt_3d_spectrum_for_peak_mode(new_idx)
+
+    # ===== Z-Scale Reference Methods for Peak Mode =====
+
+    def _capture_reference_z_scale(self, spec_idx: int):
+        """Capture z-axis limits from specified spectrum for reference scaling.
+
+        Called when a peak is selected in Peak Mode to set the reference
+        z-scale from the first spectrum. This allows visual comparison of
+        intensity changes across spectra.
+
+        Args:
+            spec_idx: Index of the spectrum to capture z-limits from
+        """
+        import numpy as np
+
+        if self.selected_master_peak_idx is None:
+            return
+
+        peak = self.master_peak_list[self.selected_master_peak_idx]
+        assignment = peak.get('assignment', '')
+
+        # Find the peak in this spectrum using same method as _plot_voigt_analysis_3d
+        spec = self.spectra[spec_idx]
+        fitted_peaks = self._get_fitted_peaks(spec_idx)
+
+        for p in fitted_peaks:
+            p_assignment = p.get('assignment', p.get('Assignment', ''))
+            if p_assignment == assignment:
+                # Use same lookup as _plot_voigt_analysis_3d
+                stored_result = self._find_stored_voigt_result(spec, assignment, p)
+
+                if stored_result is not None:
+                    region_2d = stored_result.get('region_2d')
+                    if region_2d is not None:
+                        # Capture z (intensity) limits
+                        experimental = region_2d['intensity']
+                        self.reference_z_min = float(np.min(experimental))
+                        self.reference_z_max = float(np.max(experimental))
+
+                        # Capture x/y (chemical shift) limits
+                        f1_ppm = region_2d['f1_ppm']
+                        f2_ppm = region_2d['f2_ppm']
+                        self.reference_x_min = float(np.min(f2_ppm))
+                        self.reference_x_max = float(np.max(f2_ppm))
+                        self.reference_y_min = float(np.min(f1_ppm))
+                        self.reference_y_max = float(np.max(f1_ppm))
+
+                        logger.debug(
+                            f"Captured reference scales from spectrum {spec_idx}: "
+                            f"z=[{self.reference_z_min:.2e}, {self.reference_z_max:.2e}], "
+                            f"x=[{self.reference_x_min:.3f}, {self.reference_x_max:.3f}], "
+                            f"y=[{self.reference_y_min:.2f}, {self.reference_y_max:.2f}]"
+                        )
+                break
+
+    def _on_lock_z_scale_toggled(self, checked: bool):
+        """Handle z-scale lock toggle checkbox.
+
+        Args:
+            checked: True if lock is enabled, False otherwise
+        """
+        self.lock_z_scale_to_reference = checked
+
+        if not checked:
+            self.voigt_3d_plotter.clear_fixed_z_limits()
+
+        # Refresh current view if we have a selection
+        if self.selected_master_peak_idx is not None:
+            self._plot_voigt_analysis_3d()
+
+    def _on_lock_xy_toggled(self, checked: bool):
+        """Handle x/y axis lock toggle checkbox.
+
+        Args:
+            checked: True if lock is enabled, False otherwise
+        """
+        self.lock_xy_to_reference = checked
+
+        if not checked:
+            self.voigt_3d_plotter.clear_fixed_xy_limits()
+
+        # Refresh current view if we have a selection
+        if self.selected_master_peak_idx is not None:
+            self._plot_voigt_analysis_3d()

@@ -80,12 +80,12 @@ REMOVE_ARTIFACTS = True                           # Remove obvious artifacts
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+
 import os
 import sys
 from scipy.optimize import curve_fit, minimize
-from scipy.ndimage import maximum_filter, minimum_filter
-from scipy.stats import pearsonr
+from scipy.ndimage import maximum_filter
+
 import warnings
 warnings.filterwarnings('ignore')
 

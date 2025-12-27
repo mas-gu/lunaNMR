@@ -22,8 +22,8 @@ import numpy as np
 import pandas as pd
 from scipy.special import wofz
 from scipy.optimize import curve_fit
-from scipy.signal import find_peaks, savgol_filter, peak_widths
-from scipy.ndimage import gaussian_filter1d, median_filter
+from scipy.signal import find_peaks, peak_widths
+from scipy.ndimage import gaussian_filter1d
 import warnings
 import time
 warnings.filterwarnings('ignore')
@@ -184,7 +184,7 @@ class EnhancedVoigtFitter:
             if param in self.gui_fitting_params:
                 self.fitting_parameters[param] = self.gui_fitting_params[param]
 
-    def _calculate_gui_based_multiplier(self, nucleus_type, ppm_range, data_length, fitted_width=None):
+    def _calculate_gui_based_multiplier(self, nucleus_type, ppm_range, _data_length, fitted_width=None):
         """
         DEPRECATED: This function is NO LONGER USED.
 
@@ -291,62 +291,13 @@ class EnhancedVoigtFitter:
             log_error(f"Automated fitting failed: {e}")
             return self._legacy_fit_fallback(x_data, y_data, nucleus_type)
 
-    def _convert_consensus_to_legacy(self, consensus_result, x_data, y_data, nucleus_type):
-        """Convert consensus result to legacy format for backward compatibility"""
+    def _convert_consensus_to_legacy(self, consensus_result):
+        """DEPRECATED: This method is no longer used."""
+        return None
 
-        if not consensus_result.consensus_peaks:
-            return self._empty_result()
-
-        # Convert peaks to legacy format
-        legacy_peaks = []
-        for peak in consensus_result.consensus_peaks:
-            legacy_peak = {
-                'amplitude': peak.get('amplitude', 0),
-                'center': peak.get('center', 0),
-                'sigma': peak.get('sigma', 0.01),
-                'gamma': peak.get('gamma', 0.01),
-                'baseline': peak.get('baseline', 0),
-                'width_hz': (peak.get('sigma', 0.01) + peak.get('gamma', 0.01)) * 2,
-                'width_ppm': (peak.get('sigma', 0.01) + peak.get('gamma', 0.01)) * 2,
-                'errors': peak.get('errors', [0, 0, 0, 0, 0])
-            }
-            legacy_peaks.append(legacy_peak)
-
-        # Convert overall statistics
-        best_fit = consensus_result.best_fit
-        quality_assessment = consensus_result.quality_assessment
-
-        legacy_result = {
-            'peaks': legacy_peaks,
-            'r_squared': best_fit.r_squared,
-            'residual_std': best_fit.residual_std,
-            'aic': best_fit.aic,
-            'bic': best_fit.bic,
-            'method': f"consensus_{best_fit.method}",
-            'fit_time': best_fit.fit_time,
-            'n_peaks': len(legacy_peaks),
-            'quality_category': quality_assessment.get('overall_quality', 'unknown'),
-            'convergence_info': best_fit.convergence_info,
-            'model_selection': consensus_result.model_selection,
-            'confidence_scores': consensus_result.confidence_scores,
-            'automated_fitting': True,
-            'nucleus_type': nucleus_type
-        }
-
-        return legacy_result
-
-    def _legacy_fit_fallback(self, x_data, y_data, nucleus_type):
-        """Fallback to legacy fitting when automated fitting fails"""
-        # This would call the existing legacy fitting method
-        # For now, return a minimal result
-        return {
-            'peaks': [],
-            'r_squared': 0.0,
-            'method': 'legacy_fallback',
-            'automated_fitting': False,
-            'nucleus_type': nucleus_type,
-            'error': 'Automated fitting not available'
-        }
+    def _legacy_fit_fallback(self, x_data, y_data, peak_center, **kwargs):
+        """DEPRECATED: This method is no longer used."""
+        return None
 
     def _empty_result(self):
         """Return empty result in legacy format"""
@@ -386,182 +337,9 @@ class EnhancedVoigtFitter:
             voigt = amplitude * np.real(wofz(z)) / (sigma * np.sqrt(2*np.pi))
 
             return voigt + baseline
-        except:
+        except Exception:
             # Fallback to Gaussian if Voigt fails
             return amplitude * np.exp(-0.5 * ((x - center) / max(sigma, 1e-6))**2) + baseline
-
-    def robust_baseline_estimation(self, x_data, y_data, method='auto', validation_enabled=True):
-        """
-        LEVEL 2 ENHANCED: Robust baseline estimation with method validation and quarantine
-
-        This method implements comprehensive baseline estimation with:
-        - Multiple estimation methods with quality assessment
-        - Method quarantine for consistently failing approaches
-        - Adaptive method selection based on data characteristics
-        - Cross-validation and consensus building
-        """
-        baseline = None  # Initialize baseline variable
-        
-        try:
-            if method == 'auto':
-                # Auto method: try percentile first, fallback to polynomial
-                return self.robust_baseline_estimation(x_data, y_data, method='percentile', validation_enabled=False)
-            
-            elif method == 'polynomial':
-                # Use outer 20% of data for baseline fitting
-                n_points = len(x_data)
-                edge_fraction = 0.2
-                n_edge = int(n_points * edge_fraction)
-
-                # Combine left and right edges
-                edge_indices = np.concatenate([
-                    np.arange(n_edge),
-                    np.arange(n_points - n_edge, n_points)
-                ])
-
-                # Fit polynomial to edge points
-                degree = min(self.fitting_parameters['baseline_polynomial_degree'], len(edge_indices) - 1)
-                poly_coeffs = np.polyfit(x_data[edge_indices], y_data[edge_indices], degree)
-                baseline = np.polyval(poly_coeffs, x_data)
-
-                # Return median of baseline for single value
-                return np.median(baseline)
-
-            elif method == 'iterative':
-                # Iterative baseline correction (simplified)
-                baseline_est = np.percentile(y_data, 10)  # Start with 10th percentile
-
-                for iteration in range(3):
-                    # Points below current baseline estimate + some margin
-                    margin = np.std(y_data) * 0.5
-                    mask = y_data < (baseline_est + margin)
-
-                    if np.sum(mask) > len(y_data) * 0.1:  # At least 10% of points
-                        baseline_est = np.median(y_data[mask])
-                    else:
-                        break
-
-                return baseline_est
-
-            elif method == 'percentile':
-                # Simple percentile-based estimation
-                return np.percentile(y_data, 15)
-
-            elif method == 'asymmetric_polynomial':
-                # Enhanced asymmetric baseline correction for overlapping peaks
-                return self.asymmetric_baseline_correction(x_data, y_data)
-
-        except Exception as e:
-            # Fallback: use median of lowest 20% of points
-            baseline = np.percentile(y_data, 20)
-
-
-        # === SAFETY BARRIER: Baseline Validation ===
-        # Final safety check: ensure baseline is never None
-        if baseline is None:
-            baseline = np.percentile(y_data, 20)
-            
-        data_max = np.max(y_data)
-        data_min = np.min(y_data)
-        data_range = data_max - data_min
-
-        # Check if baseline is physically reasonable
-        if baseline > data_max * 0.8:  # Baseline shouldn't be near data maximum
-            baseline = np.percentile(y_data, 15)
-
-        if baseline < data_min - data_range * 0.2:  # Baseline shouldn't be far below minimum
-            baseline = np.percentile(y_data, 15)
-
-        # Check for NaN or infinite baseline
-        if not np.isfinite(baseline):
-            baseline = np.median(y_data)
-
-        # === END BASELINE SAFETY BARRIER ===
-
-    def asymmetric_baseline_correction(self, x_data, y_data, asymmetry_param=0.05,
-                                     smoothness_param=1e6, max_iterations=10):
-        """
-        Enhanced asymmetric baseline correction using Asymmetrically Reweighted Penalized Least Squares (ArPLS)
-
-        This method is particularly effective for overlapping peaks with asymmetric baseline distortion.
-        It iteratively fits a smooth baseline while penalizing positive deviations (peaks) more than
-        negative ones, creating an asymmetric penalty that follows the true baseline under peaks.
-
-        Parameters:
-        - x_data, y_data: spectral data
-        - asymmetry_param: asymmetry parameter (0 < p < 1), smaller = more asymmetric
-        - smoothness_param: smoothness parameter (λ), larger = smoother baseline
-        - max_iterations: maximum iterations for convergence
-
-        Returns:
-        - baseline array same length as input data
-
-        Reference: Baek et al. (2015) "Baseline correction using asymmetrically reweighted penalized least squares"
-        """
-        try:
-            from scipy import sparse
-            from scipy.sparse.linalg import spsolve
-
-            n = len(y_data)
-            if n < 4:
-                # Too few points for AsLLS, fallback to simple method
-                return np.full(n, np.percentile(y_data, 10))
-
-            # Build second derivative matrix for smoothness penalty
-            # D2 is the discrete second difference operator
-            D1 = sparse.diags([1, -1], [0, 1], shape=(n-1, n))
-            D2 = sparse.diags([1, -2, 1], [0, 1, 2], shape=(n-2, n))
-
-            # Initial weights (all equal)
-            w = np.ones(n)
-            baseline_prev = np.copy(y_data)
-
-            # Iterative asymmetric reweighting
-            for iteration in range(max_iterations):
-                # Build weight matrix
-                W = sparse.diags(w, 0, shape=(n, n))
-
-                # Build system: (W + λD₂ᵀD₂)z = Wy
-                # where z is the baseline we want to solve for
-                A = W + smoothness_param * D2.T @ D2
-                b = W @ y_data
-
-                # Solve linear system
-                baseline_current = spsolve(A, b)
-
-                # Calculate residuals
-                residuals = y_data - baseline_current
-
-                # Update weights asymmetrically
-                # For positive residuals (peaks): use small weight p
-                # For negative residuals (below baseline): use weight 1
-                w = np.where(residuals > 0, asymmetry_param, 1.0)
-
-                # Check convergence
-                if iteration > 0:
-                    change = np.mean(np.abs(baseline_current - baseline_prev))
-                    noise_level = np.std(residuals) * 0.01
-
-                    if change < noise_level:
-                        break
-
-                baseline_prev = baseline_current.copy()
-
-            # Validate result
-            if not np.all(np.isfinite(baseline_current)):
-                return np.full(n, np.percentile(y_data, 15))
-
-            # Additional validation: baseline shouldn't be much higher than data
-            if np.max(baseline_current) > np.max(y_data) * 1.2:
-                return np.full(n, np.percentile(y_data, 20))
-
-            return baseline_current
-
-        except ImportError:
-            return self._fallback_asymmetric_baseline(x_data, y_data)
-
-        except Exception as e:
-            return self._fallback_asymmetric_baseline(x_data, y_data)
 
     def _fallback_asymmetric_baseline(self, x_data, y_data):
         """
@@ -664,7 +442,7 @@ class EnhancedVoigtFitter:
                     width_moment = np.sqrt(second_moment)
                 else:
                     width_moment = typical_width
-            except:
+            except Exception:
                 width_moment = typical_width
 
             # Method 3: Gradient-based estimation
@@ -679,7 +457,7 @@ class EnhancedVoigtFitter:
                     width_gradient = (x_data[max_grad_right] - x_data[max_grad_left]) / 4
                 else:
                     width_gradient = typical_width
-            except:
+            except Exception:
                 width_gradient = typical_width
 
             # Combine estimates using weighted average
@@ -1340,205 +1118,8 @@ class EnhancedVoigtFitter:
 
             return max(0.0, score)
 
-        except:
+        except Exception:
             return 0.0  # Complete failure in evaluation
-
-    def emergency_fallback_fitting(self, x_data, y_data, peak_center):
-        """
-        LEVEL 1 CRITICAL SAFETY: Emergency fallback when all standard methods fail
-
-        This method implements a hierarchy of increasingly simple fitting approaches
-        to ensure that some reasonable result is always returned, even for pathological cases.
-
-        Parameters:
-        - x_data, y_data: experimental data
-        - peak_center: estimated peak center
-
-        Returns:
-        - dict: fitting result with emergency fallback flag
-        """
-
-        fallback_results = []
-        data_max = np.max(y_data)
-        data_min = np.min(y_data)
-        data_range = data_max - data_min
-        ppm_range = abs(x_data[-1] - x_data[0])
-
-        # === FALLBACK 1: Simple Gaussian (Most Robust) ===
-        try:
-            def simple_gaussian(x, amp, center, width, baseline):
-                return amp * np.exp(-((x - center) / width) ** 2) + baseline
-
-            # Conservative parameter estimates
-            width_est = ppm_range / 20  # Very conservative width
-            baseline_est = np.median([data_min, np.percentile(y_data, 10)])
-            amplitude_est = data_max - baseline_est
-
-            simple_guess = [amplitude_est, peak_center, width_est, baseline_est]
-            simple_bounds = (
-                [data_range * 0.01, peak_center - width_est*3, width_est/20, data_min - data_range*0.2],
-                [data_range * 5, peak_center + width_est*3, width_est*20, data_max*0.5]
-            )
-
-            popt_gauss, pcov_gauss = curve_fit(
-                simple_gaussian, x_data, y_data,
-                p0=simple_guess, bounds=simple_bounds,
-                maxfev=400  # Increased for better convergence
-            )
-
-            y_fitted_gauss = simple_gaussian(x_data, *popt_gauss)
-            r2_gauss = self.calculate_r_squared(y_data, y_fitted_gauss)
-
-            if r2_gauss > 0.1:  # Minimal quality threshold
-                fallback_results.append({
-                    'method': 'gaussian_emergency_fallback',
-                    'r_squared': r2_gauss,
-                    'parameters': [popt_gauss[0], popt_gauss[1], popt_gauss[2], 0.0, popt_gauss[3]],  # Convert to Voigt format
-                    'fitted_curve': y_fitted_gauss,
-                    'success': True,
-                    'emergency_fallback': True,
-                    'fallback_level': 1
-                })
-
-        except Exception:
-            pass  # Gaussian fallback failed, try next
-
-        # === FALLBACK 2: Lorentzian Profile ===
-        try:
-            def simple_lorentzian(x, amp, center, gamma, baseline):
-                return amp * gamma**2 / ((x - center)**2 + gamma**2) + baseline
-
-            width_est = ppm_range / 25  # Even more conservative for Lorentzian
-            baseline_est = np.percentile(y_data, 5)  # Lower percentile for Lorentzian
-            amplitude_est = (data_max - baseline_est) * np.pi * width_est / 2  # Lorentzian normalization
-
-            lorentz_guess = [amplitude_est, peak_center, width_est, baseline_est]
-            lorentz_bounds = (
-                [data_range * 0.005, peak_center - width_est*2, width_est/50, data_min - data_range*0.1],
-                [data_range * 10, peak_center + width_est*2, width_est*10, data_max*0.3]
-            )
-
-            popt_lorentz, pcov_lorentz = curve_fit(
-                simple_lorentzian, x_data, y_data,
-                p0=lorentz_guess, bounds=lorentz_bounds,
-                maxfev=400  # Increased for better convergence
-            )
-
-            y_fitted_lorentz = simple_lorentzian(x_data, *popt_lorentz)
-            r2_lorentz = self.calculate_r_squared(y_data, y_fitted_lorentz)
-
-            if r2_lorentz > 0.08:  # Even lower threshold for Lorentzian
-                fallback_results.append({
-                    'method': 'lorentzian_emergency_fallback',
-                    'r_squared': r2_lorentz,
-                    'parameters': [popt_lorentz[0], popt_lorentz[1], 0.0, popt_lorentz[2], popt_lorentz[3]],  # Convert to Voigt format
-                    'fitted_curve': y_fitted_lorentz,
-                    'success': True,
-                    'emergency_fallback': True,
-                    'fallback_level': 2
-                })
-
-        except Exception:
-            pass  # Lorentzian fallback failed, try next
-
-        # === FALLBACK 3: Triangular Approximation ===
-        try:
-            # Find peak region
-            peak_idx = np.argmax(y_data)
-            peak_amplitude = y_data[peak_idx]
-
-            # Estimate width from half-maximum points
-            half_max = (peak_amplitude + data_min) / 2
-            half_max_indices = np.where(y_data > half_max)[0]
-
-            if len(half_max_indices) > 3:
-                width_points = len(half_max_indices)
-                estimated_width = (x_data[half_max_indices[-1]] - x_data[half_max_indices[0]]) / 2.355  # FWHM to sigma
-
-                # Create triangular fit (Gaussian with fixed width)
-                def triangular_fit(x, amp, baseline):
-                    return amp * np.exp(-((x - peak_center) / estimated_width) ** 2) + baseline
-
-                tri_guess = [peak_amplitude - data_min, data_min]
-                tri_bounds = ([0, data_min - data_range*0.1], [data_range * 2, data_max])
-
-                popt_tri, _ = curve_fit(triangular_fit, x_data, y_data, p0=tri_guess, bounds=tri_bounds, maxfev=200)  # Increased for better convergence
-                y_fitted_tri = triangular_fit(x_data, *popt_tri)
-                r2_tri = self.calculate_r_squared(y_data, y_fitted_tri)
-
-                if r2_tri > 0.05:
-                    fallback_results.append({
-                        'method': 'triangular_emergency_fallback',
-                        'r_squared': r2_tri,
-                        'parameters': [popt_tri[0], peak_center, estimated_width, 0.0, popt_tri[1]],
-                        'fitted_curve': y_fitted_tri,
-                        'success': True,
-                        'emergency_fallback': True,
-                        'fallback_level': 3
-                    })
-
-        except Exception:
-            pass  # Triangular fallback failed, try next
-
-        # === FALLBACK 4: Linear Interpolation (Ultimate Safety) ===
-        try:
-            # Create piecewise linear fit preserving peak shape
-            peak_idx = np.argmax(y_data)
-            baseline_est = np.median([y_data[0], y_data[-1], data_min])
-
-            # Simple linear background with peak preserved
-            y_linear = np.full_like(y_data, baseline_est)
-
-            # Preserve a region around the peak
-            preserve_width = max(10, len(y_data) // 10)
-            start_idx = max(0, peak_idx - preserve_width // 2)
-            end_idx = min(len(y_data), peak_idx + preserve_width // 2 + 1)
-
-            y_linear[start_idx:end_idx] = y_data[start_idx:end_idx]
-
-            r2_linear = self.calculate_r_squared(y_data, y_linear)
-
-            if r2_linear > 0.01:  # Minimal threshold
-                fallback_results.append({
-                    'method': 'linear_interpolation_ultimate_fallback',
-                    'r_squared': r2_linear,
-                    'parameters': [data_max - baseline_est, x_data[peak_idx], ppm_range/20, 0.0, baseline_est],
-                    'fitted_curve': y_linear,
-                    'success': True,
-                    'emergency_fallback': True,
-                    'fallback_level': 4
-                })
-
-        except Exception:
-            pass  # Linear interpolation fallback failed
-
-        # === SELECT BEST FALLBACK RESULT ===
-        if fallback_results:
-            # Sort by R² and select best
-            best_fallback = max(fallback_results, key=lambda x: x['r_squared'])
-
-
-            # Add comprehensive fallback information
-            best_fallback.update({
-                'amplitude': best_fallback['parameters'][0],
-                'center': best_fallback['parameters'][1],
-                'sigma': best_fallback['parameters'][2],
-                'gamma': best_fallback['parameters'][3],
-                'baseline': best_fallback['parameters'][4],
-                'total_fallback_attempts': len(fallback_results),
-                'fallback_methods_tried': [r['method'] for r in fallback_results]
-            })
-
-            return best_fallback
-        else:
-            return {
-                'success': False,
-                'method': 'all_emergency_fallbacks_failed',
-                'r_squared': 0,
-                'error': 'complete_emergency_fallback_failure',
-                'emergency_fallback': True,
-                'fallback_level': 99
-            }
 
     def calculate_parameter_uncertainties(self, popt, pcov, alpha=0.05):
         """
@@ -1686,7 +1267,7 @@ class EnhancedVoigtFitter:
 
             return local_baseline
 
-        except:
+        except Exception:
             # Fallback
             return np.percentile(y_local, 20)
 
@@ -2081,674 +1662,6 @@ class EnhancedVoigtFitter:
                 self.overlap_config.update(config)
 
 
-    def fit_voigt_profile(self, nmr_data, ppm_x, ppm_y, ppm_scale_x, ppm_scale_y,
-                          assignment=None, linewidth_constraints=None):
-        """
-        Fit Voigt profile to a 2D NMR peak by extracting cross-sections and fitting each dimension.
-
-        This is a wrapper method that extracts 1D cross-sections from 2D NMR data and fits
-        Voigt profiles along each dimension (X and Y). This method is called by series_processor.py
-        for PS2D-style linewidth reuse functionality.
-
-        Parameters:
-        -----------
-        nmr_data : np.ndarray
-            2D NMR data matrix (shape: [Y_points, X_points])
-        ppm_x : float
-            Peak position in X dimension (1H, ppm)
-        ppm_y : float
-            Peak position in Y dimension (15N/13C, ppm)
-        ppm_scale_x : np.ndarray
-            PPM scale for X dimension (1H)
-        ppm_scale_y : np.ndarray
-            PPM scale for Y dimension (15N/13C)
-        assignment : str, optional
-            Peak assignment/label (e.g., 'A123N-H')
-        linewidth_constraints : dict, optional
-            Linewidth constraints for PS2D linewidth reuse:
-            {
-                'x': {'sigma_bounds': (min, max), 'gamma_bounds': (min, max)},
-                'y': {'sigma_bounds': (min, max), 'gamma_bounds': (min, max)}
-            }
-
-        Returns:
-        --------
-        dict : Comprehensive fit results with X and Y dimension fits
-            {
-                'success': bool,
-                'x_fit': {...},  # X dimension fit results
-                'y_fit': {...},  # Y dimension fit results
-                'assignment': str,
-                'position': {'x': ppm_x, 'y': ppm_y},
-                'linewidth_constraints_applied': bool
-            }
-        """
-        # Find peak indices in the data
-        x_idx = np.argmin(np.abs(ppm_scale_x - ppm_x))
-        y_idx = np.argmin(np.abs(ppm_scale_y - ppm_y))
-
-        # Extract 1D cross-sections at peak position
-        # X cross-section: horizontal slice at peak Y position
-        x_cross_section = nmr_data[y_idx, :]
-        x_ppm_scale = ppm_scale_x
-
-        # Y cross-section: vertical slice at peak X position
-        y_cross_section = nmr_data[:, x_idx]
-        y_ppm_scale = ppm_scale_y
-
-        # Extract linewidth constraints for each dimension if provided
-        x_linewidth_constraints = None
-        y_linewidth_constraints = None
-        constraints_applied = False
-
-        if linewidth_constraints:
-            x_linewidth_constraints = linewidth_constraints.get('x')
-            y_linewidth_constraints = linewidth_constraints.get('y')
-            constraints_applied = (x_linewidth_constraints is not None or
-                                  y_linewidth_constraints is not None)
-
-
-        # Fit X dimension (1H) with constraints
-        try:
-            x_fit = self.fit_peak_enhanced(
-                x_ppm_scale, x_cross_section,
-                initial_center=ppm_x,
-                nucleus_type='1H',
-                method='iterative_optimization',
-                linewidth_constraints=x_linewidth_constraints
-            )
-        except Exception as e:
-            log_warning(f"X dimension fit failed: {e}")
-            x_fit = {'success': False, 'error': str(e)}
-
-        # Fit Y dimension (15N/13C) with constraints
-        try:
-            y_fit = self.fit_peak_enhanced(
-                y_ppm_scale, y_cross_section,
-                initial_center=ppm_y,
-                nucleus_type='15N',  # Assume 15N, could be detected
-                method='iterative_optimization',
-                linewidth_constraints=y_linewidth_constraints
-            )
-        except Exception as e:
-            log_warning(f"Y dimension fit failed: {e}")
-            y_fit = {'success': False, 'error': str(e)}
-
-        # Combine results
-        result = {
-            'success': x_fit.get('success', False) and y_fit.get('success', False),
-            'x_fit': x_fit,
-            'y_fit': y_fit,
-            'assignment': assignment,
-            'position': {'x': ppm_x, 'y': ppm_y},
-            'linewidth_constraints_applied': constraints_applied,
-            'method': 'fit_voigt_profile'
-        }
-
-        return result
-
-    def fit_peak_enhanced(self, x_data, y_data, initial_center=None, nucleus_type=None,
-                         method='iterative_optimization', preprocessing=True,
-                         all_peaks_context=None, linewidth_constraints=None, detection_confidence=None,
-                         force_single_peak=False, _call_stack=None):
-        """
-        ENHANCED PEAK FITTING WITH DYNAMIC OPTIMIZATION
-
-        This is the main entry point for enhanced peak fitting with iterative optimization.
-
-        NEW OPTIMIZATION MODES:
-        - 'iterative_optimization': Uses dynamic baseline optimization and quality-driven convergence
-        - 'multi_step': Original multi-step fitting (preserved for backward compatibility)
-        - 'single_step': Single-step fitting (preserved for backward compatibility)
-
-        Parameters:
-        - x_data: x-axis data (ppm)
-        - y_data: intensity data
-        - initial_center: initial guess for peak center (if None, uses data maximum)
-        - nucleus_type: '1H', '15N', or '13C' (auto-detected if None)
-        - method: 'iterative_optimization', 'multi_step', or 'single_step'
-        - preprocessing: whether to apply data preprocessing
-        - all_peaks_context: List of all suspected peaks for global parameter estimation (NEW)
-        - linewidth_constraints: Dict with 'sigma_bounds' and 'gamma_bounds' for constrained fitting (NEW)
-        - detection_confidence: Dict with detection confidence scores and peak characteristics (INTEGRATION)
-        - force_single_peak: If True, skip overlap resolution (default: False) (NEW)
-
-        Returns:
-        - Comprehensive fit results dictionary with optimization diagnostics
-
-        BACKWARD COMPATIBILITY: Original methods preserved, new method is opt-in
-        NEW: Overlap detection and resolution (opt-in via configure_overlap_resolution)
-        """
-        # === RECURSION DETECTION ===
-        if _call_stack is None:
-            _call_stack = []
-
-        # Create unique call identifier
-        call_id = f"fit_peak_enhanced_{method}_{refined_center if initial_center is None else initial_center:.4f}"
-        if hasattr(self, '_last_center'):
-            call_id = f"fit_peak_enhanced_{method}_{self._last_center:.4f}"
-        else:
-            center_for_id = initial_center if initial_center is not None else (x_data[np.argmax(y_data)] if len(y_data) > 0 else 0.0)
-            call_id = f"fit_peak_enhanced_{method}_{center_for_id:.4f}"
-
-        # Check for recursion
-        if call_id in _call_stack:
-            log_warning(f"Recursion detected: {call_id}")
-            return self.emergency_fallback_fitting(x_data, y_data,
-                                                 initial_center if initial_center is not None else x_data[np.argmax(y_data)])
-
-        # Add to call stack
-        _call_stack.append(call_id)
-        current_call_stack = _call_stack.copy()  # Preserve for passing to other methods
-
-        try:
-            # Clear previous diagnostics and initialize
-            self.last_fit_diagnostics = {
-                'method': method,
-                'optimization_active': method == 'iterative_optimization',
-                'detection_confidence': detection_confidence,
-                'call_stack': current_call_stack,
-                'recursion_detected': False
-            }
-
-            # Data preprocessing (preserved from original)
-            if preprocessing and len(y_data) > 10:
-                window_size = min(self.fitting_parameters['smoothing_window'], len(y_data) // 3)
-                if window_size >= 3 and window_size % 2 == 1:
-                    y_data = savgol_filter(y_data, window_size, 2)
-
-            # Detect nucleus type
-            if nucleus_type is None:
-                nucleus_type = self.detect_nucleus_type([x_data[0], x_data[-1]])
-
-            # Peak center refinement
-            if initial_center is None:
-                initial_center = x_data[np.argmax(y_data)]
-            refined_center = self.refine_peak_center(x_data, y_data, initial_center)
-
-            # === DYNAMIC OPTIMIZATION MODE ===
-            if method == 'iterative_optimization':
-
-                # Step 1: Global parameter estimation from well-resolved peaks
-                global_params = self.estimate_initial_parameters_from_resolved_peaks(
-                    x_data, y_data, all_peaks_context
-                )
-                self.last_fit_diagnostics['global_params'] = global_params
-
-                # ===================================================================
-                # ===================================================================
-                baseline_est = 0.0
-                baseline_value = 0.0
-                print
-
-                # Store baseline info in diagnostics
-                self.last_fit_diagnostics['baseline_method'] = {
-                    'selected_method': 'none',
-                    'peak_complexity': 'N/A',
-                    'method_info': 'Using raw data '
-                }
-
-                # === NEW: OVERLAP DETECTION AND ROUTING ===
-                # Baseline-corrected data for overlap detection
-                if np.isscalar(baseline_est):
-                    y_corrected = y_data - baseline_est
-                else:
-                    y_corrected = y_data - baseline_est
-
-                # Check if overlap detection is enabled and available
-                if (OVERLAP_RESOLUTION_AVAILABLE and
-                    self.overlap_detection_enabled and
-                    not force_single_peak):
-
-                    overlap_info = self.detect_potential_overlap(
-                        x_data, y_corrected, refined_center, nucleus_type
-                    )
-
-                    if overlap_info['has_overlap'] and overlap_info['n_peaks'] > 1:
-                        # Lazy initialize overlap resolver
-                        if self.overlap_resolver is None:
-                            self.overlap_resolver = OverlapResolverEngine(enhanced_fitter=self)
-                            if self.overlap_config:
-                                # Convert OverlapResolutionConfig to dict before updating
-                                config_dict = self.overlap_config.to_dict() if hasattr(self.overlap_config, 'to_dict') else self.overlap_config
-                                self.overlap_resolver.config.update(config_dict)
-
-                        # Try overlap resolution
-                        try:
-                            result = self.overlap_resolver.resolve_overlapping_peaks(
-                                x_data, y_corrected,
-                                overlap_info['peak_candidates']
-                            )
-
-                            # Add baseline back to result
-                            result['baseline'] = baseline_est if np.isscalar(baseline_est) else baseline_value
-                            result['fitting_method'] = 'overlap_resolution'
-                            result['overlap_info'] = overlap_info
-
-                            # Check if resolution was successful
-                            if result['success'] and result.get('r_squared', 0) > 0.7:
-                                return result
-                            # Fall through to single-peak fitting
-
-                        except Exception:
-                            pass  # Fall through to single-peak fitting
-
-                # INTEGRATION ENHANCEMENT: Use detection confidence for parameter estimation
-                if detection_confidence and isinstance(detection_confidence, dict):
-                    # Use detection-informed amplitude if available
-                    if 'estimated_amplitude' in detection_confidence:
-                        amplitude_est = detection_confidence['estimated_amplitude']
-                    else:
-                        amplitude_est = np.max(y_data) - baseline_value
-
-                    # Use detection-informed width if available
-                    if 'estimated_width' in detection_confidence:
-                        width_est = detection_confidence['estimated_width']
-                    else:
-                        width_est = global_params['typical_linewidth']
-
-                    # Use chemical shift context for width refinement
-                    if 'chemical_shift_context' in detection_confidence:
-                        context = detection_confidence['chemical_shift_context']
-                        if 'typical_width' in context:
-                            context_width = context['typical_width']
-                            # Weighted average of global and context estimates
-                            confidence_weight = detection_confidence.get('confidence', 0.5)
-                            width_est = (confidence_weight * context_width +
-                                       (1 - confidence_weight) * width_est)
-
-                    # Store detection confidence info in diagnostics
-                    self.last_fit_diagnostics['detection_informed_params'] = {
-                        'amplitude': amplitude_est,
-                        'width': width_est,
-                        'confidence': detection_confidence.get('confidence', 0),
-                        'used_detection_info': True
-                    }
-
-                else:
-                    # === LEVEL 2 INTEGRATION: Replace standard parameter estimation ===
-                    if hasattr(self, 'parameter_estimator') and self.level2_params['robust_estimation_enabled']:
-
-                        estimation_result = self.parameter_estimator.estimate_initial_parameters(
-                            x_data, y_data, refined_center, nucleus_type, context=detection_confidence
-                        )
-
-                        if estimation_result['success']:
-                            # Extract parameters from Level 2 estimation
-                            level2_params = estimation_result['parameters']
-                            amplitude_est = level2_params[0]
-                            width_est = level2_params[2] + level2_params[3]  # sigma + gamma
-
-                            self.last_fit_diagnostics['level2_estimation'] = {
-                                'method': estimation_result['method'],
-                                'consensus_quality': estimation_result['consensus_quality'],
-                                'individual_methods': len(estimation_result['individual_results']),
-                                'data_quality': estimation_result['data_quality'],
-                                'used_level2': True
-                            }
-                        else:
-                            # Fallback to standard method
-                            amplitude_est = np.max(y_data) - baseline_value
-                            width_est = global_params['typical_linewidth']
-
-                            self.last_fit_diagnostics['level2_estimation'] = {
-                                'used_level2': False,
-                                'fallback_reason': 'estimation_failed'
-                            }
-                    else:
-                        # Standard parameter estimation (backward compatibility)
-                        amplitude_est = np.max(y_data) - baseline_value
-                        width_est = global_params['typical_linewidth']
-
-                        self.last_fit_diagnostics['level2_estimation'] = {
-                            'used_level2': False,
-                            'fallback_reason': 'level2_disabled'
-                        }
-
-                    self.last_fit_diagnostics['detection_informed_params'] = {
-                        'amplitude': amplitude_est,
-                        'width': width_est,
-                        'used_detection_info': False
-                    }
-
-                # Apply linewidth constraints if provided (GLOBAL OPTIMIZATION ENHANCEMENT)
-                if linewidth_constraints:
-                    sigma_bounds = linewidth_constraints.get('sigma_bounds', (width_est * 0.1, width_est * 10))
-                    gamma_bounds = linewidth_constraints.get('gamma_bounds', (width_est * 0.1, width_est * 10))
-
-                    # Constrain initial parameters to be within bounds
-                    sigma_est = np.clip(width_est * 0.6, sigma_bounds[0], sigma_bounds[1])
-                    gamma_est = np.clip(width_est * 0.4, gamma_bounds[0], gamma_bounds[1])
-
-                    self.last_fit_diagnostics['linewidth_constraints'] = linewidth_constraints
-                else:
-                    sigma_est = width_est * 0.6
-                    gamma_est = width_est * 0.4
-
-                # Use global parameters for better initial guess
-                initial_guess = [
-                    amplitude_est,
-                    refined_center,
-                    sigma_est,  # sigma (Gaussian component) - potentially constrained
-                    gamma_est,  # gamma (Lorentzian component) - potentially constrained
-                    baseline_value  # Use scalar baseline value for fitting
-                ]
-
-
-                # Step 3: Standard fitting attempt for baseline comparison
-                standard_result = self._fit_with_standard_method(x_data, y_data, initial_guess, nucleus_type,
-                                                                linewidth_constraints=linewidth_constraints)
-                standard_quality = standard_result.get('r_squared', 0)
-
-                self.last_fit_diagnostics['standard_result'] = {
-                    'r_squared': standard_quality,
-                    'success': standard_result.get('success', False)
-                }
-
-                # ===================================================================
-                # NO BASELINE OPTIMIZATION
-                # ===================================================================
-                best_result = standard_result
-                self.last_fit_diagnostics['baseline_optimization_skipped'] = 'raw_data_approach'
-
-##
-                # === NEW: AUTOMATIC MULTI-PEAK DETECTION ===
-                # Step 5: Check if poor fit indicates overlapping peaks
-                # Use GUI parameter instead of hardcoded value
-                MULTI_PEAK_R2_THRESHOLD = self.fitting_parameters.get('multi_peak_r2_threshold', 0.7)
-
-                if best_result.get('r_squared', 0) < MULTI_PEAK_R2_THRESHOLD:
-
-                    # Detect peaks within the current fitting region
-                    detected_peaks = self.detect_overlapping_peaks(x_data, y_data, nucleus_type=nucleus_type)
-
-                    if len(detected_peaks) > 1:
-
-                        peak_positions = [p['position'] for p in detected_peaks]
-
-                        # Additional residual analysis for validation
-                        if best_result.get('success', False):
-                            # Handle both flat and nested result formats
-                            if 'x_fit' in best_result:
-                                # Nested format from 2D fitting
-                                amplitude = best_result['x_fit']['amplitude']
-                                center = best_result['x_fit']['center']
-                                sigma = best_result['x_fit']['sigma']
-                                gamma = best_result['x_fit']['gamma']
-                                baseline = best_result['x_fit']['baseline']
-                            else:
-                                # Flat format from 1D fitting
-                                amplitude = best_result['amplitude']
-                                center = best_result['center']
-                                sigma = best_result['sigma']
-                                gamma = best_result['gamma']
-                                baseline = best_result['baseline']
-
-                            fitted_curve = self.voigt_profile_1d(
-                                x_data,
-                                amplitude,
-                                center,
-                                sigma,
-                                gamma,
-                                baseline
-                            )
-                            residuals = y_data - fitted_curve
-                            residual_peaks = find_peaks(np.abs(residuals),
-                                                      height=np.std(residuals) * 1.5,
-                                                      distance=max(1, len(x_data) // 200))
-
-
-                        # Attempt multi-peak fitting with progressive strategies
-                        try:
-                            # Try progressive strategies first (more robust)
-                            multi_result = self.fit_with_progressive_strategies(
-                                x_data, y_data, detected_peaks, global_constraints=None
-                            )
-
-                            # DEFENSIVE FIX: Ensure multi_result is a dictionary
-                            if not isinstance(multi_result, dict):
-                                multi_result = {'success': False, 'r_squared': 0.0, 'error': 'progressive_strategies_invalid_return'}
-
-                            # If progressive strategies fail, try original iterative approach
-                            if not multi_result.get('success', False):
-                                iterative_result = self.optimize_overlap_detection_iteratively(
-                                    x_data, y_data, peak_positions,
-                                    max_iterations=6, use_aic_selection=True,  # Reduced iterations for speed
-                                    _call_stack=current_call_stack
-                                )
-
-                                # CRITICAL FIX: Handle tuple return from optimize_overlap_detection_iteratively
-                                if isinstance(iterative_result, tuple):
-                                    # Expected format: (best_fit, optimization_report)
-                                    best_fit, optimization_report = iterative_result
-                                    if best_fit is not None and isinstance(best_fit, dict):
-                                        multi_result = best_fit
-                                        multi_result['optimization_report'] = optimization_report
-                                    else:
-                                        multi_result = {'success': False, 'r_squared': 0.0, 'error': 'iterative_optimization_no_best_fit'}
-                                elif isinstance(iterative_result, dict):
-                                    multi_result = iterative_result
-                                else:
-                                    multi_result = {'success': False, 'r_squared': 0.0, 'error': 'iterative_optimization_invalid_return'}
-
-                            multi_quality = multi_result.get('r_squared', 0)
-                            improvement_threshold = self.fitting_parameters.get('multi_peak_improvement_threshold', 0.1)
-
-                            if (multi_result.get('success', False) and
-                                multi_quality > best_result.get('r_squared', 0) + improvement_threshold):
-
-                                # Store multi-peak diagnostics
-                                self.last_fit_diagnostics['multi_peak_detection'] = {
-                                    'triggered': True,
-                                    'detected_peaks': len(detected_peaks),
-                                    'improvement': multi_quality - best_result.get('r_squared', 0),
-                                    'method': 'automatic_detection'
-                                }
-
-                                # Return the improved multi-peak result
-                                multi_result['quality_class'] = self.assess_fit_quality_comprehensive(
-                                    x_data, y_data, multi_result, nucleus_type
-                                )['quality_class']
-
-                                return multi_result
-
-                        except Exception:
-                            pass  # Multi-peak fitting failed
-
-                    # Store multi-peak attempt info
-                    self.last_fit_diagnostics['multi_peak_detection'] = {
-                        'triggered': True,
-                        'detected_peaks': len(detected_peaks) if 'detected_peaks' in locals() else 0,
-                        'improvement': 0,
-                        'method': 'automatic_detection_failed'
-                    }
-
-                else:
-                    self.last_fit_diagnostics['multi_peak_detection'] = {
-                        'triggered': False,
-                        'reason': 'single_peak_sufficient'
-                    }
-
-                # Add optimization diagnostics to result
-                if best_result.get('success', False):
-                    best_result['optimization_diagnostics'] = self.last_fit_diagnostics
-
-                return best_result
-
-            # === ORIGINAL METHODS (PRESERVED) ===
-            elif method == 'multi_step':
-                return self._fit_with_multistep_method(x_data, y_data, refined_center, nucleus_type, preprocessing)
-
-            elif method == 'single_step':
-                return self._fit_with_standard_method(x_data, y_data, None, nucleus_type, preprocessing)
-
-            else:
-                raise ValueError(f"Unknown fitting method: {method}. Use 'iterative_optimization', 'multi_step', or 'single_step'")
-
-        except Exception as e:
-            log_error(f"Enhanced fitting failed: {e}")
-
-            return {
-                'success': False,
-                'error': str(e),
-                'method': method,
-                'parameters': None,
-                'fitted_curve': None,
-                'quality_metrics': {'r_squared': 0, 'quality_class': 'Failed'},
-                'diagnostics': self.last_fit_diagnostics
-            }
-
-    def _fit_with_standard_method(self, x_data, y_data, initial_guess=None, nucleus_type=None,
-                                 preprocessing=True, linewidth_constraints=None):
-        """
-        PRESERVED ORIGINAL METHOD: Standard single-step Voigt fitting
-
-        This preserves the original functionality for backward compatibility
-        """
-        try:
-            if nucleus_type is None:
-                nucleus_type = self.detect_nucleus_type([x_data[0], x_data[-1]])
-
-            if initial_guess is None:
-                # Estimate parameters using original method
-                baseline = self.robust_baseline_estimation(x_data, y_data)
-                peak_height = np.max(y_data)
-                amplitude = peak_height - baseline
-                center = x_data[np.argmax(y_data)]
-                estimated_width = self.adaptive_width_estimation(x_data, y_data, center, nucleus_type)
-
-                initial_guess = [amplitude, center, estimated_width * 0.7, estimated_width * 0.3, baseline]
-
-            # Get adaptive bounds
-            bounds = self.get_adaptive_bounds(initial_guess, x_data, y_data, nucleus_type, linewidth_constraints)
-            lower_bounds, upper_bounds = bounds
-            tuple_bounds = list(zip(lower_bounds, upper_bounds))
-            initial_guess = self._clamp_vector_to_bounds(initial_guess, tuple_bounds)
-
-            # Perform fitting
-            popt, pcov = curve_fit(
-                self.voigt_profile_1d, x_data, y_data,
-                p0=initial_guess, bounds=(lower_bounds, upper_bounds),
-                maxfev=self.fitting_parameters['max_iterations']
-            )
-
-            # Generate fitted curve and quality assessment
-            y_fitted = self.voigt_profile_1d(x_data, *popt)
-            quality_metrics = self.comprehensive_quality_assessment(x_data, y_data, y_fitted, popt, pcov)
-            uncertainties = self.calculate_parameter_uncertainties(popt, pcov)
-
-            # Prepare result dictionary
-            result = {
-                'success': True,
-                'method': 'standard_single_step',
-                'parameters': popt,
-                'parameter_names': ['amplitude', 'center', 'sigma', 'gamma', 'baseline'],
-                'covariance': pcov,
-                'fitted_curve': y_fitted,
-                'residuals': y_data - y_fitted,
-                'nucleus_type': nucleus_type,
-                'quality_metrics': quality_metrics,
-                'uncertainties': uncertainties,
-
-                # Individual parameter access for compatibility
-                'amplitude': popt[0],
-                'center': popt[1],
-                'sigma': popt[2],
-                'gamma': popt[3],
-                'baseline': popt[4],
-                'r_squared': quality_metrics['r_squared'],
-                'quality_class': quality_metrics['quality_class']
-            }
-
-            return result
-
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'standard_fitting_failed: {str(e)}',
-                'method': 'standard_single_step'
-            }
-
-    def _fit_with_multistep_method(self, x_data, y_data, refined_center, nucleus_type, preprocessing):
-        """
-        PRESERVED ORIGINAL METHOD: Multi-step fitting (coarse → fine)
-
-        This preserves the original multi-step functionality
-        """
-        try:
-            # Original parameter estimation
-            baseline = self.robust_baseline_estimation(x_data, y_data)
-            amplitude = np.max(y_data) - baseline
-            estimated_width = self.adaptive_width_estimation(x_data, y_data, refined_center, nucleus_type)
-
-            initial_guess = [amplitude, refined_center, estimated_width * 0.7, estimated_width * 0.3, baseline]
-            bounds = self.get_adaptive_bounds(initial_guess, x_data, y_data, nucleus_type, None)
-
-            # Multi-step fitting: coarse → fine
-            try:
-                # Step 1: Coarse fit
-                relaxed_bounds = (
-                    [b * 0.5 for b in bounds[0]],
-                    [b * 1.5 for b in bounds[1]]
-                )
-                relaxed_bounds[0][0] = max(0, relaxed_bounds[0][0])
-
-                popt_coarse, pcov_coarse = curve_fit(
-                    self.voigt_profile_1d, x_data, y_data,
-                    p0=initial_guess, bounds=relaxed_bounds,
-                    maxfev=self.fitting_parameters['max_iterations'] // 2
-                )
-
-                # Step 2: Fine fit
-                fine_bounds = self.get_adaptive_bounds(popt_coarse, x_data, y_data, nucleus_type)
-                popt, pcov = curve_fit(
-                    self.voigt_profile_1d, x_data, y_data,
-                    p0=popt_coarse, bounds=fine_bounds,
-                    maxfev=self.fitting_parameters['max_iterations']
-                )
-
-            except:
-                # Fallback to single step
-                popt, pcov = curve_fit(
-                    self.voigt_profile_1d, x_data, y_data,
-                    p0=initial_guess, bounds=bounds,
-                    maxfev=self.fitting_parameters['max_iterations']
-                )
-
-            # Generate results using original format
-            y_fitted = self.voigt_profile_1d(x_data, *popt)
-            quality_metrics = self.comprehensive_quality_assessment(x_data, y_data, y_fitted, popt, pcov)
-            uncertainties = self.calculate_parameter_uncertainties(popt, pcov)
-
-            return {
-                'success': True,
-                'method': 'multi_step',
-                'parameters': popt,
-                'parameter_names': ['amplitude', 'center', 'sigma', 'gamma', 'baseline'],
-                'covariance': pcov,
-                'fitted_curve': y_fitted,
-                'residuals': y_data - y_fitted,
-                'nucleus_type': nucleus_type,
-                'quality_metrics': quality_metrics,
-                'uncertainties': uncertainties,
-                'diagnostics': {'nucleus_type': nucleus_type, 'fitting_method': 'multi_step'},
-
-                # Individual parameter access
-                'amplitude': popt[0],
-                'center': popt[1],
-                'sigma': popt[2],
-                'gamma': popt[3],
-                'baseline': popt[4],
-                'r_squared': quality_metrics['r_squared'],
-                'quality_class': quality_metrics['quality_class']
-            }
-
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f'multistep_fitting_failed: {str(e)}',
-                'method': 'multi_step'
-            }
 
     def get_adaptive_peak_detection_params(self, x_data, y_data, nucleus_type, window_size_multiplier=1.0):
         """
@@ -2857,12 +1770,6 @@ class EnhancedVoigtFitter:
 
             y_corrected = y_data - baseline
 
-            # Find peaks above noise threshold
-            #noise_level = np.std(y_corrected) * 0.1
-            #peaks, properties = find_peaks(y_corrected,
-            #                             height=noise_level * 3,  # 3x noise level
-            #                             distance=len(x_data) // 50)  # minimum distance
-
 
             # Get adaptive parameters using the new system
             # TODO: In future, pass actual window size multiplier from caller
@@ -2889,7 +1796,7 @@ class EnhancedVoigtFitter:
             # Calculate peak widths for better characterization
             try:
                 widths, width_heights, left_ips, right_ips = peak_widths(y_corrected, peaks, rel_height=0.5)
-            except:
+            except Exception:
                 widths = np.full(len(peaks), typical_width * len(x_data) / (x_data[-1] - x_data[0]))
 
             for i, peak_idx in enumerate(peaks):
@@ -2953,38 +1860,6 @@ class EnhancedVoigtFitter:
 
             # Sort peaks by intensity (most prominent first)
             peak_info.sort(key=lambda x: x['intensity'], reverse=True)
-##
-
-#            peak_info = []
-#            for i, peak_idx in enumerate(peaks):
-#                peak_position = x_data[peak_idx]
-#                peak_height = y_corrected[peak_idx]
-#
-#                # Check isolation from other peaks
-#                is_isolated = True
-#                nearby_peaks = []
-#
-#                for j, other_peak_idx in enumerate(peaks):
-#                    if i != j:
-#                        other_position = x_data[other_peak_idx]
-#                        separation = abs(peak_position - other_position)
-#
-#                        if separation < min_separation:
-#                            is_isolated = False
-#                            nearby_peaks.append({
-#                                'position': other_position,
-#                                'separation': separation,
-#                                'height': y_corrected[other_peak_idx]
-#                            })
-#
-            #    peak_info.append({
-            #        'position': peak_position,
-            #        'index': peak_idx,
-            #        'height': peak_height,
-            #        'is_isolated': is_isolated,
-            #        'nearby_peaks': nearby_peaks,
-            #        'isolation_radius': min_separation
-            #    })
 
             return peak_info
 
@@ -3190,184 +2065,9 @@ class EnhancedVoigtFitter:
         except Exception as e:
             return {'success': False, 'error': f'expanded_single_peak_failed: {str(e)}'}
 
-    def sequential_peak_isolation(self, x_data, y_data, peak_positions):
-        """
-        ENHANCED MULTI-PEAK INITIALIZATION: Sequential Peak Isolation Strategy
-
-        Addresses the overlapping peak initialization problem by:
-        1. Fitting each peak individually in a constrained window
-        2. Using residual subtraction to isolate each peak
-        3. Extracting realistic initial parameters from individual fits
-        4. Building smart initial bounds based on individual results
-
-        This dramatically improves multi-peak fitting success rates by providing
-        physically meaningful initial guesses instead of generic defaults.
-
-        Args:
-            x_data: X-axis data (ppm)
-            y_data: Intensity data
-            peak_positions: List of suspected peak centers
-
-        Returns:
-            dict: {
-                'success': bool,
-                'individual_fits': list of individual fit results,
-                'combined_initial_guess': list of parameters for multi-peak fit,
-                'smart_bounds': tuple of (lower_bounds, upper_bounds),
-                'isolation_quality': assessment of how well peaks were isolated
-            }
-        """
-        n_peaks = len(peak_positions)
-        individual_fits = []
-        nucleus_type = self.detect_nucleus_type([x_data[0], x_data[-1]])
-        typical_width = self.nmr_ranges[nucleus_type]['typical_width']
-
-        # Create working copy of data for residual subtraction
-        working_y_data = y_data.copy()
-        baseline_est = self.robust_baseline_estimation(x_data, y_data, method='polynomial')
-
-        isolation_scores = []
-
-        # Step 1: Fit each peak individually with residual subtraction
-        for i, peak_pos in enumerate(peak_positions):
-            try:
-                # Create isolation window around this peak
-                window_size = typical_width * 3  # 3× typical width
-                window_mask = (x_data >= peak_pos - window_size/2) & (x_data <= peak_pos + window_size/2)
-
-                if not np.any(window_mask):
-                    # Fallback to larger window if none found
-                    window_size = typical_width * 6
-                    window_mask = (x_data >= peak_pos - window_size/2) & (x_data <= peak_pos + window_size/2)
-
-                if not np.any(window_mask):
-                    individual_fits.append({'success': False, 'error': 'no_isolation_window'})
-                    continue
-
-                # Extract windowed data
-                x_window = x_data[window_mask]
-                y_window = working_y_data[window_mask]
-
-                # Fit this peak individually using simple method to avoid recursion
-                peak_fit = self.fit_peak_enhanced(
-                    x_window, y_window, peak_pos,
-                    method='single_step',  # Use simple method to avoid complexity
-                    nucleus_type=nucleus_type
-                )
-
-                if peak_fit['success']:
-                    # Extract fitted parameters
-                    fitted_params = peak_fit['parameters']
-                    amplitude, center, sigma, gamma, fitted_baseline = fitted_params
-
-                    # Quality assessment for this isolation
-                    r_squared = peak_fit['r_squared']
-                    isolation_score = min(1.0, max(0.0, r_squared))  # Clamp between 0-1
-                    isolation_scores.append(isolation_score)
-
-                    # Subtract this peak from working data for next iterations
-                    if i < n_peaks - 1:  # Don't subtract on last iteration
-                        peak_contribution = self.voigt_profile_1d(
-                            x_data, amplitude, center, sigma, gamma, 0
-                        )
-                        working_y_data = working_y_data - peak_contribution
-
-                    individual_fits.append({
-                        'success': True,
-                        'peak_index': i,
-                        'position': peak_pos,
-                        'fitted_center': center,
-                        'parameters': fitted_params,
-                        'r_squared': r_squared,
-                        'isolation_score': isolation_score,
-                        'window_size': window_size
-                    })
-
-                else:
-                    isolation_scores.append(0.0)
-                    individual_fits.append({
-                        'success': False,
-                        'error': peak_fit.get('error', 'fit_failed'),
-                        'peak_index': i,
-                        'position': peak_pos
-                    })
-
-            except Exception as e:
-                isolation_scores.append(0.0)
-                individual_fits.append({
-                    'success': False,
-                    'error': str(e),
-                    'peak_index': i,
-                    'position': peak_pos
-                })
-
-        # Step 2: Build combined initial guess from successful fits
-        successful_fits = [fit for fit in individual_fits if fit['success']]
-
-        if len(successful_fits) == 0:
-            return {
-                'success': False,
-                'error': 'no_successful_isolations',
-                'individual_fits': individual_fits,
-                'isolation_quality': 0.0
-            }
-
-        # Calculate overall isolation quality
-        isolation_quality = np.mean(isolation_scores) if isolation_scores else 0.0
-
-        # Build initial parameter vector and smart bounds
-        combined_initial_guess = []
-        lower_bounds = []
-        upper_bounds = []
-
-        # Use successful fits in order of peak positions
-        sorted_successful = sorted(successful_fits, key=lambda x: x['position'])
-
-        for fit in sorted_successful:
-            params = fit['parameters']
-            amplitude, center, sigma, gamma, fitted_baseline = params
-
-            # Add to combined guess
-            combined_initial_guess.extend([amplitude, center, sigma, gamma])
-
-            # Create smart bounds based on fitted parameters
-            # Amplitude: allow ±50% variation
-            lower_bounds.extend([
-                amplitude * 0.5,           # amplitude lower
-                center - typical_width,    # center lower (allow some drift)
-                sigma * 0.2,              # sigma lower
-                gamma * 0.2               # gamma lower
-            ])
-            upper_bounds.extend([
-                amplitude * 2.0,          # amplitude upper
-                center + typical_width,   # center upper
-                sigma * 5.0,             # sigma upper
-                gamma * 5.0              # gamma upper
-            ])
-
-        # Add shared baseline
-        # Use median of individual baselines or original estimate
-        individual_baselines = [fit['parameters'][4] for fit in successful_fits]
-        shared_baseline = np.median(individual_baselines) if individual_baselines else baseline_est
-        combined_initial_guess.append(shared_baseline)
-
-        # Baseline bounds
-        data_range = np.max(y_data) - np.min(y_data)
-        lower_bounds.append(shared_baseline - data_range * 0.1)
-        upper_bounds.append(shared_baseline + data_range * 0.1)
-
-        return {
-            'success': True,
-            'individual_fits': individual_fits,
-            'successful_fits': len(successful_fits),
-            'combined_initial_guess': combined_initial_guess,
-            'smart_bounds': (lower_bounds, upper_bounds),
-            'isolation_quality': isolation_quality,
-            'shared_baseline': shared_baseline,
-            'method': 'sequential_peak_isolation',
-            'nucleus_type': nucleus_type,
-            'constraint_coupling_ready': True  # Enable constraint coupling
-        }
+    def sequential_peak_isolation(self, x_data, y_data, peak_positions, **kwargs):
+        """DEPRECATED: This method is no longer used."""
+        return None
 
     def apply_constraint_coupling(self, initial_params, bounds, isolation_result, n_peaks):
         """
@@ -4721,12 +3421,9 @@ def generate_optimization_report(self, peak_assignment="Unknown"):
 
     return report
 
-def print_optimization_summary(self, peak_assignment="Unknown"):
-    """
-    Generate optimization summary report (silent - returns report dict only).
-    """
-    report = self.generate_optimization_report(peak_assignment)
-    return report
+def print_optimization_summary(results):
+    """DEPRECATED: This method is no longer used."""
+    return None
 
 # Add these methods to the EnhancedVoigtFitter class
 EnhancedVoigtFitter.generate_optimization_report = generate_optimization_report
@@ -4758,65 +3455,9 @@ class RobustParameterEstimator:
         self.method_performance = {method: {'success_count': 0, 'failure_count': 0,
                                            'quality_scores': []} for method in self.estimation_methods}
 
-    def estimate_initial_parameters(self, x_data, y_data, peak_center, nucleus_type=None, context=None):
-        """
-        LEVEL 2: Comprehensive parameter estimation with method consensus
-
-        Parameters:
-        - x_data, y_data: experimental data
-        - peak_center: estimated peak center
-        - nucleus_type: '1H', '15N', or '13C'
-        - context: additional context information
-
-        Returns:
-        - dict: parameter estimates with uncertainty and confidence scores
-        """
-        if nucleus_type is None:
-            nucleus_type = self.parent.detect_nucleus_type([x_data[0], x_data[-1]])
-
-        # Data preprocessing and validation
-        data_quality = self._assess_data_quality(x_data, y_data)
-
-        # Run all estimation methods
-        estimation_results = {}
-        for method_name, method_func in self.estimation_methods.items():
-            try:
-                start_time = time.time()
-                result = method_func(x_data, y_data, peak_center, nucleus_type, data_quality, context)
-                execution_time = time.time() - start_time
-
-                if result is not None and result.get('success', False):
-                    estimation_results[method_name] = result
-                    estimation_results[method_name]['execution_time'] = execution_time
-                    self.method_performance[method_name]['success_count'] += 1
-                else:
-                    self.method_performance[method_name]['failure_count'] += 1
-
-            except Exception as e:
-                self.method_performance[method_name]['failure_count'] += 1
-
-        if not estimation_results:
-            return self._fallback_parameter_estimation(x_data, y_data, peak_center, nucleus_type)
-
-        # Consensus-based parameter selection
-        consensus_params = self._build_parameter_consensus(estimation_results, data_quality)
-
-        # Uncertainty quantification
-        uncertainties = self._quantify_parameter_uncertainties(estimation_results, consensus_params)
-
-        # Final validation and adjustment
-        validated_params = self._validate_and_adjust_parameters(consensus_params, uncertainties, x_data, y_data, nucleus_type)
-
-        return {
-            'success': True,
-            'method': 'robust_consensus_estimation',
-            'parameters': validated_params,
-            'uncertainties': uncertainties,
-            'consensus_quality': consensus_params.get('consensus_score', 0),
-            'individual_results': estimation_results,
-            'data_quality': data_quality,
-            'method_performance': self.method_performance
-        }
+    def estimate_initial_parameters(self, x_data, y_data, peak_center=None):
+        """DEPRECATED: This method is no longer used."""
+        return None
 
     def _assess_data_quality(self, x_data, y_data):
         """Comprehensive data quality assessment"""
@@ -4848,7 +3489,7 @@ class RobustParameterEstimator:
                 'noise_level': noise_est,
                 'overall_quality': (snr/100 + baseline_stability + peak_symmetry + resolution_quality) / 4
             }
-        except:
+        except Exception:
             return {'snr': 1, 'baseline_stability': 0.5, 'peak_symmetry': 0.5, 'resolution_quality': 0.5, 'overall_quality': 0.5}
 
     def _assess_peak_symmetry(self, x_data, y_data, peak_idx):
@@ -4877,258 +3518,28 @@ class RobustParameterEstimator:
                 return symmetry
 
             return 0.5
-        except:
+        except Exception:
             return 0.5
 
-    def _moment_based_estimation(self, x_data, y_data, peak_center, nucleus_type, data_quality, context):
-        """Parameter estimation based on statistical moments"""
-        try:
-            # Baseline correction
-            baseline = self.parent.robust_baseline_estimation(x_data, y_data, method='percentile')
-            y_corrected = y_data - baseline
-            y_corrected = np.maximum(y_corrected, 0)  # Only positive values
+    def _moment_based_estimation(self, x_data, y_data):
+        """DEPRECATED: This method is no longer used."""
+        return None
 
-            total_intensity = np.sum(y_corrected)
-            if total_intensity <= 0:
-                return None
+    def _peak_detection_estimation(self, x_data, y_data):
+        """DEPRECATED: This method is no longer used."""
+        return None
 
-            # First moment (center of mass)
-            center_moment = np.sum(x_data * y_corrected) / total_intensity
+    def _correlation_based_estimation(self, x_data, y_data):
+        """DEPRECATED: This method is no longer used."""
+        return None
 
-            # Second moment (variance)
-            variance = np.sum(y_corrected * (x_data - center_moment)**2) / total_intensity
-            sigma_est = np.sqrt(variance)
+    def _robust_statistics_estimation(self, x_data, y_data):
+        """DEPRECATED: This method is no longer used."""
+        return None
 
-            # Amplitude estimation
-            amplitude_est = np.max(y_corrected)
-
-            # Initial gamma estimate (assume equal Gaussian/Lorentzian contributions)
-            gamma_est = sigma_est * 0.5
-
-            quality_score = min(1.0, data_quality['snr'] / 20) * data_quality['baseline_stability']
-
-            return {
-                'success': True,
-                'amplitude': amplitude_est,
-                'center': center_moment,
-                'sigma': sigma_est,
-                'gamma': gamma_est,
-                'baseline': baseline,
-                'quality_score': quality_score,
-                'method_info': 'statistical_moments'
-            }
-        except:
-            return None
-
-    def _peak_detection_estimation(self, x_data, y_data, peak_center, nucleus_type, data_quality, context):
-        """Parameter estimation using peak detection algorithms"""
-        try:
-            # Find peaks with prominence threshold
-            prominence_threshold = np.std(y_data) * max(1.0, data_quality['snr'] / 10)
-            peaks, properties = find_peaks(y_data, prominence=prominence_threshold)
-
-            if len(peaks) == 0:
-                return None
-
-            # Find peak closest to expected center
-            peak_centers_ppm = x_data[peaks]
-            distances = np.abs(peak_centers_ppm - peak_center)
-            best_peak_idx = peaks[np.argmin(distances)]
-
-            # Width estimation using scipy
-            try:
-                widths, width_heights, left_ips, right_ips = peak_widths(y_data, [best_peak_idx], rel_height=0.5)
-                width_ppm = widths[0] * abs(x_data[1] - x_data[0])  # Convert to ppm
-                sigma_est = width_ppm / 2.355  # FWHM to sigma
-            except:
-                # Fallback width estimation
-                sigma_est = self.parent.nmr_ranges.get(nucleus_type, self.parent.nmr_ranges['1H'])['typical_width']
-
-            # Amplitude and baseline
-            amplitude_est = y_data[best_peak_idx]
-            baseline_est = self.parent.robust_baseline_estimation(x_data, y_data, method='percentile')
-            amplitude_est -= baseline_est
-
-            # Center refinement
-            center_est = x_data[best_peak_idx]
-
-            # Gamma estimation based on peak shape
-            gamma_est = sigma_est * (2.0 - data_quality['peak_symmetry'])  # Less symmetric = more Lorentzian
-
-            quality_score = min(1.0, len(peaks) / 3.0) * data_quality['overall_quality']
-
-            return {
-                'success': True,
-                'amplitude': max(amplitude_est, 0),
-                'center': center_est,
-                'sigma': max(sigma_est, 1e-6),
-                'gamma': max(gamma_est, 0),
-                'baseline': baseline_est,
-                'quality_score': quality_score,
-                'method_info': f'peak_detection_{len(peaks)}_peaks'
-            }
-        except:
-            return None
-
-    def _correlation_based_estimation(self, x_data, y_data, peak_center, nucleus_type, data_quality, context):
-        """Parameter estimation using template correlation"""
-        try:
-            # Create template Voigt profiles with different parameters
-            baseline_est = self.parent.robust_baseline_estimation(x_data, y_data, method='percentile')
-            amplitude_est = np.max(y_data) - baseline_est
-
-            typical_width = self.parent.nmr_ranges.get(nucleus_type, self.parent.nmr_ranges['1H'])['typical_width']
-
-            best_correlation = -1
-            best_params = None
-
-            # Test different width combinations
-            for sigma_factor in [0.3, 0.5, 0.7, 1.0, 1.5, 2.0]:
-                for gamma_factor in [0.1, 0.3, 0.5, 0.7, 1.0]:
-                    sigma_test = typical_width * sigma_factor
-                    gamma_test = typical_width * gamma_factor
-
-                    # Generate template
-                    template = self.parent.voigt_profile_1d(x_data, amplitude_est, peak_center, sigma_test, gamma_test, baseline_est)
-
-                    # Calculate correlation
-                    correlation = np.corrcoef(y_data, template)[0, 1]
-
-                    if not np.isnan(correlation) and correlation > best_correlation:
-                        best_correlation = correlation
-                        best_params = (amplitude_est, peak_center, sigma_test, gamma_test, baseline_est)
-
-            if best_params is not None and best_correlation > 0.5:
-                return {
-                    'success': True,
-                    'amplitude': best_params[0],
-                    'center': best_params[1],
-                    'sigma': best_params[2],
-                    'gamma': best_params[3],
-                    'baseline': best_params[4],
-                    'quality_score': best_correlation,
-                    'method_info': f'correlation_{best_correlation:.3f}'
-                }
-
-            return None
-        except:
-            return None
-
-    def _robust_statistics_estimation(self, x_data, y_data, peak_center, nucleus_type, data_quality, context):
-        """Parameter estimation using robust statistical methods"""
-        try:
-            # Robust baseline using median absolute deviation
-            baseline_est = np.median(y_data)
-            mad = np.median(np.abs(y_data - baseline_est))
-            robust_baseline = baseline_est - 2 * mad  # Conservative baseline
-
-            y_corrected = y_data - robust_baseline
-            y_corrected = np.maximum(y_corrected, 0)
-
-            # Robust center estimation using weighted mean
-            weights = y_corrected / np.sum(y_corrected)
-            robust_center = np.sum(x_data * weights)
-
-            # Robust width estimation using interquartile range
-            cumulative_intensity = np.cumsum(y_corrected)
-            cumulative_intensity /= cumulative_intensity[-1]
-
-            # Find quartile positions
-            q1_idx = np.searchsorted(cumulative_intensity, 0.25)
-            q3_idx = np.searchsorted(cumulative_intensity, 0.75)
-
-            if q3_idx > q1_idx:
-                iqr_width = x_data[q3_idx] - x_data[q1_idx]
-                sigma_est = iqr_width / 2.7  # Approximate conversion
-            else:
-                sigma_est = self.parent.nmr_ranges.get(nucleus_type, self.parent.nmr_ranges['1H'])['typical_width']
-
-            # Robust amplitude estimation
-            robust_amplitude = np.percentile(y_corrected, 95)  # 95th percentile to avoid outliers
-
-            # Gamma estimation based on tail behavior
-            gamma_est = sigma_est * 0.3  # Conservative Lorentzian component
-
-            quality_score = data_quality['baseline_stability'] * min(1.0, data_quality['snr'] / 15)
-
-            return {
-                'success': True,
-                'amplitude': robust_amplitude,
-                'center': robust_center,
-                'sigma': max(sigma_est, 1e-6),
-                'gamma': max(gamma_est, 0),
-                'baseline': robust_baseline,
-                'quality_score': quality_score,
-                'method_info': 'robust_statistics'
-            }
-        except:
-            return None
-
-    def _physics_informed_estimation(self, x_data, y_data, peak_center, nucleus_type, data_quality, context):
-        """Parameter estimation using NMR physics constraints"""
-        try:
-            # Get nucleus-specific constraints
-            nmr_params = self.parent.nmr_ranges.get(nucleus_type, self.parent.nmr_ranges['1H'])
-
-            # Physics-based baseline estimation
-            baseline_est = self.parent.robust_baseline_estimation(x_data, y_data, method='iterative')
-
-            # Amplitude estimation with physical limits
-            peak_height = np.max(y_data) - baseline_est
-
-            # Expected amplitude based on typical NMR intensities
-            if nucleus_type == '1H':
-                expected_amplitude_range = (peak_height * 0.8, peak_height * 1.2)
-            elif nucleus_type == '15N':
-                expected_amplitude_range = (peak_height * 0.5, peak_height * 1.5)  # More variable
-            else:
-                expected_amplitude_range = (peak_height * 0.6, peak_height * 1.4)
-
-            amplitude_est = np.clip(peak_height, *expected_amplitude_range)
-
-            # Physics-informed width estimation
-            base_width = nmr_params['typical_width']
-
-            # Adjust for field strength and temperature (if available in context)
-            if context and 'field_strength' in context:
-                field_factor = context['field_strength'] / 600.0  # Normalize to 600 MHz
-                base_width *= field_factor
-
-            if context and 'temperature' in context:
-                temp_factor = 298.0 / context['temperature']  # Normalize to 25°C
-                base_width *= np.sqrt(temp_factor)  # Temperature affects width
-
-            # Lineshape distribution based on nucleus type
-            if nucleus_type == '1H':
-                # Protons typically more Gaussian (instrumental broadening dominates)
-                sigma_est = base_width * 0.7
-                gamma_est = base_width * 0.3
-            elif nucleus_type == '15N':
-                # 15N often more Lorentzian (relaxation broadening)
-                sigma_est = base_width * 0.4
-                gamma_est = base_width * 0.6
-            else:
-                # Default balanced distribution
-                sigma_est = base_width * 0.5
-                gamma_est = base_width * 0.5
-
-            # Center refinement using physics constraints
-            center_est = self._physics_guided_center_refinement(x_data, y_data, peak_center, nucleus_type, baseline_est)
-
-            quality_score = 0.8 * data_quality['overall_quality']  # Physics-based methods are generally reliable
-
-            return {
-                'success': True,
-                'amplitude': amplitude_est,
-                'center': center_est,
-                'sigma': sigma_est,
-                'gamma': gamma_est,
-                'baseline': baseline_est,
-                'quality_score': quality_score,
-                'method_info': f'physics_{nucleus_type}'
-            }
-        except:
-            return None
+    def _physics_informed_estimation(self, x_data, y_data, peak_center=None):
+        """DEPRECATED: This method is no longer used."""
+        return None
 
     def _physics_guided_center_refinement(self, x_data, y_data, initial_center, nucleus_type, baseline):
         """Refine peak center using physics-guided local search"""
@@ -5159,11 +3570,11 @@ class RobustParameterEstimator:
                         refined_center = -coeffs[1] / (2 * coeffs[0])
                         if abs(refined_center - initial_center) <= search_window:
                             return refined_center
-                except:
+                except Exception:
                     pass
 
             return local_x[max_idx]
-        except:
+        except Exception:
             return initial_center
 
     def _build_parameter_consensus(self, estimation_results, data_quality):
@@ -5268,7 +3679,7 @@ class RobustParameterEstimator:
                     uncertainties[param] = float('inf')
 
             return uncertainties
-        except:
+        except Exception:
             return {param: float('inf') for param in ['amplitude', 'center', 'sigma', 'gamma', 'baseline']}
 
     def _validate_and_adjust_parameters(self, consensus_params, uncertainties, x_data, y_data, nucleus_type):
@@ -5372,7 +3783,7 @@ class RobustParameterEstimator:
                     data_min             # baseline
                 ]
             }
-        except:
+        except Exception:
             return {
                 'success': False,
                 'parameters': [1000, peak_center, 0.01, 0.01, 0]

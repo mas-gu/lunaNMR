@@ -91,9 +91,12 @@ class T1T2ResultsViewer(QMainWindow):
         self.df = None
         self.show_errors = True
         self.exclude_outliers = False
-        self.auto_y_axis = True
-        self.y_min = 0.0
-        self.y_max = 1000.0
+
+        # Per-experiment-type Y-axis settings
+        self.y_axis_settings = {
+            'T1': {'auto': True, 'min': 0.0, 'max': 2000.0},
+            'T2': {'auto': True, 'min': 0.0, 'max': 500.0}
+        }
 
         # Outlier detection results (cached)
         self._outlier_mask = None
@@ -263,57 +266,91 @@ class T1T2ResultsViewer(QMainWindow):
 
         layout.addWidget(options_section)
 
-        # Y-Axis limits section
-        yaxis_section = self._create_section_frame("Y-Axis Limits:")
-        yaxis_layout = yaxis_section.layout()
+        # T1 Y-Axis limits section
+        t1_yaxis_section = self._create_section_frame("T1 Y-Axis Limits:")
+        t1_yaxis_layout = t1_yaxis_section.layout()
 
-        self.auto_y_checkbox = QCheckBox("Auto (exclude outliers from range)")
-        self.auto_y_checkbox.setFont(get_font(FONT_SIZE_BODY))
-        self.auto_y_checkbox.setChecked(True)
-        self.auto_y_checkbox.stateChanged.connect(self._on_auto_y_toggle)
-        yaxis_layout.addWidget(self.auto_y_checkbox)
+        self.t1_auto_y_checkbox = QCheckBox("Auto")
+        self.t1_auto_y_checkbox.setFont(get_font(FONT_SIZE_BODY))
+        self.t1_auto_y_checkbox.setChecked(True)
+        self.t1_auto_y_checkbox.stateChanged.connect(lambda s: self._on_auto_y_toggle('T1'))
+        t1_yaxis_layout.addWidget(self.t1_auto_y_checkbox)
 
-        # Y-min row
-        ymin_row = QFrame()
-        ymin_layout = QHBoxLayout(ymin_row)
-        ymin_layout.setContentsMargins(0, 0, 0, 0)
-        ymin_layout.setSpacing(SPACING_XS)
+        # T1 Y-min/max row
+        t1_minmax_row = QFrame()
+        t1_minmax_layout = QHBoxLayout(t1_minmax_row)
+        t1_minmax_layout.setContentsMargins(0, 0, 0, 0)
+        t1_minmax_layout.setSpacing(SPACING_XS)
 
-        ymin_label = QLabel("Min:")
-        ymin_label.setFont(get_font(FONT_SIZE_SMALL))
-        ymin_layout.addWidget(ymin_label)
+        t1_min_label = QLabel("Min:")
+        t1_min_label.setFont(get_font(FONT_SIZE_SMALL))
+        t1_minmax_layout.addWidget(t1_min_label)
 
-        self.ymin_spin = QDoubleSpinBox()
-        self.ymin_spin.setRange(-1000, 100000)
-        self.ymin_spin.setValue(0)
-        self.ymin_spin.setSuffix(" ms")
-        self.ymin_spin.setEnabled(False)
-        self.ymin_spin.valueChanged.connect(self._on_yaxis_changed)
-        ymin_layout.addWidget(self.ymin_spin)
+        self.t1_ymin_spin = QDoubleSpinBox()
+        self.t1_ymin_spin.setRange(0, 100000)
+        self.t1_ymin_spin.setValue(0)
+        self.t1_ymin_spin.setSuffix(" ms")
+        self.t1_ymin_spin.setEnabled(False)
+        self.t1_ymin_spin.valueChanged.connect(lambda v: self._on_yaxis_changed('T1'))
+        t1_minmax_layout.addWidget(self.t1_ymin_spin)
 
-        yaxis_layout.addWidget(ymin_row)
+        t1_max_label = QLabel("Max:")
+        t1_max_label.setFont(get_font(FONT_SIZE_SMALL))
+        t1_minmax_layout.addWidget(t1_max_label)
 
-        # Y-max row
-        ymax_row = QFrame()
-        ymax_layout = QHBoxLayout(ymax_row)
-        ymax_layout.setContentsMargins(0, 0, 0, 0)
-        ymax_layout.setSpacing(SPACING_XS)
+        self.t1_ymax_spin = QDoubleSpinBox()
+        self.t1_ymax_spin.setRange(0, 100000)
+        self.t1_ymax_spin.setValue(2000)
+        self.t1_ymax_spin.setSuffix(" ms")
+        self.t1_ymax_spin.setEnabled(False)
+        self.t1_ymax_spin.valueChanged.connect(lambda v: self._on_yaxis_changed('T1'))
+        t1_minmax_layout.addWidget(self.t1_ymax_spin)
 
-        ymax_label = QLabel("Max:")
-        ymax_label.setFont(get_font(FONT_SIZE_SMALL))
-        ymax_layout.addWidget(ymax_label)
+        t1_yaxis_layout.addWidget(t1_minmax_row)
+        layout.addWidget(t1_yaxis_section)
 
-        self.ymax_spin = QDoubleSpinBox()
-        self.ymax_spin.setRange(-1000, 100000)
-        self.ymax_spin.setValue(1000)
-        self.ymax_spin.setSuffix(" ms")
-        self.ymax_spin.setEnabled(False)
-        self.ymax_spin.valueChanged.connect(self._on_yaxis_changed)
-        ymax_layout.addWidget(self.ymax_spin)
+        # T2 Y-Axis limits section
+        t2_yaxis_section = self._create_section_frame("T2 Y-Axis Limits:")
+        t2_yaxis_layout = t2_yaxis_section.layout()
 
-        yaxis_layout.addWidget(ymax_row)
+        self.t2_auto_y_checkbox = QCheckBox("Auto")
+        self.t2_auto_y_checkbox.setFont(get_font(FONT_SIZE_BODY))
+        self.t2_auto_y_checkbox.setChecked(True)
+        self.t2_auto_y_checkbox.stateChanged.connect(lambda s: self._on_auto_y_toggle('T2'))
+        t2_yaxis_layout.addWidget(self.t2_auto_y_checkbox)
 
-        layout.addWidget(yaxis_section)
+        # T2 Y-min/max row
+        t2_minmax_row = QFrame()
+        t2_minmax_layout = QHBoxLayout(t2_minmax_row)
+        t2_minmax_layout.setContentsMargins(0, 0, 0, 0)
+        t2_minmax_layout.setSpacing(SPACING_XS)
+
+        t2_min_label = QLabel("Min:")
+        t2_min_label.setFont(get_font(FONT_SIZE_SMALL))
+        t2_minmax_layout.addWidget(t2_min_label)
+
+        self.t2_ymin_spin = QDoubleSpinBox()
+        self.t2_ymin_spin.setRange(0, 100000)
+        self.t2_ymin_spin.setValue(0)
+        self.t2_ymin_spin.setSuffix(" ms")
+        self.t2_ymin_spin.setEnabled(False)
+        self.t2_ymin_spin.valueChanged.connect(lambda v: self._on_yaxis_changed('T2'))
+        t2_minmax_layout.addWidget(self.t2_ymin_spin)
+
+        t2_max_label = QLabel("Max:")
+        t2_max_label.setFont(get_font(FONT_SIZE_SMALL))
+        t2_minmax_layout.addWidget(t2_max_label)
+
+        self.t2_ymax_spin = QDoubleSpinBox()
+        self.t2_ymax_spin.setRange(0, 100000)
+        self.t2_ymax_spin.setValue(500)
+        self.t2_ymax_spin.setSuffix(" ms")
+        self.t2_ymax_spin.setEnabled(False)
+        self.t2_ymax_spin.valueChanged.connect(lambda v: self._on_yaxis_changed('T2'))
+        t2_minmax_layout.addWidget(self.t2_ymax_spin)
+
+        t2_yaxis_layout.addWidget(t2_minmax_row)
+        layout.addWidget(t2_yaxis_section)
 
         # Statistics section
         stats_section = self._create_section_frame("Statistics:")
@@ -545,6 +582,71 @@ class T1T2ResultsViewer(QMainWindow):
 
         self.stats_label.setText("\n".join(stats_lines) if stats_lines else "No data")
 
+    def _extract_residue_numbers(self, residue_labels):
+        """
+        Extract numeric residue numbers from residue labels.
+
+        Handles formats like: "75.GLY" -> 75, "GLY75" -> 75, "75" -> 75
+        """
+        numeric_residues = []
+
+        for label in residue_labels:
+            if isinstance(label, (int, float, np.integer, np.floating)):
+                numeric_residues.append(int(label))
+                continue
+
+            label_str = str(label)
+            numbers = re.findall(r'\d+', label_str)
+
+            if numbers:
+                numeric_residues.append(int(numbers[0]))
+            else:
+                numeric_residues.append(len(numeric_residues) + 1)
+
+        return np.array(numeric_residues)
+
+    def _add_missing_residue_bars(self, ax, residues, values):
+        """Add grey bars for missing residues to show gaps in sequence."""
+        if len(residues) == 0:
+            return
+
+        min_residue = 1
+        max_residue = int(np.max(residues))
+
+        present_residues = set(residues)
+        all_residues = set(range(min_residue, max_residue + 1))
+        missing_residues = sorted(all_residues - present_residues)
+
+        if not missing_residues:
+            return
+
+        for res in missing_residues:
+            ax.axvspan(res - 0.5, res + 0.5,
+                      facecolor='lightgrey', alpha=0.3, zorder=0)
+
+    def _format_xaxis(self, ax, residues):
+        """Format x-axis with ticks every 10 residues."""
+        if len(residues) == 0:
+            return
+
+        min_residue = 1
+        max_residue = int(np.max(residues))
+
+        ax.set_xlim(min_residue - 0.5, max_residue + 0.5)
+
+        if max_residue >= 10:
+            first_tick = 10
+            ticks = list(range(first_tick, max_residue + 1, 10))
+            if 1 not in ticks:
+                ticks = [1] + ticks
+            if max_residue not in ticks and max_residue - ticks[-1] > 2:
+                ticks.append(max_residue)
+        else:
+            ticks = list(range(1, max_residue + 1))
+
+        ax.set_xticks(ticks)
+        ax.set_xticklabels([str(t) for t in ticks])
+
     def _update_plot(self):
         """Update the plot with current data (single or multi-experiment)."""
         # Use multi-experiment mode if data available
@@ -559,6 +661,11 @@ class T1T2ResultsViewer(QMainWindow):
 
         self.figure.clear()
         ax = self.figure.add_subplot(111)
+
+        # Style the plot like Model-free viewer
+        ax.set_facecolor(FRAME_BG_COLOR)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
 
         exp_type = self.experiment_type
 
@@ -575,15 +682,13 @@ class T1T2ResultsViewer(QMainWindow):
             self.canvas.draw()
             return
 
-        # Extract residue numbers for x-axis
-        residue_nums = []
-        for res in valid_df['Residue']:
-            nums = re.findall(r'\d+', str(res))
-            residue_nums.append(int(nums[0]) if nums else 0)
-        valid_df['ResNum'] = residue_nums
+        # Extract residue numbers for x-axis (actual residue numbers, not indices)
+        residues = self._extract_residue_numbers(valid_df['Residue'].values)
+        valid_df['ResNum'] = residues
 
         # Sort by residue number
         valid_df = valid_df.sort_values('ResNum')
+        residues = valid_df['ResNum'].values
 
         # Get values
         y = valid_df[exp_type].values
@@ -592,6 +697,9 @@ class T1T2ResultsViewer(QMainWindow):
         outlier_mask, lower_bound, upper_bound = self._detect_outliers(y)
         self._outlier_mask = outlier_mask
         self._iqr_bounds = (lower_bound, upper_bound)
+
+        # Add grey bars for missing residues
+        self._add_missing_residue_bars(ax, residues, y)
 
         # Get errors if available
         err_col = f"{exp_type}_err"
@@ -603,81 +711,78 @@ class T1T2ResultsViewer(QMainWindow):
 
         # Separate normal and outlier data
         normal_mask = ~outlier_mask
-        x_all = np.arange(len(valid_df))
 
         if self.exclude_outliers:
             # Only plot normal points
-            x_normal = x_all[normal_mask]
+            x_normal = residues[normal_mask]
             y_normal = y[normal_mask]
             if has_errors:
                 yerr_normal = yerr[normal_mask]
                 ax.errorbar(x_normal, y_normal, yerr=yerr_normal, fmt='o', capsize=3,
-                           color='#2196F3', ecolor='#90CAF9',
-                           markersize=6, label=f'{exp_type} values')
+                           color='#2196F3', ecolor=SECONDARY_TEXT,
+                           markersize=6, label=f'{exp_type} values', zorder=3)
             else:
                 ax.plot(x_normal, y_normal, 'o', color='#2196F3', markersize=6,
-                       label=f'{exp_type} values')
+                       label=f'{exp_type} values', zorder=3)
         else:
             # Plot normal points
-            x_normal = x_all[normal_mask]
+            x_normal = residues[normal_mask]
             y_normal = y[normal_mask]
             if has_errors:
                 yerr_normal = yerr[normal_mask]
                 ax.errorbar(x_normal, y_normal, yerr=yerr_normal, fmt='o', capsize=3,
-                           color='#2196F3', ecolor='#90CAF9',
-                           markersize=6, label=f'{exp_type} values')
+                           color='#2196F3', ecolor=SECONDARY_TEXT,
+                           markersize=6, label=f'{exp_type} values', zorder=3)
             else:
                 ax.plot(x_normal, y_normal, 'o', color='#2196F3', markersize=6,
-                       label=f'{exp_type} values')
+                       label=f'{exp_type} values', zorder=3)
 
             # Plot outliers with distinct style (gray, smaller, different marker)
             if np.any(outlier_mask):
-                x_outlier = x_all[outlier_mask]
+                x_outlier = residues[outlier_mask]
                 y_outlier = y[outlier_mask]
                 if has_errors:
                     yerr_outlier = yerr[outlier_mask]
                     ax.errorbar(x_outlier, y_outlier, yerr=yerr_outlier, fmt='x', capsize=2,
                                color='#9E9E9E', ecolor='#BDBDBD',
-                               markersize=5, label=f'Outliers ({np.sum(outlier_mask)})')
+                               markersize=5, label=f'Outliers ({np.sum(outlier_mask)})', zorder=3)
                 else:
                     ax.plot(x_outlier, y_outlier, 'x', color='#9E9E9E', markersize=5,
-                           label=f'Outliers ({np.sum(outlier_mask)})')
+                           label=f'Outliers ({np.sum(outlier_mask)})', zorder=3)
 
-        # Set Y-axis limits
-        if self.auto_y_checkbox.isChecked():
-            # Auto mode: use IQR bounds with some padding
+        # Set Y-axis limits - always start at 0
+        # Use per-experiment-type settings
+        auto_checkbox = self.t1_auto_y_checkbox if exp_type == 'T1' else self.t2_auto_y_checkbox
+        ymin_spin = self.t1_ymin_spin if exp_type == 'T1' else self.t2_ymin_spin
+        ymax_spin = self.t1_ymax_spin if exp_type == 'T1' else self.t2_ymax_spin
+
+        if auto_checkbox.isChecked():
+            # Auto mode: always start at 0, use IQR upper bound with padding
             y_range = upper_bound - lower_bound
             padding = y_range * 0.1 if y_range > 0 else 50
-            ax.set_ylim(max(0, lower_bound - padding), upper_bound + padding)
+            ax.set_ylim(0, upper_bound + padding)
 
             # Update spinboxes to show current auto values
-            self.ymin_spin.blockSignals(True)
-            self.ymax_spin.blockSignals(True)
-            self.ymin_spin.setValue(max(0, lower_bound - padding))
-            self.ymax_spin.setValue(upper_bound + padding)
-            self.ymin_spin.blockSignals(False)
-            self.ymax_spin.blockSignals(False)
+            ymin_spin.blockSignals(True)
+            ymax_spin.blockSignals(True)
+            ymin_spin.setValue(0)
+            ymax_spin.setValue(upper_bound + padding)
+            ymin_spin.blockSignals(False)
+            ymax_spin.blockSignals(False)
         else:
-            # Manual mode
-            ax.set_ylim(self.ymin_spin.value(), self.ymax_spin.value())
+            # Manual mode - still enforce min >= 0
+            ax.set_ylim(max(0, ymin_spin.value()), ymax_spin.value())
 
-        # Labels
-        ax.set_xlabel("Residue", fontsize=12)
-        ax.set_ylabel(f"{exp_type} (ms)", fontsize=12)
-        ax.set_title(f"{exp_type} Relaxation Times by Residue", fontsize=14, fontweight='bold')
+        # Labels and title
+        ax.set_xlabel('Residue Number', fontsize=12, fontweight='bold')
+        ax.set_ylabel(f"{exp_type} (ms)", fontsize=12, fontweight='bold')
+        ax.set_title(f"{exp_type} Relaxation Times vs Residue Sequence", fontsize=14, fontweight='bold', pad=20)
 
-        # X-axis tick labels
-        residue_labels = valid_df['Residue'].values
-        if len(valid_df) <= 30:
-            ax.set_xticks(x_all)
-            ax.set_xticklabels(residue_labels, rotation=45, ha='right', fontsize=8)
-        else:
-            # Show every Nth label
-            step = max(1, len(valid_df) // 20)
-            ax.set_xticks(x_all[::step])
-            ax.set_xticklabels(residue_labels[::step], rotation=45, ha='right', fontsize=8)
+        # Format X-axis with ticks every 10 residues
+        self._format_xaxis(ax, residues)
 
-        ax.grid(True, alpha=0.3)
+        # Grid styling like Model-free viewer
+        ax.grid(True, alpha=0.3, linestyle='--', zorder=1)
         ax.legend(loc='upper right')
 
         self.figure.tight_layout()
@@ -703,8 +808,32 @@ class T1T2ResultsViewer(QMainWindow):
         if n_experiments == 1:
             axes = [axes]  # Ensure iterable
 
+        # Collect all residue numbers to determine global X-axis range
+        all_residues = set()
+        for key, data in self.experiment_data.items():
+            df = data['df']
+            if 'Success' in df.columns:
+                valid_df = df[df['Success'] == 'Yes']
+            else:
+                valid_df = df
+            if len(valid_df) > 0:
+                residues = self._extract_residue_numbers(valid_df['Residue'].values)
+                all_residues.update(residues)
+
+        if not all_residues:
+            self._show_blank_state()
+            return
+
+        max_residue = max(all_residues)
+
         for idx, (key, data) in enumerate(sorted(self.experiment_data.items())):
             ax = axes[idx]
+
+            # Style the plot like Model-free viewer
+            ax.set_facecolor(FRAME_BG_COLOR)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
             df = data['df']
             exp_type = data['experiment_type']
             freq_mhz = data.get('frequency_mhz', 0)
@@ -725,13 +854,11 @@ class T1T2ResultsViewer(QMainWindow):
                        transform=ax.transAxes)
                 continue
 
-            # Extract residue numbers for x-axis
-            residue_nums = []
-            for res in valid_df['Residue']:
-                nums = re.findall(r'\d+', str(res))
-                residue_nums.append(int(nums[0]) if nums else 0)
-            valid_df['ResNum'] = residue_nums
+            # Extract residue numbers for x-axis (actual residue numbers)
+            residues = self._extract_residue_numbers(valid_df['Residue'].values)
+            valid_df['ResNum'] = residues
             valid_df = valid_df.sort_values('ResNum')
+            residues = valid_df['ResNum'].values
 
             # Find the value column - handle variations like 'T1', 'T2', 'T1 (ms)', etc.
             value_col = None
@@ -748,11 +875,13 @@ class T1T2ResultsViewer(QMainWindow):
 
             # Get values
             y = valid_df[value_col].values
-            x = np.arange(len(valid_df))
 
             # Detect outliers
             outlier_mask, lower_bound, upper_bound = self._detect_outliers(y)
             normal_mask = ~outlier_mask
+
+            # Add grey bars for missing residues
+            self._add_missing_residue_bars(ax, residues, y)
 
             # Get errors - try variations
             err_col = None
@@ -764,41 +893,52 @@ class T1T2ResultsViewer(QMainWindow):
             yerr = valid_df[err_col].values if has_errors else None
 
             # Plot based on exclude_outliers setting
-            x_plot = x[normal_mask] if self.exclude_outliers else x
-            y_plot = y[normal_mask] if self.exclude_outliers else y
+            if self.exclude_outliers:
+                x_plot = residues[normal_mask]
+                y_plot = y[normal_mask]
+                yerr_plot = yerr[normal_mask] if has_errors else None
+            else:
+                x_plot = residues
+                y_plot = y
+                yerr_plot = yerr
 
             if has_errors:
-                yerr_plot = yerr[normal_mask] if self.exclude_outliers else yerr
                 ax.errorbar(x_plot, y_plot, yerr=yerr_plot, fmt='o', capsize=2,
-                           color=color, ecolor=color, alpha=0.7, markersize=4)
+                           color=color, ecolor=SECONDARY_TEXT, markersize=5, zorder=3)
             else:
-                ax.scatter(x_plot, y_plot, c=color, s=20, alpha=0.7)
+                ax.plot(x_plot, y_plot, 'o', color=color, markersize=5, zorder=3)
 
             # Plot outliers if not excluded
             if not self.exclude_outliers and np.any(outlier_mask):
-                ax.scatter(x[outlier_mask], y[outlier_mask],
-                          c='#9E9E9E', s=15, marker='x', alpha=0.5)
+                ax.scatter(residues[outlier_mask], y[outlier_mask],
+                          c='#9E9E9E', s=15, marker='x', alpha=0.5, zorder=3)
 
-            # Auto Y-axis
-            if self.auto_y_checkbox.isChecked():
+            # Y-axis - always start at 0, use per-experiment-type settings
+            auto_checkbox = self.t1_auto_y_checkbox if exp_type == 'T1' else self.t2_auto_y_checkbox
+            ymin_spin = self.t1_ymin_spin if exp_type == 'T1' else self.t2_ymin_spin
+            ymax_spin = self.t1_ymax_spin if exp_type == 'T1' else self.t2_ymax_spin
+
+            if auto_checkbox.isChecked():
                 y_range = upper_bound - lower_bound
                 padding = y_range * 0.1 if y_range > 0 else 50
-                ax.set_ylim(max(0, lower_bound - padding), upper_bound + padding)
+                ax.set_ylim(0, upper_bound + padding)
+            else:
+                # Manual mode - use the spinbox values
+                ax.set_ylim(max(0, ymin_spin.value()), ymax_spin.value())
 
             # Labels
             field_label = field_name.replace('field', 'Field ')
             freq_label = f" ({freq_mhz} MHz)" if freq_mhz else ""
-            ax.set_ylabel(f"{exp_type} (ms)", fontsize=10)
+            ax.set_ylabel(f"{exp_type} (ms)", fontsize=10, fontweight='bold')
             ax.set_title(f"{exp_type} - {field_label}{freq_label}", fontsize=11, fontweight='bold')
-            ax.grid(True, alpha=0.3)
+            ax.grid(True, alpha=0.3, linestyle='--', zorder=1)
 
-            # X-axis labels on bottom subplot only
+            # X-axis formatting - use residue numbers with ticks every 10
+            self._format_xaxis(ax, residues)
+
+            # X-axis label on bottom subplot only
             if idx == n_experiments - 1:
-                residue_labels = valid_df['Residue'].values
-                step = max(1, len(valid_df) // 25)
-                ax.set_xticks(x[::step])
-                ax.set_xticklabels(residue_labels[::step], rotation=45, ha='right', fontsize=7)
-                ax.set_xlabel("Residue", fontsize=10)
+                ax.set_xlabel('Residue Number', fontsize=10, fontweight='bold')
 
         self.figure.tight_layout()
         self.canvas.draw()
@@ -817,25 +957,40 @@ class T1T2ResultsViewer(QMainWindow):
 
     def _on_error_toggle(self, state):
         """Handle error bar toggle."""
-        self.show_errors = (state == Qt.Checked)
+        self.show_errors = self.error_checkbox.isChecked()
         self._update_plot()
 
     def _on_exclude_outliers_toggle(self, state):
         """Handle exclude outliers toggle."""
-        self.exclude_outliers = (state == Qt.Checked)
+        self.exclude_outliers = self.exclude_outliers_checkbox.isChecked()
         self._update_plot()
 
-    def _on_auto_y_toggle(self, state):
-        """Handle auto Y-axis toggle."""
-        self.auto_y_axis = (state == Qt.Checked)
-        self.ymin_spin.setEnabled(not self.auto_y_axis)
-        self.ymax_spin.setEnabled(not self.auto_y_axis)
+    def _on_auto_y_toggle(self, exp_type):
+        """Handle auto Y-axis toggle for specific experiment type."""
+        if exp_type == 'T1':
+            auto = self.t1_auto_y_checkbox.isChecked()
+            self.y_axis_settings['T1']['auto'] = auto
+            self.t1_ymin_spin.setEnabled(not auto)
+            self.t1_ymax_spin.setEnabled(not auto)
+        else:  # T2
+            auto = self.t2_auto_y_checkbox.isChecked()
+            self.y_axis_settings['T2']['auto'] = auto
+            self.t2_ymin_spin.setEnabled(not auto)
+            self.t2_ymax_spin.setEnabled(not auto)
         self._update_plot()
 
-    def _on_yaxis_changed(self):
-        """Handle Y-axis limit change."""
-        if not self.auto_y_checkbox.isChecked():
-            self._update_plot()
+    def _on_yaxis_changed(self, exp_type):
+        """Handle Y-axis limit change for specific experiment type."""
+        if exp_type == 'T1':
+            if not self.t1_auto_y_checkbox.isChecked():
+                self.y_axis_settings['T1']['min'] = self.t1_ymin_spin.value()
+                self.y_axis_settings['T1']['max'] = self.t1_ymax_spin.value()
+                self._update_plot()
+        else:  # T2
+            if not self.t2_auto_y_checkbox.isChecked():
+                self.y_axis_settings['T2']['min'] = self.t2_ymin_spin.value()
+                self.y_axis_settings['T2']['max'] = self.t2_ymax_spin.value()
+                self._update_plot()
 
     def _export_plot(self):
         """Export the current plot to a file."""

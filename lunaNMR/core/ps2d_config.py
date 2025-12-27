@@ -41,7 +41,7 @@ class PS2DConfig:
     NUCLEUS_PARAMS = {
         '15N': {
             # ================================================================
-            # Ellipse radii for data selection (from PS2D C++ )
+            # Ellipse radii for data selection
             # ================================================================
             # Used in fit_overlap_group_2d() for 2D region extraction
             'radF1': 0.4,              # Indirect dimension (15N) - reduced from PS2D 0.6
@@ -99,8 +99,8 @@ class PS2DConfig:
             # Position bounds (fitting movement limits)
             # ================================================================
             # Maximum distance peaks can move from initial position during fitting
-            'pos_margin_f1': 0.05,         # 15N position movement limit (ppm)
-            'pos_margin_f2': 0.05,        # 1H position movement limit (ppm)
+            'pos_margin_f1': 0.02,         # 15N position movement limit (ppm)
+            'pos_margin_f2': 0.01,        # 1H position movement limit (ppm)
 
             # ================================================================
             # Maximum drift from reference (cascade mode absolute bounds)
@@ -115,7 +115,7 @@ class PS2DConfig:
             # ================================================================
             # Cluster size limits
             # ================================================================
-            'max_cluster_size': 8,        # Maximum peaks in overlap group
+            'max_cluster_size': 20,       # Maximum peaks in overlap group
 
             # ================================================================
             # Levenberg-Marquardt optimizer settings
@@ -175,8 +175,8 @@ class PS2DConfig:
             'tooclose_threshold': 0.8,       # Elliptical distance threshold for L/G and intensity constraints
 
             # Position bounds (moderate for peak movement)
-            'pos_margin_f1': 0.05,        # Allow ±0.05 ppm movement per spectrum
-            'pos_margin_f2': 0.02,        # Allow ±0.02 ppm movement per spectrum
+            'pos_margin_f1': 0.01,        # 13C position movement limit (ppm)
+            'pos_margin_f2': 0.01,        # 1H position movement limit (ppm)
 
             # Maximum drift from reference (cascade mode absolute bounds)
             # In cascade mode, peaks can drift from spectrum to spectrum.
@@ -187,7 +187,7 @@ class PS2DConfig:
             'max_drift_f2': 0.02,         # Max 1H drift from original reference (ppm)
 
             # Cluster size limits
-            'max_cluster_size': 8,        # Maximum peaks in overlap group
+            'max_cluster_size': 20,       # Maximum peaks in overlap group
 
             # Levenberg-Marquardt optimizer settings
             'max_iterations': 500,        # Maximum LM iterations per stage

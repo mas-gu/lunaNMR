@@ -40,15 +40,13 @@ except ImportError:
 # Import PS2D-style high-performance fitter (CRITICAL FOR HIGH-QUALITY FITTING)
 try:
     from lunaNMR.core.ps2d_style_fitter import (
-        MultiStageFitter,
-        fit_single_peak_ps2d_style,
-        voigt_profile_1d as ps2d_voigt_1d
+        fit_single_peak_ps2d_style
     )
     PS2D_STYLE_FITTING_AVAILABLE = True
 except ImportError as e:
     PS2D_STYLE_FITTING_AVAILABLE = False
 
-# Import PS2D-style multi-peak fitter (EXACT PORT FROM PS2D_SRC)
+# Import PS2D-style multi-peak fitter
 try:
     from lunaNMR.core.ps2d_multi_peak_fitter import (
         Ps2dMultiPeakFitter,
@@ -58,21 +56,17 @@ try:
 except ImportError as e:
     PS2D_MULTI_PEAK_AVAILABLE = False
 
-# Import PS2D data selector (EXACT CLONE OF SPECTRUM.CPP)
+# Import PS2D data selector 
 try:
     from lunaNMR.core.ps2d_data_selector import Ps2dDataSelector
     PS2D_DATA_SELECTOR_AVAILABLE = True
 except ImportError as e:
     PS2D_DATA_SELECTOR_AVAILABLE = False
 
-# Import PS2D exact overlap integration wrapper (EXACT C++ overlap detection)
+# PS2D exact overlap integration - availability check only
 try:
-    from lunaNMR.core.ps2d_exact_overlap_integration import (
-        fit_peaks_with_exact_overlap_detection,
-        fit_peaks_with_ps2d_exact_overlap,
-        OVERLAP_DETECTOR_AVAILABLE,
-        MULTI_PEAK_FITTER_AVAILABLE as OVERLAP_FITTER_AVAILABLE
-    )
+    import lunaNMR.core.ps2d_exact_overlap_integration as _ps2d_overlap  # noqa: F401
+    del _ps2d_overlap  # Clean up namespace
     PS2D_EXACT_OVERLAP_INTEGRATION_AVAILABLE = True
 except ImportError as e:
     PS2D_EXACT_OVERLAP_INTEGRATION_AVAILABLE = False
@@ -511,7 +505,7 @@ class VoigtIntegrator(BaseIntegrator):
                 # Fallback to reasonable defaults
                 return 0.05 if len(ppm_scale) < 50 else 2.0
 
-        except:
+        except Exception:
             # Fallback width estimation
             return 0.05 if len(ppm_scale) < 50 else 2.0
 
@@ -746,11 +740,6 @@ class VoigtIntegrator(BaseIntegrator):
                 # 15N/13C dimension - broader peaks
                 initial_linewidth = 0.5  # ppm
 
-            # ===================================================================
-            # See spectrum.cpp readData2D() line 1100: y.push_back(b);
-            # See peakfit.cpp fitGlobal() line 370: yred[j] = y[i];
-            # ===================================================================
-
             # Call PS2D-style fitter with RAW data (NO baseline subtraction)
             result = fit_single_peak_ps2d_style(
                 x_data=x_data,
@@ -823,7 +812,7 @@ class VoigtIntegrator(BaseIntegrator):
 
     def detect_peaks_1d(self, x_data, y_data, target_position=None, gui_params=None):
         """Detect peaks in 1D cross-section using scipy peak detection optimized for overlapping peaks"""
-        from scipy.signal import find_peaks, peak_widths, peak_prominences
+        from scipy.signal import find_peaks, peak_widths
 
         # Get parameters from GUI if available, otherwise use defaults
         if gui_params:
@@ -1131,177 +1120,6 @@ class VoigtIntegrator(BaseIntegrator):
         else:
             log_warning(f"Iterative optimization failed after {attempts} attempts")
             return None
-
-    def adaptive_fit_1d(self, x_data, y_data, target_position, dimension='x', gui_params=None):
-        """Adaptive fitting strategy with iterative parameter optimization fallback"""
-        # Get max peaks parameter
-        max_peaks_fit = gui_params.get('max_peaks_fit', 4) if gui_params else 4
-
-        # First attempt: use GUI parameters
-        detected_peaks = self.detect_peaks_1d(x_data, y_data, target_position, gui_params)
-        n_detected = len(detected_peaks)
-
-        log_info(f"{dimension.upper()}-dimension: {n_detected} peaks detected")
-
-        # Attempt fitting with current parameters
-        fit_result = None
-
-        if n_detected <= 1:
-            # Single peak or no peaks - USE PS2D-STYLE FITTING (HIGH QUALITY)
-            if PS2D_STYLE_FITTING_AVAILABLE:
-                log_info("Using PS2D-style high-quality fitting for single peak")
-                fit_result = self.fit_peak_1d_ps2d_style(x_data, y_data, target_position, dimension, verbose=False)
-            else:
-                # Fallback to standard fitting
-                initial_guess = self._calculate_initial_guess_1d(x_data, y_data, target_position)
-                bounds = self._get_fitting_bounds(initial_guess, x_data, dimension)
-                fit_result = self.fit_peak_1d(x_data, y_data, initial_guess, 'voigt', bounds)
-
-        elif 2 <= n_detected <= max_peaks_fit:
-            # Multi-peak case - USE PS2D-STYLE MULTI-PEAK FITTING (EXCLUSIVE)
-            fit_result = None  # Initialize to avoid variable leakage
-
-            # PS2D multi-peak is now the ONLY method (no fallbacks to old methods)
-            use_ps2d = gui_params.get('use_ps2d_multi_peak', True) if gui_params else True
-
-            if PS2D_MULTI_PEAK_AVAILABLE:
-                log_info(f"Using PS2D-style multi-peak fitting (5-stage) for {n_detected} peaks in {dimension.upper()}-dimension")
-
-                try:
-                    # Get linewidth constraint parameters from GUI (with None check)
-                    fix_linewidths = gui_params.get('fix_linewidths', False) if gui_params else False
-                    fix_positions = gui_params.get('fix_positions', False) if gui_params else False
-
-                    # Get custom linewidth overrides from GUI (if provided)
-                    lw_lorentz_1h = gui_params.get('lw_lorentz_1h', None) if gui_params else None
-                    lw_gauss_1h = gui_params.get('lw_gauss_1h', None) if gui_params else None
-                    lw_lorentz_15n = gui_params.get('lw_lorentz_15n', None) if gui_params else None
-                    lw_gauss_15n = gui_params.get('lw_gauss_15n', None) if gui_params else None
-
-                    # ===================================================================
-                    # USE EXACT C++ PS2D OVERLAP DETECTION (ellipsoid + transitive closure)
-                    # This implements the complete C++ workflow:
-                    # 1. Ellipsoid overlap detection (geometric intersection)
-                    # 2. Transitive closure grouping (A overlaps B, B overlaps C → all grouped)
-                    # 3. Simultaneous fitting of each overlap group (5-stage deconvolution)
-                    # ===================================================================
-
-                    # Check if exact overlap detection is available
-                    if PS2D_EXACT_OVERLAP_INTEGRATION_AVAILABLE:
-                        ps2d_multi_result = fit_peaks_with_exact_overlap_detection(
-                            x_data=x_data,
-                            y_data=y_data,
-                            detected_peaks=detected_peaks,
-                            dimension=dimension,
-                            target_position=target_position,  # CRITICAL: Pass original target for correct peak selection
-                            fix_linewidths=fix_linewidths,
-                            fix_positions=fix_positions,
-                            lw_lorentz_1h=lw_lorentz_1h,
-                            lw_gauss_1h=lw_gauss_1h,
-                            lw_lorentz_15n=lw_lorentz_15n,
-                            lw_gauss_15n=lw_gauss_15n,
-                            use_exact_overlap_detection=True,  # ENABLE exact C++ algorithm
-                            verbose=False  # Enable debug output
-                        )
-
-                        # Show overlap detection results
-                        if ps2d_multi_result.get('n_overlap_groups', 0) > 0:
-                            log_info(f"Found {ps2d_multi_result['n_overlap_groups']} overlap groups, {ps2d_multi_result['n_isolated_peaks']} isolated peaks")
-                    else:
-                        # Fallback to standard multi-peak fitting (NO overlap detection)
-                        ps2d_multi_result = fit_overlapping_peaks_ps2d_style(
-                            x_data=x_data,
-                            y_data=y_data,
-                            detected_peaks=detected_peaks,
-                            dimension=dimension,
-                            target_position=target_position,  # CRITICAL: Pass original target for correct peak selection
-                            fix_linewidths=fix_linewidths,
-                            fix_positions=fix_positions,
-                            lw_lorentz_1h=lw_lorentz_1h,
-                            lw_gauss_1h=lw_gauss_1h,
-                            lw_lorentz_15n=lw_lorentz_15n,
-                            lw_gauss_15n=lw_gauss_15n,
-                            verbose=False  # Enable debug output
-                        )
-
-                    if ps2d_multi_result['success']:
-                        log_info(f"PS2D multi-peak: {len(ps2d_multi_result['peaks'])} peaks, R²={ps2d_multi_result['r_squared']:.3f}")
-
-                        # Find peak closest to target position
-                        target_peak = min(ps2d_multi_result['peaks'],
-                                        key=lambda p: abs(p['position'] - target_position))
-
-                        fit_result = {
-                            'success': True,
-                            'r_squared': ps2d_multi_result['r_squared'],
-                            'fitted_curve': ps2d_multi_result['fitted_curve'],  # NO baseline adjustment
-                            'amplitude': target_peak['intensity'],
-                            'center': target_peak['position'],
-                            'sigma': target_peak['lw_gauss'] / np.sqrt(8 * np.log(2)),  # Convert FWHM to sigma
-                            'gamma': target_peak['lw_lorentz'] / 2.0,  # Convert FWHM to gamma
-                            'baseline': 0.0,
-                            'multi_peak_info': {
-                                'n_peaks': len(ps2d_multi_result['peaks']),
-                                'all_peaks': ps2d_multi_result['peaks'],
-                                'method': 'ps2d_multi_peak_5_stage',
-                                'convergence_flag': ps2d_multi_result.get('convergence_flag', 0)
-                            }
-                        }
-                    else:
-                        log_warning("PS2D multi-peak failed (success=False)")
-                        fit_result = None
-
-                except Exception as e:
-                    log_error(f"PS2D multi-peak exception: {e}")
-                    fit_result = None
-            else:
-                log_error(f"PS2D multi-peak not available - cannot fit {n_detected} peaks")
-                fit_result = None
-
-            # NO FALLBACKS - PS2D is the only method
-            # If PS2D failed, the fit_result will be None and fitting fails cleanly
-
-            # Fallback to single peak if multi-peak fails
-            if not fit_result:
-                log_warning("Multi-peak failed, falling back to single peak")
-                initial_guess = self._calculate_initial_guess_1d(x_data, y_data, target_position)
-                bounds = self._get_fitting_bounds(initial_guess, x_data, dimension)
-                fit_result = self.fit_peak_1d(x_data, y_data, initial_guess, 'voigt', bounds)
-
-        else:
-            # Too many peaks - fallback to single peak
-            log_warning(f"Too many peaks ({n_detected}), using single peak fitting")
-            initial_guess = self._calculate_initial_guess_1d(x_data, y_data, target_position)
-            bounds = self._get_fitting_bounds(initial_guess, x_data, dimension)
-            fit_result = self.fit_peak_1d(x_data, y_data, initial_guess, 'voigt', bounds)
-
-        # Quality assessment and iterative optimization fallback
-        if fit_result and fit_result.get('success', False):
-            r_squared = fit_result.get('r_squared', -float('inf'))
-
-            # If fit quality is poor (R² < 0.5), try iterative optimization
-            if r_squared < 0.5:
-                log_warning(f"Poor fit quality (R²={r_squared:.3f}), attempting iterative optimization")
-                optimized_result = self.iterative_parameter_optimization(x_data, y_data, target_position, dimension, gui_params)
-
-                if optimized_result and optimized_result.get('r_squared', -float('inf')) > r_squared:
-                    return optimized_result
-                else:
-                    log_info(f"Keeping original fit (R²={r_squared:.3f})")
-                    return fit_result
-            else:
-                # Good fit, return as-is
-                return fit_result
-        else:
-            # Fitting failed completely, try iterative optimization as last resort
-            log_warning("Initial fitting failed, attempting iterative optimization")
-            optimized_result = self.iterative_parameter_optimization(x_data, y_data, target_position, dimension, gui_params)
-
-            if optimized_result:
-                return optimized_result
-            else:
-                # Complete failure
-                return fit_result
 
     # =================== ENHANCED 2D FITTING ===================
 
@@ -1868,7 +1686,7 @@ class VoigtIntegrator(BaseIntegrator):
         Extract 2D region covering all peaks in overlap group
 
         PS2D-compatible implementation: Uses elliptical window radii to define
-        bounding box, matching spectrum.cpp:1584-1587 (getRegion function).
+        bounding box
 
         Uses centralized PS2D configuration (nucleus-adaptive).
 
@@ -2285,7 +2103,7 @@ class VoigtIntegrator(BaseIntegrator):
             for p in overlap_group
         ]
 
-        # Select data inside union of elliptical windows (spectrum.cpp:1010-1020)
+        # Select data inside union of elliptical windows
         # Use nucleus-adaptive radii from centralized config
         config = get_ps2d_config()
         radF1 = config.radF1  # Nucleus-adaptive F1 ellipse radius
@@ -3243,7 +3061,6 @@ class VoigtIntegrator(BaseIntegrator):
         if self.nmr_data is None:
             return None
 
-        # PS2D_SRC METHOD: Use FIXED elliptical windows (EXACT clone)
         if self.ps2d_data_selector is not None:
             # Find peak position in data points
             x_idx = np.argmin(np.abs(self.ppm_x_axis - peak_x_ppm))
@@ -3257,7 +3074,7 @@ class VoigtIntegrator(BaseIntegrator):
             y_cross_full = self.nmr_data[:, x_idx]
             y_ppm_full = self.ppm_y_axis
 
-            # Apply PS2D's FIXED elliptical window selection (spectrum.cpp lines 1010-1020)
+            # Apply PS2D's FIXED elliptical window selection 
             x_selection = self.ps2d_data_selector.select_data_elliptical(
                 x_ppm_full, x_cross_full, peak_x_ppm, peak_y_ppm, dimension='x'
             )

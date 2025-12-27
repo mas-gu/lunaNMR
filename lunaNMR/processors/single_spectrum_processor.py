@@ -592,7 +592,7 @@ class SingleSpectrumProcessor:
             parallel_fitter = ParallelPeakFitter(self.integrator)
 
             # Define progress callback for original parallel processing
-            def original_parallel_progress_callback(completed, total, current_assignment):
+            def original_parallel_progress_callback(completed, total, _current_assignment):
                 if self.progress_callback and self.processing_active:
                     progress = (completed / total) * 100
                     self.progress_callback(

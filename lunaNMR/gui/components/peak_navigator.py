@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QLineEdit
 )
 from PySide6.QtCore import Signal, Qt, QSize
-from PySide6.QtGui import QColor, QFont, QFont as QFontWeight
+from PySide6.QtGui import QColor, QFont
 
 from lunaNMR.gui.styles.design_system import (
     # Colors

@@ -88,7 +88,7 @@ Understanding how these blocks interact will help you plug in experiments withou
 ## 4. Elliptical Mask & Data Selection
 
 - **Code**: `ps2d_data_selector.py`, invoked in `core_integrator.py:2375-2389`
-- **Default radii**: `radF1 = 0.4`, `radF2 = 0.04` ppm (~33% tighter than original PS2D C++ defaults of 0.6/0.06)
+- **Default radii**: `radF1 = 0.4`, `radF2 = 0.04` ppm
 
 **Tuning strategies**:
 1. Multiply radii by 1.25 for clusters with >4 peaks. Expect more context captured (R² up to +0.03) but slightly higher runtime; check that masks don’t overlap neighbouring clusters.

@@ -14,7 +14,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 import logging
-from collections import defaultdict
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
