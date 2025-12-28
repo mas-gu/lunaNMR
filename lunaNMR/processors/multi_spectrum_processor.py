@@ -11,8 +11,6 @@ import json
 import pandas as pd
 import numpy as np
 from datetime import datetime
-import threading
-import time
 from typing import List, Dict, Any, Optional
 
 # Independent imports - no GUI dependencies
@@ -456,6 +454,14 @@ class MultiSpectrumProcessor:
             'enable_cascade_drift_limit': enable_cascade_drift_limit
         }
 
+        # PER-PEAK LINEWIDTH REUSE: Pass reference linewidths for spectrum 2+
+        # Spectrum 1: linewidths are extracted and stored in self.reference_linewidths
+        # Spectrum 2+: use stored linewidths as fixed constraints
+        if self.use_ps2d_linewidth_reuse and spectrum_number > 1 and self.reference_linewidths:
+            processing_options['reference_linewidths'] = self.reference_linewidths
+            processing_options['force_reference_linewidths'] = True
+            log_info(f"Spectrum {spectrum_number}: Using {len(self.reference_linewidths)} stored linewidths from reference")
+
         if self.peak_source_mode == 'cascade':
             pass  # Cascade mode uses drift limiting
 
@@ -857,7 +863,7 @@ class MultiSpectrumProcessor:
 
                 # Extract detected intensity (from peak detection, not fitting)
                 detected_intensity = 0.0
-                if 'detected_intensity' in fit_result:
+                if 'detected_intensity' in fit_result and fit_result['detected_intensity'] is not None:
                     detected_intensity = float(fit_result['detected_intensity'])
                 # Fallback: use intensity from all_peaks_context if available
                 elif self.reference_peaks is not None:
@@ -1134,9 +1140,11 @@ class MultiSpectrumProcessor:
     def _format_dataframe_for_csv(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Format dataframe columns with specific decimal places:
-        - Reference_X, Reference_Y: 3 decimal places
-        - All other numeric columns: 1 decimal place
+        - Reference_X, LW_X: 4 decimal places (1H dimension)
+        - Reference_Y, LW_Y: 3 decimal places (15N dimension)
+        - R_Squared: 3 decimal places
         - Integer columns: preserved as integers (no decimal point)
+        - All other numeric columns: 1 decimal place
 
         Returns a copy with formatted values.
         """
@@ -1150,8 +1158,14 @@ class MultiSpectrumProcessor:
             # Check if column is integer type (preserve as integer without decimals)
             if pd.api.types.is_integer_dtype(df_formatted[col]):
                 df_formatted[col] = df_formatted[col].apply(lambda x: f'{int(x)}' if pd.notna(x) else '')
-            # Format positions and linewidths with 3 decimal places
-            elif col in ['Reference_X', 'Reference_Y', 'LW_X', 'LW_Y'] or 'LW_' in col:
+            # Format LW_X (1H linewidth) with 4 decimal places
+            elif col == 'LW_X' or col.endswith('_LW_X'):
+                df_formatted[col] = df_formatted[col].apply(lambda x: f'{x:.4f}' if pd.notna(x) else '')
+            # Format positions and LW_Y (15N linewidth) with 3 decimal places
+            elif col in ['Reference_X', 'Reference_Y', 'LW_Y'] or col.endswith('_LW_Y'):
+                df_formatted[col] = df_formatted[col].apply(lambda x: f'{x:.3f}' if pd.notna(x) else '')
+            # Format R_Squared with 3 decimal places
+            elif col == 'R_Squared' or col.endswith('_R_Squared'):
                 df_formatted[col] = df_formatted[col].apply(lambda x: f'{x:.3f}' if pd.notna(x) else '')
             # Format all other numeric columns with 1 decimal place
             else:
@@ -1306,10 +1320,10 @@ class MultiSpectrumProcessor:
 
     def _extract_and_store_linewidth(self, result, assignment):
         """
-        Extract linewidths from reference spectrum fit 
-        - Fit first plane/spectrum with full optimization
-        - Extract linewidths (LW F1, LW F2, Voigt params)
-        - Store for reuse in subsequent spectra
+        Extract linewidths from reference spectrum fit results.
+
+        Handles both 1D (x_fit/y_fit subdicts) and 2D PS2D (top-level sigma/gamma) formats.
+        Stores in PS2D-compatible format (lw_lor_f1, lw_gau_f1, etc.) for reuse.
 
         Parameters
         ----------
@@ -1319,18 +1333,33 @@ class MultiSpectrumProcessor:
             Peak assignment identifier
         """
         try:
-            x_fit = result.get('x_fit', {})
-            y_fit = result.get('y_fit', {})
+            # Check for top-level sigma/gamma fields (from PS2D 2D fit results)
+            if 'sigma_x' in result or 'sigma_y' in result:
+                # PS2D top-level format: sigma_x = 1H Gaussian, gamma_x = 1H Lorentzian
+                self.reference_linewidths[assignment] = {
+                    'lw_gau_f2': result.get('sigma_x', 0.015),   # 1H Gaussian (F2)
+                    'lw_lor_f2': result.get('gamma_x', 0.001),   # 1H Lorentzian (F2)
+                    'lw_gau_f1': result.get('sigma_y', 0.3),     # 15N Gaussian (F1)
+                    'lw_lor_f1': result.get('gamma_y', 0.0001),  # 15N Lorentzian (F1)
+                    'r_squared': result.get('r_squared', result.get('avg_r_squared', 0))
+                }
+            else:
+                # 1D format with x_fit/y_fit subdicts
+                x_fit = result.get('x_fit', {})
+                y_fit = result.get('y_fit', {})
 
-            # Extract Gaussian (sigma) and Lorentzian (gamma) components
-            self.reference_linewidths[assignment] = {
-                'x_sigma': x_fit.get('sigma', 0.015),  # 1H dimension
-                'x_gamma': x_fit.get('gamma', 0.015),  # 1H dimension
-                'y_sigma': y_fit.get('sigma', 0.4),    # 15N/13C dimension
-                'y_gamma': y_fit.get('gamma', 0.4),    # 15N/13C dimension
-                'x_r_squared': x_fit.get('r_squared', 0),
-                'y_r_squared': y_fit.get('r_squared', 0)
-            }
+                self.reference_linewidths[assignment] = {
+                    'lw_gau_f2': x_fit.get('sigma', 0.015),   # 1H Gaussian (F2)
+                    'lw_lor_f2': x_fit.get('gamma', 0.001),   # 1H Lorentzian (F2)
+                    'lw_gau_f1': y_fit.get('sigma', 0.3),     # 15N Gaussian (F1)
+                    'lw_lor_f1': y_fit.get('gamma', 0.0001),  # 15N Lorentzian (F1)
+                    'r_squared': max(x_fit.get('r_squared', 0), y_fit.get('r_squared', 0))
+                }
+
+            ref_lw = self.reference_linewidths[assignment]
+            log_info(f"Stored linewidths for {assignment}: "
+                     f"F1(Gau={ref_lw['lw_gau_f1']:.4f}, Lor={ref_lw['lw_lor_f1']:.5f}), "
+                     f"F2(Gau={ref_lw['lw_gau_f2']:.5f}, Lor={ref_lw['lw_lor_f2']:.6f})")
 
         except Exception as e:
             log_warning(f"Could not extract linewidths for {assignment}: {e}")
@@ -1506,132 +1535,3 @@ class BatchResults:
                 integration_df_formatted.to_csv(integration_file, index=False)
 
         return output_folder
-    
-## GM added 
-
-class SeriesAnalyzer:
-    """Analysis and visualization of series processing results"""
-
-    def __init__(self):
-        self.results = None
-
-    def analyze_detection_trends(self):
-        """Analyze detection rate trends across series"""
-        if self.results is None or not hasattr(self.results, 'results') or not self.results.results:
-            return None
-
-        detection_data = []
-        for spectrum_name, result in self.results.results.items():
-            if result['status'] == 'success':
-                detection_data.append({
-                    'spectrum': spectrum_name,
-                    'detection_rate': result.get('detection_rate', 0.0),
-                    'detected_peaks': result.get('detected_peaks', 0),
-                    'total_peaks': result.get('total_peaks', 0),
-                    'noise_level': result.get('noise_level', 0.0)
-                })
-
-        if not detection_data:
-            return None
-
-        df = pd.DataFrame(detection_data)
-
-        analysis = {
-            'data': df,
-            'trends': {
-                'best_spectrum': df.loc[df['detection_rate'].idxmax()]['spectrum'],
-                'worst_spectrum': df.loc[df['detection_rate'].idxmin()]['spectrum'],
-                'average_detection': df['detection_rate'].mean(),
-                'detection_consistency': 1.0 - (df['detection_rate'].std() / df['detection_rate'].mean()) if df['detection_rate'].mean() > 0 else 0
-            },
-            'correlations': {}
-        }
-
-        # Analyze correlations
-        if len(df) > 2:
-            # Correlation between noise level and detection rate
-            noise_detection_corr = df['noise_level'].corr(df['detection_rate'])
-            analysis['correlations']['noise_vs_detection'] = noise_detection_corr
-
-        return analysis
-
-    def generate_quality_report(self):
-        """Generate comprehensive quality assessment report"""
-        if not self.results:
-            return None
-
-        summary = self.results.get_summary()
-
-        # Quality thresholds
-        thresholds = {
-            'excellent_detection': 90.0,
-            'good_detection': 70.0,
-            'fair_detection': 50.0,
-            'min_success_rate': 80.0
-        }
-
-        report = {
-            'overall_grade': 'Unknown',
-            'summary': summary,
-            'quality_metrics': {},
-            'recommendations': [],
-            'issues': []
-        }
-
-        # Calculate quality metrics
-        if summary['success_rate'] >= thresholds['min_success_rate']:
-            if 'statistics' in self.results.statistics and 'detection_rate' in self.results.statistics:
-                avg_detection = self.results.statistics['detection_rate']['mean']
-
-                if avg_detection >= thresholds['excellent_detection']:
-                    report['overall_grade'] = 'Excellent'
-                elif avg_detection >= thresholds['good_detection']:
-                    report['overall_grade'] = 'Good'
-                elif avg_detection >= thresholds['fair_detection']:
-                    report['overall_grade'] = 'Fair'
-                else:
-                    report['overall_grade'] = 'Poor'
-                    report['issues'].append(f"Low average detection rate: {avg_detection:.1f}%")
-
-                report['quality_metrics']['average_detection_rate'] = avg_detection
-                report['quality_metrics']['detection_consistency'] = 1.0 - (
-                    self.results.statistics['detection_rate']['std'] / avg_detection
-                ) if avg_detection > 0 else 0
-            else:
-                report['overall_grade'] = 'Poor'
-                report['issues'].append("No detection statistics available")
-        else:
-            report['overall_grade'] = 'Failed'
-            report['issues'].append(f"Low success rate: {summary['success_rate']:.1f}%")
-
-        # Generate recommendations
-        if report['overall_grade'] in ['Poor', 'Fair']:
-            report['recommendations'].append("Consider adjusting detection parameters")
-            report['recommendations'].append("Review noise threshold settings")
-            report['recommendations'].append("Check data quality and preprocessing")
-
-        if summary['error_count'] > 0:
-            report['recommendations'].append(f"Investigate {summary['error_count']} processing errors")
-
-        return report
-
-    def export_analysis(self, output_file):
-        """Export analysis results to file"""
-        if not self.results:
-            return False
-
-        analysis_data = {
-            'timestamp': datetime.now().isoformat(),
-            'summary': self.results.get_summary(),
-            'statistics': self.results.statistics,
-            'trends': self.analyze_detection_trends(),
-            'quality_report': self.generate_quality_report()
-        }
-
-        try:
-            with open(output_file, 'w') as f:
-                json.dump(analysis_data, f, indent=2, default=str)
-            return True
-        except Exception as e:
-            log_error(f"Failed to export analysis: {e}")
-            return False

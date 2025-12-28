@@ -5,9 +5,8 @@ import os
 import glob
 import re
 import logging
-import threading
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import List, Dict, Any
 
 import pandas as pd
 
@@ -23,7 +22,6 @@ from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT,
-    PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
     FRAME_BG_COLOR,
@@ -977,7 +975,7 @@ class SeriesIntegrationDialog(BaseDialog):
             self.status_label.setText(
                 f"Complete: {summary.get('successful', 0)}/{summary.get('total_spectra', 0)} spectra processed"
             )
-            self._log(f"Series integration complete!")
+            self._log("Series integration complete!")
             self._log(f"  Total: {summary.get('total_spectra', 0)} spectra")
             self._log(f"  Successful: {summary.get('successful', 0)}")
             self._log(f"  Failed: {summary.get('failed', 0)}")

@@ -7,7 +7,7 @@ from typing import Optional
 import logging
 
 from PySide6.QtWidgets import QMainWindow, QStatusBar, QMenuBar
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import QSize
 from PySide6.QtGui import QIcon
 
 logger = logging.getLogger(__name__)

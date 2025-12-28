@@ -6,13 +6,11 @@ Author: Guillaume Mas
 Date: 2025
 """
 
-import threading
 import time
 from typing import List, Dict, Any, Optional, Tuple
 import pandas as pd
 import numpy as np
 
-from datetime import datetime
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
 class SingleSpectrumProcessor:
@@ -84,6 +82,9 @@ class SingleSpectrumProcessor:
         self._pre_learned_statistics = pre_learned_statistics  # Store for parallel fitting
         # Store original reference positions for cascade mode absolute drift limiting
         self._original_reference_positions = processing_options.get('original_reference_positions') if processing_options else None
+        # Store reference linewidths for per-peak linewidth reuse
+        self._reference_linewidths = processing_options.get('reference_linewidths', {}) if processing_options else {}
+        self._force_reference_linewidths = processing_options.get('force_reference_linewidths', False) if processing_options else False
 
         try:
             # Update integrator parameters from parameter manager
@@ -266,7 +267,7 @@ class SingleSpectrumProcessor:
                         self.progress_callback(progress, task_desc, f"{assignment} fitted (R²={r_squared:.3f})")
                 else:
                     self.stats['failed_fits'] += 1
-                    log_warning(f"Failed: Could not fit peak")
+                    log_warning("Failed: Could not fit peak")
                     # Log individual peak failure for progress dialog
                     if self.progress_callback:
                         self.progress_callback(progress, task_desc, f"{assignment} failed")
@@ -324,6 +325,20 @@ class SingleSpectrumProcessor:
                 fix_positions = self.integrator.gui_params.get('fix_positions', False)
                 fix_linewidths = self.integrator.gui_params.get('fix_linewidths', False)
 
+                # Build reference linewidths dict for peaks in this cluster
+                cluster_reference_linewidths = None
+                if self._force_reference_linewidths and self._reference_linewidths:
+                    cluster_reference_linewidths = {}
+                    for peak_pos in cluster:
+                        meta = peak_metadata.get(peak_pos)
+                        if meta:
+                            assignment = str(meta['assignment'])
+                            if assignment in self._reference_linewidths:
+                                cluster_reference_linewidths[assignment] = self._reference_linewidths[assignment]
+                    # If we have reference linewidths, force fix_linewidths=True
+                    if cluster_reference_linewidths:
+                        fix_linewidths = True
+
                 # Call 2D overlap fitting with dictionary format
                 group_result = self.integrator.fit_overlap_group_2d(
                     cluster_dicts,
@@ -331,7 +346,8 @@ class SingleSpectrumProcessor:
                     peak_assignments=cluster_assignments,
                     fix_positions=fix_positions,
                     fix_linewidths=fix_linewidths,
-                    reference_positions=self._original_reference_positions
+                    reference_positions=self._original_reference_positions,
+                    reference_linewidths=cluster_reference_linewidths
                 )
 
                 if group_result and group_result.get('success', False):
@@ -398,6 +414,7 @@ class SingleSpectrumProcessor:
                                 'amplitude': best_match['amplitude'],  # Use PS2D calculated amplitude (= height)
                                 'height': best_match['height'],  # Use PS2D calculated height (not intensity!)
                                 'volume': best_match['volume'],  # Use PS2D volume (= intensity for normalized Voigt)
+                                'detected_intensity': best_match.get('detected_intensity'),  # From peak detection
                                 'r_squared': group_result['r_squared'],  # Peak Navigator uses 'r_squared'
                                 'avg_r_squared': group_result['r_squared'],
                                 'center_x': best_match['pos_f2'],
@@ -534,6 +551,12 @@ class SingleSpectrumProcessor:
         if pre_learned_statistics is not None:
             log_info("Parallel mode: Using pre-learned statistics (skipping PASS 1)")
 
+        # Get reference linewidths if available (for per-peak linewidth reuse)
+        reference_linewidths = getattr(self, '_reference_linewidths', {})
+        force_reference_linewidths = getattr(self, '_force_reference_linewidths', False)
+        if force_reference_linewidths and reference_linewidths:
+            log_info(f"Parallel mode: Using {len(reference_linewidths)} reference linewidths")
+
         # Check if enhanced parallel fitting is available
         if (hasattr(self.integrator, 'enhanced_fitter') and
             hasattr(self.integrator.enhanced_fitter, 'enhanced_peak_fitting_parallel')):
@@ -553,7 +576,8 @@ class SingleSpectrumProcessor:
                     use_parallel=True,
                     progress_callback=parallel_progress_callback,
                     locked_clusters_by_assignment=locked_clusters,
-                    pre_learned_statistics=pre_learned_statistics
+                    pre_learned_statistics=pre_learned_statistics,
+                    reference_linewidths=reference_linewidths if force_reference_linewidths else None
                 )
 
                 # Handle both old (list) and new (tuple) return formats
@@ -598,7 +622,7 @@ class SingleSpectrumProcessor:
                     self.progress_callback(
                         progress,
                         f"Original parallel fitting: {completed}/{total} completed",
-                        f"Processing peaks in parallel"
+                        "Processing peaks in parallel"
                     )
 
             # Run original parallel fitting

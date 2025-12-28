@@ -19,13 +19,10 @@ Date: 2025
 """
 
 import numpy as np
-import pandas as pd
 from scipy.special import wofz
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_widths
-from scipy.ndimage import gaussian_filter1d
 import warnings
-import time
 warnings.filterwarnings('ignore')
 
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
@@ -372,7 +369,7 @@ class EnhancedVoigtFitter:
 
             return baseline_poly
 
-        except Exception as e:
+        except Exception:
             return np.full(len(y_data), np.percentile(y_data, 15))
 
     @staticmethod
@@ -474,7 +471,7 @@ class EnhancedVoigtFitter:
 
             return final_width
 
-        except Exception as e:
+        except Exception:
             return typical_width
 
     def estimate_initial_parameters_from_resolved_peaks(self, x_data, y_data,
@@ -562,7 +559,7 @@ class EnhancedVoigtFitter:
                                 )
                                 baseline_estimates.append(local_baseline)
 
-                        except Exception as e:
+                        except Exception:
                             continue
 
                     # Calculate robust statistics if we got enough estimates
@@ -592,7 +589,7 @@ class EnhancedVoigtFitter:
                     edge_data = np.concatenate([y_data[:edge_size], y_data[-edge_size:]])
                     results['noise_level'] = np.std(edge_data)
 
-            except Exception as e:
+            except Exception:
                 results['estimation_quality'] = 'failed'
 
         else:
@@ -641,7 +638,7 @@ class EnhancedVoigtFitter:
             # Fallback to discrete maximum
             return x_data[local_max_idx]
 
-        except Exception as e:
+        except Exception:
             return initial_center
 
     def get_adaptive_bounds(self, initial_guess, x_data, y_data, nucleus_type=None, linewidth_constraints=None):
@@ -1627,41 +1624,6 @@ class EnhancedVoigtFitter:
                 'separation_distance': float('inf'),
                 'confidence': 0.0
             }
-
-    def configure_overlap_resolution(self, enable: bool = True,
-                                     config: dict = None):
-        """
-        Configure overlap resolution behavior
-
-        This method enables/disables the overlap detection and resolution system.
-        By default, overlap resolution is DISABLED for backward compatibility.
-
-        Args:
-            enable: Enable/disable overlap detection
-            config: Optional configuration dictionary for overlap resolver
-
-        Example:
-            fitter.configure_overlap_resolution(
-                enable=True,
-                config={
-                    'jackknife': {'n_resamples': 100},
-                    'model_selection': {'max_peaks': 5}
-                }
-            )
-        """
-        if not OVERLAP_RESOLUTION_AVAILABLE:
-            log_warning("Overlap resolution modules not available - ensure overlap_resolver_engine.py and overlap_config.py are installed")
-            return
-
-        self.overlap_detection_enabled = enable
-
-        if config:
-            if self.overlap_config is None:
-                self.overlap_config = OverlapResolutionConfig(config)
-            else:
-                self.overlap_config.update(config)
-
-
 
     def get_adaptive_peak_detection_params(self, x_data, y_data, nucleus_type, window_size_multiplier=1.0):
         """
@@ -2702,7 +2664,7 @@ class EnhancedVoigtFitter:
                     y_pred = multi_voigt_model(params)
                     residuals = y_data - y_pred
                     return np.sum(residuals**2)
-                except Exception as e:
+                except Exception:
                     return 1e10  # Large penalty for failed evaluations
 
             # Use smart bounds from sequential isolation or create basic bounds
@@ -3166,7 +3128,7 @@ class EnhancedVoigtFitter:
 
     def enhanced_peak_fitting_parallel(self, peak_list, use_parallel=True, progress_callback=None,
                                         parent_integrator=None, locked_clusters_by_assignment=None,
-                                        pre_learned_statistics=None):
+                                        pre_learned_statistics=None, reference_linewidths=None):
         """
         New parallel entry point that maintains complete compatibility with existing interface.
 
@@ -3178,6 +3140,8 @@ class EnhancedVoigtFitter:
             locked_clusters_by_assignment: Optional pre-computed clusters from reference spectrum
             pre_learned_statistics: Optional linewidth statistics from reference spectrum.
                 If provided, PASS 1 learning is skipped and these values are used as initial guesses.
+            reference_linewidths: Optional dict mapping assignment -> {lw_lor_f1, lw_gau_f1, etc.}
+                for per-peak linewidth reuse. If provided, linewidths are fixed to these values.
 
         Returns:
             Tuple of (fitted_results, learned_statistics) where learned_statistics is the
@@ -3252,12 +3216,13 @@ class EnhancedVoigtFitter:
                 if hasattr(self, 'series_params') and self.series_params is not None:
                     parallel_processor.set_series_params(self.series_params)
 
-                # Pass locked clusters and pre-learned statistics
+                # Pass locked clusters, pre-learned statistics, and reference linewidths
                 results, learned_statistics = parallel_processor.fit_all_peaks_parallel(
                     peak_list,
                     progress_callback,
                     locked_clusters_by_assignment=locked_clusters_by_assignment,
-                    pre_learned_statistics=pre_learned_statistics
+                    pre_learned_statistics=pre_learned_statistics,
+                    reference_linewidths=reference_linewidths
                 )
 
                 # Store series_params after first spectrum optimization
@@ -3645,7 +3610,7 @@ class RobustParameterEstimator:
 
             return consensus
 
-        except Exception as e:
+        except Exception:
             return None
 
     def _quantify_parameter_uncertainties(self, estimation_results, consensus_params):
@@ -3763,7 +3728,7 @@ class RobustParameterEstimator:
                 validated.get('baseline', data_min)
             ]
 
-        except Exception as e:
+        except Exception:
             return self._fallback_parameter_estimation(x_data, y_data, np.mean(x_data), nucleus_type)['parameters']
 
     def _fallback_parameter_estimation(self, x_data, y_data, peak_center, nucleus_type):
@@ -3813,7 +3778,7 @@ if __name__ == "__main__":
     result = fitter.fit_peak_enhanced(x_test, y_noisy, nucleus_type='1H')
 
     if result['success']:
-        print(f"✅ Fitting successful!")
+        print("✅ Fitting successful!")
         print(f"   Quality: {result['quality_class']} (R² = {result['r_squared']:.3f})")
         print(f"   Center: {result['center']:.4f} ppm (true: {true_params[1]:.4f})")
         print(f"   Amplitude: {result['amplitude']:.1f} (true: {true_params[0]:.1f})")

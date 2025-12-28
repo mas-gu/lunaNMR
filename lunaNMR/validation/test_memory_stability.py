@@ -10,7 +10,6 @@ Date: 2025-09-19
 """
 
 import sys
-import os
 import time
 import numpy as np
 import pandas as pd
@@ -182,7 +181,7 @@ def test_repeated_execution_memory():
             time.sleep(1)
 
         # Analyze memory growth pattern
-        print(f"\n📈 Memory Growth Analysis:")
+        print("\n📈 Memory Growth Analysis:")
         for i, memory in enumerate(memory_per_run):
             growth = memory - baseline_rss
             print(f"   Run {i+1}: {memory:.1f}MB (+{growth:.1f}MB)")
@@ -192,7 +191,7 @@ def test_repeated_execution_memory():
         last_run_growth = memory_per_run[-1] - baseline_rss
         growth_increase = last_run_growth - first_run_growth
 
-        print(f"\n📊 Growth Analysis:")
+        print("\n📊 Growth Analysis:")
         print(f"   First run growth: {first_run_growth:.1f}MB")
         print(f"   Last run growth:  {last_run_growth:.1f}MB")
         print(f"   Additional growth: {growth_increase:.1f}MB")

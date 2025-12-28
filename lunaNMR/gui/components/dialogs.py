@@ -7,17 +7,14 @@ import logging
 
 from PySide6.QtWidgets import (
     QMessageBox,
-    QVBoxLayout,
     QLabel,
-    QCheckBox,
-    QDialogButtonBox
+    QCheckBox
 )
 from PySide6.QtCore import Qt
 
 from lunaNMR.gui.base import BaseDialog
 from lunaNMR.gui.styles.design_system import (
     SPACING_MD,
-    SPACING_SM,
     FONT_SIZE_BODY
 )
 

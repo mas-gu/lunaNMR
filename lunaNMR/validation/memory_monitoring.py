@@ -13,9 +13,6 @@ import psutil
 import os
 import time
 import threading
-from typing import Dict, List, Optional
-from multiprocessing import shared_memory
-import subprocess
 import gc
 
 
@@ -233,29 +230,29 @@ class MemoryMonitor:
 
         print("\n📊 Memory Usage Report")
         print("=" * 50)
-        print(f"RSS Memory:")
+        print("RSS Memory:")
         print(f"  Current: {stats['rss_current_mb']:.1f}MB")
         print(f"  Average: {stats['rss_avg_mb']:.1f}MB")
         print(f"  Peak:    {stats['rss_max_mb']:.1f}MB")
         print(f"  Minimum: {stats['rss_min_mb']:.1f}MB")
 
-        print(f"\nShared Memory Blocks:")
+        print("\nShared Memory Blocks:")
         print(f"  Current: {stats['shared_memory_current']}")
         print(f"  Peak:    {stats['shared_memory_max']}")
         print(f"  Minimum: {stats['shared_memory_min']}")
 
-        print(f"\nMonitoring:")
+        print("\nMonitoring:")
         print(f"  Duration: {stats['monitoring_duration']:.1f}s")
         print(f"  Samples:  {stats['sample_count']}")
 
         # Check for leaks
         leak_check = self.check_memory_leaks()
         if leak_check.get('has_potential_leaks', False):
-            print(f"\n⚠️ Potential Memory Issues:")
+            print("\n⚠️ Potential Memory Issues:")
             for indicator in leak_check['leak_indicators']:
                 print(f"  - {indicator}")
         else:
-            print(f"\n✅ No significant memory leaks detected")
+            print("\n✅ No significant memory leaks detected")
 
 
 def test_parallel_processor_memory():

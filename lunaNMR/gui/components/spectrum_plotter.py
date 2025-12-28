@@ -23,18 +23,14 @@ Date: 2025
 """
 
 import numpy as np
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal
 
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
 from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
 from lunaNMR.gui.styles.design_system import (
-    PRIMARY_BUTTON_BG,
     SUCCESS_GREEN,
     ERROR_RED,
-    WARNING_ORANGE,
-    FRAME_BG_COLOR,
-    SECONDARY_TEXT,
-    PRIMARY_TEXT
+    WARNING_ORANGE
 )
 
 
@@ -55,10 +51,12 @@ class SpectrumPlotter(MatplotlibWidget):
     Signals:
         peak_clicked: Emitted when a peak is clicked (x_ppm, y_ppm) [legacy]
         peak_edit_requested: Emitted when modifier+click for peak editing (x_ppm, y_ppm, modifiers)
+        peak_select_requested: Emitted when middle-click to select peak for moving (x_ppm, y_ppm)
     """
 
     peak_clicked = Signal(float, float)
     peak_edit_requested = Signal(float, float, object)  # x_ppm, y_ppm, Qt.KeyboardModifiers
+    peak_select_requested = Signal(float, float)  # x_ppm, y_ppm - middle-click selection
 
     def __init__(self, parent=None, toolbar=False, figsize=(8, 6)):
         """
@@ -101,7 +99,11 @@ class SpectrumPlotter(MatplotlibWidget):
         self._nav_handler = NMRNavigationHandler()
         self._nav_handler.attach(self)
         self._nav_handler.on_peak_edit = self._on_peak_edit_request
+        self._nav_handler.on_peak_select = self._on_peak_select_request
         self._nav_handler.on_reset_zoom = self.reset_zoom
+
+        # Selection highlight artist (for showing selected peak)
+        self._selection_highlight = None
 
     def plot_spectrum(self, integrator, **kwargs):
         """
@@ -279,7 +281,7 @@ class SpectrumPlotter(MatplotlibWidget):
             # Ensure main axes position stays fixed
             self.ax.set_position(self.main_axes_position)
 
-        except Exception as e:
+        except Exception:
             # Silently handle colorbar creation failures
             self.colorbar = None
             self.colorbar_ax = None
@@ -450,9 +452,9 @@ class SpectrumPlotter(MatplotlibWidget):
                     print(f"✅ Plotted {len(ref_x)} reference peaks using columns '{x_col}' and '{y_col}'")
             else:
                 available_cols = list(peak_df.columns) if hasattr(peak_df, 'columns') else []
-                print(f"⚠️  Could not find position columns in peak list.")
+                print("⚠️  Could not find position columns in peak list.")
                 print(f"    Available columns: {available_cols}")
-                print(f"    Expected: Position_X/Position_Y or similar variants")
+                print("    Expected: Position_X/Position_Y or similar variants")
 
         except Exception as e:
             print(f"❌ Error plotting reference peaks: {e}")
@@ -636,3 +638,56 @@ class SpectrumPlotter(MatplotlibWidget):
         self.peak_edit_requested.emit(x_ppm, y_ppm, modifiers)
         # Also emit legacy signal for backward compatibility
         self.peak_clicked.emit(x_ppm, y_ppm)
+
+    def _on_peak_select_request(self, x_ppm: float, y_ppm: float):
+        """
+        Handle peak selection request from navigation handler.
+
+        This is called when middle-click is performed.
+
+        Args:
+            x_ppm: X coordinate in ppm
+            y_ppm: Y coordinate in ppm
+        """
+        self.peak_select_requested.emit(x_ppm, y_ppm)
+
+    def show_selection_highlight(self, x_ppm: float, y_ppm: float):
+        """
+        Show visual highlight for selected peak.
+
+        Args:
+            x_ppm: X coordinate of selected peak (ppm)
+            y_ppm: Y coordinate of selected peak (ppm)
+        """
+        from matplotlib.patches import Ellipse
+
+        # Clear any existing highlight
+        self.clear_selection_highlight()
+
+        # Create highlight ellipse (width/height are full diameters, not radii)
+        # x dimension: smaller (0.015 / 4 = 0.00375 radius -> 0.0075 diameter)
+        # y dimension: larger (0.015 * 1.5 = 0.0225 radius -> 0.045 diameter)
+        self._selection_highlight = Ellipse(
+            (x_ppm, y_ppm),
+            width=0.0075,   # x dimension (smaller)
+            height=0.045,   # y dimension (larger)
+            fill=False,
+            edgecolor='#E0A0E0',  # pastel magenta/pink
+            linewidth=2,
+            linestyle='-',
+            zorder=15
+        )
+        self.ax.add_patch(self._selection_highlight)
+        self.canvas.draw_idle()
+
+    def clear_selection_highlight(self):
+        """Clear the selection highlight from the plot."""
+        if self._selection_highlight is not None:
+            try:
+                # Remove from axes patches collection
+                if self._selection_highlight in self.ax.patches:
+                    self.ax.patches.remove(self._selection_highlight)
+            except (ValueError, NotImplementedError):
+                pass  # Already removed or can't remove
+            self._selection_highlight = None
+            self.canvas.draw_idle()

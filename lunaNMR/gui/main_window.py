@@ -33,12 +33,14 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QScrollArea,
     QTabWidget, QLabel, QPushButton, QMessageBox, QGroupBox,
     QDoubleSpinBox, QSpinBox, QFormLayout, QCheckBox, QRadioButton, QButtonGroup,
-    QTextEdit, QDialog, QDialogButtonBox, QComboBox, QSlider, QFrame, QGridLayout,
-    QSizePolicy
+    QTextEdit, QDialog, QComboBox, QFrame, QGridLayout,
+    QSizePolicy, QApplication
 )
 from PySide6.QtCore import Qt, Signal, QThread, Slot
 from PySide6.QtGui import QFont
@@ -47,7 +49,7 @@ from lunaNMR.gui.base.base_window import BaseWindow
 from lunaNMR.gui.components.peak_navigator import PeakNavigator
 from lunaNMR.gui.styles.design_system import (
     PANEL_BG_COLOR, FRAME_BG_COLOR, PRIMARY_TEXT, SECONDARY_TEXT,
-    SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XS,
+    SPACING_SM, SPACING_MD, SPACING_XS,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT, SECONDARY_BUTTON_BORDER,
@@ -62,10 +64,9 @@ from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.utils.config_manager import ConfigurationManager, UserPreferences, ProcessingParameters
 from lunaNMR.utils.parameter_manager import NMRParameterManager
 from lunaNMR.utils.project_manager import ProjectManager
+from lunaNMR.utils.recent_projects_manager import RecentProjectsManager
 
 # Import processors (will be instantiated when needed)
-from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
-from lunaNMR.processors.multi_spectrum_processor import MultiSpectrumProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -441,7 +442,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.lw_gauss_15n = 0.3    # 15N Gaussian (ppm)
 
         # ===== Series Integration Parameters (Expert Mode) =====
-        self.use_ps2d_linewidth_reuse = False  # PS2D Linewidth Reuse for ~40% speedup
+        self.use_ps2d_linewidth_reuse = True  # Per-Peak Linewidth Reuse for ~40% speedup (ON by default)
         self.series_peak_source = "cascade"    # "detected" or "cascade"
         self.enable_cascade_drift_limit = True  # Enforce absolute drift limits in cascade mode (ON by default)
 
@@ -1639,8 +1640,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.update_status("Peak list shift reset to 0")
         logger.info("Reset coordinate offsets to zero")
 
-        peak_list_layout.addWidget(self.edit_reference_checkbox)
-
     def create_spectrum_display_section(self) -> QGroupBox:
         """Create the Spectrum Display Controls section.
 
@@ -2466,9 +2465,15 @@ class LunaNMRMainWindow(BaseWindow):
         series_group = QGroupBox("🚀 Series Integration")
         series_layout = QVBoxLayout(series_group)
 
-        # PS2D Linewidth Reuse checkbox
+        # Per-Peak Linewidth Reuse checkbox
         lw_reuse_row = QHBoxLayout()
-        self.expert_lw_reuse_check = QCheckBox("🔒 PS2D Linewidth Reuse (Fix LW from reference, ~40% speedup)")
+        self.expert_lw_reuse_check = QCheckBox("🔒 Per-Peak Linewidth Reuse (Use spectrum 1 linewidths for all)")
+        self.expert_lw_reuse_check.setToolTip(
+            "Extract per-peak linewidths from spectrum 1 and apply them as fixed\n"
+            "constraints when fitting the same peaks in spectra 2+.\n"
+            "Improves fitting speed (~40%) and consistency across relaxation series.\n"
+            "Falls back to median statistics if a peak wasn't successfully fitted in spectrum 1."
+        )
         self.expert_lw_reuse_check.setChecked(self.use_ps2d_linewidth_reuse)
         self.expert_lw_reuse_check.stateChanged.connect(self._on_lw_reuse_toggle)
         lw_reuse_row.addWidget(self.expert_lw_reuse_check)
@@ -2870,9 +2875,9 @@ class LunaNMRMainWindow(BaseWindow):
         """Handle PS2D linewidth reuse toggle."""
         self.use_ps2d_linewidth_reuse = (state == 2)  # Qt.CheckState.Checked = 2
         if self.use_ps2d_linewidth_reuse:
-            logger.info("PS2D Linewidth Reuse ENABLED - ~40% speedup for series")
+            logger.info("Per-Peak Linewidth Reuse ENABLED - spectrum 1 linewidths will be used for all")
         else:
-            logger.info("PS2D Linewidth Reuse DISABLED")
+            logger.info("Per-Peak Linewidth Reuse DISABLED")
 
     def _on_peak_source_change(self, button):
         """Handle peak source radio button change."""
@@ -2917,7 +2922,6 @@ class LunaNMRMainWindow(BaseWindow):
             logger.info("Resetting to initial state")
 
             # Reset the integrator to fresh instance
-            from lunaNMR.core.enhanced_voigt_integrator import EnhancedVoigtIntegrator
             self.integrator = EnhancedVoigtIntegrator()
 
             # Clear fitting results
@@ -2985,6 +2989,8 @@ class LunaNMRMainWindow(BaseWindow):
 
         # Connect peak edit signal (Shift+click = add, Ctrl+click = delete)
         self.spectrum_plotter.peak_edit_requested.connect(self._on_peak_edit_with_modifier)
+        # Connect peak select signal (middle-click = select for moving)
+        self.spectrum_plotter.peak_select_requested.connect(self._on_peak_select_for_move)
 
         # Add Main Spectrum tab first
         tab_widget.addTab(main_spectrum_tab, "Main Spectrum")
@@ -3030,6 +3036,9 @@ class LunaNMRMainWindow(BaseWindow):
         self.peak_navigator.peak_selected.connect(self._on_peak_selected)
         self.peak_navigator.navigation_requested.connect(self._on_navigation_requested)
         self.peak_navigator.peak_analysis_requested.connect(self._on_peak_analysis_requested)
+        self.peak_navigator.peak_edited.connect(self._on_navigator_peak_edited)
+        self.peak_navigator.peak_added.connect(self._on_navigator_peak_added)
+        self.peak_navigator.peak_deleted.connect(self._on_navigator_peak_deleted)
 
         return self.peak_navigator
 
@@ -3085,9 +3094,7 @@ class LunaNMRMainWindow(BaseWindow):
         Based on v0o9 implementation (lines 1829-1978).
         """
         from lunaNMR.gui.components.voigt_analysis_plotter import VoigtAnalysisPlotter
-        from PySide6.QtWidgets import (QGroupBox, QCheckBox, QRadioButton, QComboBox,
-                                       QSlider, QLabel, QButtonGroup)
-        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import (QGroupBox, QCheckBox, QComboBox)
 
         # Create tab widget
         tab_widget = QWidget()
@@ -3413,6 +3420,93 @@ class LunaNMRMainWindow(BaseWindow):
             direction: Navigation direction ('prev' or 'next')
         """
         self.update_status(f"Navigate {direction} requested")
+
+    def _on_navigator_peak_edited(self, peak_id: int, new_values: dict):
+        """Handle peak edit from navigator - sync with integrator.
+
+        Args:
+            peak_id: Index of the edited peak in detected_peaks list
+            new_values: Dict with 'assignment', 'x_coord', 'y_coord'
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        if not hasattr(self.integrator, 'fitted_peaks') or not self.integrator.fitted_peaks:
+            logger.warning("No fitted_peaks to sync with navigator edit")
+            return
+
+        if peak_id < 0 or peak_id >= len(self.integrator.fitted_peaks):
+            logger.warning(f"Peak index {peak_id} out of range for fitted_peaks")
+            return
+
+        # Update integrator's fitted_peaks
+        self.integrator.fitted_peaks[peak_id]['assignment'] = new_values.get('assignment', '')
+        self.integrator.fitted_peaks[peak_id]['ppm_x'] = new_values.get('x_coord', 0.0)
+        self.integrator.fitted_peaks[peak_id]['ppm_y'] = new_values.get('y_coord', 0.0)
+
+        logger.info(f"Synced navigator edit to integrator: peak {peak_id}")
+
+        # Refresh the spectrum plot to show updated position
+        self.update_spectrum_plot()
+
+    def _on_navigator_peak_added(self, peak_data: dict):
+        """Handle peak add from navigator - sync with integrator.
+
+        Adds only to reference peak list (peak_list DataFrame).
+        Detected peaks are created by fitting, not manual addition.
+
+        Args:
+            peak_data: Dict with 'assignment', 'x_coord', 'y_coord'
+        """
+        import logging
+        import pandas as pd
+        logger = logging.getLogger(__name__)
+
+        assignment = peak_data.get('assignment', 'New')
+        x_coord = peak_data.get('x_coord', 0.0)
+        y_coord = peak_data.get('y_coord', 0.0)
+
+        # Extract intensity from spectrum at position
+        intensity = self._extract_intensity_at_position(x_coord, y_coord)
+
+        # Add to integrator's reference peak list (DataFrame)
+        new_peak_ref = pd.DataFrame([{
+            'Assignment': assignment,
+            'Position_X': x_coord,
+            'Position_Y': y_coord,
+            'Height': intensity
+        }])
+
+        if hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
+            self.integrator.peak_list = pd.concat(
+                [self.integrator.peak_list, new_peak_ref], ignore_index=True
+            )
+        else:
+            self.integrator.peak_list = new_peak_ref
+
+        logger.info(f"Synced navigator add to integrator.peak_list: '{assignment}' at ({x_coord:.3f}, {y_coord:.1f})")
+
+        # Refresh the spectrum plot
+        self.update_spectrum_plot()
+
+    def _on_navigator_peak_deleted(self, peak_id: int):
+        """Handle peak delete from navigator - sync with integrator.
+
+        Args:
+            peak_id: Index of the deleted peak
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Delete from fitted_peaks if exists
+        if hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
+            if 0 <= peak_id < len(self.integrator.fitted_peaks):
+                deleted = self.integrator.fitted_peaks[peak_id]
+                del self.integrator.fitted_peaks[peak_id]
+                logger.info(f"Synced navigator delete to integrator.fitted_peaks: index {peak_id}")
+
+        # Refresh the spectrum plot
+        self.update_spectrum_plot()
 
     @Slot(str, int)
     def _on_peak_analysis_requested(self, peak_type: str, peak_index: int):
@@ -3933,7 +4027,7 @@ class LunaNMRMainWindow(BaseWindow):
             Help: User Guide, About
         """
         from PySide6.QtGui import QAction
-        from PySide6.QtWidgets import QMenuBar
+        from PySide6.QtWidgets import QMenu
 
         logger.debug("Creating menu bar (v0o9 exact copy)")
 
@@ -3946,6 +4040,11 @@ class LunaNMRMainWindow(BaseWindow):
         open_project_action = QAction("Open Project...", self)
         open_project_action.triggered.connect(self.open_project)
         file_menu.addAction(open_project_action)
+
+        # Open Recent submenu
+        self.recent_projects_menu = QMenu("Open Recent", self)
+        file_menu.addMenu(self.recent_projects_menu)
+        self._update_recent_projects_menu()
 
         save_project_action = QAction("Save Project", self)
         save_project_action.triggered.connect(self.save_project)
@@ -4698,7 +4797,7 @@ class LunaNMRMainWindow(BaseWindow):
         from datetime import datetime
         from PySide6.QtWidgets import (QMessageBox, QFileDialog, QDialog,
                                        QVBoxLayout, QHBoxLayout, QCheckBox,
-                                       QLabel, QPushButton, QGroupBox)
+                                       QPushButton, QGroupBox)
 
         if not hasattr(self, 'batch_results') or not self.batch_results:
             QMessageBox.warning(self, "No Data",
@@ -4904,7 +5003,7 @@ class LunaNMRMainWindow(BaseWindow):
 
         Opens a statistics dialog showing processing metrics.
         """
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QMessageBox
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit
 
         # Create statistics dialog
         dialog = QDialog(self)
@@ -4932,7 +5031,7 @@ class LunaNMRMainWindow(BaseWindow):
             good = sum(1 for p in peaks if p.get('fitting_quality') == 'Good')
             fair = sum(1 for p in peaks if p.get('fitting_quality') == 'Fair')
             poor = sum(1 for p in peaks if p.get('fitting_quality') == 'Poor')
-            stats_text += f"Quality Breakdown:\n"
+            stats_text += "Quality Breakdown:\n"
             stats_text += f"  Excellent: {excellent}\n"
             stats_text += f"  Good: {good}\n"
             stats_text += f"  Fair: {fair}\n"
@@ -4942,8 +5041,8 @@ class LunaNMRMainWindow(BaseWindow):
             stats_text += "Run 'Fit All Peaks' to generate statistics.\n"
 
         if hasattr(self, 'batch_results') and self.batch_results:
-            stats_text += f"\n=== Series Results ===\n"
-            stats_text += f"Series data available\n"
+            stats_text += "\n=== Series Results ===\n"
+            stats_text += "Series data available\n"
 
         text_edit.setPlainText(stats_text)
         dialog.exec()
@@ -5042,7 +5141,7 @@ For more information, visit the project documentation.
         """
         from PySide6.QtWidgets import QMessageBox
 
-        about_text = f"""
+        about_text = """
 LunaNMR - NMR Peaks Series Analysis
 Version 1.0.0 (Qt Port)
 
@@ -5688,7 +5787,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     self.peak_navigator.update_heights_from_results(standardized_for_navigator)
 
             # Print detailed summary (v0o9 lines 4289-4295)
-            logger.info(f"\nSingle Spectrum Processing Summary:")
+            logger.info("\nSingle Spectrum Processing Summary:")
             logger.info(f"   Total peaks: {summary['total_peaks']}")
             logger.info(f"   Successful: {summary['successful_peaks']} ({summary.get('success_rate', 0):.1f}%)")
             if 'average_r_squared' in summary:
@@ -5735,7 +5834,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             if 'fitted_results' in summary and summary['fitted_results']:
                 output_file = self.save_fitting_results_to_csv(summary['fitted_results'])
                 if output_file:
-                    status_msg += f" - Results saved"
+                    status_msg += " - Results saved"
                     self.update_status(status_msg)
 
             logger.info("Fitting results updated in GUI")
@@ -5779,7 +5878,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         """
         import os
         import pandas as pd
-        import numpy as np
 
         if not fitted_results:
             logger.warning("No fitting results to save")
@@ -6147,6 +6245,36 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             else:
                 logger.warning(f"Ctrl+Click: No peak found near ({x_ppm:.4f}, {y_ppm:.4f})")
 
+    def _on_peak_select_for_move(self, x_ppm: float, y_ppm: float):
+        """Handle middle-click to select a peak for moving.
+
+        Middle-click selects the nearest peak and shows a visual highlight.
+        The next left-click will move the selected peak to that position.
+
+        Args:
+            x_ppm: X coordinate in ppm where clicked
+            y_ppm: Y coordinate in ppm where clicked
+        """
+        # If we already have a selected peak, this click moves it
+        if self.selected_peak_info is not None:
+            self.move_selected_peak(x_ppm, y_ppm)
+            self.selected_peak_info = None
+            self.spectrum_plotter.clear_selection_highlight()
+            if hasattr(self, 'selected_peak_label'):
+                self.selected_peak_label.setText("Peak moved! No peak selected")
+            return
+
+        # Otherwise, select the nearest peak (search all peaks, not just edit-enabled ones)
+        peak_info = self.find_nearest_peak(x_ppm, y_ppm, check_edit_mode=False)
+        if peak_info:
+            self.selected_peak_info = peak_info
+            self.update_selected_peak_display()
+            # Show visual highlight on the selected peak
+            self.spectrum_plotter.show_selection_highlight(peak_info['x'], peak_info['y'])
+            logger.info(f"Middle-click: Selected {peak_info['type']} peak '{peak_info['assignment']}' for moving")
+        else:
+            logger.warning(f"Middle-click: No peak found near ({x_ppm:.4f}, {y_ppm:.4f})")
+
     def on_peak_edit_click(self, event):
         """Handle mouse clicks in peak edit mode (v0o9 line 5632)."""
         if not self.peak_edit_mode or event.inaxes != self.spectrum_plotter.ax:
@@ -6175,20 +6303,31 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             if peak_info:
                 self.selected_peak_info = peak_info
                 self.update_selected_peak_display()
+                # Show visual highlight on the selected peak
+                self.spectrum_plotter.show_selection_highlight(peak_info['x'], peak_info['y'])
         else:
             # Second click: move selected peak
             self.move_selected_peak(click_x, click_y)
             self.selected_peak_info = None
+            self.spectrum_plotter.clear_selection_highlight()
             if hasattr(self, 'selected_peak_label'):
                 self.selected_peak_label.setText("Peak moved! No peak selected")
 
-    def find_nearest_peak(self, click_x, click_y):
-        """Find the nearest peak to click position (v0o9 line 5666)."""
+    def find_nearest_peak(self, click_x, click_y, check_edit_mode=True):
+        """Find the nearest peak to click position (v0o9 line 5666).
+
+        Args:
+            click_x: X coordinate of click (ppm)
+            click_y: Y coordinate of click (ppm)
+            check_edit_mode: If True, only search peaks enabled for editing.
+                           If False, search all peaks (for middle-click selection).
+        """
         import math
         candidates = []
 
-        # Check reference peaks (only if enabled for editing)
-        if (self.edit_reference_peaks and
+        # Check reference peaks
+        search_reference = (not check_edit_mode) or self.edit_reference_peaks
+        if (search_reference and
             hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None):
             for idx, row in self.integrator.peak_list.iterrows():
                 peak_x = float(row['Position_X'])
@@ -6204,8 +6343,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                         'assignment': row.get('Assignment', f'Peak_{idx+1}')
                     })
 
-        # Check detected peaks (only if enabled for editing)
-        if (self.edit_detected_peaks and
+        # Check detected peaks
+        search_detected = (not check_edit_mode) or self.edit_detected_peaks
+        if (search_detected and
             hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks):
             for idx, peak in enumerate(self.integrator.fitted_peaks):
                 peak_x = float(peak.get('ppm_x', 0))
@@ -6275,7 +6415,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         # Refresh the main plot
         self.update_spectrum_plot()
 
-        logger.info(f"✅ Peak position updated successfully")
+        logger.info("✅ Peak position updated successfully")
 
     def delete_selected_peak(self, peak_info):
         """Delete the selected peak from the appropriate peak list (v0o9 line 5761)."""
@@ -6337,7 +6477,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             # Update statistics
             self.update_statistics_panel()
 
-            logger.info(f"✅ Peak deletion completed successfully")
+            logger.info("✅ Peak deletion completed successfully")
 
         except Exception as e:
             QMessageBox.critical(self, "Deletion Error", f"Failed to delete peak: {str(e)}")
@@ -6345,7 +6485,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
     def _find_max_assignment_number(self, peaks_list, assignment_key='Assignment'):
         """Helper: Find highest assignment number from peak list (v0o9 line 5824)."""
-        import re
         max_assignment = 0
 
         # Handle DataFrame (reference peaks)
@@ -6441,35 +6580,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
             logger.info(f"✅ Added to reference peak list: '{new_assignment}'")
 
-            # ============================================================
-            # ADD TO DETECTED PEAK LIST (list of dicts)
-            # ============================================================
-            new_peak_det = {
-                'assignment': new_assignment,
-                'ppm_x': click_x,
-                'ppm_y': click_y,
-                'height': intensity,
-                'intensity': intensity,
-                'r_squared': 0.0,
-                'status': 'manual_add',
-                'manual_add': True,
-                'detected': True
-            }
-
-            if hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
-                self.integrator.fitted_peaks.append(new_peak_det)
-            else:
-                self.integrator.fitted_peaks = [new_peak_det]
-
-            logger.info(f"✅ Added to detected peak list: '{new_assignment}'")
-
-            # Update peak navigator (refresh both lists)
+            # Update peak navigator to show the new reference peak
             if hasattr(self, 'peak_navigator'):
-                if hasattr(self.peak_navigator, 'selected_peak_type'):
-                    if self.peak_navigator.selected_peak_type == 'reference':
-                        self.peak_navigator.load_reference_peaks(self.integrator.peak_list)
-                    elif self.peak_navigator.selected_peak_type == 'detected':
-                        self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
+                self.peak_navigator.load_reference_peaks(self.integrator.peak_list)
 
             # Update status label
             if hasattr(self, 'selected_peak_label'):
@@ -6483,7 +6596,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             # Update statistics
             self.update_statistics_panel()
 
-            logger.info(f"✅ Peak addition completed: added to BOTH lists with intensity extraction")
+            logger.info("✅ Peak addition completed: added to BOTH lists with intensity extraction")
 
         except Exception as e:
             QMessageBox.critical(self, "Addition Error", f"Failed to add peak: {str(e)}")
@@ -6498,6 +6611,108 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         if self.project_manager is None:
             self.project_manager = ProjectManager(self)
         return self.project_manager
+
+    def _get_recent_projects_manager(self) -> RecentProjectsManager:
+        """Get or create RecentProjectsManager instance."""
+        if not hasattr(self, '_recent_projects_manager'):
+            self._recent_projects_manager = RecentProjectsManager()
+        return self._recent_projects_manager
+
+    def _update_recent_projects_menu(self):
+        """Update the Open Recent submenu with current recent projects."""
+        from PySide6.QtGui import QAction
+
+        if not hasattr(self, 'recent_projects_menu'):
+            return
+
+        self.recent_projects_menu.clear()
+
+        recent_projects = self._get_recent_projects_manager().get_recent_projects()
+
+        if not recent_projects:
+            no_recent_action = QAction("(No recent projects)", self)
+            no_recent_action.setEnabled(False)
+            self.recent_projects_menu.addAction(no_recent_action)
+        else:
+            for project_path in recent_projects:
+                action = QAction(project_path.name, self)
+                action.setToolTip(str(project_path))
+                action.triggered.connect(
+                    lambda checked, p=project_path: self._open_recent_project(p)
+                )
+                self.recent_projects_menu.addAction(action)
+
+            self.recent_projects_menu.addSeparator()
+
+            clear_action = QAction("Clear Recent", self)
+            clear_action.triggered.connect(self._clear_recent_projects)
+            self.recent_projects_menu.addAction(clear_action)
+
+    def _open_recent_project(self, project_path: Path):
+        """Open a project from the recent list."""
+        from lunaNMR.gui.dialogs.missing_files_dialog import MissingFilesDialog
+
+        if not project_path.exists():
+            QMessageBox.warning(
+                self,
+                "Project Not Found",
+                f"The project '{project_path.name}' no longer exists.\n\n"
+                f"Path: {project_path}"
+            )
+            self._get_recent_projects_manager().remove_project(project_path)
+            self._update_recent_projects_menu()
+            return
+
+        # Check for unsaved changes
+        if not self._check_unsaved_changes():
+            return
+
+        # Check for missing files before loading
+        pm = self._get_project_manager()
+        missing_files = pm.get_missing_files_structured(project_path)
+
+        remapped_paths = {}
+        skipped_files = set()
+
+        if missing_files:
+            dialog = MissingFilesDialog(self, missing_files=missing_files)
+            if not dialog.exec():
+                return
+            remapped_paths = dialog.get_remapped_paths()
+            skipped_files = dialog.get_skipped_files()
+
+        # Load project
+        success, error_messages, summary = pm.load_project(project_path)
+
+        if success:
+            self.current_project_path = project_path
+
+            if remapped_paths:
+                pm.apply_path_remapping(remapped_paths)
+
+            if skipped_files:
+                logger.info(f"Skipped files: {skipped_files}")
+
+            self._refresh_after_project_load()
+            self.update_status(f"Project loaded: {project_path.name}")
+            logger.info(f"Project loaded from {project_path}")
+
+            # Update recent projects
+            self._get_recent_projects_manager().add_recent_project(project_path)
+            self._update_recent_projects_menu()
+
+            self._show_load_summary(project_path, summary)
+        else:
+            QMessageBox.critical(
+                self,
+                "Load Failed",
+                f"Failed to load project:\n{', '.join(error_messages)}"
+            )
+
+    def _clear_recent_projects(self):
+        """Clear the recent projects list."""
+        self._get_recent_projects_manager().clear_recent_projects()
+        self._update_recent_projects_menu()
 
     def open_project(self):
         """Open a saved project bundle."""
@@ -6566,6 +6781,10 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             self.update_status(f"Project loaded: {project_path.name}")
             logger.info(f"Project loaded from {project_path}")
 
+            # Update recent projects
+            self._get_recent_projects_manager().add_recent_project(project_path)
+            self._update_recent_projects_menu()
+
             # Show summary popup
             self._show_load_summary(project_path, summary)
         else:
@@ -6619,6 +6838,10 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             self.update_status(f"Project saved: {project_path.name}")
             logger.info(f"Project saved to {project_path}")
 
+            # Update recent projects
+            self._get_recent_projects_manager().add_recent_project(project_path)
+            self._update_recent_projects_menu()
+
             # Show summary popup
             self._show_save_summary(project_path, summary)
         else:
@@ -6662,7 +6885,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             lines.append("No analysis results to save.")
             lines.append("Complete analyses in DynamiXs to save results.")
 
-        logger.info(f"Showing save summary popup")
+        logger.info("Showing save summary popup")
         msg = QMessageBox(self)
         msg.setWindowTitle("Project Saved")
         msg.setText("\n".join(lines))
@@ -6707,7 +6930,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             lines.append("")
             lines.append("No DynamiXs analysis results in project.")
 
-        logger.info(f"Showing load summary popup")
+        logger.info("Showing load summary popup")
         msg = QMessageBox(self)
         msg.setWindowTitle("Project Loaded")
         msg.setText("\n".join(lines))

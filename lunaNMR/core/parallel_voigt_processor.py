@@ -24,8 +24,6 @@ Date: 2025
 import multiprocessing as mp
 from multiprocessing import Pool, cpu_count, shared_memory
 import numpy as np
-import pandas as pd
-from typing import List, Dict, Any, Optional, Tuple
 import time
 import traceback
 import sys
@@ -105,7 +103,7 @@ class ParallelVoigtProcessor:
             log_info(f"Series parameters loaded from reference: radF1={series_params.get('radF1', 'N/A'):.4f}, radF2={series_params.get('radF2', 'N/A'):.5f}")
 
     def fit_all_peaks_parallel(self, peak_list, progress_callback=None, locked_clusters_by_assignment=None,
-                                pre_learned_statistics=None):
+                                pre_learned_statistics=None, reference_linewidths=None):
         """
         Complete parallel workflow using IDENTICAL clustering algorithm as sequential mode.
 
@@ -123,6 +121,8 @@ class ParallelVoigtProcessor:
                 guesses for linewidth bounds. This speeds up fitting for spectrum 2+ in series.
                 Format: {'lw_f1_median': float, 'lw_f2_median': float, 'lw_f1_mad': float,
                          'lw_f2_mad': float, 'n_samples': int, 'alpha': float}
+            reference_linewidths: Optional dict mapping assignment -> {lw_lor_f1, lw_gau_f1, etc.}
+                for per-peak linewidth reuse. If provided, linewidths are fixed to these values.
 
         Returns:
             Tuple of (fitted_results, learned_statistics) where:
@@ -133,7 +133,12 @@ class ParallelVoigtProcessor:
         if len(peak_list) == 0:
             return ([], None)
 
+        # Store reference linewidths for use in shared context
+        self._reference_linewidths = reference_linewidths
+
         log_progress(f"Starting cluster-based parallel fitting of {len(peak_list)} peaks")
+        if reference_linewidths:
+            log_info(f"Per-peak linewidth reuse enabled: {len(reference_linewidths)} reference linewidths")
         start_time = time.time()
 
         try:
@@ -201,7 +206,7 @@ class ParallelVoigtProcessor:
             # Check if pre-learned statistics are provided (from reference spectrum)
             if pre_learned_statistics is not None:
                 # USE PRE-LEARNED STATISTICS: Skip PASS 1 learning entirely
-                log_info(f"USING PRE-LEARNED STATISTICS from reference spectrum (skipping PASS 1 learning)")
+                log_info("USING PRE-LEARNED STATISTICS from reference spectrum (skipping PASS 1 learning)")
                 log_info(f"LW F1: {pre_learned_statistics['lw_f1_median']:.4f} ± {pre_learned_statistics['lw_f1_mad']:.4f} ppm")
                 log_info(f"LW F2: {pre_learned_statistics['lw_f2_median']:.5f} ± {pre_learned_statistics['lw_f2_mad']:.5f} ppm")
                 log_info(f"(From {pre_learned_statistics['n_samples']} fits in reference)")
@@ -220,7 +225,8 @@ class ParallelVoigtProcessor:
                     pass1_start = time.time()
 
                     # Prepare shared context WITHOUT spectrum_statistics (Pass 1)
-                    shared_context_pass1 = self._prepare_shared_context(all_peaks_context, spectrum_statistics=None)
+                    shared_context_pass1 = self._prepare_shared_context(all_peaks_context, spectrum_statistics=None,
+                                                                        reference_linewidths=self._reference_linewidths)
 
                     # Create tasks for isolated peaks only
                     isolated_tasks = self._create_cluster_tasks(isolated_clusters, peak_metadata, peak_list, shared_context_pass1)
@@ -300,7 +306,7 @@ class ParallelVoigtProcessor:
                                 all_peaks_context=all_peaks_context
                             )
 
-                        except Exception as e:
+                        except Exception:
                             pass  # Silently handle exceptions during optimization
                         finally:
                             # Always restore config (guaranteed to have old values)
@@ -373,7 +379,8 @@ class ParallelVoigtProcessor:
                 pass1bis_start = time.time()
 
                 # Prepare shared context with optimal parameters
-                shared_context_pass1bis = self._prepare_shared_context(all_peaks_context, spectrum_statistics=None)
+                shared_context_pass1bis = self._prepare_shared_context(all_peaks_context, spectrum_statistics=None,
+                                                                      reference_linewidths=self._reference_linewidths)
 
                 # Create tasks for all isolated peaks (including newly isolated from re-clustering)
                 isolated_tasks_bis = self._create_cluster_tasks(isolated_clusters, peak_metadata, peak_list, shared_context_pass1bis)
@@ -406,7 +413,8 @@ class ParallelVoigtProcessor:
                 pass2_start = time.time()
 
                 # Prepare shared context WITH spectrum_statistics (Pass 2)
-                shared_context_pass2 = self._prepare_shared_context(all_peaks_context, spectrum_statistics=spectrum_statistics)
+                shared_context_pass2 = self._prepare_shared_context(all_peaks_context, spectrum_statistics=spectrum_statistics,
+                                                                    reference_linewidths=self._reference_linewidths)
 
                 # Create tasks for clusters
                 pass2_tasks = self._create_cluster_tasks(all_pass2_clusters, peak_metadata, peak_list, shared_context_pass2)
@@ -699,7 +707,8 @@ class ParallelVoigtProcessor:
 
         return good_peaks
 
-    def _prepare_shared_context(self, all_peaks_context=None, spectrum_statistics=None):
+    def _prepare_shared_context(self, all_peaks_context=None, spectrum_statistics=None,
+                                 reference_linewidths=None):
         """
         Create shared memory context containing all data needed
         by worker processes without breaking current logic.
@@ -707,6 +716,7 @@ class ParallelVoigtProcessor:
         Args:
             all_peaks_context: List of all peaks for overlap detection
             spectrum_statistics: Optional dict with spectrum-wide linewidth stats from Pass 1
+            reference_linewidths: Optional dict mapping assignment -> linewidth params for reuse
         """
         
         # 1. Create shared memory for spectral data
@@ -760,6 +770,9 @@ class ParallelVoigtProcessor:
 
             # NEW: Spectrum-wide linewidth statistics from Pass 1
             'spectrum_statistics': spectrum_statistics,
+
+            # NEW: Per-peak reference linewidths for reuse
+            'reference_linewidths': reference_linewidths,
 
             # Path information for worker imports
             'lunaNMR_path': os.path.dirname(os.path.dirname(__file__)),
@@ -1272,13 +1285,26 @@ def _parallel_cluster_worker(cluster_task):
             # Overlap group - 2D simultaneous fitting (IDENTICAL to sequential)
             target_assignment = cluster_assignments[0]
 
+            # Build reference linewidths dict for peaks in this cluster
+            cluster_reference_linewidths = None
+            all_reference_linewidths = cluster_task['shared_context'].get('reference_linewidths')
+            if all_reference_linewidths:
+                cluster_reference_linewidths = {}
+                for assignment in cluster_assignments:
+                    if assignment in all_reference_linewidths:
+                        cluster_reference_linewidths[assignment] = all_reference_linewidths[assignment]
+                # If we have reference linewidths, force fix_linewidths=True
+                if cluster_reference_linewidths:
+                    fix_linewidths = True
+
             # Call fit_overlap_group_2d() (SAME AS SEQUENTIAL!)
             group_result = worker_integrator.fit_overlap_group_2d(
                 cluster_dicts,
                 target_assignment,
                 peak_assignments=cluster_assignments,
                 fix_positions=fix_positions,  # Pass GUI checkbox state
-                fix_linewidths=fix_linewidths  # Pass GUI checkbox state
+                fix_linewidths=fix_linewidths,  # Pass GUI checkbox state
+                reference_linewidths=cluster_reference_linewidths  # Pass reference linewidths for reuse
             )
 
             if group_result and group_result.get('success', False):
@@ -1340,6 +1366,7 @@ def _parallel_cluster_worker(cluster_task):
                             'amplitude': best_match['intensity'],
                             'height': best_match['intensity'],
                             'volume': best_match['intensity'],
+                            'detected_intensity': best_match.get('detected_intensity'),  # From peak detection
                             'r_squared': group_result['r_squared'],
                             'avg_r_squared': group_result['r_squared'],
                             'center_x': best_match['pos_f2'],
@@ -1421,7 +1448,7 @@ def _initialize_worker_fitter(shared_context):
     try:
         from lunaNMR.core.ps2d_2d_fitter import Ps2dMultiPeakFitter2D
         from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
-    except ImportError as e:
+    except ImportError:
         # Workers will fall back to 1D fitting for overlapping peaks
         pass
 

@@ -23,7 +23,7 @@ Version: 2.0 - CENTRALIZED_CONFIG (2025-10-10)
 """
 
 import numpy as np
-from typing import Dict, Tuple, Optional
+from typing import Dict
 
 # Import centralized configuration
 from .ps2d_config import get_ps2d_config

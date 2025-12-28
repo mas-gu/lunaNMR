@@ -3,26 +3,24 @@
 
 import os
 import logging
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict
 
 import numpy as np
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
-    QGroupBox, QScrollArea, QWidget, QSplitter, QSpinBox,
+    QGroupBox, QWidget, QSplitter, QSpinBox,
     QDoubleSpinBox, QComboBox, QMessageBox, QListWidget, QListWidgetItem,
-    QTabWidget, QSlider
+    QTabWidget
 )
 from PySide6.QtCore import Qt, Signal
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
-from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget, MatplotlibMultiAxesWidget
+from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
 from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
 from lunaNMR.gui.styles.design_system import (
-    SPACING_SM, SPACING_MD, SPACING_LG,
-    FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
+    SPACING_SM, SPACING_MD, FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT,
-    PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
     FRAME_BG_COLOR
@@ -317,7 +315,6 @@ class SpectrumViewerDialog(BaseDialog):
         Full controls matching v0.9 implementation.
         """
         from lunaNMR.gui.components.voigt_analysis_plotter import VoigtAnalysisPlotter
-        from PySide6.QtWidgets import QRadioButton, QButtonGroup
 
         tab = QWidget()
         layout = QVBoxLayout()

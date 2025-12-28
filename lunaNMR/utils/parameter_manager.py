@@ -9,7 +9,7 @@ Date: 2025
 """
 
 #import tkinter as tk
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from lunaNMR.utils.output_manager import log_info, log_warning
 
 class NMRParameterManager:

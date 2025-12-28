@@ -333,7 +333,7 @@ class GlobalOptimizationManager:
                         error_message="Standard fitting failed"
                     )
                     self.peak_results[peak_id] = peak_result
-                    logger.info(f"    ❌ Failed: Standard fitting unsuccessful")
+                    logger.info("    ❌ Failed: Standard fitting unsuccessful")
 
             except Exception as e:
                 logger.error(f"    💥 Exception during fitting: {e}")
@@ -473,7 +473,7 @@ class GlobalOptimizationManager:
                     else:
                         logger.info(f"     ➖ No improvement: R²=({new_min_r2:.3f})")
                 else:
-                    logger.info(f"     ❌ Constrained fitting failed")
+                    logger.info("     ❌ Constrained fitting failed")
 
             except Exception as e:
                 logger.error(f"     💥 Exception: {e}")
@@ -579,7 +579,7 @@ class GlobalOptimizationManager:
         round1 = self.optimization_rounds[0]
         stats = self.linewidth_stats.get_statistics_summary()
 
-        logger.info(f"\n📊 Phase 1 Survey Complete:")
+        logger.info("\n📊 Phase 1 Survey Complete:")
         logger.info(f"   Total peaks processed: {round1.peaks_processed}")
         logger.info(f"   Excellent (R²>0.95): {round1.quality_distribution[PeakQuality.EXCELLENT]}")
         logger.info(f"   Good (0.85-0.95): {round1.quality_distribution[PeakQuality.GOOD]}")
@@ -588,7 +588,7 @@ class GlobalOptimizationManager:
         logger.info(f"   Success rate: {round1.success_rate:.1f}%")
         logger.info(f"   Processing time: {round1.processing_time:.1f}s")
 
-        logger.info(f"\n📏 Linewidth Statistics:")
+        logger.info("\n📏 Linewidth Statistics:")
         logger.info(f"   Successful peaks for stats: {stats['peak_count']}")
         if stats['x_linewidths']['median']:
             logger.info(f"   X-dimension median: {stats['x_linewidths']['median']:.4f}")
@@ -599,16 +599,16 @@ class GlobalOptimizationManager:
         final_round = self.optimization_rounds[-1]
         initial_round = self.optimization_rounds[0]
 
-        logger.info(f"\n🎯 FINAL OPTIMIZATION SUMMARY")
-        logger.info(f"="*50)
+        logger.info("\n🎯 FINAL OPTIMIZATION SUMMARY")
+        logger.info("="*50)
         logger.info(f"Total rounds: {len(self.optimization_rounds)}")
         logger.info(f"Total peaks: {self.total_peaks}")
-        logger.info(f"")
+        logger.info("")
         logger.info(f"Initial success rate: {initial_round.success_rate:.1f}%")
         logger.info(f"Final success rate: {final_round.success_rate:.1f}%")
         logger.info(f"Improvement: +{final_round.success_rate - initial_round.success_rate:.1f}%")
-        logger.info(f"")
-        logger.info(f"Final distribution:")
+        logger.info("")
+        logger.info("Final distribution:")
         logger.info(f"  Excellent: {final_round.quality_distribution[PeakQuality.EXCELLENT]}")
         logger.info(f"  Good: {final_round.quality_distribution[PeakQuality.GOOD]}")
         logger.info(f"  Poor: {final_round.quality_distribution[PeakQuality.POOR]}")

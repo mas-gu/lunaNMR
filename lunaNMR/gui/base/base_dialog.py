@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QPushButton
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import QSize
 from PySide6.QtGui import QIcon
 
 logger = logging.getLogger(__name__)

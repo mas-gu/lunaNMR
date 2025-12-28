@@ -15,8 +15,7 @@ Features:
 
 import numpy as np
 import logging
-from typing import Dict, List, Tuple, Any, Optional
-from pathlib import Path
+from typing import Dict, Tuple, Any, Optional
 
 class ParameterOptimizer:
     """

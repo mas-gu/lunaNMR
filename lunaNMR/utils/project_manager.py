@@ -945,8 +945,6 @@ class ProjectManager:
         - dynamixs/results/: Copied result files (CSV, TXT)
         - dynamixs/results_manifest.json: Mapping of original paths to bundled files
         """
-        import shutil
-        import glob
 
         # IMPORTANT: If DynamiXsDialog is currently open, get fresh state from it
         # (state is only transferred to main_window when dialog closes)
@@ -985,6 +983,12 @@ class ProjectManager:
             state_file = dynamixs_dir / "state.json"
             with open(state_file, 'w') as f:
                 json.dump(state, f, indent=2, default=self._json_serializer)
+
+            # Save analysis metadata separately for easy access
+            if 'analysis_metadata' in state and state['analysis_metadata']:
+                meta_file = dynamixs_dir / "analysis_meta.json"
+                with open(meta_file, 'w') as f:
+                    json.dump(state['analysis_metadata'], f, indent=2, default=self._json_serializer)
 
         # Save file references
         if file_refs:
@@ -1189,6 +1193,17 @@ class ProjectManager:
         if state_file.exists():
             with open(state_file, 'r') as f:
                 self.main_window.dynamixs_state = json.load(f)
+
+        # Load analysis metadata (may have been edited separately)
+        meta_file = dynamixs_dir / "analysis_meta.json"
+        if meta_file.exists():
+            with open(meta_file, 'r') as f:
+                metadata = json.load(f)
+                # Merge into state (metadata file takes precedence if edited)
+                if hasattr(self.main_window, 'dynamixs_state') and self.main_window.dynamixs_state:
+                    self.main_window.dynamixs_state['analysis_metadata'] = metadata
+                    if 'analysis_name' in metadata:
+                        self.main_window.dynamixs_state['analysis_name'] = metadata['analysis_name']
 
         # Load file references
         refs_file = dynamixs_dir / "file_refs.json"

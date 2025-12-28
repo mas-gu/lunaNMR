@@ -15,12 +15,8 @@ Date: 2025
 """
 
 import os
-import glob
 import pandas as pd
-import numpy as np
-from pathlib import Path
 from datetime import datetime
-import json
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -246,86 +242,3 @@ class NMRFileManager:
         # Limit size
         if len(self.recent_files) > self.max_recent:
             self.recent_files = self.recent_files[:self.max_recent]
-
-
-class DataValidator:
-    """Validation utilities for NMR data integrity"""
-
-    def __init__(self):
-        self.validation_rules = {
-            'chemical_shift_range_1H': (-5.0, 20.0),
-            'chemical_shift_range_15N': (80.0, 140.0),
-            'chemical_shift_range_13C': (0.0, 220.0),
-            'min_peaks': 1,
-            'max_peaks': 10000
-        }
-
-
-class FileMetadata:
-    """File metadata collection and analysis"""
-
-    def __init__(self):
-        self.metadata_cache = {}
-        self.cache_duration = 300  # 5 minutes
-
-    def get_folder_summary(self, folder_path):
-        """Get comprehensive folder summary"""
-        if not os.path.exists(folder_path):
-            return None
-
-        try:
-            summary = {
-                'path': os.path.abspath(folder_path),
-                'name': os.path.basename(folder_path),
-                'total_files': 0,
-                'total_size_mb': 0,
-                'file_types': {},
-                'nmr_files': [],
-                'peak_files': [],
-                'other_files': [],
-                'last_modified': None,
-                'scan_time': datetime.now()
-            }
-
-            file_manager = NMRFileManager()
-            latest_mod_time = None
-
-            for item in os.listdir(folder_path):
-                item_path = os.path.join(folder_path, item)
-
-                if os.path.isfile(item_path):
-                    summary['total_files'] += 1
-
-                    # Get file info
-                    stat_info = os.stat(item_path)
-                    size_mb = stat_info.st_size / (1024 * 1024)
-                    summary['total_size_mb'] += size_mb
-
-                    # Track latest modification
-                    mod_time = datetime.fromtimestamp(stat_info.st_mtime)
-                    if latest_mod_time is None or mod_time > latest_mod_time:
-                        latest_mod_time = mod_time
-
-                    # Categorize file
-                    ext = os.path.splitext(item)[1].lower().lstrip('.')
-                    summary['file_types'][ext] = summary['file_types'].get(ext, 0) + 1
-
-                    if ext in file_manager.supported_nmr_formats:
-                        summary['nmr_files'].append(item)
-                    elif ext in file_manager.supported_peak_formats:
-                        summary['peak_files'].append(item)
-                    else:
-                        summary['other_files'].append(item)
-
-            summary['last_modified'] = latest_mod_time
-            summary['nmr_file_count'] = len(summary['nmr_files'])
-            summary['peak_file_count'] = len(summary['peak_files'])
-
-            return summary
-
-        except Exception as e:
-            return {
-                'path': folder_path,
-                'error': str(e),
-                'scan_time': datetime.now()
-            }

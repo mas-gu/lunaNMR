@@ -4,13 +4,11 @@ ABOUTME: Provides workflow-aware file selection with two modes: peak_list and sn
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QLineEdit, QGroupBox, QMessageBox
 )
-from PySide6.QtCore import Qt
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.styles.design_system import (

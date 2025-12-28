@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QScrollArea, QSizePolicy, QSplitter,
     QListWidget, QListWidgetItem, QAbstractItemView
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -48,9 +48,15 @@ class FitViewer(QMainWindow):
     - Field selection (F1, F2, Overlay)
     - Measurement type selection (T1, T2)
     - 4x1 vertical subplot layout
+    - Inspect Peak button for integration with MultiSpectrumViewer
     """
 
-    def __init__(self, parent=None, json_folder=None, json_folders=None):
+    # Signal emitted when user clicks "Inspect Peak" with residue, series name, and fit data
+    # Args: residue_id (e.g., "142"), series_name (e.g., "T1_asyn_series"), fit_data (dict or None)
+    inspect_peak_requested = Signal(str, str, object)
+
+    def __init__(self, parent=None, json_folder=None, json_folders=None,
+                 source_series_map=None):
         """
         Initialize the Fit Viewer
 
@@ -62,8 +68,13 @@ class FitViewer(QMainWindow):
             Path to JSON data folder (legacy single folder)
         json_folders : list, optional
             List of JSON data folder paths (for multi-experiment support)
+        source_series_map : dict, optional
+            Mapping from field names to series names (e.g., {'field1_t1': 'T1_series'})
         """
         super().__init__(parent)
+
+        # Store source series map for Inspect Peak functionality
+        self.source_series_map = source_series_map or {}
 
         self.setWindowTitle("T1/T2 Fit Viewer")
         self.setMinimumSize(1400, 900)
@@ -287,15 +298,26 @@ class FitViewer(QMainWindow):
 
         # === Action Buttons ===
         button_frame = QFrame()
-        button_layout = QHBoxLayout(button_frame)
+        button_layout = QVBoxLayout(button_frame)
         button_layout.setContentsMargins(0, 0, 0, 0)
         button_layout.setSpacing(SPACING_XS)
+
+        # Inspect Peak button - opens MultiSpectrumViewer for selected residue
+        self.inspect_peak_btn = create_primary_button(
+            "Inspect Peak in Series",
+            clicked=self._on_inspect_peak_clicked
+        )
+        self.inspect_peak_btn.setFixedWidth(280)
+        self.inspect_peak_btn.setToolTip(
+            "Open the selected residue in MultiSpectrum Viewer to inspect\n"
+            "the underlying peak fits across all spectra in the series."
+        )
+        button_layout.addWidget(self.inspect_peak_btn)
 
         clear_btn = create_secondary_button("Clear Selection", clicked=self._clear_selection)
         clear_btn.setFixedWidth(280)
         button_layout.addWidget(clear_btn)
 
-        button_layout.addStretch()
         scroll_layout.addWidget(button_frame)
 
         scroll_layout.addStretch()
@@ -506,6 +528,191 @@ class FitViewer(QMainWindow):
         self.residue_list.clearSelection()
         self._show_blank_state()
 
+    def _on_inspect_peak_clicked(self):
+        """Handle Inspect Peak button click.
+
+        Emits the inspect_peak_requested signal with residue ID, series name, and fit data.
+        The signal is connected to DynamiXsDialog which opens the MultiSpectrumViewer.
+        """
+        current_item = self.residue_list.currentItem()
+        if current_item is None:
+            show_warning(self, "No Selection", "Please select a residue to inspect.")
+            return
+
+        residue = current_item.data(Qt.UserRole)
+        if residue is None:
+            show_warning(self, "No Selection", "Please select a residue to inspect.")
+            return
+
+        # Get available series names and data key for fit data lookup
+        series_name, data_key = self._get_series_for_inspection()
+        if series_name is None:
+            return  # User cancelled or no series available
+
+        # Extract fit data for ALL residues (so viewer can update when switching peaks)
+        all_fit_data = self._get_all_fit_data(data_key)
+
+        # Emit signal for handling by parent (DynamiXsDialog)
+        self.inspect_peak_requested.emit(str(residue), series_name, all_fit_data)
+
+    def _get_fit_data_for_residue(self, residue: str, data_key: str) -> dict:
+        """Extract fit data for a specific residue.
+
+        Args:
+            residue: Residue ID (e.g., "142")
+            data_key: Data key for lookup (e.g., "field1_T1")
+
+        Returns:
+            Dict with fit data including:
+                - time_points: delay times for raw data
+                - intensities: raw intensity values
+                - fit_curve: {'time': [...], 'intensity': [...]} for smooth curve
+                - t_value: T1 or T2 value
+                - t_error: uncertainty
+                - time_units: time units string
+                - experiment_type: 'T1' or 'T2'
+            Returns None if fit data not available.
+        """
+        if data_key is None or data_key not in self.data:
+            return None
+
+        data_entry = self.data[data_key]
+        fits = data_entry.get('fits', [])
+        metadata = data_entry.get('metadata', {})
+
+        # Find fit for this residue
+        fit_entry = None
+        for fit in fits:
+            if fit.get('residue') == residue:
+                fit_entry = fit
+                break
+
+        if fit_entry is None:
+            return None
+
+        # Extract experiment type from data_key (e.g., 'field1_T1' -> 'T1')
+        experiment_type = data_key.split('_')[-1] if '_' in data_key else ''
+
+        return {
+            'time_points': metadata.get('time_points', []),
+            'intensities': fit_entry.get('intensities', []),
+            'fit_curve': fit_entry.get('fit_curve', {}),
+            't_value': fit_entry.get('t2', 0),  # Named 't2' even for T1 in JSON
+            't_error': fit_entry.get('t2_err', 0),
+            'time_units': metadata.get('time_units', 'ms'),
+            'experiment_type': experiment_type
+        }
+
+    def _get_all_fit_data(self, data_key: str) -> dict:
+        """Extract fit data for ALL residues.
+
+        Args:
+            data_key: Data key for lookup (e.g., "field1_T1")
+
+        Returns:
+            Dict mapping residue ID to fit data dict.
+            E.g., {'142': {fit_data}, '143': {fit_data}, ...}
+        """
+        if data_key is None or data_key not in self.data:
+            return {}
+
+        data_entry = self.data[data_key]
+        fits = data_entry.get('fits', [])
+        metadata = data_entry.get('metadata', {})
+
+        # Extract experiment type from data_key (e.g., 'field1_T1' -> 'T1')
+        experiment_type = data_key.split('_')[-1] if '_' in data_key else ''
+
+        all_fit_data = {}
+        for fit_entry in fits:
+            residue = fit_entry.get('residue')
+            if residue:
+                all_fit_data[str(residue)] = {
+                    'time_points': metadata.get('time_points', []),
+                    'intensities': fit_entry.get('intensities', []),
+                    'fit_curve': fit_entry.get('fit_curve', {}),
+                    't_value': fit_entry.get('t2', 0),
+                    't_error': fit_entry.get('t2_err', 0),
+                    'time_units': metadata.get('time_units', 'ms'),
+                    'experiment_type': experiment_type
+                }
+
+        return all_fit_data
+
+    def _get_series_for_inspection(self):
+        """Get series name and data key for Inspect Peak from available series.
+
+        Shows dialog with actual series names from source_series_map.
+        User selects which series to inspect.
+
+        Returns:
+            Tuple of (series_name, data_key) or (None, None) if cancelled/no series.
+            data_key is like 'field1_T1' for fetching fit data.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        # Get unique series names from source_series_map, tracking data_key
+        available_series = []
+        series_labels = {}  # series_name -> display label
+        series_to_data_key = {}  # series_name -> data_key for fit data lookup
+
+        for field_key, series_name in self.source_series_map.items():
+            if series_name and series_name not in available_series:
+                available_series.append(series_name)
+                # Create label showing experiment type (extract from field_key like 'field1_t1')
+                exp_type = field_key.split('_')[-1].upper() if '_' in field_key else ''
+                series_labels[series_name] = f"{series_name} ({exp_type})" if exp_type else series_name
+                # Convert field_key to data_key format (e.g., 'field1_t1' -> 'field1_T1')
+                parts = field_key.split('_')
+                if len(parts) >= 2:
+                    data_key = f"{parts[0]}_{parts[1].upper()}"
+                    series_to_data_key[series_name] = data_key
+
+        if len(available_series) == 0:
+            show_warning(
+                self, "No Series Linked",
+                "No NMR series are linked to this analysis.\n\n"
+                "Use drag-and-drop in the Project Series panel to assign series."
+            )
+            return None, None
+
+        if len(available_series) == 1:
+            series_name = available_series[0]
+            return series_name, series_to_data_key.get(series_name)
+
+        # Multiple series - ask user to choose
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Choose NMR Series")
+        msg.setText("Which NMR series do you want to inspect?")
+        msg.setInformativeText("Select the series for viewing the underlying Voigt fits.")
+
+        # Create buttons for each series
+        buttons = {}
+        for series_name in available_series:
+            label = series_labels.get(series_name, series_name)
+            btn = msg.addButton(label, QMessageBox.ActionRole)
+            buttons[btn] = series_name
+
+        msg.addButton(QMessageBox.Cancel)
+        msg.exec()
+
+        clicked = msg.clickedButton()
+        if clicked in buttons:
+            series_name = buttons[clicked]
+            return series_name, series_to_data_key.get(series_name)
+        return None, None  # Cancelled
+
+    def get_current_residue(self) -> str:
+        """Get the currently selected residue ID.
+
+        Returns:
+            Residue ID string (e.g., "142") or None if no selection.
+        """
+        current_item = self.residue_list.currentItem()
+        if current_item:
+            return current_item.data(Qt.UserRole)
+        return None
+
     def _update_plots(self):
         """Update plots with current selection (legacy method kept for compatibility)"""
         current_item = self.residue_list.currentItem()
@@ -593,7 +800,7 @@ class FitViewer(QMainWindow):
         # Plot with zorder for proper layering
         ax.plot(time_points, intensities, 'o', color='#2196F3', markersize=8,
                label='Data', zorder=3)
-        ax.plot(fit_time, fit_intensity, '-', color='#2196F3', linewidth=2,
+        ax.plot(fit_time, fit_intensity, '-', color='#e63946', linewidth=2,
                label='Fit', zorder=2)
 
         # Annotation

@@ -15,17 +15,16 @@ Features:
     - peak_selected signal for integration
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QLabel, QPushButton, QHeaderView, QAbstractItemView
 )
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor
 
 from lunaNMR.gui.styles.design_system import (
-    PRIMARY_TEXT, SECONDARY_TEXT, FRAME_BG_COLOR,
-    SUCCESS_GREEN, WARNING_ORANGE, ERROR_RED,
+    PRIMARY_TEXT, SECONDARY_TEXT, SUCCESS_GREEN, WARNING_ORANGE, ERROR_RED,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER,
@@ -33,6 +32,25 @@ from lunaNMR.gui.styles.design_system import (
     BUTTON_CORNER_RADIUS,
     FONT_SIZE_BODY, FONT_SIZE_SMALL
 )
+
+
+def _to_scalar(value):
+    """Convert a value to scalar, handling lists from JSON deserialization.
+
+    After JSON round-trip, numpy scalars may become single-element lists.
+    This helper extracts the scalar value.
+
+    Args:
+        value: A scalar, list, tuple, or None
+
+    Returns:
+        The scalar value, or 0 if None/empty
+    """
+    if value is None:
+        return 0
+    if isinstance(value, (list, tuple)):
+        return value[0] if len(value) > 0 else 0
+    return value
 
 
 class PeakNavigatorTable(QWidget):
@@ -227,13 +245,15 @@ class PeakNavigatorTable(QWidget):
 
     def _populate_row(self, row: int, peak: Dict):
         """Populate a single table row with peak data."""
-        # Extract values with fallbacks
+        # Extract values with fallbacks, using _to_scalar to handle list values
         assignment = peak.get('assignment', peak.get('Assignment', f'Peak_{row+1}'))
-        x_ppm = (peak.get('center_x') or peak.get('peak_x') or peak.get('ppm_x') or
-                 peak.get('pos_f2') or peak.get('Position_X') or 0)
-        y_ppm = (peak.get('center_y') or peak.get('peak_y') or peak.get('ppm_y') or
-                 peak.get('pos_f1') or peak.get('Position_Y') or 0)
-        r_squared = peak.get('r_squared', peak.get('r2', peak.get('avg_r_squared', 0)))
+        x_ppm = _to_scalar(peak.get('center_x') or peak.get('peak_x') or peak.get('ppm_x') or
+                           peak.get('pos_f2') or peak.get('Position_X') or 0)
+        y_ppm = _to_scalar(peak.get('center_y') or peak.get('peak_y') or peak.get('ppm_y') or
+                           peak.get('pos_f1') or peak.get('Position_Y') or 0)
+        # Use None as default to distinguish "no fitting data" from "failed fit (r²=0)"
+        raw_r2 = peak.get('r_squared', peak.get('r2', peak.get('avg_r_squared', None)))
+        r_squared = _to_scalar(raw_r2) if raw_r2 is not None else None
         quality = peak.get('fitting_quality', peak.get('quality', peak.get('Quality', '')))
 
         # Determine quality indicator and color
@@ -261,36 +281,49 @@ class PeakNavigatorTable(QWidget):
         self.table.setItem(row, 2, y_item)
         self.table.setItem(row, 3, r2_item)
 
-    def _get_quality_display(self, r_squared: float, quality: str) -> tuple:
+    def _get_quality_display(self, r_squared, quality: str) -> tuple:
         """Get quality indicator emoji and row color.
 
         Unified thresholds (consistent with PeakNavigator):
-            - ❌ Red: R² == 0 or failed fit
-            - 🟠 Orange: R² < 0.85 (low quality)
-            - ✅ Green: R² >= 0.85 (good fit)
+            - No indicator: No fitting data (r_squared is None)
+            - ❌ Red: Failed fit (quality says 'failed' or r_squared == 0)
+            - 🟠 Orange: R² < 0.7 (low quality)
+            - ✅ Green: R² >= 0.7 (good fit)
+
+        Args:
+            r_squared: R² value, or None if no fitting data
+            quality: Quality string from fitting result
 
         Returns:
             Tuple of (emoji, QColor or None)
         """
-        # Check quality string first
         quality_lower = str(quality).lower() if quality else ''
 
-        # Failed fit
-        if 'failed' in quality_lower or r_squared == 0:
+        # No fitting data at all - show no indicator (Peak Mode)
+        if r_squared is None and not quality_lower:
+            return "", None
+
+        # Explicitly failed fit (quality string says failed)
+        if 'failed' in quality_lower:
             return "❌", QColor(ERROR_RED).lighter(180)
 
-        # Good fit (R² >= 0.85 or quality string indicates good/excellent)
-        if 'excellent' in quality_lower or 'good' in quality_lower or (r_squared and r_squared >= 0.85):
+        # R² == 0 means failed fit (but only if we have fitting data)
+        if r_squared is not None and r_squared == 0:
+            return "❌", QColor(ERROR_RED).lighter(180)
+
+        # Good fit (R² >= 0.7 or quality string indicates good/excellent)
+        if 'excellent' in quality_lower or 'good' in quality_lower:
+            return "✅", QColor(SUCCESS_GREEN).lighter(180)
+        if r_squared is not None and r_squared >= 0.7:
             return "✅", QColor(SUCCESS_GREEN).lighter(180)
 
-        # Low quality (R² < 0.85 or quality string indicates poor/fair)
-        if 'poor' in quality_lower or 'fair' in quality_lower or (r_squared and r_squared < 0.85):
+        # Low quality (R² < 0.7 or quality string indicates poor/fair)
+        if 'poor' in quality_lower or 'fair' in quality_lower:
+            return "🟠", QColor(WARNING_ORANGE).lighter(180)
+        if r_squared is not None and r_squared < 0.7:
             return "🟠", QColor(WARNING_ORANGE).lighter(180)
 
-        # Default for unknown/no data
-        if r_squared and r_squared > 0:
-            return "✅", QColor(SUCCESS_GREEN).lighter(180)
-
+        # Default: no indicator
         return "", None
 
     def _on_selection_changed(self):

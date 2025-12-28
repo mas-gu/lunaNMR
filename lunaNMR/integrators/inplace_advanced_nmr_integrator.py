@@ -83,8 +83,6 @@ import matplotlib.pyplot as plt
 
 import os
 import sys
-from scipy.optimize import curve_fit, minimize
-from scipy.ndimage import maximum_filter
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -471,7 +469,7 @@ class InPlaceAdvancedNMRIntegrator:
         # Store refined peaks (not original unrefined peaks)
         self.fitted_peaks = detected_peaks
 
-        print(f"Reference-based detection with consolidation completed:")
+        print("Reference-based detection with consolidation completed:")
         print(f"  Total peaks: {self.detection_statistics['total_peaks']}")
         print(f"  Detected peaks: {self.detection_statistics['detected_peaks']}")
         print(f"  Reference retained: {self.detection_statistics['reference_retained']}")
@@ -1037,7 +1035,7 @@ class InPlaceAdvancedNMRIntegrator:
         good_quality = sum(1 for r in results if r['Quality'] in ['Excellent', 'Good'])
         detected_count = sum(1 for r in results if r['Integration_Method'] != 'Reference')
 
-        print(f"Integration completed:")
+        print("Integration completed:")
         print(f"  Total peaks: {len(results)}")
         print(f"  Detected and integrated: {detected_count}")
         print(f"  Good quality (≥SNR 5): {good_quality}")
@@ -1175,7 +1173,7 @@ def main():
 
     # Print final statistics
     stats = integrator.get_detection_statistics()
-    print(f"\nFinal Statistics:")
+    print("\nFinal Statistics:")
     print(f"  Detection rate: {stats['detection_rate']:.1f}%")
     print(f"  Detected peaks: {stats['detected_peaks']}")
     print(f"  Reference retained: {stats['reference_retained']}")

@@ -2,6 +2,8 @@
 # ABOUTME: Peak Navigator component for interactive peak list display and navigation
 # ABOUTME: Qt/PySide6 port from CustomTkinter version with improved signal/slot architecture
 
+import logging
+
 """
 Peak Navigator Widget for lunaNMR
 
@@ -26,25 +28,21 @@ from PySide6.QtWidgets import (
     QLabel, QComboBox, QPushButton, QHeaderView, QAbstractItemView,
     QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QLineEdit
 )
-from PySide6.QtCore import Signal, Qt, QSize
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QColor, QFont
 
 from lunaNMR.gui.styles.design_system import (
     # Colors
-    PRIMARY_TEXT, SECONDARY_TEXT, PANEL_BG_COLOR, FRAME_BG_COLOR,
-    SUCCESS_GREEN, WARNING_ORANGE, ERROR_RED,
+    PRIMARY_TEXT, SECONDARY_TEXT, SUCCESS_GREEN, WARNING_ORANGE, ERROR_RED,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, DESTRUCTIVE_BUTTON_BG, DESTRUCTIVE_BUTTON_HOVER,
     DESTRUCTIVE_BUTTON_TEXT,
     # Spacing
-    SPACING_XS, SPACING_SM, SPACING_MD,
-    # Sizing
-    BUTTON_WIDTH_ICON, BUTTON_WIDTH_STANDARD,
-    # Typography
-    FONT_SIZE_SECTION_LABEL, FONT_SIZE_BODY, FONT_SIZE_SMALL,
-    FONT_WEIGHT_BOLD, FONT_WEIGHT_REGULAR
+    SPACING_XS, SPACING_SM, BUTTON_WIDTH_ICON, FONT_SIZE_SECTION_LABEL, FONT_SIZE_BODY, FONT_SIZE_SMALL
 )
+
+logger = logging.getLogger(__name__)
 
 
 class PeakNavigator(QWidget):
@@ -56,6 +54,8 @@ class PeakNavigator(QWidget):
     Signals:
         peak_selected(int): Emitted when a peak is selected (peak_id)
         peak_edited(int, dict): Emitted when a peak is edited (peak_id, new_values)
+        peak_added(dict): Emitted when a new peak is added (peak_data)
+        peak_deleted(int): Emitted when a peak is deleted (peak_id)
         navigation_requested(str): Emitted for prev/next navigation ('prev' or 'next')
         peak_analysis_requested(str, int): Emitted when analysis button clicked (peak_type, peak_id)
     """
@@ -63,6 +63,8 @@ class PeakNavigator(QWidget):
     # Signals for communication with main GUI
     peak_selected = Signal(int)  # peak_id
     peak_edited = Signal(int, dict)  # peak_id, new_values
+    peak_added = Signal(dict)  # peak_data dict with assignment, x, y
+    peak_deleted = Signal(int)  # peak_id
     navigation_requested = Signal(str)  # 'prev' or 'next'
     peak_analysis_requested = Signal(str, int)  # peak_type, peak_id
 
@@ -520,6 +522,9 @@ class PeakNavigator(QWidget):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
+            # Store index before clearing
+            deleted_index = self.selected_peak_index
+
             # Remove from list
             del self.detected_peaks[self.selected_peak_index]
             self.selected_peak_index = None
@@ -527,27 +532,35 @@ class PeakNavigator(QWidget):
             # Refresh display
             self.refresh_peak_list()
 
-    def _add_new_peak(self):
-        """Open dialog to add new peak."""
-        if self.selected_peak_type != "detected":
-            QMessageBox.information(
-                self,
-                "Cannot Add",
-                "You can only add peaks to detected peaks list."
-            )
-            return
+            # Emit signal for main window to sync with integrator
+            self.peak_deleted.emit(deleted_index)
 
-        # Open add dialog with default values
-        new_id = len(self.detected_peaks) + 1
-        dialog = PeakEditDialog(self, f"Det{new_id}", 8.0, 120.0)
+    def _add_new_peak(self):
+        """Open dialog to add new reference peak.
+
+        Peaks are added to the reference list only. Detected peaks
+        are created through the fitting process, not manual addition.
+        """
+        # Generate next assignment number based on reference peaks
+        new_id = len(self.reference_peaks) + 1
+        dialog = PeakEditDialog(self, f"{new_id}", 8.0, 120.0)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_assignment, new_x, new_y = dialog.get_values()
 
-            # Add to detected peaks list
-            self.detected_peaks.append([new_assignment, new_x, new_y, ""])
+            # Add to reference peaks list (format: [assignment, x, y, height, r_squared])
+            self.reference_peaks.append([new_assignment, new_x, new_y, "", None])
 
-            # Refresh display
+            # Switch to reference view and refresh
+            self.selected_peak_type = "reference"
             self.refresh_peak_list()
+
+            # Emit signal for main window to sync with integrator
+            peak_data = {
+                'assignment': new_assignment,
+                'x_coord': new_x,
+                'y_coord': new_y
+            }
+            self.peak_added.emit(peak_data)
 
     def _save_peak_changes(self):
         """Save detected peaks to file.
@@ -930,8 +943,8 @@ class PeakNavigator(QWidget):
 
         Unified thresholds (consistent with PeakNavigatorTable):
             - ❌ Red: R² == 0 or failed fit
-            - 🟠 Orange: R² < 0.85 (low quality)
-            - ✅ Green: R² >= 0.85 (good fit)
+            - 🟠 Orange: R² < 0.7 (low quality)
+            - ✅ Green: R² >= 0.7 (good fit)
 
         Args:
             assignment: Peak assignment name
@@ -945,9 +958,9 @@ class PeakNavigator(QWidget):
         if r_squared is not None:
             if r_squared == 0:
                 return f"❌ {assignment}"
-            elif r_squared < 0.85:
+            elif r_squared < 0.7:
                 return f"🟠 {assignment}"
-            else:  # r_squared >= 0.85
+            else:  # r_squared >= 0.7
                 return f"✅ {assignment}"
 
         # Fallback: no R² available, check if display string exists
@@ -960,8 +973,8 @@ class PeakNavigator(QWidget):
 
         Unified thresholds (consistent with PeakNavigatorTable):
             - Red: R² == 0 or failed fit
-            - Orange: R² < 0.85 (low quality)
-            - Green: R² >= 0.85 (good fit)
+            - Orange: R² < 0.7 (low quality)
+            - Green: R² >= 0.7 (good fit)
 
         Args:
             r_squared: R² value from fitting (None if not fitted)
@@ -974,9 +987,9 @@ class PeakNavigator(QWidget):
         if r_squared is not None:
             if r_squared == 0:
                 return QColor(ERROR_RED).lighter(180)
-            elif r_squared < 0.85:
+            elif r_squared < 0.7:
                 return QColor(WARNING_ORANGE).lighter(180)
-            else:  # r_squared >= 0.85
+            else:  # r_squared >= 0.7
                 return QColor(SUCCESS_GREEN).lighter(180)
 
         # Fallback: no R² available, check if display string exists
@@ -991,7 +1004,7 @@ class PeakNavigator(QWidget):
 
         self.edit_btn.setEnabled(is_detected and has_selection)
         self.delete_btn.setEnabled(is_detected and has_selection)
-        self.add_btn.setEnabled(is_detected)
+        self.add_btn.setEnabled(True)  # Always enabled - adds to reference peaks
         self.save_btn.setEnabled(is_detected)
 
     def _update_navigation_button_states(self):

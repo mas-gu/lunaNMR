@@ -26,10 +26,11 @@ from PySide6.QtWidgets import (
     QFrame, QGroupBox, QScrollArea, QStackedWidget,
     QCheckBox, QRadioButton, QButtonGroup, QComboBox,
     QSpinBox, QDoubleSpinBox, QProgressBar,
-    QFileDialog, QMessageBox, QSizePolicy
+    QFileDialog, QMessageBox, QSizePolicy, QListWidget, QListWidgetItem,
+    QAbstractItemView
 )
-from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer, QMimeData
+from PySide6.QtGui import QFont, QDrag, QDragEnterEvent, QDropEvent
 
 # Import design constants
 from constants import (
@@ -309,6 +310,109 @@ class BasePage(QWidget):
 
 
 # =============================================================================
+# DRAG-DROP WIDGETS FOR SERIES PICKER
+# =============================================================================
+
+class DraggableSeriesList(QListWidget):
+    """List widget with drag support for series items."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragOnly)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {FRAME_BG_COLOR};
+                border: 1px solid {PANEL_BG_COLOR};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QListWidget::item {{
+                padding: 6px 8px;
+                border-radius: 3px;
+            }}
+            QListWidget::item:selected {{
+                background-color: {PANEL_BG_COLOR};
+            }}
+            QListWidget::item:hover {{
+                background-color: {PANEL_BG_COLOR};
+            }}
+        """)
+
+    def startDrag(self, supportedActions):
+        """Start dragging with series data."""
+        item = self.currentItem()
+        if item:
+            drag = QDrag(self)
+            mime_data = QMimeData()
+            # Store series name and CSV path in mime data
+            series_name = item.data(Qt.UserRole)
+            csv_path = item.data(Qt.UserRole + 1) or ""
+            mime_data.setText(f"series:{series_name}:{csv_path}")
+            drag.setMimeData(mime_data)
+            drag.exec(Qt.CopyAction)
+
+
+class DropTargetLabel(QLabel):
+    """Label that accepts dropped series items."""
+
+    series_dropped = Signal(str, str, str)  # field_name, series_name, csv_path
+
+    def __init__(self, field_name: str, text: str = "No file selected", parent=None):
+        super().__init__(text, parent)
+        self.field_name = field_name
+        self.setAcceptDrops(True)
+        self._update_style(False)
+
+    def _update_style(self, is_hover: bool):
+        """Update style based on hover state."""
+        if is_hover:
+            self.setStyleSheet(f"""
+                color: {PRIMARY_TEXT};
+                background-color: {SUCCESS_GREEN}40;
+                padding: 4px 8px;
+                border-radius: 4px;
+                border: 2px dashed {SUCCESS_GREEN};
+            """)
+        else:
+            self.setStyleSheet(f"""
+                color: {SECONDARY_TEXT};
+                background-color: {FRAME_BG_COLOR};
+                padding: 4px 8px;
+                border-radius: 4px;
+            """)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """Accept drag if it contains series data."""
+        if event.mimeData().hasText():
+            text = event.mimeData().text()
+            if text.startswith("series:"):
+                event.acceptProposedAction()
+                self._update_style(True)
+                return
+        event.ignore()
+
+    def dragLeaveEvent(self, event):
+        """Reset style when drag leaves."""
+        self._update_style(False)
+
+    def dropEvent(self, event: QDropEvent):
+        """Handle dropped series."""
+        self._update_style(False)
+        text = event.mimeData().text()
+        if text.startswith("series:"):
+            parts = text.split(":", 2)
+            if len(parts) >= 2:
+                series_name = parts[1]
+                csv_path = parts[2] if len(parts) > 2 else ""
+                self.series_dropped.emit(self.field_name, series_name, csv_path)
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+
+# =============================================================================
 # T1/T2 FITTING PAGE
 # =============================================================================
 
@@ -364,8 +468,8 @@ class T1T2FittingPage(BasePage):
         # Field 2 enabled state
         self.field2_enabled = False
 
-    def _create_file_row(self, parent_layout, label_text: str, field_name: str, enabled: bool = True) -> QLabel:
-        """Create a file selection row for data input."""
+    def _create_file_row(self, parent_layout, label_text: str, field_name: str, enabled: bool = True) -> DropTargetLabel:
+        """Create a file selection row with drop-enabled display for data input."""
         row = QFrame()
         row_layout = create_h_layout(SPACING_SM)
         row.setLayout(row_layout)
@@ -374,9 +478,11 @@ class T1T2FittingPage(BasePage):
         label.setFixedWidth(100)
         row_layout.addWidget(label)
 
-        display = create_label("No file selected", font_size=FONT_SIZE_SMALL)
-        display.setStyleSheet(f"color: {SECONDARY_TEXT}; background-color: {FRAME_BG_COLOR}; padding: 4px 8px; border-radius: 4px;")
+        # Use DropTargetLabel for drag-and-drop from series picker
+        display = DropTargetLabel(field_name, "No file selected")
+        display.setFont(get_font(FONT_SIZE_SMALL))
         display.setEnabled(enabled)
+        display.series_dropped.connect(self._on_series_dropped)
         row_layout.addWidget(display, stretch=1)
 
         browse_btn = create_secondary_button("Browse", width=80, enabled=enabled)
@@ -403,6 +509,100 @@ class T1T2FittingPage(BasePage):
             if display:
                 display.setText(os.path.basename(filename))
                 display.setToolTip(filename)
+
+    # =========================================================================
+    # SERIES PICKER METHODS
+    # =========================================================================
+
+    def _get_available_series(self) -> List[Dict[str, Any]]:
+        """Get list of available series from lunaNMR project.
+
+        Returns list of dicts with 'name' and 'csv_path' keys.
+        """
+        series_list = []
+
+        # Access lunaNMR main window through DynamiXsDialog
+        lunaNMR_main = None
+        if hasattr(self.main_window, 'main_window'):
+            lunaNMR_main = self.main_window.main_window
+
+        if not lunaNMR_main:
+            return series_list
+
+        # Get saved_series from lunaNMR main window
+        saved_series = getattr(lunaNMR_main, 'saved_series', {}) or {}
+
+        # Get project path to find CSV files
+        project_path = getattr(lunaNMR_main, 'current_project_path', None)
+
+        for series_name in saved_series.keys():
+            csv_path = ""
+            # Try to find series_analysis_tidy.csv for this series
+            if project_path:
+                tidy_csv = Path(project_path) / ".lunaNMR" / "series_results" / series_name / "series_analysis_tidy.csv"
+                if tidy_csv.exists():
+                    csv_path = str(tidy_csv)
+            series_list.append({
+                'name': series_name,
+                'csv_path': csv_path
+            })
+
+        return series_list
+
+    def _populate_series_list(self):
+        """Populate the series list widget with available series."""
+        if not hasattr(self, 'series_list_widget'):
+            return
+
+        self.series_list_widget.clear()
+        series = self._get_available_series()
+
+        if not series:
+            # Show "no series" message
+            self.no_series_label.setVisible(True)
+            self.series_list_widget.setVisible(False)
+            return
+
+        self.no_series_label.setVisible(False)
+        self.series_list_widget.setVisible(True)
+
+        for s in series:
+            item = QListWidgetItem(s['name'])
+            item.setData(Qt.UserRole, s['name'])
+            item.setData(Qt.UserRole + 1, s['csv_path'])
+            # Add tooltip with CSV path if available
+            if s['csv_path']:
+                item.setToolTip(f"CSV: {s['csv_path']}")
+            self.series_list_widget.addItem(item)
+
+    def _on_series_dropped(self, field_name: str, series_name: str, csv_path: str):
+        """Handle a series being dropped on a data field.
+
+        Args:
+            field_name: Target field (e.g., 'field1_t1', 'field2_t1rho')
+            series_name: Name of the dropped series
+            csv_path: Path to series_analysis_tidy.csv
+        """
+        # Set the file path
+        if csv_path:
+            setattr(self, f"{field_name}_file", csv_path)
+
+        # Update the display
+        display = getattr(self, f"{field_name}_display", None)
+        if display:
+            display.setText(f"📊 {series_name}")
+            display.setToolTip(f"Series: {series_name}\nCSV: {csv_path}")
+
+        # Store source_series metadata for later use in Inspect Peak
+        if not hasattr(self, 'source_series_map'):
+            self.source_series_map = {}
+        self.source_series_map[field_name] = series_name
+
+        # Log to results area
+        if hasattr(self, 'results_text'):
+            self.results_text.appendPlainText(
+                f"Assigned series '{series_name}' to {field_name.replace('_', ' ').title()}"
+            )
 
     def _toggle_field2(self):
         """Enable or disable Field 2 data section."""
@@ -541,6 +741,39 @@ class T1T2FittingPage(BasePage):
         scroll_content.setProperty("class", "panel")
         scroll_layout = create_v_layout(SPACING_MD, (SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD))
         scroll_content.setLayout(scroll_layout)
+
+        # --- Project Series Section (drag series to data fields) ---
+        series_group = CollapsibleGroupBox("Project Series", collapsible=True, initially_collapsed=False)
+        series_content = series_group.content_layout
+
+        # Instruction label
+        series_hint = create_secondary_label("Drag a series to assign it to a T1/T2/T1ρ data field below")
+        series_content.addWidget(series_hint)
+
+        # No series message (shown when empty)
+        self.no_series_label = create_secondary_label("No project series available. Use Browse buttons or Auto-Load from Folder.")
+        self.no_series_label.setStyleSheet(f"color: {SECONDARY_TEXT}; font-style: italic; padding: 8px;")
+        series_content.addWidget(self.no_series_label)
+
+        # Series list widget (draggable items)
+        self.series_list_widget = DraggableSeriesList()
+        self.series_list_widget.setMaximumHeight(120)
+        self.series_list_widget.setVisible(False)  # Hidden until populated
+        series_content.addWidget(self.series_list_widget)
+
+        # Refresh button
+        refresh_row = QFrame()
+        refresh_layout = create_h_layout(SPACING_SM)
+        refresh_row.setLayout(refresh_layout)
+        refresh_btn = create_secondary_button("Refresh Series List", clicked=self._populate_series_list, width=150)
+        refresh_layout.addWidget(refresh_btn)
+        refresh_layout.addStretch()
+        series_content.addWidget(refresh_row)
+
+        scroll_layout.addWidget(series_group)
+
+        # Populate series list on first show
+        QTimer.singleShot(100, self._populate_series_list)
 
         # --- Field 1 Data Section (Required) ---
         field1_group = CollapsibleGroupBox("Field 1 Data (Required)")
@@ -1755,11 +1988,21 @@ class T1T2FittingPage(BasePage):
             # Convert to list for FitViewer
             json_folders_list = list(json_folders)
 
+            # Get source series map for Inspect Peak functionality
+            series_map = getattr(self, 'source_series_map', {})
+
             # Store as instance variable to prevent garbage collection
             self.fit_viewer = FitViewer(
                 parent=None,  # Separate window
-                json_folders=json_folders_list if json_folders_list else None
+                json_folders=json_folders_list if json_folders_list else None,
+                source_series_map=series_map
             )
+
+            # Connect FitViewer's Inspect Peak signal to DynamiXsDialog handler
+            # (main_window is DynamiXsDialog when embedded in lunaNMR)
+            if hasattr(self.main_window, 'connect_fit_viewer_signals'):
+                self.main_window.connect_fit_viewer_signals(self.fit_viewer)
+
             self.fit_viewer.show()
         except ImportError as e:
             self.results_text.appendPlainText(f"Could not open Fit Viewer: {e}")
@@ -2271,6 +2514,39 @@ class IntegratedAnalysisPage(BasePage):
         subtitle = create_secondary_label("Automated workflow from NMR relaxation data to model-free parameters")
         scroll_layout.addWidget(subtitle)
 
+        # --- Project Series Section (drag series to data fields) ---
+        series_group = CollapsibleGroupBox("Project Series", collapsible=True, initially_collapsed=False)
+        series_content = series_group.content_layout
+
+        # Instruction label
+        series_hint = create_secondary_label("Drag a series to assign it to a T1/T2/hetNOE data field below")
+        series_content.addWidget(series_hint)
+
+        # No series message (shown when empty)
+        self.mf_no_series_label = create_secondary_label("No project series available. Use Browse buttons or Auto-Load from Folder.")
+        self.mf_no_series_label.setStyleSheet(f"color: {SECONDARY_TEXT}; font-style: italic; padding: 8px;")
+        series_content.addWidget(self.mf_no_series_label)
+
+        # Series list widget (draggable items)
+        self.mf_series_list_widget = DraggableSeriesList()
+        self.mf_series_list_widget.setMaximumHeight(120)
+        self.mf_series_list_widget.setVisible(False)  # Hidden until populated
+        series_content.addWidget(self.mf_series_list_widget)
+
+        # Refresh button
+        refresh_row = QFrame()
+        refresh_layout = create_h_layout(SPACING_SM)
+        refresh_row.setLayout(refresh_layout)
+        refresh_btn = create_secondary_button("Refresh Series List", clicked=self._populate_series_list, width=150)
+        refresh_layout.addWidget(refresh_btn)
+        refresh_layout.addStretch()
+        series_content.addWidget(refresh_row)
+
+        scroll_layout.addWidget(series_group)
+
+        # Populate series list on first show
+        QTimer.singleShot(100, self._populate_series_list)
+
         # --- CSV Input Section ---
         csv_input_layout = create_v_layout(SPACING_MD)
 
@@ -2533,8 +2809,8 @@ class IntegratedAnalysisPage(BasePage):
         scroll.setWidget(scroll_content)
         self.page_layout.addWidget(scroll, stretch=1)
 
-    def _create_file_row(self, parent_layout, label_text: str, field_name: str, enabled: bool = True) -> QLabel:
-        """Create a file selection row."""
+    def _create_file_row(self, parent_layout, label_text: str, field_name: str, enabled: bool = True) -> DropTargetLabel:
+        """Create a file selection row with drop-enabled display."""
         row = QFrame()
         row_layout = create_h_layout(SPACING_SM)
         row.setLayout(row_layout)
@@ -2543,8 +2819,11 @@ class IntegratedAnalysisPage(BasePage):
         label.setFixedWidth(150)
         row_layout.addWidget(label)
 
-        display = create_label("No file selected", font_size=FONT_SIZE_SMALL)
-        display.setStyleSheet(f"color: {SECONDARY_TEXT}; background-color: {FRAME_BG_COLOR}; padding: 4px 8px; border-radius: 4px;")
+        # Use DropTargetLabel for drag-and-drop from series picker
+        display = DropTargetLabel(field_name, "No file selected")
+        display.setFont(get_font(FONT_SIZE_SMALL))
+        display.setEnabled(enabled)
+        display.series_dropped.connect(self._on_series_dropped)
         row_layout.addWidget(display, stretch=1)
 
         browse_btn = create_secondary_button(
@@ -2561,7 +2840,7 @@ class IntegratedAnalysisPage(BasePage):
         parent_layout.addWidget(row)
         return display
 
-    def _browse_file(self, field_name: str, display_label: QLabel):
+    def _browse_file(self, field_name: str, display_label: DropTargetLabel):
         """Browse for a file."""
         filename = open_file_dialog(
             self,
@@ -2572,6 +2851,100 @@ class IntegratedAnalysisPage(BasePage):
         if filename:
             setattr(self, f"{field_name}_file", filename)
             display_label.setText(os.path.basename(filename))
+
+    # =========================================================================
+    # SERIES PICKER METHODS
+    # =========================================================================
+
+    def _get_available_series(self) -> List[Dict[str, Any]]:
+        """Get list of available series from lunaNMR project.
+
+        Returns list of dicts with 'name' and 'csv_path' keys.
+        """
+        series_list = []
+
+        # Access lunaNMR main window through DynamiXsDialog
+        lunaNMR_main = None
+        if hasattr(self.main_window, 'main_window'):
+            lunaNMR_main = self.main_window.main_window
+
+        if not lunaNMR_main:
+            return series_list
+
+        # Get saved_series from lunaNMR main window
+        saved_series = getattr(lunaNMR_main, 'saved_series', {}) or {}
+
+        # Get project path to find CSV files
+        project_path = getattr(lunaNMR_main, 'current_project_path', None)
+
+        for series_name in saved_series.keys():
+            csv_path = ""
+            # Try to find series_analysis_tidy.csv for this series
+            if project_path:
+                tidy_csv = Path(project_path) / ".lunaNMR" / "series_results" / series_name / "series_analysis_tidy.csv"
+                if tidy_csv.exists():
+                    csv_path = str(tidy_csv)
+            series_list.append({
+                'name': series_name,
+                'csv_path': csv_path
+            })
+
+        return series_list
+
+    def _populate_series_list(self):
+        """Populate the series list widget with available series."""
+        if not hasattr(self, 'mf_series_list_widget'):
+            return
+
+        self.mf_series_list_widget.clear()
+        series = self._get_available_series()
+
+        if not series:
+            # Show "no series" message
+            self.mf_no_series_label.setVisible(True)
+            self.mf_series_list_widget.setVisible(False)
+            return
+
+        self.mf_no_series_label.setVisible(False)
+        self.mf_series_list_widget.setVisible(True)
+
+        for s in series:
+            item = QListWidgetItem(s['name'])
+            item.setData(Qt.UserRole, s['name'])
+            item.setData(Qt.UserRole + 1, s['csv_path'])
+            # Add tooltip with CSV path if available
+            if s['csv_path']:
+                item.setToolTip(f"CSV: {s['csv_path']}")
+            self.mf_series_list_widget.addItem(item)
+
+    def _on_series_dropped(self, field_name: str, series_name: str, csv_path: str):
+        """Handle a series being dropped on a data field.
+
+        Args:
+            field_name: Target field (e.g., 'field1_t1', 'field2_noe_sat')
+            series_name: Name of the dropped series
+            csv_path: Path to series_analysis_tidy.csv
+        """
+        # Set the file path
+        if csv_path:
+            setattr(self, f"{field_name}_file", csv_path)
+
+        # Update the display
+        display = getattr(self, f"{field_name}_display", None)
+        if display:
+            display.setText(f"📊 {series_name}")
+            display.setToolTip(f"Series: {series_name}\nCSV: {csv_path}")
+
+        # Store source_series metadata for later use in Inspect Peak
+        if not hasattr(self, 'source_series_map'):
+            self.source_series_map = {}
+        self.source_series_map[field_name] = series_name
+
+        # Log to results area
+        if hasattr(self, 'results_text'):
+            self.results_text.appendPlainText(
+                f"Assigned series '{series_name}' to {field_name.replace('_', ' ').title()}"
+            )
 
     def _on_mf_error_method_changed(self, index: int):
         """Show/hide bootstrap iterations based on error method selection."""
@@ -2881,11 +3254,21 @@ class IntegratedAnalysisPage(BasePage):
                 if not os.path.exists(json_folder):
                     json_folder = None
 
+            # Get source series map for Inspect Peak functionality
+            series_map = getattr(self, 'source_series_map', {})
+
             # Store as instance variable to prevent garbage collection
             self.fit_viewer = FitViewer(
                 parent=None,  # Separate window
-                json_folder=json_folder
+                json_folder=json_folder,
+                source_series_map=series_map
             )
+
+            # Connect FitViewer's Inspect Peak signal to DynamiXsDialog handler
+            # (main_window is DynamiXsDialog when embedded in lunaNMR)
+            if hasattr(self.main_window, 'connect_fit_viewer_signals'):
+                self.main_window.connect_fit_viewer_signals(self.fit_viewer)
+
             self.fit_viewer.show()
         except ImportError as e:
             self.progress_text.appendPlainText(f"Could not open Fit Viewer: {e}")

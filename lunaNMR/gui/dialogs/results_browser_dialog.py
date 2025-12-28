@@ -2,12 +2,12 @@
 # ABOUTME: Provides tabbed interface with overview stats, peak tracking, and evolution plots
 
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Dict, List
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
-    QComboBox, QGroupBox, QSplitter, QScrollArea, QMessageBox
+    QComboBox, QGroupBox, QSplitter, QMessageBox
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor

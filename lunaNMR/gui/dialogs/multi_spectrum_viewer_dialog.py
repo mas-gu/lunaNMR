@@ -1,15 +1,14 @@
 # ABOUTME: Qt-based multi-spectrum overlay viewer dialog for comparing multiple NMR spectra
 # ABOUTME: Port of Tkinter multi_spectrum_viewer.py to PySide6 for v1.0 Qt interface
 
-import os
 import logging
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
-    QGroupBox, QScrollArea, QWidget, QColorDialog, QMessageBox,
+    QGroupBox, QWidget, QColorDialog, QMessageBox,
     QSpinBox, QDoubleSpinBox, QSplitter, QListWidget, QListWidgetItem,
-    QTabWidget, QSlider, QComboBox, QTextEdit, QStackedWidget
+    QTabWidget, QComboBox, QTextEdit, QStackedWidget
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont
@@ -17,8 +16,7 @@ from PySide6.QtGui import QColor, QFont
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.components.peak_navigator_table import PeakNavigatorTable
 from lunaNMR.gui.styles.design_system import (
-    SPACING_SM, SPACING_MD, SPACING_LG,
-    FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
+    SPACING_SM, SPACING_MD, FONT_SIZE_BODY, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
@@ -27,6 +25,25 @@ from lunaNMR.gui.styles.design_system import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _to_scalar(value):
+    """Convert a value to scalar, handling lists from JSON deserialization.
+
+    JSON deserialization may convert numpy scalars to single-element lists.
+    This helper extracts the scalar value.
+
+    Args:
+        value: A scalar, list, or None
+
+    Returns:
+        Scalar value (first element if list, 0 if None/empty)
+    """
+    if value is None:
+        return 0
+    if isinstance(value, (list, tuple)):
+        return value[0] if len(value) > 0 else 0
+    return value
 
 
 class SpectrumListItem(QWidget):
@@ -97,13 +114,20 @@ class MultiSpectrumViewerDialog(BaseDialog):
     """
 
     def __init__(self, parent=None, all_results: List[Dict] = None,
-                 file_manager=None):
+                 file_manager=None, initial_assignment: str = None,
+                 exponential_fit_data: dict = None):
         """Initialize the multi-spectrum viewer dialog.
 
         Args:
             parent: Parent widget
             all_results: List of result dictionaries for all spectra
             file_manager: NMRFileManager instance for loading spectra
+            initial_assignment: Optional assignment to auto-select in Peak Mode
+                               (e.g., "142" or "A.142.ALA.H"). If provided, the
+                               dialog will start in Peak Mode with this peak selected.
+            exponential_fit_data: Dict mapping residue ID to exponential fit data from DynamiXs.
+                E.g., {'142': {fit_data}, '143': {fit_data}, ...}
+                Each fit_data contains: time_points, intensities, fit_curve, t_value, t_error, etc.
         """
         super().__init__(
             parent=parent,
@@ -114,6 +138,8 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         self.all_results = all_results or []
         self.file_manager = file_manager
+        self._initial_assignment = initial_assignment  # Store for post-init use
+        self._exponential_fit_data = exponential_fit_data  # T1/T2 fit from DynamiXs
 
         # Spectrum data management
         self.spectra = []  # List of spectrum info dicts
@@ -162,14 +188,21 @@ class MultiSpectrumViewerDialog(BaseDialog):
         else:
             self.center_on_screen()
 
+        # Handle initial assignment (for DynamiXs → lunaNMR drill-down)
+        if self._initial_assignment:
+            self._select_initial_assignment(self._initial_assignment)
+
         logger.debug(f"MultiSpectrumViewerDialog initialized with {len(self.spectra)} spectra")
 
     def _initialize_spectra(self):
-        """Initialize spectrum data from results."""
+        """Initialize spectrum data from results, sorted by delay value."""
+        from lunaNMR.gui.components.intensity_decay_widget import extract_delay_from_spectrum_name
+
+        # First pass: collect all spectrum data
+        unsorted_spectra = []
         for idx, result in enumerate(self.all_results):
             spectrum_name = result.get('spectrum_name', f'spectrum_{idx+1:03d}')
             file_path = result.get('spectrum_file', '')
-            color = self.default_colors[idx % len(self.default_colors)]
 
             # Extract fitted peaks from result_data
             # v0.9 multi_spectrum_viewer.py:117-125 - check integration_results first
@@ -179,21 +212,39 @@ class MultiSpectrumViewerDialog(BaseDialog):
             if fitted_peaks is None:
                 fitted_peaks = []
 
-            self.spectra.append({
+            # Extract delay for sorting
+            delay_ms = extract_delay_from_spectrum_name(spectrum_name)
+
+            unsorted_spectra.append({
                 'name': spectrum_name,
                 'file_path': file_path,
-                'color': color,
-                'visible': idx == 0,  # First spectrum visible by default
                 'result_data': result,
-                'fitted_peaks': fitted_peaks,  # Store extracted peaks
+                'fitted_peaks': fitted_peaks,
                 'loaded': False,
-                'data': None
+                'data': None,
+                '_delay_ms': delay_ms  # Temporary key for sorting
             })
 
-            if idx == 0:
-                self.visible_spectra.add(spectrum_name)
+        # Sort by delay (None values go to end)
+        def sort_key(spec):
+            delay = spec.get('_delay_ms')
+            if delay is None:
+                return (1, spec['name'])  # Sort unparseable names alphabetically at end
+            return (0, delay)
 
-            logger.debug(f"Initialized spectrum {spectrum_name} with {len(fitted_peaks)} fitted peaks")
+        unsorted_spectra.sort(key=sort_key)
+
+        # Second pass: assign colors and visibility after sorting
+        for idx, spec in enumerate(unsorted_spectra):
+            spec['color'] = self.default_colors[idx % len(self.default_colors)]
+            spec['visible'] = (idx == 0)  # First spectrum visible by default
+            del spec['_delay_ms']  # Remove temporary key
+            self.spectra.append(spec)
+
+            if idx == 0:
+                self.visible_spectra.add(spec['name'])
+
+            logger.debug(f"Initialized spectrum {spec['name']} with {len(spec['fitted_peaks'])} fitted peaks")
 
     def _build_peak_spectrum_map(self):
         """Build mapping from peak assignments to spectrum indices.
@@ -236,11 +287,14 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 assignment = peak.get('assignment', peak.get('Assignment', ''))
                 if assignment and assignment not in seen_assignments:
                     seen_assignments.add(assignment)
+                    # Get coordinates using _to_scalar for JSON deserialization safety
+                    cx = _to_scalar(peak.get('center_x') or peak.get('peak_x') or peak.get('ppm_x') or peak.get('pos_f2') or 0)
+                    cy = _to_scalar(peak.get('center_y') or peak.get('peak_y') or peak.get('ppm_y') or peak.get('pos_f1') or 0)
                     # Create master peak entry (R² left blank)
                     master_peak = {
                         'assignment': assignment,
-                        'center_x': peak.get('center_x', peak.get('peak_x', peak.get('ppm_x', peak.get('pos_f2', 0)))),
-                        'center_y': peak.get('center_y', peak.get('peak_y', peak.get('ppm_y', peak.get('pos_f1', 0)))),
+                        'center_x': cx,
+                        'center_y': cy,
                         'r_squared': None,  # Leave blank for master list
                         'quality': ''
                     }
@@ -249,16 +303,102 @@ class MultiSpectrumViewerDialog(BaseDialog):
             # Add any peaks from other spectra not in first spectrum
             for assignment, peak in reference_peaks.items():
                 if assignment not in seen_assignments:
+                    cx = _to_scalar(peak.get('center_x') or peak.get('peak_x') or peak.get('ppm_x') or peak.get('pos_f2') or 0)
+                    cy = _to_scalar(peak.get('center_y') or peak.get('peak_y') or peak.get('ppm_y') or peak.get('pos_f1') or 0)
                     master_peak = {
                         'assignment': assignment,
-                        'center_x': peak.get('center_x', peak.get('peak_x', peak.get('ppm_x', peak.get('pos_f2', 0)))),
-                        'center_y': peak.get('center_y', peak.get('peak_y', peak.get('ppm_y', peak.get('pos_f1', 0)))),
+                        'center_x': cx,
+                        'center_y': cy,
                         'r_squared': None,
                         'quality': ''
                     }
                     self.master_peak_list.append(master_peak)
 
         logger.debug(f"Built peak_spectrum_map with {len(self.master_peak_list)} unique peaks")
+
+    def _select_initial_assignment(self, assignment: str):
+        """Select a peak by assignment and switch to Peak Mode in 3D Voigt tab.
+
+        Used for DynamiXs → lunaNMR drill-down: when user clicks "Inspect Peak"
+        in FitViewer, this opens the MultiSpectrumViewer with the corresponding
+        peak already selected.
+
+        Args:
+            assignment: Peak assignment (e.g., "142", "A.8.LEU.H") to select.
+                       Matches against assignments in master_peak_list using:
+                       1. Exact match
+                       2. Substring match
+                       3. Residue number extraction and match
+        """
+        import re
+
+        if not self.master_peak_list:
+            logger.warning(f"Cannot select assignment '{assignment}': no peaks loaded")
+            return
+
+        # Find matching peak index
+        target_idx = None
+        assignment_clean = str(assignment).strip()
+
+        # Extract residue number from assignment (e.g., "A.8.LEU.H" -> "8")
+        def extract_residue_number(s):
+            """Extract the first number from an assignment string."""
+            numbers = re.findall(r'\d+', str(s))
+            return numbers[0] if numbers else None
+
+        search_resnum = extract_residue_number(assignment_clean)
+
+        # First try exact match
+        for idx, peak in enumerate(self.master_peak_list):
+            peak_assignment = peak.get('assignment', '')
+            if peak_assignment == assignment_clean:
+                target_idx = idx
+                logger.debug(f"Exact match: '{assignment_clean}' == '{peak_assignment}'")
+                break
+
+        # If no exact match, try partial match (assignment as substring)
+        if target_idx is None:
+            for idx, peak in enumerate(self.master_peak_list):
+                peak_assignment = peak.get('assignment', '')
+                # Check if search term is in peak assignment
+                if assignment_clean in peak_assignment:
+                    target_idx = idx
+                    logger.debug(f"Substring match: '{assignment_clean}' in '{peak_assignment}'")
+                    break
+                # Also check if peak assignment is in the search string
+                if peak_assignment in assignment_clean:
+                    target_idx = idx
+                    logger.debug(f"Reverse substring match: '{peak_assignment}' in '{assignment_clean}'")
+                    break
+
+        # If still no match, try matching by residue number
+        if target_idx is None and search_resnum:
+            for idx, peak in enumerate(self.master_peak_list):
+                peak_assignment = peak.get('assignment', '')
+                peak_resnum = extract_residue_number(peak_assignment)
+                if peak_resnum and peak_resnum == search_resnum:
+                    target_idx = idx
+                    logger.debug(f"Residue number match: {search_resnum} in '{peak_assignment}'")
+                    break
+
+        if target_idx is None:
+            logger.warning(f"Assignment '{assignment}' not found in master_peak_list")
+            # Log available assignments for debugging
+            available = [p.get('assignment', '') for p in self.master_peak_list[:10]]
+            logger.debug(f"Available assignments (first 10): {available}")
+            return
+
+        # Switch to 3D Voigt Analysis tab (index 2)
+        self.plot_tabs.setCurrentIndex(2)
+
+        # Enable Peak Mode
+        self.voigt_3d_mode_toggle_btn.setChecked(True)
+        self._toggle_voigt_3d_navigation_mode()
+
+        # Select the peak in the peak table
+        self.voigt_3d_peak_mode_peak_table.select_peak(target_idx)
+
+        logger.debug(f"Selected initial assignment '{assignment}' (index {target_idx}) in Peak Mode")
 
     def _get_fitted_peaks(self, spec_idx: int) -> List[Dict]:
         """Get fitted peaks for a spectrum.
@@ -286,159 +426,20 @@ class MultiSpectrumViewerDialog(BaseDialog):
         return fitted_peaks
 
     def setup_ui(self):
-        """Setup the dialog user interface."""
+        """Setup the dialog user interface.
+
+        Tabs contain their own layout - no global left panel.
+        Spectrum list is now inside Overlay View tab only.
+        """
         layout = QVBoxLayout()
         layout.setSpacing(SPACING_SM)
         layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
 
-        # Main content splitter (no title - maximizes space)
-        splitter = QSplitter(Qt.Horizontal)
-
-        # Left panel: Spectrum list + Contour controls (compact)
-        left_panel = self.create_spectrum_list_panel()
-        splitter.addWidget(left_panel)
-
-        # Right panel: Plot area
-        right_panel = self.create_plot_panel()
-        splitter.addWidget(right_panel)
-
-        # Set splitter proportions (left column 25% smaller: 280 * 0.75 = 210)
-        splitter.setSizes([210, 990])
-
-        layout.addWidget(splitter, stretch=1)
+        # Plot area with tabs (full width - no global left panel)
+        plot_panel = self.create_plot_panel()
+        layout.addWidget(plot_panel, stretch=1)
 
         self.setLayout(layout)
-
-    def create_spectrum_list_panel(self) -> QWidget:
-        """Create the spectrum list panel with contour controls.
-
-        Returns:
-            QWidget containing spectrum list and contour controls
-        """
-        # Main container widget
-        container = QWidget()
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(SPACING_SM)
-
-        # Spectra group
-        spectra_group = QGroupBox("Spectra")
-        spectra_group.setStyleSheet(self._get_group_style())
-
-        spectra_layout = QVBoxLayout()
-        spectra_layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
-        spectra_layout.setSpacing(2)
-
-        # Info label
-        info_label = QLabel(f"{len(self.spectra)} spectra available")
-        info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT};")
-        spectra_layout.addWidget(info_label)
-
-        # Scroll area for spectrum list
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("QScrollArea { border: none; }")
-
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout()
-        scroll_layout.setSpacing(2)
-        scroll_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Add spectrum items
-        self.spectrum_items = {}
-        for spec in self.spectra:
-            item = SpectrumListItem(
-                spectrum_name=spec['name'],
-                color=spec['color'],
-                visible=spec['visible']
-            )
-            item.visibility_changed.connect(self._on_visibility_changed)
-            item.color_changed.connect(self._on_color_changed)
-            scroll_layout.addWidget(item)
-            self.spectrum_items[spec['name']] = item
-
-        scroll_layout.addStretch()
-        scroll_content.setLayout(scroll_layout)
-        scroll_area.setWidget(scroll_content)
-
-        spectra_layout.addWidget(scroll_area, stretch=1)
-
-        # Quick selection buttons
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(SPACING_SM)
-
-        select_all_btn = QPushButton("Select All")
-        select_all_btn.clicked.connect(self._select_all)
-        btn_layout.addWidget(select_all_btn)
-
-        select_none_btn = QPushButton("Select None")
-        select_none_btn.clicked.connect(self._select_none)
-        btn_layout.addWidget(select_none_btn)
-
-        spectra_layout.addLayout(btn_layout)
-        spectra_group.setLayout(spectra_layout)
-        main_layout.addWidget(spectra_group, stretch=1)
-
-        # Contour controls group (compact vertical layout)
-        contour_group = QGroupBox("Contour")
-        contour_group.setStyleSheet(self._get_group_style())
-
-        contour_layout = QVBoxLayout()
-        contour_layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
-        contour_layout.setSpacing(2)
-
-        # Row 1: Levels
-        levels_row = QHBoxLayout()
-        levels_row.addWidget(QLabel("Levels:"))
-        self.levels_spin = QSpinBox()
-        self.levels_spin.setRange(5, 100)
-        self.levels_spin.setValue(10)
-        levels_row.addWidget(self.levels_spin)
-        contour_layout.addLayout(levels_row)
-
-        # Row 2: Min Level
-        min_row = QHBoxLayout()
-        min_row.addWidget(QLabel("Min:"))
-        self.min_spin = QDoubleSpinBox()
-        self.min_spin.setRange(0.01, 10.0)
-        self.min_spin.setValue(0.2)
-        self.min_spin.setSingleStep(0.01)
-        min_row.addWidget(self.min_spin)
-        contour_layout.addLayout(min_row)
-
-        # Row 3: Increment
-        inc_row = QHBoxLayout()
-        inc_row.addWidget(QLabel("Inc:"))
-        self.increment_spin = QDoubleSpinBox()
-        self.increment_spin.setRange(1.01, 2.0)
-        self.increment_spin.setValue(2.0)
-        self.increment_spin.setSingleStep(0.01)
-        inc_row.addWidget(self.increment_spin)
-        contour_layout.addLayout(inc_row)
-
-        # Update button
-        update_btn = QPushButton("Update")
-        update_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {PRIMARY_BUTTON_BG};
-                color: {PRIMARY_BUTTON_TEXT};
-                border: none;
-                border-radius: {BUTTON_CORNER_RADIUS}px;
-                padding: {SPACING_SM}px;
-                font-size: {FONT_SIZE_BODY}px;
-            }}
-            QPushButton:hover {{
-                background-color: {PRIMARY_BUTTON_HOVER};
-            }}
-        """)
-        update_btn.clicked.connect(self._update_plot)
-        contour_layout.addWidget(update_btn)
-
-        contour_group.setLayout(contour_layout)
-        main_layout.addWidget(contour_group)
-
-        container.setLayout(main_layout)
-        return container
 
     def create_plot_panel(self) -> QWidget:
         """Create the plot panel with tabbed views: Overlay, Voigt Analysis, 3D Voigt.
@@ -477,37 +478,152 @@ class MultiSpectrumViewerDialog(BaseDialog):
         return panel
 
     def _create_overlay_tab(self) -> QWidget:
-        """Create the overlay view tab with contour plot and peak navigator.
+        """Create the overlay view tab with spectrum list, contour plot, and peak navigator.
 
-        Based on v0.9 multi_spectrum_viewer.py overlay tab structure.
-        Simple layout: spectrum selector and peak navigator (no mode toggle here).
+        Layout: [Spectra + Contour] | [Plot] | [Peak Navigator]
+
+        The spectrum list with visibility toggles and contour controls is now
+        integrated into this tab (moved from global left panel).
         """
         from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
         from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
+        from PySide6.QtWidgets import QScrollArea
 
         tab = QWidget()
         layout = QHBoxLayout()
         layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
         layout.setSpacing(SPACING_SM)
 
-        # Left panel (75%): Contour plot
+        # === Left panel: Spectrum list + Contour controls ===
         left_panel = QWidget()
         left_layout = QVBoxLayout()
         left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(SPACING_SM)
 
-        # Create matplotlib widget for contour plot
+        # Spectra group with visibility toggles
+        spectra_group = QGroupBox("Spectra")
+        spectra_group.setStyleSheet(self._get_group_style())
+        spectra_layout = QVBoxLayout()
+        spectra_layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
+        spectra_layout.setSpacing(2)
+
+        info_label = QLabel(f"{len(self.spectra)} spectra available")
+        info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT};")
+        spectra_layout.addWidget(info_label)
+
+        # Scroll area for spectrum list
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("QScrollArea { border: none; }")
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout()
+        scroll_layout.setSpacing(2)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Add spectrum items with visibility toggles
+        self.spectrum_items = {}
+        for spec in self.spectra:
+            item = SpectrumListItem(
+                spectrum_name=spec['name'],
+                color=spec['color'],
+                visible=spec['visible']
+            )
+            item.visibility_changed.connect(self._on_visibility_changed)
+            item.color_changed.connect(self._on_color_changed)
+            scroll_layout.addWidget(item)
+            self.spectrum_items[spec['name']] = item
+
+        scroll_layout.addStretch()
+        scroll_content.setLayout(scroll_layout)
+        scroll_area.setWidget(scroll_content)
+        spectra_layout.addWidget(scroll_area, stretch=1)
+
+        # Quick selection buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(SPACING_SM)
+        select_all_btn = QPushButton("Select All")
+        select_all_btn.clicked.connect(self._select_all)
+        btn_layout.addWidget(select_all_btn)
+        select_none_btn = QPushButton("Select None")
+        select_none_btn.clicked.connect(self._select_none)
+        btn_layout.addWidget(select_none_btn)
+        spectra_layout.addLayout(btn_layout)
+
+        spectra_group.setLayout(spectra_layout)
+        left_layout.addWidget(spectra_group, stretch=1)
+
+        # Contour controls group
+        contour_group = QGroupBox("Contour")
+        contour_group.setStyleSheet(self._get_group_style())
+        contour_layout = QVBoxLayout()
+        contour_layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
+        contour_layout.setSpacing(2)
+
+        levels_row = QHBoxLayout()
+        levels_row.addWidget(QLabel("Levels:"))
+        self.levels_spin = QSpinBox()
+        self.levels_spin.setRange(5, 100)
+        self.levels_spin.setValue(10)
+        levels_row.addWidget(self.levels_spin)
+        contour_layout.addLayout(levels_row)
+
+        min_row = QHBoxLayout()
+        min_row.addWidget(QLabel("Min:"))
+        self.min_spin = QDoubleSpinBox()
+        self.min_spin.setRange(0.01, 10.0)
+        self.min_spin.setValue(0.2)
+        self.min_spin.setSingleStep(0.01)
+        min_row.addWidget(self.min_spin)
+        contour_layout.addLayout(min_row)
+
+        inc_row = QHBoxLayout()
+        inc_row.addWidget(QLabel("Inc:"))
+        self.increment_spin = QDoubleSpinBox()
+        self.increment_spin.setRange(1.01, 2.0)
+        self.increment_spin.setValue(2.0)
+        self.increment_spin.setSingleStep(0.01)
+        inc_row.addWidget(self.increment_spin)
+        contour_layout.addLayout(inc_row)
+
+        update_btn = QPushButton("Update")
+        update_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {PRIMARY_BUTTON_BG};
+                color: {PRIMARY_BUTTON_TEXT};
+                border: none;
+                border-radius: {BUTTON_CORNER_RADIUS}px;
+                padding: {SPACING_SM}px;
+                font-size: {FONT_SIZE_BODY}px;
+            }}
+            QPushButton:hover {{
+                background-color: {PRIMARY_BUTTON_HOVER};
+            }}
+        """)
+        update_btn.clicked.connect(self._update_plot)
+        contour_layout.addWidget(update_btn)
+
+        contour_group.setLayout(contour_layout)
+        left_layout.addWidget(contour_group)
+
+        left_panel.setLayout(left_layout)
+        layout.addWidget(left_panel, stretch=2)
+
+        # === Center panel: Contour plot ===
+        center_panel = QWidget()
+        center_layout = QVBoxLayout()
+        center_layout.setContentsMargins(0, 0, 0, 0)
+
         self.plot_widget = MatplotlibWidget(
-            parent=left_panel,
+            parent=center_panel,
             toolbar=False,
             figsize=(8, 6),
             dpi=100
         )
 
-        # Attach navigation handler for pan/zoom
         self._nav_handler = NMRNavigationHandler()
         self._nav_handler.attach(self.plot_widget)
 
-        # Initialize plot with placeholder text
         self.plot_widget.axes.set_title("Select spectra to display overlay")
         self.plot_widget.axes.text(
             0.5, 0.5,
@@ -518,17 +634,16 @@ class MultiSpectrumViewerDialog(BaseDialog):
         )
         self.plot_widget.refresh()
 
-        left_layout.addWidget(self.plot_widget, stretch=1)
-        left_panel.setLayout(left_layout)
-        layout.addWidget(left_panel, stretch=7)
+        center_layout.addWidget(self.plot_widget, stretch=1)
+        center_panel.setLayout(center_layout)
+        layout.addWidget(center_panel, stretch=6)
 
-        # Right panel (30%): Spectrum selector and peak navigator
+        # === Right panel: Spectrum selector and peak navigator ===
         right_panel = QWidget()
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(SPACING_SM)
 
-        # Spectrum selector
         spec_group = QGroupBox("Select Spectrum")
         spec_group.setStyleSheet(self._get_group_style())
         spec_layout = QVBoxLayout()
@@ -544,7 +659,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         spec_group.setLayout(spec_layout)
         right_layout.addWidget(spec_group)
 
-        # Peak navigator
         peak_group = QGroupBox("Peak Navigator")
         peak_group.setStyleSheet(self._get_group_style())
         peak_layout = QVBoxLayout()
@@ -553,7 +667,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.overlay_peak_table.peak_selected.connect(self._on_overlay_peak_selected_by_index)
         peak_layout.addWidget(self.overlay_peak_table)
 
-        # Show Peaks checkbox
         self.show_peaks_checkbox = QCheckBox("Show Peak Markers")
         self.show_peaks_checkbox.setChecked(True)
         self.show_peaks_checkbox.toggled.connect(self._on_toggle_peak_markers)
@@ -563,7 +676,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         right_layout.addWidget(peak_group, stretch=1)
 
         right_panel.setLayout(right_layout)
-        layout.addWidget(right_panel, stretch=3)
+        layout.addWidget(right_panel, stretch=2)
 
         # Track selected spectrum for overlay peak display
         self.overlay_selected_spectrum_idx = 0
@@ -744,20 +857,22 @@ class MultiSpectrumViewerDialog(BaseDialog):
         return tab
 
     def _create_voigt_3d_analysis_tab(self) -> QWidget:
-        """Create the 3D Voigt analysis tab with VoigtAnalysisPlotter.
+        """Create the 3D Voigt analysis tab with VoigtAnalysisPlotter and IntensityDecayWidget.
+
+        In Peak Mode, shows side-by-side: 3D Voigt surface + Intensity vs Delay plot.
+        In Spectrum Mode, shows only the 3D Voigt surface (full width).
 
         Based on v0.9 main_gui.py Tab 3: 3D Voigt Analysis (lines 1829-1944).
-        Full controls matching v0.9 implementation.
         """
         from lunaNMR.gui.components.voigt_analysis_plotter import VoigtAnalysisPlotter
-        from PySide6.QtWidgets import QRadioButton, QButtonGroup
+        from lunaNMR.gui.components.intensity_decay_widget import IntensityDecayWidget
 
         tab = QWidget()
         layout = QHBoxLayout()
         layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
         layout.setSpacing(SPACING_SM)
 
-        # Left panel: Controls + 3D plot
+        # Left panel: Controls + 3D plot + IntensityDecay (in Peak Mode)
         left_panel = QWidget()
         left_layout = QVBoxLayout()
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -860,7 +975,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.residual_mode_3d = 'separate'
         self.intensity_scale_3d = 100
 
-        # === Plot area ===
+        # === Plot area with splitter for 3D Voigt + Intensity Decay ===
+        plot_splitter = QSplitter(Qt.Horizontal)
+
+        # Left side: 3D Voigt Surface Analysis
         plot_group = QGroupBox("3D Voigt Surface Analysis")
         plot_group.setStyleSheet(self._get_group_style())
         plot_layout = QVBoxLayout()
@@ -870,7 +988,19 @@ class MultiSpectrumViewerDialog(BaseDialog):
         plot_layout.addWidget(self.voigt_3d_plotter)
 
         plot_group.setLayout(plot_layout)
-        left_layout.addWidget(plot_group, stretch=1)
+        plot_splitter.addWidget(plot_group)
+
+        # Right side: Intensity Decay Widget (shown in Peak Mode only)
+        self.intensity_decay_widget = IntensityDecayWidget(parent=tab)
+        self.intensity_decay_widget.point_clicked.connect(self._on_intensity_decay_point_clicked)
+        self.intensity_decay_widget.setVisible(False)  # Hidden by default (Spectrum Mode)
+        plot_splitter.addWidget(self.intensity_decay_widget)
+
+        # Set initial splitter sizes (3D plot takes full width when decay is hidden)
+        plot_splitter.setSizes([1000, 0])
+        self._plot_splitter_3d = plot_splitter  # Store reference for mode toggle
+
+        left_layout.addWidget(plot_splitter, stretch=1)
 
         left_panel.setLayout(left_layout)
         layout.addWidget(left_panel, stretch=7)
@@ -1152,18 +1282,9 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 lines.append(f"  Volume:                {volume:.3e}")
                 lines.append("")
 
-                # Linewidths F2 (1H)
+                # Linewidths
                 lines.append(f"  Linewidth F2 (1H):     {lw_f2:.4f} ppm")
-                lines.append(f"    - Gaussian (sigma):  {lw_gau_f2:.4f} ppm")
-                lines.append(f"    - Lorentzian (gamma):{lw_lor_f2:.4f} ppm")
-                lines.append(f"    - L/G Ratio:         {lg_ratio_f2:.2%}")
-                lines.append("")
-
-                # Linewidths F1 (15N/13C)
                 lines.append(f"  Linewidth F1 (15N):    {lw_f1:.3f} ppm")
-                lines.append(f"    - Gaussian (sigma):  {lw_gau_f1:.3f} ppm")
-                lines.append(f"    - Lorentzian (gamma):{lw_lor_f1:.3f} ppm")
-                lines.append(f"    - L/G Ratio:         {lg_ratio_f1:.2%}")
 
                 if i < len(all_peaks) - 1:
                     lines.append("")
@@ -1892,10 +2013,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
             # Extract peak coordinates and quality info
             for peak in fitted_peaks:
-                # Try multiple possible keys for coordinates
-                x_ppm = (peak.get('center_x') or peak.get('peak_x') or peak.get('ppm_x') or
+                # Try multiple possible keys for coordinates, using _to_scalar for JSON safety
+                x_ppm = _to_scalar(peak.get('center_x') or peak.get('peak_x') or peak.get('ppm_x') or
                         peak.get('pos_f2') or peak.get('Position_X') or 0)
-                y_ppm = (peak.get('center_y') or peak.get('peak_y') or peak.get('ppm_y') or
+                y_ppm = _to_scalar(peak.get('center_y') or peak.get('peak_y') or peak.get('ppm_y') or
                         peak.get('pos_f1') or peak.get('Position_Y') or 0)
                 assignment = peak.get('assignment', peak.get('Assignment', ''))
                 quality = peak.get('quality', peak.get('fitting_quality', peak.get('Quality', 'Unknown')))
@@ -2108,6 +2229,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
             self.navigation_mode = 'peak'
             self.voigt_3d_mode_toggle_btn.setText("Peak Mode")
             self.voigt_3d_mode_stack.setCurrentIndex(1)
+            # Show intensity decay widget and adjust splitter
+            if hasattr(self, 'intensity_decay_widget'):
+                self.intensity_decay_widget.setVisible(True)
+                self._plot_splitter_3d.setSizes([600, 400])  # 60/40 split
             # Reset to first peak
             if self.master_peak_list:
                 self.voigt_3d_peak_mode_peak_table.select_peak(0)
@@ -2117,6 +2242,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
             self.navigation_mode = 'spectrum'
             self.voigt_3d_mode_toggle_btn.setText("Spectrum Mode")
             self.voigt_3d_mode_stack.setCurrentIndex(0)
+            # Hide intensity decay widget
+            if hasattr(self, 'intensity_decay_widget'):
+                self.intensity_decay_widget.setVisible(False)
+                self._plot_splitter_3d.setSizes([1000, 0])  # Full width for 3D plot
             # Clear reference scales (not used in Spectrum Mode)
             self.reference_z_min = None
             self.reference_z_max = None
@@ -2148,6 +2277,28 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         # Get list of spectra that have this peak
         spectra_with_peak = self.peak_spectrum_map.get(assignment, [])
+
+        # Update intensity decay widget with new peak data
+        if hasattr(self, 'intensity_decay_widget'):
+            self.intensity_decay_widget.set_data(
+                self.spectra,
+                assignment,
+                current_spectrum_index=None  # Will be set when spectrum is selected
+            )
+            # Pass exponential fit data from DynamiXs if available
+            # Look up fit for this assignment from the all_fit_data dict
+            # Keys can be full assignments (A.142.ALA.H) or just residue numbers (142)
+            if self._exponential_fit_data:
+                # Try full assignment first, then extracted residue number
+                fit_data = self._exponential_fit_data.get(assignment)
+                if fit_data is None:
+                    residue_id = self._extract_residue_from_assignment(assignment)
+                    fit_data = self._exponential_fit_data.get(residue_id) if residue_id else None
+
+                if fit_data:
+                    self.intensity_decay_widget.set_exponential_fit(fit_data)
+                else:
+                    self.intensity_decay_widget.clear_exponential_fit()
 
         # Update spectrum navigator list with grayed-out items
         self._update_voigt_3d_peak_mode_spectrum_list(spectra_with_peak)
@@ -2184,6 +2335,39 @@ class MultiSpectrumViewerDialog(BaseDialog):
             self._capture_reference_z_scale(first_idx)
             self.voigt_3d_peak_mode_spectrum_list.setCurrentRow(first_idx)
             self._select_voigt_3d_spectrum_for_peak_mode(first_idx)
+
+    def _extract_residue_from_assignment(self, assignment: str) -> str:
+        """Extract residue number from a peak assignment string.
+
+        Handles various assignment formats:
+        - "A.142.ALA.H" -> "142"
+        - "142" -> "142"
+        - "B.55.GLY.H" -> "55"
+
+        Args:
+            assignment: Peak assignment string
+
+        Returns:
+            Residue number as string, or None if not extractable
+        """
+        import re
+
+        if not assignment:
+            return None
+
+        # Try to extract number from dotted format (e.g., "A.142.ALA.H")
+        parts = assignment.split('.')
+        if len(parts) >= 2:
+            # Second part should be the residue number
+            if parts[1].isdigit():
+                return parts[1]
+
+        # Try to find any number in the assignment
+        match = re.search(r'\d+', assignment)
+        if match:
+            return match.group()
+
+        return None
 
     def _on_voigt_3d_peak_mode_spectrum_selected(self, item: QListWidgetItem):
         """Handle spectrum selection in Peak Mode for 3D Voigt tab (click)."""
@@ -2231,6 +2415,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
             if p_assignment == assignment:
                 self.selected_peak_index = i
                 break
+
+        # Update intensity decay widget highlight
+        if hasattr(self, 'intensity_decay_widget'):
+            self.intensity_decay_widget.set_highlight(spec_idx)
 
         # Apply reference z-scale if locked (for intensity comparison across spectra)
         if self.lock_z_scale_to_reference and self.reference_z_min is not None:
@@ -2291,6 +2479,23 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 new_idx = self._voigt_3d_peak_mode_available_spectra[0]
                 self.voigt_3d_peak_mode_spectrum_list.setCurrentRow(new_idx)
                 self._select_voigt_3d_spectrum_for_peak_mode(new_idx)
+
+    def _on_intensity_decay_point_clicked(self, spec_idx: int):
+        """Handle click on intensity decay plot point to navigate to that spectrum.
+
+        Args:
+            spec_idx: Index of the spectrum corresponding to the clicked point
+        """
+        if not hasattr(self, '_voigt_3d_peak_mode_available_spectra'):
+            return
+        if spec_idx not in self._voigt_3d_peak_mode_available_spectra:
+            return
+
+        # Update spectrum list selection
+        self.voigt_3d_peak_mode_spectrum_list.setCurrentRow(spec_idx)
+        # Navigate to spectrum
+        self._select_voigt_3d_spectrum_for_peak_mode(spec_idx)
+        logger.debug(f"Intensity decay: Clicked point for spectrum {spec_idx}")
 
     # ===== Z-Scale Reference Methods for Peak Mode =====
 

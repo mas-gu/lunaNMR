@@ -29,8 +29,7 @@ Version: 1.0
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional
-import warnings
+from typing import Dict, List
 import sys
 
 # Import building blocks
@@ -38,14 +37,12 @@ from .ps2d_style_fitter import (
     multi_voigt_profile_2d,
     compute_multi_voigt_jacobian_2d,
     Ps2dStyleLevenbergMarquardt,
-    DERIV_STEP_MULTIPLIER,
     SQRT_2,
     SQRT_8LN2
 )
 from .ps2d_config import get_ps2d_config
 from scipy.special import wofz
 
-from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
 # Import training data collector (optional)
 try:
@@ -1003,11 +1000,19 @@ class Ps2dMultiPeakFitter2D:
         # ====================================================================
         if not fix_positions:
 
-            # Fix only spare parameters
+            # Fix spare parameters + respect fix_linewidths flag
             fixed_stage2 = {}
             for i in range(n_peaks):
                 offset = i * NPAR_VOIGT
                 fixed_stage2[offset + 7] = 0.0  # Fix spare
+
+                # CRITICAL: Respect fix_linewidths flag during position refinement
+                # Without this, linewidths would float in Stage 2 even when user wants them fixed
+                if fix_linewidths:
+                    fixed_stage2[offset + 1] = params[offset + 1]  # Fix lw_lor_f1
+                    fixed_stage2[offset + 2] = params[offset + 2]  # Fix lw_gau_f1
+                    fixed_stage2[offset + 4] = params[offset + 4]  # Fix lw_lor_f2
+                    fixed_stage2[offset + 5] = params[offset + 5]  # Fix lw_gau_f2
 
             params, cov, info = self.optimizer.fit(
                 func=model_function,

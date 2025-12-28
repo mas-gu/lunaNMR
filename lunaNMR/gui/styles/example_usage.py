@@ -31,11 +31,6 @@ from lunaNMR.gui.styles import (
     load_stylesheet,
     
     # Colors for dynamic styling
-    PRIMARY_BUTTON_BG,
-    SUCCESS_GREEN,
-    DESTRUCTIVE_BUTTON_BG,
-    
-    # Spacing for layouts
     SPACING_SM,
     SPACING_MD,
     SPACING_LG,

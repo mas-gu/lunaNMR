@@ -19,8 +19,6 @@ Date: 2025
 import multiprocessing as mp
 from multiprocessing import Pool, cpu_count
 import numpy as np
-import pandas as pd
-from typing import List, Dict, Any, Tuple
 import time
 import traceback
 
@@ -134,10 +132,10 @@ class ParallelPeakFitter:
 
                     except mp.TimeoutError:
                         failed_fits += 1
-                    except Exception as e:
+                    except Exception:
                         failed_fits += 1
 
-        except Exception as e:
+        except Exception:
             # Fallback to sequential processing
             return self._fit_peaks_sequential_fallback(peak_list, progress_callback)
 
@@ -194,7 +192,7 @@ class ParallelPeakFitter:
                 if progress_callback:
                     progress_callback(i + 1, len(peak_list), assignment)
 
-            except Exception as e:
+            except Exception:
                 pass  # Silent failure - results list tracks success
 
         return results
@@ -281,132 +279,3 @@ def _fit_single_peak_worker(task_data):
 def _test_worker(_test_data):
     """Simple test function for multiprocessing"""
     return "test_ok"
-
-
-# Gaussian Mixture Model implementation for very close peaks
-class GaussianMixtureModel:
-    """Gaussian Mixture Model for overlapping peak detection and fitting"""
-
-    def __init__(self, n_components=2, max_iter=100):
-        """
-        Initialize GMM for peak fitting
-
-        Args:
-            n_components: Number of Gaussian components
-            max_iter: Maximum iterations for EM algorithm
-        """
-        self.n_components = n_components
-        self.max_iter = max_iter
-
-    def fit_overlapping_peaks(self, x_data, y_data, n_peaks=None):
-        """
-        Fit overlapping peaks using Gaussian Mixture Model
-
-        Args:
-            x_data: X coordinates
-            y_data: Y intensities
-            n_peaks: Number of peaks to fit (auto-detect if None)
-
-        Returns:
-            Dictionary with fitted parameters
-        """
-        try:
-            from sklearn.mixture import GaussianMixture
-            import numpy as np
-
-            # Auto-detect number of peaks if not provided
-            if n_peaks is None:
-                n_peaks = self._estimate_n_peaks(x_data, y_data)
-
-            # Prepare data for GMM (weight by intensity)
-            weights = y_data / np.sum(y_data)
-            X = x_data.reshape(-1, 1)
-
-            # Fit Gaussian Mixture Model
-            gmm = GaussianMixture(n_components=n_peaks, max_iter=self.max_iter)
-            gmm.fit(X, sample_weight=weights)
-
-            # Extract peak parameters
-            peaks = []
-            for i in range(n_peaks):
-                center = gmm.means_[i, 0]
-                sigma = np.sqrt(gmm.covariances_[i, 0, 0])
-                amplitude = gmm.weights_[i] * np.sum(y_data)
-
-                peaks.append({
-                    'center': center,
-                    'sigma': sigma,
-                    'amplitude': amplitude,
-                    'gamma': sigma * 0.5  # Approximate Lorentzian component
-                })
-
-            # Calculate combined fit
-            y_fitted = self._calculate_combined_voigt(x_data, peaks)
-            r_squared = self._calculate_r_squared(y_data, y_fitted)
-
-            return {
-                'success': True,
-                'n_peaks': n_peaks,
-                'peaks': peaks,
-                'fitted_curve': y_fitted,
-                'r_squared': r_squared,
-                'method': 'gaussian_mixture_model'
-            }
-
-        except ImportError:
-            return None
-        except Exception as e:
-            return None
-
-    def _estimate_n_peaks(self, x_data, y_data, max_peaks=6):
-        """Estimate optimal number of peaks using BIC/AIC"""
-        try:
-            from sklearn.mixture import GaussianMixture
-
-            best_n_peaks = 1
-            best_bic = float('inf')
-
-            weights = y_data / np.sum(y_data)
-            X = x_data.reshape(-1, 1)
-
-            for n in range(1, max_peaks + 1):
-                try:
-                    gmm = GaussianMixture(n_components=n, max_iter=50)
-                    gmm.fit(X, sample_weight=weights)
-                    bic = gmm.bic(X)
-
-                    if bic < best_bic:
-                        best_bic = bic
-                        best_n_peaks = n
-
-                except Exception:
-                    break  # Stop if fitting fails
-
-            return min(best_n_peaks, 4)  # Limit to reasonable number
-
-        except Exception:
-            return 2  # Default fallback
-
-    def _calculate_combined_voigt(self, x_data, peaks):
-        """Calculate combined Voigt profile from multiple peaks"""
-        from scipy.special import wofz
-
-        result = np.zeros_like(x_data)
-        for peak in peaks:
-            # Voigt profile calculation
-            sigma = peak['sigma']
-            gamma = peak['gamma']
-            center = peak['center']
-            amplitude = peak['amplitude']
-
-            z = ((x_data - center) + 1j * gamma) / (sigma * np.sqrt(2))
-            voigt = amplitude * np.real(wofz(z)) / (sigma * np.sqrt(2 * np.pi))
-            result += voigt
-
-        return result
-
-    def _calculate_r_squared(self, y_true, y_pred):
-        """Calculate R² coefficient"""
-        ss_res = np.sum((y_true - y_pred) ** 2)
-        ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
-        return 1 - (ss_res / ss_tot) if ss_tot > 0 else 0

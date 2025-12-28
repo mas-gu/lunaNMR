@@ -3,20 +3,17 @@
 
 import os
 import logging
-from typing import Optional
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGroupBox, QTextEdit, QFileDialog, QMessageBox, QScrollArea, QWidget
+    QGroupBox, QTextEdit, QFileDialog, QMessageBox
 )
-from PySide6.QtCore import Qt
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
-    PRIMARY_TEXT, SECONDARY_TEXT,
-    PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
+    PRIMARY_TEXT, PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
     FRAME_BG_COLOR

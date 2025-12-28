@@ -3,7 +3,6 @@
 
 import numpy as np
 import pandas as pd
-from typing import Optional
 
 
 # 15N/1H gyromagnetic ratio factor (15N frequency = 1H frequency / this factor)

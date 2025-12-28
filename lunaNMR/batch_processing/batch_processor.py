@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import List, Dict, Optional, Union, Any
 import numpy as np
 from datetime import datetime
-import traceback
 
 # Import lunaNMR core components (READ-ONLY usage)
 try:
@@ -740,7 +739,6 @@ class BatchProcessor:
             self.logger.info(f"     Nucleus type: {nucleus_type}")
 
             # Prepare peak data for fitting
-            import pandas as pd
             fitted_results = []
             failed_peaks = []
             processing_start_time = time.time()
@@ -748,7 +746,7 @@ class BatchProcessor:
             # Use direct enhanced_peak_fitting calls for guaranteed ML data collection
             # with fallback to SingleSpectrumProcessor for compatibility
             try:
-                self.logger.info(f"     Using direct enhanced_peak_fitting (guaranteed ML collection)")
+                self.logger.info("     Using direct enhanced_peak_fitting (guaranteed ML collection)")
                 fitted_results = self._fit_peaks_with_enhanced_peak_fitting(
                     detected_peaks, parameters, use_parallel
                 )
@@ -813,7 +811,7 @@ class BatchProcessor:
                 return success_count
 
             else:
-                self.logger.warning(f"  ❌ Voigt fitting failed - no results returned")
+                self.logger.warning("  ❌ Voigt fitting failed - no results returned")
                 return 0
 
         except Exception as e:
@@ -960,8 +958,6 @@ class BatchProcessor:
         This method uses the exact same enhanced_peak_fitting calls as GUI individual peak fitting,
         ensuring 100% ML data collection compatibility with optional multiprocessing support.
         """
-        import time
-        import os
 
         total_peaks = len(detected_peaks)
         fitted_results = []
@@ -1016,7 +1012,6 @@ class BatchProcessor:
 
     def _fit_peaks_parallel_direct(self, detected_peaks: List[Dict], parameters: Dict[str, Any]) -> List[Dict]:
         """Parallel direct enhanced_peak_fitting using threading for ML data collection compatibility"""
-        import threading
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         fitted_results = []
@@ -1044,7 +1039,7 @@ class BatchProcessor:
                     return result
                 return None
 
-            except Exception as e:
+            except Exception:
                 return None
 
         # Process peaks in parallel using ThreadPoolExecutor
@@ -1068,7 +1063,7 @@ class BatchProcessor:
                     result = future.result()
                     if result:
                         fitted_results.append(result)
-                except Exception as e:
+                except Exception:
                     continue
 
         # Sort results by peak number to maintain order
@@ -1084,7 +1079,7 @@ class BatchProcessor:
         try:
             import pandas as pd
 
-            self.logger.info(f"     🔄 Using fallback sequential fitting method")
+            self.logger.info("     🔄 Using fallback sequential fitting method")
 
             # Convert detected peaks to peak list format
             peak_list_data = []
@@ -1261,12 +1256,12 @@ class BatchProcessor:
             if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
                 # Try to load spectrum data if not available
                 if not self._load_spectrum(spectrum_file):
-                    self.logger.warning(f"  ⚠️ Could not load spectrum for optimization, using base parameters")
+                    self.logger.warning("  ⚠️ Could not load spectrum for optimization, using base parameters")
                     return base_parameters
 
                 # Check again after loading
                 if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
-                    self.logger.warning(f"  ⚠️ No spectrum data available for optimization, using base parameters")
+                    self.logger.warning("  ⚠️ No spectrum data available for optimization, using base parameters")
                     return base_parameters
 
             # Extract spectrum characteristics
@@ -1275,7 +1270,7 @@ class BatchProcessor:
             f2_ppm = getattr(self.integrator, 'ppm_x_axis', None)  # X-axis is F2 (1H)
 
             if f1_ppm is None or f2_ppm is None:
-                self.logger.warning(f"  ⚠️ Missing PPM scales for optimization, using base parameters")
+                self.logger.warning("  ⚠️ Missing PPM scales for optimization, using base parameters")
                 return base_parameters
 
             # Perform optimization
@@ -1552,7 +1547,7 @@ if __name__ == "__main__":
     processor = BatchProcessor()
     try:
         results = processor.process_folder(args.folder, args.nucleus, args.auto_optimize)
-        print(f"\nBatch processing completed successfully!")
+        print("\nBatch processing completed successfully!")
         print(f"Processed {results['processed_files']}/{results['total_files']} files")
         print(f"ML training samples collected: {results['total_ml_samples']}")
     except Exception as e:

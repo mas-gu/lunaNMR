@@ -24,7 +24,7 @@ from scipy.special import wofz  # Faddeeva function for Voigt profiles
 from scipy.optimize import curve_fit
 import warnings
 from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
-from lunaNMR.core.ps2d_config import get_ps2d_config, set_ps2d_config
+from lunaNMR.core.ps2d_config import get_ps2d_config
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 warnings.filterwarnings('ignore')
 
@@ -43,7 +43,7 @@ try:
         fit_single_peak_ps2d_style
     )
     PS2D_STYLE_FITTING_AVAILABLE = True
-except ImportError as e:
+except ImportError:
     PS2D_STYLE_FITTING_AVAILABLE = False
 
 # Import PS2D-style multi-peak fitter
@@ -53,14 +53,14 @@ try:
         fit_overlapping_peaks_ps2d_style
     )
     PS2D_MULTI_PEAK_AVAILABLE = True
-except ImportError as e:
+except ImportError:
     PS2D_MULTI_PEAK_AVAILABLE = False
 
 # Import PS2D data selector 
 try:
     from lunaNMR.core.ps2d_data_selector import Ps2dDataSelector
     PS2D_DATA_SELECTOR_AVAILABLE = True
-except ImportError as e:
+except ImportError:
     PS2D_DATA_SELECTOR_AVAILABLE = False
 
 # PS2D exact overlap integration - availability check only
@@ -68,7 +68,7 @@ try:
     import lunaNMR.core.ps2d_exact_overlap_integration as _ps2d_overlap  # noqa: F401
     del _ps2d_overlap  # Clean up namespace
     PS2D_EXACT_OVERLAP_INTEGRATION_AVAILABLE = True
-except ImportError as e:
+except ImportError:
     PS2D_EXACT_OVERLAP_INTEGRATION_AVAILABLE = False
 
 # Import PS2D 2D multi-peak fitter (for closely-spaced overlapping peaks in 2D)
@@ -76,7 +76,7 @@ try:
     from lunaNMR.core.ps2d_2d_fitter import Ps2dMultiPeakFitter2D
     from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
     PS2D_2D_FITTER_AVAILABLE = True
-except ImportError as e:
+except ImportError:
     PS2D_2D_FITTER_AVAILABLE = False
 try:
     from lunaNMR.integrators.inplace_advanced_nmr_integrator import InPlaceAdvancedNMRIntegrator
@@ -812,7 +812,7 @@ class VoigtIntegrator(BaseIntegrator):
 
     def detect_peaks_1d(self, x_data, y_data, target_position=None, gui_params=None):
         """Detect peaks in 1D cross-section using scipy peak detection optimized for overlapping peaks"""
-        from scipy.signal import find_peaks, peak_widths
+        from scipy.signal import find_peaks
 
         # Get parameters from GUI if available, otherwise use defaults
         if gui_params:
@@ -1102,7 +1102,7 @@ class VoigtIntegrator(BaseIntegrator):
                                         log_info("Excellent fit achieved, stopping optimization")
                                         break
 
-                        except Exception as e:
+                        except Exception:
                             continue  # Skip failed parameter combinations
 
                     if best_r_squared > 0.9:  # Break out of nested loops
@@ -1855,7 +1855,8 @@ class VoigtIntegrator(BaseIntegrator):
         return fitted_surface, individual_surfaces, baseline
 
     def fit_overlap_group_2d(self, overlap_group, assignment="Unknown", peak_assignments=None,
-                             fix_positions=False, fix_linewidths=False, reference_positions=None):
+                             fix_positions=False, fix_linewidths=False, reference_positions=None,
+                             reference_linewidths=None):
         """
         Fit overlap group using 2D simultaneous multi-peak fitting
 
@@ -1878,6 +1879,10 @@ class VoigtIntegrator(BaseIntegrator):
         reference_positions : dict, optional
             Mapping of assignment -> (x_ppm, y_ppm) for cascade mode absolute drift limiting.
             If provided, position bounds are clipped to stay within max_drift of original reference.
+        reference_linewidths : dict, optional
+            Mapping of assignment -> {lw_lor_f1, lw_gau_f1, lw_lor_f2, lw_gau_f2} for per-peak
+            linewidth reuse. If provided and fix_linewidths=True, these linewidths are used
+            as initial values (which then remain fixed).
 
         Returns:
         --------
@@ -1907,7 +1912,7 @@ class VoigtIntegrator(BaseIntegrator):
 
         # Prepare initial parameters with data-driven linewidth estimates
         initial_peaks = []
-        for peak_dict in overlap_group:
+        for peak_idx, peak_dict in enumerate(overlap_group):
             # Extract peak position
             x_ppm = peak_dict.get('x_ppm') or peak_dict.get('pos_x')
             y_ppm = peak_dict.get('y_ppm') or peak_dict.get('pos_y')
@@ -1955,13 +1960,52 @@ class VoigtIntegrator(BaseIntegrator):
                     break
 
             # ====================================================================
+            # REFERENCE LINEWIDTH REUSE (Per-Peak)
+            # ====================================================================
+            # If reference linewidths provided (from spectrum 1), use them directly
+            # instead of re-estimating. This ensures consistent linewidths across series.
+            # ====================================================================
+            use_reference_linewidths = False
+            if reference_linewidths:
+                # Get assignment for this peak
+                peak_assignment = None
+                if peak_assignments and peak_idx < len(peak_assignments):
+                    peak_assignment = str(peak_assignments[peak_idx])
+                elif 'assignment' in peak_dict:
+                    peak_assignment = str(peak_dict['assignment'])
+
+                if peak_assignment and peak_assignment in reference_linewidths:
+                    ref_lw = reference_linewidths[peak_assignment]
+                    lw_lor_f1 = ref_lw['lw_lor_f1']
+                    lw_gau_f1 = ref_lw['lw_gau_f1']
+                    lw_lor_f2 = ref_lw['lw_lor_f2']
+                    lw_gau_f2 = ref_lw['lw_gau_f2']
+                    use_reference_linewidths = True
+                    if len(initial_peaks) == 0:
+                        log_info(f"Using reference linewidths for cluster: "
+                                 f"F1(Gau={lw_gau_f1:.4f}, Lor={lw_lor_f1:.5f}), "
+                                 f"F2(Gau={lw_gau_f2:.5f}, Lor={lw_lor_f2:.6f})")
+                elif hasattr(self, 'spectrum_statistics') and self.spectrum_statistics:
+                    # FALLBACK: Peak not in reference, use median statistics
+                    fwhm_f1 = self.spectrum_statistics.get('lw_f1_median', config.typical_linewidth_f1)
+                    fwhm_f2 = self.spectrum_statistics.get('lw_f2_median', config.typical_linewidth_f2)
+                    lw_gau_f1 = fwhm_f1 / 2.0
+                    lw_lor_f1 = fwhm_f1 / 25.0
+                    lw_gau_f2 = fwhm_f2 / 2.0
+                    lw_lor_f2 = fwhm_f2 / 25.0
+                    use_reference_linewidths = True  # Still skip normal estimation
+                    log_info(f"Peak {peak_assignment}: using median statistics fallback")
+
+            # ====================================================================
             # LINEWIDTH ESTIMATION FOR CLUSTER PEAKS
             # ====================================================================
             # For ALL peaks in multi-peak clusters (PASS 2), use learned statistics
             # from isolated peaks (PASS 1) when available. This avoids contamination
             # from neighbor peaks in 1D cross-section measurements.
             # ====================================================================
-            if hasattr(self, 'spectrum_statistics') and self.spectrum_statistics:
+            if use_reference_linewidths:
+                pass  # Already set linewidths from reference above
+            elif hasattr(self, 'spectrum_statistics') and self.spectrum_statistics:
                 # Use learned linewidths from PASS 1 isolated peaks
                 fwhm_f1 = self.spectrum_statistics['lw_f1_median']
                 fwhm_f2 = self.spectrum_statistics['lw_f2_median']
@@ -1984,25 +2028,27 @@ class VoigtIntegrator(BaseIntegrator):
             # ====================================================================
             # CONVERT FWHM TO VOIGT COMPONENTS
             # ====================================================================
-            # FIXED 2025-10-13: Correct FWHM storage convention
-            # Bug: Was storing FWHM/2 in lw_gau, but rest of codebase expects full FWHM
-            # The variable lw_gau_f1 should contain the Gaussian FWHM, not half of it
-            # Use nucleus-adaptive minimum constraints from centralized config
+            # Skip if we already have reference linewidths set directly
+            if not use_reference_linewidths:
+                # FIXED 2025-10-13: Correct FWHM storage convention
+                # Bug: Was storing FWHM/2 in lw_gau, but rest of codebase expects full FWHM
+                # The variable lw_gau_f1 should contain the Gaussian FWHM, not half of it
+                # Use nucleus-adaptive minimum constraints from centralized config
 
-            # NEW (CORRECT): Store full FWHM in lw_gau, small Lorentzian initial guess
-            #lw_gau_f1 = max(fwhm_f1, config.min_linewidth_f1)  # lw_gau IS the Gaussian FWHM
-            #lw_lor_f1 = max(fwhm_f1 / 10.0, config.min_linewidth_f1 / 5.0)  # Start with small Lorentzian
-            #lw_gau_f2 = max(fwhm_f2, config.min_linewidth_f2)  # lw_gau IS the Gaussian FWHM
-            #lw_lor_f2 = max(fwhm_f2 / 10.0, config.min_linewidth_f2 / 5.0)  # Start with small Lorentzian
+                # NEW (CORRECT): Store full FWHM in lw_gau, small Lorentzian initial guess
+                #lw_gau_f1 = max(fwhm_f1, config.min_linewidth_f1)  # lw_gau IS the Gaussian FWHM
+                #lw_lor_f1 = max(fwhm_f1 / 10.0, config.min_linewidth_f1 / 5.0)  # Start with small Lorentzian
+                #lw_gau_f2 = max(fwhm_f2, config.min_linewidth_f2)  # lw_gau IS the Gaussian FWHM
+                #lw_lor_f2 = max(fwhm_f2 / 10.0, config.min_linewidth_f2 / 5.0)  # Start with small Lorentzian
 
-            # OLD (BUG - COMMENTED OUT): Stored FWHM/2, causing confusion throughout codebase
-            # Convert FWHM to Gaussian/Lorentzian components (assume 50/50 mix)
-            # For Voigt: FWHM ≈ 0.5346*fL + sqrt(0.2166*fL² + fG²)
-            # Approximate: set lw_gau ≈ fwhm/2, lw_lor ≈ fwhm/2
-            lw_gau_f1 = max(fwhm_f1 / 2.0, config.min_linewidth_f1)  # BUG: Stores FWHM/2
-            lw_lor_f1 = max(fwhm_f1 / 25.0, config.min_linewidth_f1) #/2#10
-            lw_gau_f2 = max(fwhm_f2 / 2.0, config.min_linewidth_f2)  # BUG: Stores FWHM/2
-            lw_lor_f2 = max(fwhm_f2 / 25.0, config.min_linewidth_f2) #10
+                # OLD (BUG - COMMENTED OUT): Stored FWHM/2, causing confusion throughout codebase
+                # Convert FWHM to Gaussian/Lorentzian components (assume 50/50 mix)
+                # For Voigt: FWHM ≈ 0.5346*fL + sqrt(0.2166*fL² + fG²)
+                # Approximate: set lw_gau ≈ fwhm/2, lw_lor ≈ fwhm/2
+                lw_gau_f1 = max(fwhm_f1 / 2.0, config.min_linewidth_f1)  # BUG: Stores FWHM/2
+                lw_lor_f1 = max(fwhm_f1 / 25.0, config.min_linewidth_f1) #/2#10
+                lw_gau_f2 = max(fwhm_f2 / 2.0, config.min_linewidth_f2)  # BUG: Stores FWHM/2
+                lw_lor_f2 = max(fwhm_f2 / 25.0, config.min_linewidth_f2) #10
 
             # Use detected intensity if available, otherwise fall back to re-measurement
             if detected_intensity is not None and detected_intensity > 0:
@@ -2158,6 +2204,13 @@ class VoigtIntegrator(BaseIntegrator):
             if peak_assignments and len(peak_assignments) == len(result['peaks']):
                 for i, peak_fit in enumerate(result['peaks']):
                     peak_fit['assignment'] = peak_assignments[i]
+
+            # Add detected_intensity to each peak from original overlap_group
+            # This preserves the intensity measured at peak detection time
+            for i, peak_fit in enumerate(result['peaks']):
+                if i < len(overlap_group):
+                    detected_int = overlap_group[i].get('intensity')
+                    peak_fit['detected_intensity'] = detected_int
         else:
             log_warning("2D fitting did not converge")
 
@@ -2243,16 +2296,15 @@ class VoigtIntegrator(BaseIntegrator):
 
                 target_peak = result_2d['peaks'][best_match_idx]
 
-                # Extract detected intensity from all_peaks_context by matching position
+                # Extract detected intensity from overlap_group by matching position
                 detected_intensity = None
-                if all_peaks_context is not None:
-                    for peak_ctx in all_peaks_context:
-                        ctx_x = peak_ctx.get('x_ppm') or peak_ctx.get('pos_x')
-                        ctx_y = peak_ctx.get('y_ppm') or peak_ctx.get('pos_y')
-                        # Match by position (within 0.001 ppm tolerance)
-                        if abs(ctx_x - peak_x_ppm) < 0.001 and abs(ctx_y - peak_y_ppm) < 0.01:
-                            detected_intensity = peak_ctx.get('intensity')
-                            break
+                for peak_dict in overlap_group:
+                    ctx_x = peak_dict.get('x_ppm') or peak_dict.get('pos_x')
+                    ctx_y = peak_dict.get('y_ppm') or peak_dict.get('pos_y')
+                    # Match by position (within 0.001 ppm tolerance)
+                    if abs(ctx_x - peak_x_ppm) < 0.001 and abs(ctx_y - peak_y_ppm) < 0.01:
+                        detected_intensity = peak_dict.get('intensity')
+                        break
 
                 # Extract 2D region data for proper 2D contour visualization
                 region_2d = self.extract_2d_region_for_overlap_group(overlap_group)
@@ -2720,7 +2772,6 @@ class VoigtIntegrator(BaseIntegrator):
         Returns:
             dict: Comprehensive optimization results
         """
-        import numpy as np
 
         # Search parameters
         step_size = 0.1
@@ -2977,7 +3028,6 @@ class VoigtIntegrator(BaseIntegrator):
         --------
         dict : Interference analysis with isolation classification
         """
-        import numpy as np
 
         # Extract larger region for neighbor analysis (3x current window)
         analysis_x_window = x_window * 3
@@ -4128,6 +4178,10 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
                 result['all_peaks'] = voigt2d_result['all_peaks']
             if 'overlap_group_size' in voigt2d_result:
                 result['overlap_group_size'] = voigt2d_result['overlap_group_size']
+
+            # Preserve detected_intensity (from peak detection, before fitting)
+            if 'detected_intensity' in voigt2d_result:
+                result['detected_intensity'] = voigt2d_result['detected_intensity']
 
             return result
 

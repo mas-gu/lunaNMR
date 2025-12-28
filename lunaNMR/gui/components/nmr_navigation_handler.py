@@ -132,6 +132,7 @@ class NMRNavigationHandler:
 
     This class attaches to a MatplotlibWidget and provides:
     - Left-click drag to pan
+    - Middle-click to select peak for moving
     - Scroll wheel to zoom at cursor
     - Arrow keys to pan, +/- to zoom, Home to reset
     - Modifier keys (Shift/Ctrl) to delegate to peak editing
@@ -140,9 +141,11 @@ class NMRNavigationHandler:
         handler = NMRNavigationHandler()
         handler.attach(spectrum_plotter)  # Attach to widget
         handler.on_peak_edit = my_peak_edit_callback  # Optional callback
+        handler.on_peak_select = my_peak_select_callback  # Optional callback
 
     Attributes:
         on_peak_edit: Optional callback for peak edit requests (x, y, modifiers)
+        on_peak_select: Optional callback for peak selection (x, y) - middle-click
         on_reset_zoom: Optional callback for reset zoom requests
     """
 
@@ -168,6 +171,7 @@ class NMRNavigationHandler:
 
         # Callbacks
         self.on_peak_edit: Optional[Callable[[float, float, Qt.KeyboardModifiers], None]] = None
+        self.on_peak_select: Optional[Callable[[float, float], None]] = None
         self.on_reset_zoom: Optional[Callable[[], None]] = None
 
     def attach(self, widget):
@@ -218,7 +222,13 @@ class NMRNavigationHandler:
         if event.inaxes != self._ax:
             return
 
-        if event.button != 1:  # Only handle left click
+        # Middle-click (button 2): select peak for moving
+        if event.button == 2:
+            if self.on_peak_select is not None and event.xdata is not None:
+                self.on_peak_select(event.xdata, event.ydata)
+            return
+
+        if event.button != 1:  # Only handle left click for pan
             return
 
         # Check for modifier keys (delegate to peak editing)

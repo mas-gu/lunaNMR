@@ -34,10 +34,8 @@ Date: 2025-01-24
 """
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QSizePolicy
-from PySide6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
-import numpy as np
 
 from lunaNMR.gui.styles.design_system import (
     PANEL_BG_COLOR,

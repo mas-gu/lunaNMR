@@ -17,9 +17,7 @@ Version: 1.0 -
 import numpy as np
 from scipy.special import wofz
 
-from typing import Dict, Tuple, Optional, List
-import warnings
-import sys
+from typing import Dict, Tuple
 
 # Numba JIT compilation for 3-5× speedup (optional dependency)
 try:
@@ -31,9 +29,7 @@ except ImportError:
     NUMBA_AVAILABLE = False
 
 # Import apriori linewidth estimator and global instance (self-contained, no circular deps)
-from .ps2d_multi_peak_fitter import Ps2dLinewidthEstimator
 
-from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
 # Conditional JIT decorator - compiles to native code if Numba available, otherwise no-op
 if NUMBA_AVAILABLE:
@@ -635,61 +631,3 @@ class Ps2dStyleLevenbergMarquardt:
         }
 
         return params_final, covariance_final, info
-
-
-# ============================================================================
-# ============================================================================
-# CONVENIENCE FUNCTIONS
-# ============================================================================
-
-
-
-# ============================================================================
-# TESTING AND VALIDATION
-# ============================================================================
-
-if __name__ == '__main__':
-    """
-    Test ps2d_style_fitter with synthetic Voigt profile
-    """
-
-    print("Testing PS2D-Style Voigt Fitter")
-    print("=" * 70)
-
-    # Generate synthetic Voigt peak
-    x = np.linspace(7.9, 8.1, 200)
-
-    # True parameters
-    true_pos = 8.0
-    true_lw_lor = 0.01
-    true_lw_gauss = 0.015
-    true_int = 1000.0
-    true_baseline = 50.0
-
-    # Generate data with noise
-    y_true = voigt_profile_1d(x, true_pos, true_lw_lor, true_lw_gauss, true_int, true_baseline)
-    noise = np.random.normal(0, 10, len(x))
-    y_noisy = y_true + noise
-
-    print(f"\nTrue parameters:")
-    print(f"  Position: {true_pos:.4f} ppm")
-    print(f"  LW Lorentz: {true_lw_lor:.4f} ppm")
-    print(f"  LW Gauss: {true_lw_gauss:.4f} ppm")
-    print(f"  Intensity: {true_int:.1f}")
-    print(f"  Baseline: {true_baseline:.1f}")
-
-    # Fit with ps2d_style
-    result = fit_single_peak_ps2d_style(x, y_noisy, peak_position=8.0, verbose=True)
-
-    print("\n" + "=" * 70)
-    print("FITTING RESULTS")
-    print("=" * 70)
-    print(f"Success: {result['success']}")
-    print(f"R² = {result['r_squared']:.6f}")
-    print(f"Total iterations: {result['iterations']}")
-    print(f"\nFitted parameters:")
-    print(f"  Position: {result['pos']:.4f} ppm (error: {abs(result['pos']-true_pos)*1000:.2f} ppb)")
-    print(f"  LW Lorentz: {result['lw_lorentz']:.4f} ppm")
-    print(f"  LW Gauss: {result['lw_gauss']:.4f} ppm")
-    print(f"  Intensity: {result['intensity']:.1f}")
-    print(f"  Baseline: {result['baseline']:.1f}")

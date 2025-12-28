@@ -14,7 +14,7 @@ Version: 1.0
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Union, Optional
+from typing import Dict, List, Union, Optional
 from dataclasses import dataclass
 
 @dataclass

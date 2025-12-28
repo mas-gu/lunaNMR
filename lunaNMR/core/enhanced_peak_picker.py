@@ -21,7 +21,6 @@ Date: 2025
 
 import numpy as np
 import pandas as pd
-from scipy.signal import find_peaks, peak_widths
 from scipy.ndimage import gaussian_filter, maximum_filter
 import warnings
 warnings.filterwarnings('ignore')
@@ -149,7 +148,7 @@ class EnhancedPeakPicker:
 
             return max(noise_level, 1e-10)  # Avoid zero noise
 
-        except Exception as e:
+        except Exception:
             return np.std(data_2d) * 0.1  # Fallback
 
     def preprocess_data_for_detection(self, data_2d, sigma=None, adaptive_smoothing=True):

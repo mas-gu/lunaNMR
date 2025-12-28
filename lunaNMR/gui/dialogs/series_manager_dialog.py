@@ -2,7 +2,7 @@
 # ABOUTME: Provides a centralized interface for series management operations
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton,

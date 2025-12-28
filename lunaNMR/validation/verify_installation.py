@@ -10,7 +10,6 @@ Date: 2025
 """
 
 import sys
-import os
 
 def check_python_version():
     """Check Python version compatibility"""
@@ -163,7 +162,7 @@ def run_quick_test():
 
 def generate_installation_report(missing_external, missing_internal, app_ok, fix_ok):
     """Generate installation report"""
-    print(f"\n📋 INSTALLATION REPORT")
+    print("\n📋 INSTALLATION REPORT")
     print("=" * 50)
 
     if not missing_external and not missing_internal and app_ok and fix_ok:
@@ -178,25 +177,25 @@ def generate_installation_report(missing_external, missing_internal, app_ok, fix
         print("❌ INSTALLATION INCOMPLETE!")
 
         if missing_external:
-            print(f"\n📦 Missing External Dependencies:")
+            print("\n📦 Missing External Dependencies:")
             for pkg in missing_external:
                 print(f"   - {pkg}")
             print(f"\n💡 Install with: pip install {' '.join(missing_external)}")
-            print(f"   Or use: pip install -r requirements.txt")
+            print("   Or use: pip install -r requirements.txt")
 
         if missing_internal:
-            print(f"\n🔧 Missing Internal Modules:")
+            print("\n🔧 Missing Internal Modules:")
             for mod in missing_internal:
                 print(f"   - {mod}")
-            print(f"   This indicates a problem with the installation")
+            print("   This indicates a problem with the installation")
 
         if not app_ok:
-            print(f"\n🎯 Main application cannot be imported")
-            print(f"   Check for import errors in lunaNMR.gui.main_gui")
+            print("\n🎯 Main application cannot be imported")
+            print("   Check for import errors in lunaNMR.gui.main_gui")
 
         if not fix_ok:
-            print(f"\n🔍 Local quality assessment fix not working")
-            print(f"   The R² improvement fix may not be properly integrated")
+            print("\n🔍 Local quality assessment fix not working")
+            print("   The R² improvement fix may not be properly integrated")
 
         return False
 
@@ -217,9 +216,9 @@ def main():
     success = generate_installation_report(missing_external, missing_internal, app_ok, fix_ok)
 
     if success:
-        print(f"\n✨ The local quality assessment fix is ready!")
-        print(f"   Users will now see improved R² values in the GUI")
-        print(f"   that exclude distant peaks from quality evaluation.")
+        print("\n✨ The local quality assessment fix is ready!")
+        print("   Users will now see improved R² values in the GUI")
+        print("   that exclude distant peaks from quality evaluation.")
 
     return success
 

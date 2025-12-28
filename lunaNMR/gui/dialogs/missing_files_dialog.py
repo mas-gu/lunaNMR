@@ -2,15 +2,14 @@
 # ABOUTME: Allows browsing to locate files or skipping missing files
 
 from pathlib import Path
-from typing import Dict, Set, List, Optional
+from typing import Dict, Set, List
 import logging
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGroupBox, QFileDialog, QScrollArea, QWidget,
-    QFrame, QSizePolicy
+    QFileDialog, QScrollArea, QWidget,
+    QFrame
 )
-from PySide6.QtCore import Qt
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.styles.design_system import (

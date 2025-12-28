@@ -26,10 +26,8 @@ Usage:
 """
 
 import numpy as np
-import json
 from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
-from pathlib import Path
 
 
 class AdaptiveOptimizer:
@@ -163,7 +161,7 @@ class AdaptiveOptimizer:
                         train_scores.append(score)
                     else:
                         train_failures += 1
-                except Exception as e:
+                except Exception:
                     train_failures += 1
                     continue
 
@@ -201,7 +199,7 @@ class AdaptiveOptimizer:
                         val_scores.append(score)
                     else:
                         val_failures += 1
-                except Exception as e:
+                except Exception:
                     val_failures += 1
                     continue
 

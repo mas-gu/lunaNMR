@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QStackedWidget, QWidget, QFrame, QLabel
+    QVBoxLayout, QStackedWidget, QWidget, QFrame, QInputDialog
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -82,6 +82,12 @@ class DynamiXsDialog(BaseDialog):
 
         # Path to dynamiXs module
         self.dynamixs_path = _dynamixs_path
+
+        # Current analysis name (required before entering analysis pages)
+        self.current_analysis_name = None
+
+        # Analysis metadata (source_series, analysis_type, created_at, etc.)
+        self._analysis_metadata = {}
 
         # Setup UI
         self._setup_ui()
@@ -230,7 +236,16 @@ class DynamiXsDialog(BaseDialog):
         self.stack.setCurrentWidget(self.main_menu_page)
 
     def show_t1t2_fitting(self):
-        """Show T1/T2 fitting page."""
+        """Show T1/T2 fitting page.
+
+        Prompts for analysis name if not already set.
+        """
+        if not self.current_analysis_name:
+            name = self._prompt_analysis_name("T1/T2 Fitting")
+            if name is None:
+                return  # User cancelled
+            self.current_analysis_name = name
+
         self.stack.setCurrentWidget(self.t1t2_page)
 
     def show_spectral_density(self):
@@ -242,8 +257,179 @@ class DynamiXsDialog(BaseDialog):
         self.stack.setCurrentWidget(self.plotting_page)
 
     def show_integrated_analysis(self):
-        """Show integrated analysis page."""
+        """Show integrated analysis page.
+
+        Prompts for analysis name if not already set.
+        """
+        if not self.current_analysis_name:
+            name = self._prompt_analysis_name("Model-Free Analysis")
+            if name is None:
+                return  # User cancelled
+            self.current_analysis_name = name
+
         self.stack.setCurrentWidget(self.integrated_page)
+
+    def _prompt_analysis_name(self, analysis_type: str) -> Optional[str]:
+        """Prompt user for analysis name before starting analysis.
+
+        Args:
+            analysis_type: Type of analysis (for dialog title)
+
+        Returns:
+            Analysis name if provided, None if cancelled.
+        """
+        # Generate suggested name
+        suggested_name = "Analysis_1"
+
+        # Check for existing analyses to avoid duplicates
+        existing_analyses = set()
+        if self.main_window and hasattr(self.main_window, 'saved_dynamixs'):
+            existing_analyses = set(self.main_window.saved_dynamixs.keys())
+
+        if suggested_name in existing_analyses:
+            # Append number to make unique
+            base_name = "Analysis"
+            counter = 2
+            while f"{base_name}_{counter}" in existing_analyses:
+                counter += 1
+            suggested_name = f"{base_name}_{counter}"
+
+        # Show input dialog
+        name, ok = QInputDialog.getText(
+            self,
+            "Analysis Name",
+            f"Enter a name for this {analysis_type}:",
+            text=suggested_name
+        )
+
+        if not ok or not name.strip():
+            return None
+
+        # Validate name (no special characters that could cause file issues)
+        name = name.strip()
+        invalid_chars = '<>:"/\\|?*'
+        for char in invalid_chars:
+            name = name.replace(char, '_')
+
+        return name
+
+    def clear_analysis_name(self):
+        """Clear current analysis name (e.g., when starting fresh)."""
+        self.current_analysis_name = None
+        self._analysis_metadata = {}
+
+    def get_analysis_metadata(self) -> Dict[str, Any]:
+        """Get metadata for current analysis.
+
+        Returns:
+            Dict with analysis metadata including:
+            - analysis_name: Name of this analysis
+            - analysis_type: 't1t2' or 'model_free'
+            - source_series: Name of series that provided input data (if known)
+            - created_at: ISO timestamp when analysis was started
+        """
+        from datetime import datetime
+
+        metadata = getattr(self, '_analysis_metadata', {}).copy()
+
+        # Always include current analysis name
+        metadata['analysis_name'] = self.current_analysis_name
+
+        # Ensure created_at is set
+        if 'created_at' not in metadata and self.current_analysis_name:
+            metadata['created_at'] = datetime.now().isoformat()
+
+        # Determine analysis type from current page
+        current_widget = self.stack.currentWidget()
+        if current_widget == self.t1t2_page:
+            metadata['analysis_type'] = 't1t2'
+        elif current_widget == self.integrated_page:
+            metadata['analysis_type'] = 'model_free'
+        elif current_widget == self.spectral_page:
+            metadata['analysis_type'] = 'spectral_density'
+
+        return metadata
+
+    def set_analysis_metadata(self, metadata: Dict[str, Any]):
+        """Set metadata for current analysis.
+
+        Args:
+            metadata: Dict with analysis metadata (source_series, etc.)
+        """
+        self._analysis_metadata = metadata.copy()
+        if 'analysis_name' in metadata:
+            self.current_analysis_name = metadata['analysis_name']
+
+    def set_source_series(self, series_name: str):
+        """Set the source series for this analysis.
+
+        Called when DynamiXs is launched from series results.
+
+        Args:
+            series_name: Name of the series that provided input data
+        """
+        if not hasattr(self, '_analysis_metadata'):
+            self._analysis_metadata = {}
+        self._analysis_metadata['source_series'] = series_name
+
+    def detect_source_series_from_path(self, file_path: str) -> Optional[str]:
+        """Detect source series from a file path.
+
+        Checks if the file is within a known series folder structure:
+        - <project>/.lunaNMR/series_results/<series_name>/
+        - Or if the path contains a series name from saved_series
+
+        Args:
+            file_path: Path to a CSV file loaded in DynamiXs
+
+        Returns:
+            Series name if detected, None otherwise
+        """
+        if not file_path:
+            return None
+
+        file_path = os.path.normpath(file_path)
+
+        # Check for series_results folder pattern
+        if 'series_results' in file_path:
+            parts = file_path.split(os.sep)
+            try:
+                series_idx = parts.index('series_results')
+                if series_idx + 1 < len(parts):
+                    series_name = parts[series_idx + 1]
+                    return series_name
+            except ValueError:
+                pass
+
+        # Check against saved series names if available
+        if self.main_window and hasattr(self.main_window, 'saved_series'):
+            for series_name in self.main_window.saved_series.keys():
+                # Check if series name appears in path
+                if series_name in file_path:
+                    return series_name
+
+        return None
+
+    def try_auto_detect_source_series(self):
+        """Try to auto-detect source series from loaded file paths.
+
+        Checks file references in the current state for series patterns.
+        Sets source_series in metadata if detected.
+        """
+        file_refs = self.get_file_refs()
+
+        for page_name, refs in file_refs.items():
+            if not refs:
+                continue
+
+            for field_name, file_path in refs.items():
+                if file_path:
+                    series_name = self.detect_source_series_from_path(file_path)
+                    if series_name:
+                        self.set_source_series(series_name)
+                        return series_name
+
+        return None
 
     def change_working_directory(self):
         """Allow user to change working directory."""
@@ -271,6 +457,8 @@ class DynamiXsDialog(BaseDialog):
         return {
             'active_page': self.stack.currentIndex(),
             'current_dir': self.current_dir,
+            'analysis_name': self.current_analysis_name,
+            'analysis_metadata': self.get_analysis_metadata(),
             't1t2': self._get_t1t2_state(),
             'spectral': self._get_spectral_state(),
             'integrated': self._get_integrated_state(),
@@ -286,6 +474,12 @@ class DynamiXsDialog(BaseDialog):
             self.current_dir = state['current_dir']
             if self.dir_label:
                 self.dir_label.setText(f"Working Directory: {self.current_dir}")
+
+        if 'analysis_name' in state:
+            self.current_analysis_name = state['analysis_name']
+
+        if 'analysis_metadata' in state:
+            self.set_analysis_metadata(state['analysis_metadata'])
 
         if 't1t2' in state:
             self._set_t1t2_state(state['t1t2'])
@@ -615,3 +809,290 @@ class DynamiXsDialog(BaseDialog):
             self.main_window.dynamixs_state = self.get_state()
             self.main_window.dynamixs_file_refs = self.get_file_refs()
         super().closeEvent(event)
+
+    # -------------------------------------------------------------------------
+    # Inspect Peak Integration (FitViewer → MultiSpectrumViewer)
+    # -------------------------------------------------------------------------
+
+    def connect_fit_viewer_signals(self, fit_viewer):
+        """Connect FitViewer's inspect_peak_requested signal to handler.
+
+        Called after a FitViewer is opened to enable the Inspect Peak flow.
+
+        Args:
+            fit_viewer: The FitViewer instance to connect signals from
+        """
+        if fit_viewer and hasattr(fit_viewer, 'inspect_peak_requested'):
+            fit_viewer.inspect_peak_requested.connect(self._on_inspect_peak_requested)
+
+    def _on_inspect_peak_requested(self, residue_id: str, series_name: str, all_fit_data: dict = None):
+        """Handle Inspect Peak request from FitViewer.
+
+        Opens the MultiSpectrumViewerDialog with the selected residue,
+        using the specified series name directly.
+
+        Args:
+            residue_id: Residue ID from FitViewer (e.g., "142")
+            series_name: Name of the NMR series to inspect (e.g., "T1_asyn_series")
+            all_fit_data: Dict mapping residue ID to exponential fit data from DynamiXs.
+                E.g., {'142': {fit_data}, '143': {fit_data}, ...}
+                Each fit_data contains: time_points, intensities, fit_curve, t_value, t_error, etc.
+        """
+        from PySide6.QtWidgets import QMessageBox
+
+        if not series_name:
+            QMessageBox.warning(
+                self,
+                "No Series",
+                "No series name provided.\n\n"
+                "Please assign a series using drag-and-drop in the Project Series panel."
+            )
+            return
+
+        # Get series data from main_window
+        if not self.main_window or not hasattr(self.main_window, 'saved_series'):
+            QMessageBox.warning(
+                self,
+                "No Series Data",
+                "Cannot open MultiSpectrum Viewer: No series data available."
+            )
+            return
+
+        series_data = self.main_window.saved_series.get(series_name)
+        if not series_data:
+            QMessageBox.warning(
+                self,
+                "Series Not Found",
+                f"Cannot find series '{series_name}' in saved series.\n\n"
+                "Available series: " + ", ".join(self.main_window.saved_series.keys())
+            )
+            return
+
+        # Open MultiSpectrumViewerDialog with the series data and all fit data
+        self._open_multi_spectrum_viewer(series_data, residue_id, all_fit_data)
+
+    def _get_source_series_for_experiment(self, experiment_type: str) -> Optional[str]:
+        """Get source series name for a specific experiment type.
+
+        Looks up the series from:
+        1. T1T2FittingPage's source_series_map (from drag-and-drop)
+        2. File paths used for the fit (detects series from path)
+
+        Args:
+            experiment_type: "t1", "t2", or "t1rho"
+
+        Returns:
+            Series name or None if not found
+        """
+        # Try T1T2FittingPage's source_series_map first (from drag-and-drop)
+        if hasattr(self, 't1t2_page') and hasattr(self.t1t2_page, 'source_series_map'):
+            source_map = self.t1t2_page.source_series_map
+            for field in ['field1', 'field2']:
+                key = f"{field}_{experiment_type}"
+                if key in source_map:
+                    return source_map[key]
+
+        # Try detecting from file paths used in T1T2FittingPage
+        if hasattr(self, 't1t2_page'):
+            for field in ['field1', 'field2']:
+                file_attr = f"{field}_{experiment_type}_file"
+                file_path = getattr(self.t1t2_page, file_attr, None)
+                if file_path:
+                    series_name = self.detect_source_series_from_path(file_path)
+                    if series_name:
+                        return series_name
+
+        # Try IntegratedAnalysisPage (Model Free)
+        if hasattr(self, 'integrated_page'):
+            # Check source_series_map
+            if hasattr(self.integrated_page, 'source_series_map'):
+                source_map = self.integrated_page.source_series_map
+                for field in ['field1', 'field2']:
+                    key = f"{field}_{experiment_type}"
+                    if key in source_map:
+                        return source_map[key]
+
+            # Try detecting from file paths
+            for field in ['field1', 'field2']:
+                file_attr = f"{field}_{experiment_type}_file"
+                file_path = getattr(self.integrated_page, file_attr, None)
+                if file_path:
+                    series_name = self.detect_source_series_from_path(file_path)
+                    if series_name:
+                        return series_name
+
+        return None
+
+    def _open_multi_spectrum_viewer(self, series_data, initial_assignment: str = None,
+                                      exponential_fit_data: dict = None):
+        """Open MultiSpectrumViewerDialog with series data.
+
+        Args:
+            series_data: Series integration results (BatchResults object)
+            initial_assignment: Optional assignment to auto-select in Peak Mode
+            exponential_fit_data: Dict mapping residue ID to exponential fit data from DynamiXs.
+                E.g., {'142': {fit_data}, '143': {fit_data}, ...}
+        """
+        try:
+            from lunaNMR.gui.dialogs.multi_spectrum_viewer_dialog import MultiSpectrumViewerDialog
+
+            # Convert BatchResults to list format expected by MultiSpectrumViewerDialog
+            all_results = self._convert_batch_results_to_list(series_data)
+
+            if not all_results:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self,
+                    "No Results",
+                    "The series data contains no spectrum results."
+                )
+                return
+
+            # Get file_manager from main_window if available
+            file_manager = None
+            if self.main_window and hasattr(self.main_window, 'file_manager'):
+                file_manager = self.main_window.file_manager
+
+            # Create and show the viewer
+            self.multi_spectrum_viewer = MultiSpectrumViewerDialog(
+                parent=self,
+                all_results=all_results,
+                file_manager=file_manager,
+                initial_assignment=initial_assignment,
+                exponential_fit_data=exponential_fit_data
+            )
+            self.multi_spectrum_viewer.show()
+
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to open MultiSpectrum Viewer:\n{str(e)}"
+            )
+
+    def _convert_batch_results_to_list(self, batch_results) -> List[Dict[str, Any]]:
+        """Convert BatchResults object to list format for MultiSpectrumViewerDialog.
+
+        Args:
+            batch_results: BatchResults object with .results dict
+
+        Returns:
+            List of result dicts with spectrum_name, spectrum_file, fitted_peaks
+        """
+        import os
+
+        all_results = []
+
+        # Get data_folder for constructing full paths (same as main_window.open_multi_spectrum_viewer)
+        data_folder = None
+        if hasattr(batch_results, 'metadata'):
+            data_folder = batch_results.metadata.get('data_folder')
+        elif isinstance(batch_results, dict):
+            metadata = batch_results.get('metadata', {})
+            data_folder = metadata.get('data_folder')
+
+        # Fallback to main_window.current_nmr_folder if not in metadata
+        if not data_folder and self.main_window:
+            data_folder = getattr(self.main_window, 'current_nmr_folder', None)
+
+        # BatchResults has .results attribute which is a dict keyed by spectrum_name
+        if hasattr(batch_results, 'results') and batch_results.results:
+            for spectrum_name, result_data in batch_results.results.items():
+                if not isinstance(result_data, dict):
+                    continue
+
+                # Skip failed spectra
+                if not result_data.get('success', True):
+                    continue
+
+                # Extract fitted peaks (may be 'fitted_results' or 'integration_results')
+                fitted_peaks = result_data.get('fitted_results', [])
+                if not fitted_peaks:
+                    fitted_peaks = result_data.get('integration_results', [])
+
+                # Construct full path for spectrum_file (same logic as main_window)
+                spectrum_file = result_data.get('spectrum_file', '')
+                if not spectrum_file or not os.path.isabs(spectrum_file):
+                    if data_folder:
+                        spectrum_file = os.path.join(data_folder, spectrum_name)
+
+                result_entry = {
+                    'spectrum_name': spectrum_name,
+                    'spectrum_file': spectrum_file,
+                    'fitted_peaks': fitted_peaks,
+                    'integration_results': fitted_peaks,
+                }
+                all_results.append(result_entry)
+
+        return all_results
+
+    def _normalize_peak_data(self, peak: Dict) -> Dict:
+        """Normalize peak data to ensure numeric values are floats, not lists.
+
+        After JSON deserialization, numpy scalars may become single-element lists.
+        This method converts them back to proper floats.
+
+        Args:
+            peak: Peak data dict
+
+        Returns:
+            Normalized peak dict with proper float values
+        """
+        if not isinstance(peak, dict):
+            return peak
+
+        normalized = {}
+        # Keys that should be scalar floats
+        scalar_keys = {
+            # Position keys (various naming conventions)
+            'pos_f1', 'pos_f2', 'position_x', 'position_y',
+            'center_x', 'center_y', 'peak_x', 'peak_y',
+            'ppm_x', 'ppm_y', 'Position_X', 'Position_Y',
+            # Linewidth keys
+            'lw_gau_f1', 'lw_gau_f2', 'lw_lor_f1', 'lw_lor_f2',
+            'sigma_x', 'sigma_y', 'gamma_x', 'gamma_y',
+            'gaussian_fwhm_x', 'gaussian_fwhm_y',
+            'lorentzian_fwhm_x', 'lorentzian_fwhm_y',
+            # Intensity/amplitude keys
+            'intensity', 'amplitude', 'volume', 'height',
+            # Quality metrics
+            'r_squared', 'avg_r_squared', 'r_squared_x', 'r_squared_y',
+            'r_squared_local',
+            # Other scalars
+            'baseline', 'noise_level', 'window_size',
+        }
+
+        for key, value in peak.items():
+            if key in scalar_keys:
+                normalized[key] = self._to_float(value)
+            elif isinstance(value, dict):
+                # Recursively normalize nested dicts (like 'all_peaks', 'region_2d')
+                normalized[key] = self._normalize_peak_data(value)
+            elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+                # Normalize list of peak dicts (like 'all_peaks')
+                normalized[key] = [self._normalize_peak_data(p) for p in value]
+            else:
+                normalized[key] = value
+
+        return normalized
+
+    def _to_float(self, value) -> float:
+        """Convert a value to float, handling lists and numpy types.
+
+        Args:
+            value: A float, int, list, or numpy scalar
+
+        Returns:
+            Float value
+        """
+        if value is None:
+            return 0.0
+        if isinstance(value, (list, tuple)):
+            if len(value) == 0:
+                return 0.0
+            return float(value[0])
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0

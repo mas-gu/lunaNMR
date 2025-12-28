@@ -17,11 +17,10 @@ Author: Guillaume Mas
 Date: 2025
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict
 import numpy as np
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout
-from PySide6.QtCore import Qt
 
 import matplotlib
 matplotlib.use('QtAgg')  # Force Qt backend
@@ -31,7 +30,7 @@ from matplotlib.figure import Figure
 from lunaNMR.gui.styles.design_system import (
     BG_COLOR, PANEL_BG_COLOR, PRIMARY_TEXT, SECONDARY_TEXT,
     PRIMARY_BUTTON_BG, SUCCESS_GREEN, WARNING_ORANGE, ERROR_RED,
-    INFO_BLUE, SPACING_SM
+    INFO_BLUE
 )
 
 

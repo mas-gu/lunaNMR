@@ -4,7 +4,6 @@ ABOUTME: Implements the threading pattern for all background operations in lunaN
 
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 import logging
 
 from PySide6.QtWidgets import (
@@ -15,25 +14,19 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QPushButton,
     QFrame,
-    QWidget,
     QFileDialog,
     QMessageBox
 )
-from PySide6.QtCore import Signal, Slot, Qt
+from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QFont
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.styles.design_system import (
-    BG_COLOR,
     PANEL_BG_COLOR,
     FRAME_BG_COLOR,
     PRIMARY_TEXT,
-    SECONDARY_TEXT,
     SUCCESS_GREEN,
     WARNING_ORANGE,
-    ERROR_RED,
-    PRIMARY_BUTTON_BG,
-    PRIMARY_BUTTON_HOVER,
     SECONDARY_BUTTON_BG,
     SECONDARY_BUTTON_HOVER,
     DESTRUCTIVE_BUTTON_BG,

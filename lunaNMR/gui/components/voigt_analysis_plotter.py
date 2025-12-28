@@ -28,19 +28,24 @@ Author: Guillaume Mas
 Date: 2025-01-24
 """
 
-from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Signal
 import numpy as np
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
 from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, ListedColormap, Normalize
 from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator
-import matplotlib.pyplot as plt
 from scipy.special import wofz
 
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibMultiAxesWidget
+
+
+def _to_scalar(value):
+    """Convert value to scalar, handling lists from JSON deserialization."""
+    if value is None:
+        return 0.0
+    if isinstance(value, (list, tuple)):
+        return float(value[0]) if len(value) > 0 else 0.0
+    return float(value)
 
 
 class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
@@ -362,10 +367,18 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         if region_2d is None:
             return
 
+        # Convert arrays from lists to numpy arrays (may be lists from JSON serialization)
+        for key in ['f1_ppm', 'f2_ppm', 'f1_grid', 'f2_grid', 'intensity']:
+            if key in region_2d and isinstance(region_2d[key], list):
+                region_2d[key] = np.array(region_2d[key])
+
         f1_ppm = region_2d['f1_ppm']  # (M,)
         f2_ppm = region_2d['f2_ppm']  # (N,)
         experimental = region_2d['intensity']  # (M, N)
         fitted = result.get('fitted_2d_surface')  # (M, N)
+
+        if fitted is not None and isinstance(fitted, list):
+            fitted = np.array(fitted)
 
         if fitted is None:
             return
@@ -560,6 +573,15 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         assignment = voigt_result.get('assignment', 'Unknown')
         quality = voigt_result.get('fitting_quality', 'Unknown')
 
+        # Convert arrays from lists to numpy arrays (may be lists from JSON serialization)
+        if region_2d is not None:
+            for key in ['f1_ppm', 'f2_ppm', 'f1_grid', 'f2_grid', 'intensity']:
+                if key in region_2d and isinstance(region_2d[key], list):
+                    region_2d[key] = np.array(region_2d[key])
+
+        if fitted_surface is not None and isinstance(fitted_surface, list):
+            fitted_surface = np.array(fitted_surface)
+
         if region_2d is None or fitted_surface is None:
             self._plot_no_data()
             return
@@ -598,8 +620,8 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
         # Mark peak positions
         for i, peak in enumerate(all_peaks):
-            pos_f2 = peak['pos_f2']
-            pos_f1 = peak['pos_f1']
+            pos_f2 = _to_scalar(peak['pos_f2'])
+            pos_f1 = _to_scalar(peak['pos_f1'])
             ax_exp.plot(pos_f2, pos_f1, 'r+', markersize=12, markeredgewidth=2)
             peak_label = peak.get('assignment', str(i+1))
             ax_exp.text(pos_f2, pos_f1, f"  {peak_label}",
@@ -608,6 +630,13 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         # Plot 2: Individual Fitted Peaks (top right) - Multi-color visualization
         individual_surfaces = voigt_result.get('individual_surfaces', None)
         colors = ['red', 'orange', 'purple', 'brown', 'pink', 'olive', 'cyan', 'magenta']
+
+        # Convert individual surfaces from lists to numpy arrays (may be lists from JSON)
+        if individual_surfaces is not None:
+            individual_surfaces = [
+                np.array(s) if isinstance(s, list) else s
+                for s in individual_surfaces
+            ]
 
         if individual_surfaces is not None and len(individual_surfaces) > 0:
             # Calculate global contour levels
@@ -645,10 +674,12 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
                 color = colors[i % len(colors)]
             else:
                 color = 'blue'
-            ax_fit.plot(peak['pos_f2'], peak['pos_f1'], '+', color=color,
+            pos_f2 = _to_scalar(peak['pos_f2'])
+            pos_f1 = _to_scalar(peak['pos_f1'])
+            ax_fit.plot(pos_f2, pos_f1, '+', color=color,
                        markersize=12, markeredgewidth=2)
             peak_label = peak.get('assignment', str(i+1))
-            ax_fit.text(peak['pos_f2'], peak['pos_f1'], f"  {peak_label}",
+            ax_fit.text(pos_f2, pos_f1, f"  {peak_label}",
                        fontsize=8, color=color, fontweight='bold', va='center')
 
         # Plot 3: Residuals (bottom left) - Color-coded quality regions
@@ -666,7 +697,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
         # Add peak positions for reference
         for i, peak in enumerate(all_peaks):
-            ax_res.plot(peak['pos_f2'], peak['pos_f1'], 'k+', markersize=8, markeredgewidth=1.5)
+            ax_res.plot(_to_scalar(peak['pos_f2']), _to_scalar(peak['pos_f1']), 'k+', markersize=8, markeredgewidth=1.5)
 
         ax_res.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
         ax_res.set_ylabel('¹⁵N/¹³C Chemical Shift (ppm)', fontsize=9)
@@ -690,15 +721,15 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         table_text = "Fitted Parameters\n" + "="*30 + "\n\n"
 
         for i, peak in enumerate(all_peaks):
-            lw_f2 = peak['lw_gau_f2'] + peak['lw_lor_f2']
-            lw_f1 = peak['lw_gau_f1'] + peak['lw_lor_f1']
+            lw_f2 = _to_scalar(peak['lw_gau_f2']) + _to_scalar(peak['lw_lor_f2'])
+            lw_f1 = _to_scalar(peak['lw_gau_f1']) + _to_scalar(peak['lw_lor_f1'])
 
             colors_list = ['red', 'orange', 'purple', 'brown', 'pink', 'olive', 'cyan', 'magenta']
             color = colors_list[i % len(colors_list)]
 
             peak_label = peak.get('assignment', f'Peak {i+1}')
-            volume = peak.get('volume', peak.get('intensity', 0.0))
-            height = peak.get('height', peak.get('amplitude', 0.0))
+            volume = _to_scalar(peak.get('volume', peak.get('intensity', 0.0)))
+            height = _to_scalar(peak.get('height', peak.get('amplitude', 0.0)))
 
             table_text += f"{peak_label}\n"
             table_text += f"LW ¹H: {lw_f2:.4f}  LW ¹⁵N: {lw_f1:.3f}\n"
@@ -744,6 +775,21 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         baseline = voigt_result.get('baseline', 0.0)
         assignment = voigt_result.get('assignment', 'Unknown')
 
+        # Convert arrays from lists to numpy arrays (may be lists from JSON serialization)
+        if region_2d is not None:
+            for key in ['f1_ppm', 'f2_ppm', 'f1_grid', 'f2_grid', 'intensity']:
+                if key in region_2d and isinstance(region_2d[key], list):
+                    region_2d[key] = np.array(region_2d[key])
+
+        if fitted_surface_original is not None and isinstance(fitted_surface_original, list):
+            fitted_surface_original = np.array(fitted_surface_original)
+
+        if individual_surfaces_original is not None:
+            individual_surfaces_original = [
+                np.array(s) if isinstance(s, list) else s
+                for s in individual_surfaces_original
+            ]
+
         if region_2d is None or fitted_surface_original is None:
             self._plot_no_data_3d()
             return
@@ -762,20 +808,23 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             # Reconstruct with clipping
             individual_surfaces = []
             for peak in all_peaks:
-                fitted_intensity = peak.get('intensity', peak.get('amplitude', 1000))
+                fitted_intensity = _to_scalar(peak.get('intensity', peak.get('amplitude', 1000)))
 
                 SQRT_8LN2 = np.sqrt(8 * np.log(2))
-                sigma_f1 = peak['lw_gau_f1'] / SQRT_8LN2
-                sigma_f2 = peak['lw_gau_f2'] / SQRT_8LN2
-                gamma_f1 = peak['lw_lor_f1'] / 2.0
-                gamma_f2 = peak['lw_lor_f2'] / 2.0
+                sigma_f1 = _to_scalar(peak['lw_gau_f1']) / SQRT_8LN2
+                sigma_f2 = _to_scalar(peak['lw_gau_f2']) / SQRT_8LN2
+                gamma_f1 = _to_scalar(peak['lw_lor_f1']) / 2.0
+                gamma_f2 = _to_scalar(peak['lw_lor_f2']) / 2.0
 
                 sigma_f1 = max(sigma_f1, 1e-10)
                 sigma_f2 = max(sigma_f2, 1e-10)
 
+                pos_f1 = _to_scalar(peak['pos_f1'])
+                pos_f2 = _to_scalar(peak['pos_f2'])
+
                 SQRT_2 = np.sqrt(2)
-                z_f1 = ((peak['pos_f1'] - region_2d['f1_grid']) + 1j * gamma_f1) / (sigma_f1 * SQRT_2)
-                z_f2 = ((peak['pos_f2'] - region_2d['f2_grid']) + 1j * gamma_f2) / (sigma_f2 * SQRT_2)
+                z_f1 = ((pos_f1 - region_2d['f1_grid']) + 1j * gamma_f1) / (sigma_f1 * SQRT_2)
+                z_f2 = ((pos_f2 - region_2d['f2_grid']) + 1j * gamma_f2) / (sigma_f2 * SQRT_2)
 
                 fade_f1 = np.real(wofz(z_f1))
                 fade_f2 = np.real(wofz(z_f2))
@@ -783,8 +832,8 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
                 peak_surface = fitted_intensity * fade_f1 * fade_f2 / (sigma_f1 * sigma_f2 * 2.0 * np.pi)
 
                 # Apply elliptical clipping
-                ellipse_distance_sq = ((region_2d['f1_grid'] - peak['pos_f1']) / radF1_display) ** 2 + \
-                                      ((region_2d['f2_grid'] - peak['pos_f2']) / radF2_display) ** 2
+                ellipse_distance_sq = ((region_2d['f1_grid'] - pos_f1) / radF1_display) ** 2 + \
+                                      ((region_2d['f2_grid'] - pos_f2) / radF2_display) ** 2
                 ellipse_mask = ellipse_distance_sq <= 1.0
 
                 peak_surface = np.where(ellipse_mask, peak_surface, 0.0)
@@ -921,8 +970,8 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             for i, peak in enumerate(all_peaks):
                 color = colors[i % len(colors)]
 
-                pos_f2 = peak['pos_f2']
-                pos_f1 = peak['pos_f1']
+                pos_f2 = _to_scalar(peak['pos_f2'])
+                pos_f1 = _to_scalar(peak['pos_f1'])
 
                 ellipse_f2 = pos_f2 + radF2 * np.cos(theta)
                 ellipse_f1 = pos_f1 + radF1 * np.sin(theta)
@@ -940,8 +989,8 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
                 color = colors[i % len(colors)]
                 peak_assignment = peak.get('assignment', f'Peak {i+1}')
 
-                pos_f2 = peak['pos_f2']
-                pos_f1 = peak['pos_f1']
+                pos_f2 = _to_scalar(peak['pos_f2'])
+                pos_f1 = _to_scalar(peak['pos_f1'])
 
                 # Find Z-height at peak maximum
                 f2_idx = np.argmin(np.abs(f2_ppm - pos_f2))

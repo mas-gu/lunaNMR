@@ -19,7 +19,6 @@ import sys
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, List
-import json
 import signal
 
 # Import batch processing components
@@ -389,7 +388,7 @@ Examples:
             if len(spectrum_files) > 10:
                 print(f"  ... and {len(spectrum_files) - 10} more files")
 
-            print(f"\nConfiguration:")
+            print("\nConfiguration:")
             print(f"  Nucleus type: {args.nucleus or 'auto-detect'}")
             print(f"  Optimization: {'enabled' if args.optimize else 'disabled'}")
             print(f"  Error handling: {'skip errors' if config['processing']['skip_on_error'] else 'strict'}")

@@ -1,11 +1,9 @@
 # ABOUTME: Training data collector for PS2D 2D multi-peak fitting results
 # ABOUTME: Stores successful 2D Voigt fits as JSON for future ML model development
 
-import json
-import numpy as np
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 import logging
 
 

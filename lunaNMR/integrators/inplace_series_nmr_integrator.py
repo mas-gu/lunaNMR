@@ -22,12 +22,10 @@ import sys
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from pathlib import Path
 import glob
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Optional
 import nmrglue as ng
 import time
-from datetime import datetime
 
 # Import the enhanced integrator
 from lunaNMR.integrators.inplace_advanced_nmr_integrator import InPlaceAdvancedNMRIntegrator
@@ -180,7 +178,7 @@ class InPlaceSeriesNMRIntegrator(InPlaceAdvancedNMRIntegrator):
                 peak.get('detected', False)):
                 quality_filtered_peaks.append(peak)
 
-        print(f"Reference spectrum analysis:")
+        print("Reference spectrum analysis:")
         print(f"  Total detected: {len(detected_peaks)}")
         print(f"  Quality filtered: {len(quality_filtered_peaks)}")
 
@@ -506,7 +504,7 @@ class InPlaceSeriesNMRIntegrator(InPlaceAdvancedNMRIntegrator):
             'peak_statistics': peak_detection_count
         }
 
-        print(f"Series analysis completed:")
+        print("Series analysis completed:")
         print(f"  Successful spectra: {self.series_summary['successful_spectra']}")
         print(f"  Failed spectra: {self.series_summary['failed_spectra']}")
         print(f"  Mean detection rate: {self.series_summary['mean_detection_rate']:.1%}")
