@@ -14,10 +14,13 @@ Usage:
     worker.start()
 """
 
+import os
+import tempfile
 import traceback
 from typing import Any, Callable, Dict, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+import pandas as pd
 from PySide6.QtCore import QThread, Signal, QObject
 
 
@@ -163,11 +166,20 @@ class FunctionWorker(AnalysisWorker):
 
 @dataclass
 class T1T2FittingParams:
-    """Parameters for T1/T2 fitting analysis."""
-    input_file: str
-    output_dir: str
-    experiment_type: str  # "T1" or "T2"
-    results_prefix: str
+    """Parameters for T1/T2 fitting analysis.
+
+    Data can be provided in three ways (checked in order):
+    1. input_df: DataFrame already in fitting format (pivot with Assignment + delay columns)
+    2. series_name: Name of series to look up from lunaNMR saved_series
+    3. input_file: Path to CSV file
+
+    When input_df or series_name is used, a temporary CSV file is created
+    for the fitting module.
+    """
+    input_file: str = ""  # CSV file path (legacy mode)
+    output_dir: str = ""
+    experiment_type: str = "T1"  # "T1" or "T2"
+    results_prefix: str = ""
     multicore: bool = True
     initial_amplitude: float = 1.0
     initial_decay: float = 1000.0
@@ -176,6 +188,9 @@ class T1T2FittingParams:
     json_folder: str = ""
     field_name: str = ""
     field_freq: float = 0.0
+    # New fields for memory-based data flow
+    input_df: Optional[pd.DataFrame] = field(default=None, repr=False)
+    series_name: str = ""
 
 
 class T1T2FittingWorker(AnalysisWorker):
@@ -199,6 +214,7 @@ class T1T2FittingWorker(AnalysisWorker):
 
     def run(self):
         """Execute the T1/T2 fitting analysis."""
+        temp_csv_path = None
         try:
             self.status.emit("Initializing fitting...")
             self.emit_progress("Loading data...", 5)
@@ -209,16 +225,29 @@ class T1T2FittingWorker(AnalysisWorker):
             else:
                 from dynamiXs_T1_T2 import fit_Tx_NMRRE as fitting_module
 
+            # Determine input CSV file path
+            # Priority: input_df > input_file
+            if self.params.input_df is not None:
+                # Write DataFrame to temp file for fitting module
+                fd, temp_csv_path = tempfile.mkstemp(suffix='.csv', prefix='dynamixs_')
+                os.close(fd)
+                self.params.input_df.to_csv(temp_csv_path, index=False)
+                input_csv_file = temp_csv_path
+                self.emit_progress("Loaded data from memory...", 8)
+            elif self.params.input_file:
+                input_csv_file = self.params.input_file
+            else:
+                raise ValueError("No input data provided: need input_df or input_file")
+
             self.emit_progress("Starting fit...", 10)
 
             # Build output file paths
-            import os
             output_prefix = os.path.join(self.params.output_dir, self.params.results_prefix)
             results_txt_file = f"{output_prefix}_fit_results.txt"
 
             # Prepare parameters dictionary matching run_analysis_with_params() expected keys
             fit_params = {
-                'input_csv_file': self.params.input_file,
+                'input_csv_file': input_csv_file,
                 'output_prefix': output_prefix,
                 'results_txt_file': results_txt_file,
                 'experiment_type': self.params.experiment_type,
@@ -260,6 +289,13 @@ class T1T2FittingWorker(AnalysisWorker):
 
         except Exception as e:
             self.emit_error(e)
+        finally:
+            # Clean up temp file if created
+            if temp_csv_path and os.path.exists(temp_csv_path):
+                try:
+                    os.remove(temp_csv_path)
+                except OSError:
+                    pass  # Best effort cleanup
 
 
 # =============================================================================

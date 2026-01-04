@@ -13,6 +13,21 @@ import numpy as np
 
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
+# ML module - imported lazily to avoid circular imports and handle missing sklearn
+_ml_manager = None
+
+
+def _get_ml_manager():
+    """Lazy initialization of ML manager singleton."""
+    global _ml_manager
+    if _ml_manager is None:
+        try:
+            from lunaNMR.ml import ModelManager
+            _ml_manager = ModelManager()
+        except ImportError:
+            _ml_manager = False  # Marker that import failed
+    return _ml_manager if _ml_manager is not False else None
+
 class SingleSpectrumProcessor:
     """
     Processes peaks in a single NMR spectrum
@@ -90,6 +105,23 @@ class SingleSpectrumProcessor:
             # Update integrator parameters from parameter manager
             self._sync_parameters_to_integrator()
 
+            # Override adaptive optimization if skip_adaptive is requested
+            if processing_options and processing_options.get('skip_adaptive', False):
+                if hasattr(self.integrator, 'gui_params') and self.integrator.gui_params:
+                    self.integrator.gui_params['use_adaptive_optimization'] = False
+
+            # Apply ML predictions if available (provides initial parameter suggestions)
+            # Skip during data collection to avoid confusing warnings
+            if not (processing_options and processing_options.get('skip_ml_prediction', False)):
+                ml_predictions = self._apply_ml_predictions(peak_list, processing_options)
+            else:
+                ml_predictions = None
+            if ml_predictions is not None:
+                # Store ML predictions in processing options for use by fitting methods
+                if processing_options is None:
+                    processing_options = {}
+                processing_options['ml_predictions'] = ml_predictions
+
             # Choose processing strategy
             # Returns tuple: (fitted_results, learned_statistics)
             if processing_options.get('use_global_optimization', False):
@@ -135,6 +167,93 @@ class SingleSpectrumProcessor:
         self.integrator.gui_params = params['gui_params']
 
         log_info("Single spectrum processor parameters synchronized")
+
+    def _apply_ml_predictions(self, peak_list: pd.DataFrame,
+                              processing_options: Optional[Dict] = None) -> Optional[Dict]:
+        """
+        Apply ML predictions to suggest optimal parameters.
+
+        This method extracts spectrum features and uses the ML model (if available)
+        to suggest optimal linewidths and integration windows. The predictions are
+        used as initial guesses - PASS1 learning can still refine them.
+
+        Parameters
+        ----------
+        peak_list : pd.DataFrame
+            Peak list with positions
+        processing_options : dict, optional
+            Processing options that may include ML config
+
+        Returns
+        -------
+        dict or None
+            ML predictions if available and confident, None otherwise
+        """
+        ml_manager = _get_ml_manager()
+        if ml_manager is None:
+            return None
+
+        # Check if ML is enabled in processing options
+        ml_config = processing_options.get('ml_config', {}) if processing_options else {}
+        if not ml_config.get('enabled', True):
+            return None
+        if not ml_config.get('use_predictions', True):
+            return None
+
+        try:
+            from lunaNMR.ml import FeatureExtractor, SpectrumFeatures
+
+            # Extract features from spectrum
+            extractor = FeatureExtractor()
+
+            # Get spectrum data from integrator
+            spectrum_data = self.integrator.spectrum_data
+            ppm_f1 = self.integrator.ppm_f1
+            ppm_f2 = self.integrator.ppm_f2
+
+            if spectrum_data is None or ppm_f1 is None or ppm_f2 is None:
+                return None
+
+            features = extractor.extract_from_spectrum(
+                spectrum_data=spectrum_data,
+                ppm_f1=ppm_f1,
+                ppm_f2=ppm_f2,
+                peak_count=len(peak_list),
+            )
+
+            # Get prediction
+            prediction = ml_manager.predict(features)
+
+            if prediction is None:
+                return None
+
+            # Check confidence threshold
+            min_confidence = ml_config.get('ml_confidence_threshold', 0.5)
+            if prediction.confidence < min_confidence:
+                log_info(f"ML prediction confidence {prediction.confidence:.0%} below threshold")
+                return None
+
+            # Log prediction if configured
+            if ml_config.get('show_predictions_in_log', True):
+                log_info(
+                    f"ML suggests: LW F1={prediction.lw_f1_median:.3f} ppm, "
+                    f"LW F2={prediction.lw_f2_median:.3f} ppm "
+                    f"(confidence: {prediction.confidence:.0%}, source: {prediction.source})"
+                )
+
+            return {
+                'lw_f1_median': prediction.lw_f1_median,
+                'lw_f2_median': prediction.lw_f2_median,
+                'rad_f1': prediction.rad_f1,
+                'rad_f2': prediction.rad_f2,
+                'achievable_r2': prediction.achievable_r2,
+                'confidence': prediction.confidence,
+                'source': prediction.source,
+            }
+
+        except Exception as e:
+            log_warning(f"ML prediction failed: {e}")
+            return None
 
     def _process_with_sequential_fitting(self, peak_list: pd.DataFrame) -> List[Dict]:
         """Process peaks one by one (most reliable method)"""
@@ -256,6 +375,7 @@ class SingleSpectrumProcessor:
                 if result:
                     result['peak_number'] = peak_number
                     result['processing_mode'] = 'sequential'
+                    result['cluster_idx'] = cluster_idx  # Cluster ID for ML training (isolated = singleton cluster)
                     results_cache[(peak_x, peak_y)] = result
                     self.stats['successful_fits'] += 1
 
@@ -411,6 +531,7 @@ class SingleSpectrumProcessor:
                                 'peak_position': (best_match['pos_f2'], best_match['pos_f1']),
                                 'peak_x': peak_x,
                                 'peak_y': peak_y,
+                                'intensity': best_match['intensity'],  # Fitted Voigt parameter (for ML training)
                                 'amplitude': best_match['amplitude'],  # Use PS2D calculated amplitude (= height)
                                 'height': best_match['height'],  # Use PS2D calculated height (not intensity!)
                                 'volume': best_match['volume'],  # Use PS2D volume (= intensity for normalized Voigt)
@@ -429,8 +550,16 @@ class SingleSpectrumProcessor:
                                 'fitted': True,  # Peak Navigator uses 'fitted' flag
                                 'method': '2d_simultaneous_multi_peak',
                                 'processing_mode': 'sequential',
+                                'cluster_idx': cluster_idx,  # Cluster ID for ML training
                                 'cluster_size': cluster_size,
                                 'overlap_group_size': len(cluster),
+                                # Cluster-level fit statistics
+                                'chi2': group_result.get('chi2', 0),
+                                'iterations': group_result.get('iterations', 0),
+                                # Convergence flags from PS2D
+                                'formal_convergence': group_result.get('formal_convergence', False),
+                                'pragmatic_acceptance': group_result.get('pragmatic_acceptance', False),
+                                'chi2_reduction_success': group_result.get('chi2_reduction_success', False),
                                 # CRITICAL: Add visualization data for GUI
                                 'x_fit': {
                                     'center': best_match['pos_f2'],

@@ -56,7 +56,7 @@ class ProcessingWorker(QObject):
     error = Signal(str)
 
     def __init__(self, processor, nmr_files, reference_peaks, peak_source_mode, voigt_params,
-                 extract_delays: bool = False, pre_detected_peaks=None):
+                 extract_delays: bool = False, pre_detected_peaks=None, sn_from_gui_locked=None):
         super().__init__()
         self.processor = processor
         self.nmr_files = nmr_files
@@ -65,6 +65,7 @@ class ProcessingWorker(QObject):
         self.voigt_params = voigt_params
         self.extract_delays = extract_delays
         self.pre_detected_peaks = pre_detected_peaks
+        self.sn_from_gui_locked = sn_from_gui_locked
         self._cancelled = False
         self._paused = False
 
@@ -124,7 +125,8 @@ class ProcessingWorker(QObject):
                 peak_source_mode=self.peak_source_mode,
                 progress_callback=progress_callback,
                 extract_delays=self.extract_delays,
-                pre_detected_peaks=self.pre_detected_peaks
+                pre_detected_peaks=self.pre_detected_peaks,
+                sn_from_gui_locked=self.sn_from_gui_locked
             )
 
             if not self._cancelled:
@@ -821,6 +823,17 @@ class SeriesIntegrationDialog(BaseDialog):
             else:
                 self._log("No pre-detected peaks - will run detection on first spectrum")
 
+        # Check if from-GUI mode is active and lock threshold for series
+        sn_from_gui_locked = None
+        if hasattr(self.main_window, 'sn_from_gui_checkbox') and self.main_window.sn_from_gui_checkbox.isChecked():
+            if hasattr(self.main_window.integrator, 'sn_absolute_threshold'):
+                sn_from_gui_locked = {
+                    'absolute_threshold': self.main_window.integrator.sn_absolute_threshold,
+                    'contour_min': self.main_window.contour_min_spin.value()
+                }
+                self._log(f"Series integration: Locking threshold at {sn_from_gui_locked['absolute_threshold']:.2e} "
+                         f"(contour_min={sn_from_gui_locked['contour_min']:.3f})")
+
         # Get parameters
         voigt_params = self._get_voigt_params()
 
@@ -856,7 +869,8 @@ class SeriesIntegrationDialog(BaseDialog):
         self.worker = ProcessingWorker(
             None, self.nmr_files, reference_peaks, peak_source_mode, voigt_params,
             extract_delays=extract_delays,
-            pre_detected_peaks=pre_detected_peaks
+            pre_detected_peaks=pre_detected_peaks,
+            sn_from_gui_locked=sn_from_gui_locked
         )
         self.worker.moveToThread(self.thread)
 
@@ -1243,6 +1257,8 @@ class SeriesIntegrationDialog(BaseDialog):
                 'centroid_noise_multiplier': getattr(self.main_window, 'centroid_noise_multiplier', 2.0),
                 'use_ps2d_multi_peak': getattr(self.main_window, 'use_ps2d_multi_peak', True),
                 'use_ps2d_linewidth_reuse': getattr(self.main_window, 'use_ps2d_linewidth_reuse', False),
+                # ML training data collection
+                'collect_training_data': self._get_ml_collect_enabled(),
                 # Custom linewidth parameters (only if enabled)
                 'lw_lorentz_1h': getattr(self.main_window, 'lw_lorentz_1h', None) if getattr(self.main_window, 'use_custom_linewidths', False) else None,
                 'lw_gauss_1h': getattr(self.main_window, 'lw_gauss_1h', None) if getattr(self.main_window, 'use_custom_linewidths', False) else None,
@@ -1272,3 +1288,21 @@ class SeriesIntegrationDialog(BaseDialog):
         }
 
         return params
+
+    def _get_ml_collect_enabled(self) -> bool:
+        """Check if ML training data collection is enabled.
+
+        Returns True if the config has collect_training_data enabled.
+        """
+        if not self.main_window:
+            return False
+
+        try:
+            if hasattr(self.main_window, 'config_manager'):
+                config = self.main_window.config_manager.config
+                ml_config = config.get('ml_learning', {})
+                return ml_config.get('collect_training_data', False)
+        except Exception:
+            pass
+
+        return False  # Default to disabled in GUI mode

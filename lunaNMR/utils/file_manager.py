@@ -29,11 +29,20 @@ except ImportError:
 class NMRFileManager:
     """Core file operations for NMR data and peak lists"""
 
+    # Bruker processed data files (no extension)
+    BRUKER_PDATA_NAMES = ('2rr', '2ri', '2ir', '2ii', '1r', '1i',
+                          '3rrr', '3rri', '3rir', '3rii', '3irr', '3iri', '3iir', '3iii')
+
     def __init__(self):
-        self.supported_nmr_formats = ['ft', 'fid', 'ser']
+        self.supported_nmr_formats = ['ft', 'fid', 'ser', 'ft2', 'ft3', 'pipe', 'ucsf']
         self.supported_peak_formats = ['txt', 'csv', 'peaks']
         self.recent_files = []
         self.max_recent = 10
+
+    def _is_bruker_pdata(self, file_path):
+        """Check if file is Bruker processed data based on filename."""
+        basename = os.path.basename(file_path)
+        return basename in self.BRUKER_PDATA_NAMES
 
     def validate_nmr_file(self, file_path):
         """Validate NMR data file"""
@@ -41,7 +50,17 @@ class NMRFileManager:
             return False, "File does not exist"
 
         try:
-            # Check file extension
+            # Check for Bruker pdata files (no extension)
+            if self._is_bruker_pdata(file_path):
+                # Check file size (basic validation)
+                size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                if size_mb < 0.001:
+                    return False, "File too small"
+                if size_mb > 1000:
+                    return False, "File too large"
+                return True, "Valid Bruker pdata file"
+
+            # Check file extension for other formats
             ext = os.path.splitext(file_path)[1].lower().lstrip('.')
             if ext not in self.supported_nmr_formats:
                 return False, f"Unsupported format: {ext}"

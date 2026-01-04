@@ -362,8 +362,12 @@ class MissingFilesDialog(BaseDialog):
             File filter string for QFileDialog
         """
         suffix_lower = suffix.lower()
+        # Handle Bruker files (no extension)
+        basename = Path(suffix).name if suffix else ""
+        if basename in ('2rr', '2ri', '2ir', '2ii', '1r', '1i'):
+            return "Bruker Processed (2rr 2ri 2ir 2ii 1r 1i);;NMR Files (*.ft *.ft2 *.ft3);;All Files (*)"
         if suffix_lower in [".ft", ".ft2", ".ft3"]:
-            return "NMR Files (*.ft *.ft2 *.ft3);;All Files (*)"
+            return "NMR Files (*.ft *.ft2 *.ft3);;Bruker Processed (2rr 2ri 2ir 2ii);;All Files (*)"
         elif suffix_lower in [".txt", ".csv"]:
             return "Text Files (*.txt *.csv);;All Files (*)"
         elif suffix_lower == ".json":

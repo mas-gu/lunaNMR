@@ -57,6 +57,9 @@ class SpectrumPlotter(MatplotlibWidget):
     peak_clicked = Signal(float, float)
     peak_edit_requested = Signal(float, float, object)  # x_ppm, y_ppm, Qt.KeyboardModifiers
     peak_select_requested = Signal(float, float)  # x_ppm, y_ppm - middle-click selection
+    area_select_requested = Signal(float, float, float, float)  # x1, y1, x2, y2 - rectangle selection
+    escape_pressed = Signal()  # Escape key pressed
+    delete_pressed = Signal()  # Delete/Backspace/Ctrl+D pressed
 
     def __init__(self, parent=None, toolbar=False, figsize=(8, 6)):
         """
@@ -104,6 +107,17 @@ class SpectrumPlotter(MatplotlibWidget):
 
         # Selection highlight artist (for showing selected peak)
         self._selection_highlight = None
+
+        # Rectangle selection visual state
+        self._selection_rectangle = None  # Rubber-band rectangle during drag
+        self._multi_selection_highlights = []  # List of highlight patches for multi-selected peaks
+
+        # Connect area selection callbacks
+        self._nav_handler.on_area_select = self._on_area_select_request
+        self._nav_handler.on_rect_drag = self._on_rect_drag_update
+        # Connect keyboard action callbacks
+        self._nav_handler.on_escape = self._on_escape_request
+        self._nav_handler.on_delete = self._on_delete_request
 
     def plot_spectrum(self, integrator, **kwargs):
         """
@@ -684,10 +698,114 @@ class SpectrumPlotter(MatplotlibWidget):
         """Clear the selection highlight from the plot."""
         if self._selection_highlight is not None:
             try:
-                # Remove from axes patches collection
-                if self._selection_highlight in self.ax.patches:
-                    self.ax.patches.remove(self._selection_highlight)
+                self._selection_highlight.remove()
             except (ValueError, NotImplementedError):
                 pass  # Already removed or can't remove
             self._selection_highlight = None
             self.canvas.draw_idle()
+
+    # --- Rectangle selection methods ---
+
+    def _on_rect_drag_update(self, x1: float, y1: float, x2: float, y2: float):
+        """
+        Update rubber-band rectangle during drag.
+
+        Args:
+            x1, y1: Starting corner in ppm
+            x2, y2: Current corner in ppm
+        """
+        from matplotlib.patches import Rectangle
+
+        # Clear existing rectangle
+        self.clear_selection_rectangle()
+
+        # Calculate rectangle dimensions (handle any drag direction)
+        left = min(x1, x2)
+        bottom = min(y1, y2)
+        width = abs(x2 - x1)
+        height = abs(y2 - y1)
+
+        # Create rubber-band rectangle
+        self._selection_rectangle = Rectangle(
+            (left, bottom),
+            width,
+            height,
+            fill=False,
+            edgecolor='#E0A0E0',  # Pastel magenta (matches selection highlight)
+            linewidth=2,
+            linestyle='--',
+            zorder=20
+        )
+        self.ax.add_patch(self._selection_rectangle)
+        self.canvas.draw_idle()
+
+    def clear_selection_rectangle(self):
+        """Clear the rubber-band selection rectangle."""
+        if self._selection_rectangle is not None:
+            try:
+                self._selection_rectangle.remove()
+            except (ValueError, NotImplementedError):
+                pass
+            self._selection_rectangle = None
+
+    def _on_area_select_request(self, x1: float, y1: float, x2: float, y2: float):
+        """
+        Handle completed area selection.
+
+        Args:
+            x1, y1: First corner in ppm
+            x2, y2: Second corner in ppm
+        """
+        # Clear rubber-band rectangle
+        self.clear_selection_rectangle()
+        self.canvas.draw_idle()
+
+        # Emit signal for MainWindow to handle
+        self.area_select_requested.emit(x1, y1, x2, y2)
+
+    def show_multi_selection_highlights(self, peaks: list):
+        """
+        Show visual highlights for multiple selected peaks.
+
+        Args:
+            peaks: List of peak_info dicts with 'x' and 'y' keys
+        """
+        from matplotlib.patches import Ellipse
+
+        # Clear existing highlights
+        self.clear_multi_selection_highlights()
+
+        for peak_info in peaks:
+            # Use same style as single selection highlight
+            highlight = Ellipse(
+                (peak_info['x'], peak_info['y']),
+                width=0.0075,   # x dimension (smaller for 1H)
+                height=0.045,   # y dimension (larger for 15N)
+                fill=False,
+                edgecolor='#E0A0E0',  # pastel magenta/pink
+                linewidth=2,
+                linestyle='-',
+                zorder=15
+            )
+            self.ax.add_patch(highlight)
+            self._multi_selection_highlights.append(highlight)
+
+        self.canvas.draw_idle()
+
+    def clear_multi_selection_highlights(self):
+        """Clear all multi-selection highlights."""
+        for highlight in self._multi_selection_highlights:
+            try:
+                highlight.remove()
+            except (ValueError, NotImplementedError):
+                pass
+        self._multi_selection_highlights.clear()
+        self.canvas.draw_idle()
+
+    def _on_escape_request(self):
+        """Handle Escape key press."""
+        self.escape_pressed.emit()
+
+    def _on_delete_request(self):
+        """Handle Delete/Backspace/Ctrl+D key press."""
+        self.delete_pressed.emit()

@@ -155,6 +155,9 @@ class NMRNavigationHandler:
     # Pan step as fraction of view
     PAN_STEP = 0.1
 
+    # Drag threshold in pixels to distinguish click from drag
+    DRAG_THRESHOLD_PIXELS = 5
+
     def __init__(self):
         """Initialize the navigation handler."""
         self._widget = None
@@ -169,10 +172,23 @@ class NMRNavigationHandler:
         self._pan_start_xlim = None
         self._pan_start_ylim = None
 
+        # Rectangle selection state (middle-click drag)
+        self._rect_select_active = False
+        self._rect_start_x_data = None
+        self._rect_start_y_data = None
+        self._rect_start_x_pixel = None
+        self._rect_start_y_pixel = None
+
         # Callbacks
         self.on_peak_edit: Optional[Callable[[float, float, Qt.KeyboardModifiers], None]] = None
         self.on_peak_select: Optional[Callable[[float, float], None]] = None
         self.on_reset_zoom: Optional[Callable[[], None]] = None
+        # Area selection callbacks (for rectangle selection)
+        self.on_area_select: Optional[Callable[[float, float, float, float], None]] = None
+        self.on_rect_drag: Optional[Callable[[float, float, float, float], None]] = None
+        # Keyboard action callbacks
+        self.on_escape: Optional[Callable[[], None]] = None
+        self.on_delete: Optional[Callable[[], None]] = None
 
     def attach(self, widget):
         """
@@ -216,16 +232,29 @@ class NMRNavigationHandler:
         self._canvas = None
         self._ax = None
         self._pan_active = False
+        # Clear rectangle selection state
+        self._rect_select_active = False
+        self._rect_start_x_data = None
+        self._rect_start_y_data = None
+        self._rect_start_x_pixel = None
+        self._rect_start_y_pixel = None
 
     def _on_mouse_press(self, event):
         """Handle mouse button press event."""
         if event.inaxes != self._ax:
             return
 
-        # Middle-click (button 2): select peak for moving
+        # Middle-click (button 2): start rectangle selection or single peak select
+        # We defer the decision until mouse release to distinguish click from drag
         if event.button == 2:
-            if self.on_peak_select is not None and event.xdata is not None:
-                self.on_peak_select(event.xdata, event.ydata)
+            if event.xdata is not None and event.ydata is not None:
+                self._rect_select_active = True
+                self._rect_start_x_data = event.xdata
+                self._rect_start_y_data = event.ydata
+                # Store pixel position for click vs drag detection
+                self._rect_start_x_pixel = event.x
+                self._rect_start_y_pixel = event.y
+                self._canvas.setCursor(Qt.CrossCursor)
             return
 
         if event.button != 1:  # Only handle left click for pan
@@ -252,12 +281,65 @@ class NMRNavigationHandler:
 
     def _on_mouse_release(self, event):
         """Handle mouse button release event."""
+        # Handle rectangle selection release (middle-click)
+        if event.button == 2 and self._rect_select_active:
+            self._rect_select_active = False
+            self._canvas.setCursor(Qt.OpenHandCursor)
+
+            # Determine if this was a click or drag
+            if self._rect_start_x_pixel is not None and event.x is not None:
+                dx = abs(event.x - self._rect_start_x_pixel)
+                dy = abs(event.y - self._rect_start_y_pixel)
+
+                if dx < self.DRAG_THRESHOLD_PIXELS and dy < self.DRAG_THRESHOLD_PIXELS:
+                    # Click (not drag) - use single peak selection
+                    if self.on_peak_select is not None and self._rect_start_x_data is not None:
+                        self.on_peak_select(self._rect_start_x_data, self._rect_start_y_data)
+                else:
+                    # Drag completed - use area selection
+                    if self.on_area_select is not None and event.xdata is not None:
+                        self.on_area_select(
+                            self._rect_start_x_data,
+                            self._rect_start_y_data,
+                            event.xdata,
+                            event.ydata
+                        )
+
+            # Clear rectangle selection state
+            self._rect_start_x_data = None
+            self._rect_start_y_data = None
+            self._rect_start_x_pixel = None
+            self._rect_start_y_pixel = None
+            return
+
+        # Handle pan release (left-click)
         if event.button == 1 and self._pan_active:
             self._pan_active = False
             self._canvas.setCursor(Qt.OpenHandCursor)
 
     def _on_mouse_motion(self, event):
-        """Handle mouse motion event for panning."""
+        """Handle mouse motion event for panning and rectangle selection."""
+        # Handle rectangle selection drag
+        if self._rect_select_active:
+            if event.inaxes != self._ax or event.xdata is None:
+                return
+
+            # Check if we've exceeded drag threshold
+            if self._rect_start_x_pixel is not None and event.x is not None:
+                dx = abs(event.x - self._rect_start_x_pixel)
+                dy = abs(event.y - self._rect_start_y_pixel)
+                if dx >= self.DRAG_THRESHOLD_PIXELS or dy >= self.DRAG_THRESHOLD_PIXELS:
+                    # Notify for rubber-band update
+                    if self.on_rect_drag is not None:
+                        self.on_rect_drag(
+                            self._rect_start_x_data,
+                            self._rect_start_y_data,
+                            event.xdata,
+                            event.ydata
+                        )
+            return
+
+        # Handle pan drag
         if not self._pan_active:
             return
 
@@ -376,6 +458,20 @@ class NMRNavigationHandler:
                 self.on_reset_zoom()
             elif hasattr(self._widget, 'reset_zoom'):
                 self._widget.reset_zoom()
+        elif event.key == 'escape':
+            # Clear selection
+            if self.on_escape is not None:
+                self.on_escape()
+        elif event.key in ['delete', 'backspace']:
+            # Delete selected peaks
+            if self.on_delete is not None:
+                self.on_delete()
+        elif event.key == 'd':
+            # Ctrl+D for delete (check if ctrl is held via Qt)
+            modifiers = QApplication.keyboardModifiers()
+            if modifiers & Qt.ControlModifier:
+                if self.on_delete is not None:
+                    self.on_delete()
 
     def _apply_pan(self, delta_x: float, delta_y: float):
         """Apply a pan offset to the view."""

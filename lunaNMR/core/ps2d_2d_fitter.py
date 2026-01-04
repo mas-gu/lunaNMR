@@ -1184,9 +1184,12 @@ class Ps2dMultiPeakFitter2D:
         # We track Stage 0's first iteration as the baseline
         # Require 100× reduction as evidence of successful convergence
         chi2_reduction_success = False
+        chi2_initial = 0.0
+        chi2_reduction_factor = 0.0
         if hasattr(self, '_stage0_initial_chi2'):
-            chi2_reduction = self._stage0_initial_chi2 / info['final_chi2']
-            chi2_reduction_success = chi2_reduction > 100
+            chi2_initial = self._stage0_initial_chi2
+            chi2_reduction_factor = chi2_initial / info['final_chi2'] if info['final_chi2'] > 0 else 0.0
+            chi2_reduction_success = chi2_reduction_factor > 100
 
         final_success = formal_convergence or pragmatic_r2_success or chi2_reduction_success
 
@@ -1234,6 +1237,9 @@ class Ps2dMultiPeakFitter2D:
             'peaks': fitted_peaks,
             'r_squared': r_squared,
             'chi2': info['final_chi2'],
+            'chi2_initial': chi2_initial,
+            'chi2_reduction_factor': chi2_reduction_factor,
+            'chi2_reduction_success': chi2_reduction_success,
             'iterations': total_iterations,
             'fitted_2d': y_fit_2d,
             'params': params,

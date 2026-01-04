@@ -330,6 +330,9 @@ class LunaNMRMainWindow(BaseWindow):
         self.single_spectrum_processor = None
         self.multi_spectrum_processor = None
 
+        # ML Training Data Collector (disabled in GUI, used by CLI scripts)
+        self.training_collector = None
+
         # ===== File Path Tracking =====
         self.current_nmr_file = None
         self.current_peak_file = None
@@ -354,12 +357,13 @@ class LunaNMRMainWindow(BaseWindow):
 
         # ===== Selection State =====
         self.selected_peak_info = None  # {type, index, data}
+        self.selected_peaks_multi = []  # List of peak_info dicts for multi-selection
         self.selected_peak_number = 1  # For peak navigation
 
         # ===== Workflow Configuration =====
         # Workflow mode: "peak_list" (default) or "sn_threshold"
         self.workflow_mode = "peak_list"
-        self.sn_threshold = 3.0
+        self.sn_threshold = 10.0
         self.expected_peak_count = 50
 
         # ===== Display Options =====
@@ -407,6 +411,17 @@ class LunaNMRMainWindow(BaseWindow):
 
         # Auto-add dummy peaks (for peak_list mode only)
         self.auto_add_dummy_peaks = True  # Auto-add nearby unmatched peaks
+
+        # S/N threshold for peak_list mode initial detection (Expert Mode)
+        self.peak_list_sn_threshold = 10.0  # Multiplier for noise level
+
+        # Manual detection region (Expert Mode)
+        # When enabled, overrides automatic nucleus-based region filtering
+        self.use_manual_detection_region = False
+        self.manual_detection_x_min = 6.0   # ppm (1H) - default for 15N-HSQC amide
+        self.manual_detection_x_max = 10.0  # ppm (1H)
+        self.manual_detection_y_min = 105.0 # ppm (15N)
+        self.manual_detection_y_max = 135.0 # ppm (15N)
 
         # ===== Peak Detection Parameters (for series integration) =====
         self.height_threshold = 0.1  # Peak height threshold
@@ -546,6 +561,209 @@ class LunaNMRMainWindow(BaseWindow):
         self.setup_central_widget()
 
         logger.debug("User interface setup complete")
+
+    def _init_training_collector(self):
+        """Initialize the ML training data collector."""
+        try:
+            from lunaNMR.ml.comprehensive_collector import ComprehensiveTrainingCollector
+            self.training_collector = ComprehensiveTrainingCollector(
+                min_r2=0.70,
+                auto_save=True,
+            )
+            logger.info("ML training data collector initialized")
+        except Exception as e:
+            logger.warning(f"Could not initialize ML training collector: {e}")
+            self.training_collector = None
+
+    def _collect_training_data(self, summary: dict):
+        """Collect training data after successful fitting.
+
+        Args:
+            summary: Fitting summary with fitted_results and learned_statistics
+        """
+        if self.training_collector is None:
+            return
+
+        # Check if ML learning is enabled in config
+        ml_config = self.config_manager.config.get('ml_learning', {})
+        if not ml_config.get('collect_training_data', False):
+            logger.debug("ML training data collection disabled in config")
+            return
+
+        try:
+            # Get fit results
+            fitted_results = summary.get('fitted_results', [])
+            if not fitted_results:
+                return
+
+            # Get spectrum data
+            spectrum_data = self.integrator.nmr_data
+            if spectrum_data is None:
+                return
+
+            # Get peak list - convert DataFrame to list of dicts if needed
+            peak_list = self.integrator.peak_list
+            if peak_list is None or len(peak_list) == 0:
+                return
+            if hasattr(peak_list, 'to_dict'):
+                peak_list_dicts = peak_list.to_dict('records')
+            else:
+                peak_list_dicts = peak_list
+
+            # Get learned statistics (PASS1 results)
+            learned_statistics = summary.get('learned_statistics')
+
+            # Enhance learned_statistics with additional stats from fit results
+            if learned_statistics is None:
+                learned_statistics = {}
+
+            # Calculate additional statistics from fit results if not present
+            if fitted_results and 'lw_f1_std' not in learned_statistics:
+                lw_f1_values = []
+                lw_f2_values = []
+                r2_values = []
+                for r in fitted_results:
+                    if r.get('success', False):
+                        # Get linewidths from fit results
+                        # PS2D 2D fits: lw_lor_f1/lw_gau_f1 or gamma_y/sigma_y
+                        # 1D fits: linewidths in nested y_fit/x_fit dicts
+                        y_fit = r.get('y_fit', {})
+                        x_fit = r.get('x_fit', {})
+
+                        # F1 linewidth (Y dimension)
+                        lw_lor_f1 = r.get('lw_lor_f1', r.get('gamma_y', y_fit.get('gamma', 0)))
+                        lw_gau_f1 = r.get('lw_gau_f1', r.get('sigma_y', y_fit.get('sigma', 0)))
+                        lw_f1 = lw_lor_f1 + lw_gau_f1
+
+                        # F2 linewidth (X dimension)
+                        lw_lor_f2 = r.get('lw_lor_f2', r.get('gamma_x', r.get('gamma', x_fit.get('gamma', 0))))
+                        lw_gau_f2 = r.get('lw_gau_f2', r.get('sigma_x', r.get('sigma', x_fit.get('sigma', 0))))
+                        lw_f2 = lw_lor_f2 + lw_gau_f2
+
+                        if lw_f1 > 0:
+                            lw_f1_values.append(lw_f1)
+                        if lw_f2 > 0:
+                            lw_f2_values.append(lw_f2)
+                        r2 = r.get('r_squared', r.get('avg_r_squared', 0))
+                        if r2 > 0:
+                            r2_values.append(r2)
+
+                if lw_f1_values:
+                    learned_statistics['lw_f1_std'] = float(np.std(lw_f1_values))
+                    learned_statistics['lw_f1_min'] = float(np.min(lw_f1_values))
+                    learned_statistics['lw_f1_max'] = float(np.max(lw_f1_values))
+                if lw_f2_values:
+                    learned_statistics['lw_f2_std'] = float(np.std(lw_f2_values))
+                    learned_statistics['lw_f2_min'] = float(np.min(lw_f2_values))
+                    learned_statistics['lw_f2_max'] = float(np.max(lw_f2_values))
+                if r2_values:
+                    learned_statistics['n_good_peaks'] = len(r2_values)
+                    learned_statistics['mean_r_squared'] = float(np.mean(r2_values))
+
+            # Get intermediate results from parallel processor (if available)
+            adaptive_results = None
+            timing_info = None
+            cluster_info = None
+            pass1_results = None
+            pass1bis_results = None
+            pass2_results = None
+
+            if hasattr(self.integrator, 'enhanced_fitter'):
+                fitter = self.integrator.enhanced_fitter
+                # Check for parallel processor with stored intermediate results
+                if hasattr(fitter, 'parallel_processor') and fitter.parallel_processor:
+                    pp = fitter.parallel_processor
+                    if hasattr(pp, 'optimal_params') and pp.optimal_params:
+                        adaptive_results = pp.optimal_params
+                    if hasattr(pp, 'timing_info') and pp.timing_info:
+                        timing_info = pp.timing_info
+                    if hasattr(pp, 'cluster_info') and pp.cluster_info:
+                        cluster_info = pp.cluster_info
+                    if hasattr(pp, 'pass1_results'):
+                        pass1_results = pp.pass1_results
+                    if hasattr(pp, 'pass1bis_results'):
+                        pass1bis_results = pp.pass1bis_results
+                    if hasattr(pp, 'pass2_results'):
+                        pass2_results = pp.pass2_results
+                # Fallback to enhanced_fitter's optimal_params (for backward compatibility)
+                elif hasattr(fitter, 'optimal_params') and fitter.optimal_params:
+                    adaptive_results = fitter.optimal_params
+
+            # Get PPM ranges from integrator's ppm axes
+            ppm_ranges = {}
+            if hasattr(self.integrator, 'ppm_y_axis') and self.integrator.ppm_y_axis is not None:
+                ppm_y = self.integrator.ppm_y_axis
+                ppm_ranges['f1'] = (float(min(ppm_y)), float(max(ppm_y)))
+            if hasattr(self.integrator, 'ppm_x_axis') and self.integrator.ppm_x_axis is not None:
+                ppm_x = self.integrator.ppm_x_axis
+                ppm_ranges['f2'] = (float(min(ppm_x)), float(max(ppm_x)))
+
+            # Detect nucleus type from F1 range
+            nucleus_type = "15N"  # Default
+            if ppm_ranges.get('f1'):
+                f1_max = ppm_ranges['f1'][1]
+                # 15N typically 100-140 ppm, 13C typically 0-200 ppm
+                if f1_max > 150:
+                    nucleus_type = "13C"
+
+            # Get field strength from metadata
+            field_strength = 600.0  # Default
+            if hasattr(self.integrator, 'dic') and self.integrator.dic:
+                # Try different keys for field strength
+                field_strength = float(
+                    self.integrator.dic.get('FDF2OBS',
+                    self.integrator.dic.get('SFO1',
+                    self.integrator.dic.get('bf1', 600.0)))
+                )
+
+            # Get spectrum name
+            spectrum_name = ""
+            if self.current_nmr_file:
+                spectrum_name = Path(self.current_nmr_file).name
+
+            # Fallback: get cluster info from integrator if not from parallel processor
+            if cluster_info is None and hasattr(self.integrator, 'cluster_info'):
+                cluster_info = self.integrator.cluster_info
+
+            # Get detection parameters and statistics
+            detection_params = {
+                'search_window_x': self.search_window_x,
+                'search_window_y': self.search_window_y,
+                'noise_threshold': getattr(self, 'noise_threshold', 3.0),
+                'noise_level': getattr(self.integrator, 'noise_level', 0),
+            }
+            detection_statistics = None
+            if hasattr(self.integrator, 'get_detection_statistics'):
+                detection_statistics = self.integrator.get_detection_statistics()
+
+            # Collect training data
+            success = self.training_collector.collect_spectrum_processing(
+                spectrum_data=spectrum_data,
+                peak_list=peak_list_dicts,
+                fit_results=fitted_results,
+                pass1_statistics=learned_statistics,
+                adaptive_results=adaptive_results,
+                pass1_results=pass1_results,
+                pass1bis_results=pass1bis_results,
+                pass2_results=pass2_results,
+                cluster_info=cluster_info,
+                timing_info=timing_info,
+                spectrum_name=spectrum_name,
+                nucleus_type=nucleus_type,
+                field_strength_mhz=field_strength,
+                ppm_ranges=ppm_ranges,
+                processing_mode='parallel' if self.use_parallel_processing else 'sequential',
+                detection_params=detection_params,
+                detection_statistics=detection_statistics,
+            )
+
+            if success:
+                logger.info(f"Collected ML training data: {spectrum_name}")
+            else:
+                logger.debug(f"Training data rejected (below R² threshold)")
+
+        except Exception as e:
+            logger.warning(f"Failed to collect training data: {e}")
 
     def setup_central_widget(self):
         """Create and configure the 3-panel layout.
@@ -830,7 +1048,7 @@ class LunaNMRMainWindow(BaseWindow):
         # S/N Threshold spinbox
         self.sn_threshold_spin = QDoubleSpinBox()
         self.sn_threshold_spin.setRange(1.0, 100.0)
-        self.sn_threshold_spin.setValue(3.0)
+        self.sn_threshold_spin.setValue(10.0)
         self.sn_threshold_spin.setSingleStep(0.5)
         self.sn_threshold_spin.setDecimals(1)
         self.sn_threshold_spin.setStyleSheet(f"""
@@ -841,6 +1059,11 @@ class LunaNMRMainWindow(BaseWindow):
                 border-radius: 4px;
                 padding: {SPACING_XS}px;
                 font-size: {FONT_SIZE_BODY}px;
+            }}
+            QDoubleSpinBox:disabled {{
+                background-color: #F0F0F0;
+                color: #999999;
+                border: 1px solid #CCCCCC;
             }}
         """)
         params_layout.addRow("S/N Threshold:", self.sn_threshold_spin)
@@ -859,8 +1082,51 @@ class LunaNMRMainWindow(BaseWindow):
                 padding: {SPACING_XS}px;
                 font-size: {FONT_SIZE_BODY}px;
             }}
+            QSpinBox:disabled {{
+                background-color: #F0F0F0;
+                color: #999999;
+                border: 1px solid #CCCCCC;
+            }}
         """)
         params_layout.addRow("Expected Peaks:", self.expected_peaks_spin)
+
+        # From-GUI threshold checkbox
+        self.sn_from_gui_checkbox = QCheckBox("Set threshold from GUI contour minimum")
+        self.sn_from_gui_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                color: {PRIMARY_TEXT};
+                font-size: {FONT_SIZE_BODY}px;
+                spacing: {SPACING_XS}px;
+            }}
+        """)
+        self.sn_from_gui_checkbox.setToolTip(
+            "Use GUI contour minimum level as absolute threshold.\n"
+            "Threshold = max_intensity × contour_min × 1.05 (5% safety margin)\n"
+            "Expected peak count is ignored (all peaks detected)\n"
+            "Safety margin ensures all detected peaks are clearly visible"
+        )
+        self.sn_from_gui_checkbox.toggled.connect(self.on_sn_from_gui_toggled)
+        params_layout.addRow(self.sn_from_gui_checkbox)
+
+        # From-GUI mode read-only display widget
+        self.sn_gui_info_widget = QWidget()
+        gui_info_layout = QFormLayout(self.sn_gui_info_widget)
+        gui_info_layout.setContentsMargins(SPACING_MD, 0, SPACING_MD, SPACING_SM)
+        gui_info_layout.setSpacing(SPACING_XS)
+        gui_info_layout.setLabelAlignment(Qt.AlignRight)
+
+        # Contour min display (read-only)
+        self.sn_contour_min_display = QLabel("—")
+        self.sn_contour_min_display.setStyleSheet(f"color: {SECONDARY_TEXT}; font-size: {FONT_SIZE_BODY}px;")
+        gui_info_layout.addRow("Contour Min:", self.sn_contour_min_display)
+
+        # Effective S/N display (read-only)
+        self.sn_effective_sn_display = QLabel("—")
+        self.sn_effective_sn_display.setStyleSheet(f"color: {SECONDARY_TEXT}; font-size: {FONT_SIZE_BODY}px;")
+        gui_info_layout.addRow("Effective S/N:", self.sn_effective_sn_display)
+
+        self.sn_gui_info_widget.setVisible(False)  # Initially hidden
+        params_layout.addRow(self.sn_gui_info_widget)
 
         # Initially hide S/N parameters
         self.sn_params_widget.setVisible(False)
@@ -929,6 +1195,54 @@ class LunaNMRMainWindow(BaseWindow):
         self._update_auto_add_dummy_enabled()
 
         self.update_status(f"Workflow mode: {self.workflow_mode}")
+
+    def on_sn_from_gui_toggled(self, checked: bool):
+        """Handle 'From GUI' checkbox toggle.
+
+        When checked:
+        - Show read-only info fields (Contour Min, Effective S/N)
+        - Disable S/N threshold and expected peaks spinboxes
+        - Update display with current contour_min value
+
+        When unchecked:
+        - Hide info fields
+        - Re-enable spinboxes
+        """
+        if checked:
+            # Enable "From GUI" mode
+            self.sn_threshold_spin.setEnabled(False)
+            self.expected_peaks_spin.setEnabled(False)
+            self.sn_gui_info_widget.setVisible(True)
+
+            # Update display fields
+            contour_min = self.contour_min_spin.value()
+            self.sn_contour_min_display.setText(f"{contour_min:.3f}")
+
+            # Calculate effective S/N if spectrum loaded
+            if hasattr(self, 'integrator') and hasattr(self.integrator, 'nmr_data') and self.integrator.nmr_data is not None:
+                max_intensity = np.max(self.integrator.nmr_data)
+                # Apply 5% safety margin
+                safety_factor = 1.05
+                absolute_threshold = max_intensity * contour_min * safety_factor
+
+                # Estimate noise level
+                noise_level = self.integrator._estimate_noise_level_advanced()
+                effective_sn = absolute_threshold / noise_level if noise_level > 0 else 0
+
+                self.sn_effective_sn_display.setText(f"{effective_sn:.1f}")
+            else:
+                self.sn_effective_sn_display.setText("(load spectrum)")
+
+            logger.info(f"S/N mode: From GUI (contour_min={contour_min:.3f})")
+        else:
+            # Disable "From GUI" mode
+            self.sn_threshold_spin.setEnabled(True)
+            self.expected_peaks_spin.setEnabled(True)
+            self.sn_gui_info_widget.setVisible(False)
+
+            logger.info("S/N mode: Standard (multiplier-based)")
+
+        self.update_status(f"S/N threshold mode: {'From GUI' if checked else 'Standard'}")
 
     def _update_auto_add_dummy_enabled(self):
         """Enable/disable auto-add dummy peaks checkbox based on workflow mode.
@@ -1753,9 +2067,9 @@ class LunaNMRMainWindow(BaseWindow):
         """)
         params_layout.addRow("Levels:", self.contour_levels_spin)
 
-        # Min Level spinbox (0.01-1.0, default 0.05)
+        # Min Level spinbox (0.001-1.0, default 0.05)
         self.contour_min_spin = QDoubleSpinBox()
-        self.contour_min_spin.setRange(0.01, 1.0)
+        self.contour_min_spin.setRange(0.001, 1.0)
         self.contour_min_spin.setValue(self.contour_min)
         self.contour_min_spin.setSingleStep(0.01)
         self.contour_min_spin.setDecimals(3)
@@ -1845,6 +2159,20 @@ class LunaNMRMainWindow(BaseWindow):
         self.contour_min = value
         logger.debug(f"Contour min level changed to {value}")
         self.update_spectrum_plot()
+
+        # Update S/N from-GUI display if active
+        if hasattr(self, 'sn_from_gui_checkbox') and self.sn_from_gui_checkbox.isChecked():
+            self.sn_contour_min_display.setText(f"{value:.3f}")
+
+            # Recalculate effective S/N
+            if hasattr(self, 'integrator') and hasattr(self.integrator, 'nmr_data') and self.integrator.nmr_data is not None:
+                max_intensity = np.max(self.integrator.nmr_data)
+                # Apply 5% safety margin
+                safety_factor = 1.05
+                absolute_threshold = max_intensity * value * safety_factor
+                noise_level = self.integrator._estimate_noise_level_advanced()
+                effective_sn = absolute_threshold / noise_level if noise_level > 0 else 0
+                self.sn_effective_sn_display.setText(f"{effective_sn:.1f}")
 
     def on_contour_increment_changed(self, value: float):
         """Handle contour increment value change.
@@ -2172,6 +2500,103 @@ class LunaNMRMainWindow(BaseWindow):
         )
         self.expert_auto_add_dummy_cb.stateChanged.connect(self._on_auto_add_dummy_change)
         params_frame_layout.addWidget(self.expert_auto_add_dummy_cb, 5, 0, 1, 4)
+
+        # Row 6: S/N threshold for peak_list mode
+        peak_list_sn_label = QLabel("Peak List S/N threshold:")
+        peak_list_sn_label.setToolTip(
+            "S/N threshold multiplier for initial peak detection in Peak List mode.\n"
+            "Higher values = fewer peaks detected, more selective matching."
+        )
+        params_frame_layout.addWidget(peak_list_sn_label, 6, 0, 1, 2)
+
+        self.expert_peak_list_sn_spin = QDoubleSpinBox()
+        self.expert_peak_list_sn_spin.setRange(1.0, 100.0)
+        self.expert_peak_list_sn_spin.setSingleStep(1.0)
+        self.expert_peak_list_sn_spin.setDecimals(1)
+        self.expert_peak_list_sn_spin.setValue(self.peak_list_sn_threshold)
+        self.expert_peak_list_sn_spin.setToolTip("S/N threshold for Peak List mode detection")
+        self.expert_peak_list_sn_spin.valueChanged.connect(self._on_peak_list_sn_change)
+        params_frame_layout.addWidget(self.expert_peak_list_sn_spin, 6, 2, 1, 2)
+
+        # Row 7: Separator line
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        params_frame_layout.addWidget(separator, 7, 0, 1, 4)
+
+        # Row 8: Manual detection region checkbox
+        self.expert_manual_region_check = QCheckBox("Use manual detection region")
+        self.expert_manual_region_check.setChecked(self.use_manual_detection_region)
+        self.expert_manual_region_check.setToolTip(
+            "Override automatic nucleus-based region filtering.\n"
+            "When enabled, detection uses the specified X/Y ppm ranges.\n"
+            "Only applies to S/N Threshold mode."
+        )
+        self.expert_manual_region_check.stateChanged.connect(self._on_manual_region_toggle)
+        params_frame_layout.addWidget(self.expert_manual_region_check, 8, 0, 1, 4)
+
+        # Row 9: X range (1H)
+        x_range_label = QLabel("X range (1H):")
+        params_frame_layout.addWidget(x_range_label, 9, 0)
+
+        self.expert_region_x_min_spin = QDoubleSpinBox()
+        self.expert_region_x_min_spin.setRange(-2.0, 15.0)
+        self.expert_region_x_min_spin.setSingleStep(0.1)
+        self.expert_region_x_min_spin.setDecimals(2)
+        self.expert_region_x_min_spin.setValue(self.manual_detection_x_min)
+        self.expert_region_x_min_spin.setToolTip("Minimum 1H ppm for detection")
+        self.expert_region_x_min_spin.valueChanged.connect(self._on_manual_region_change)
+        self.expert_region_x_min_spin.setEnabled(self.use_manual_detection_region)
+        params_frame_layout.addWidget(self.expert_region_x_min_spin, 9, 1)
+
+        x_to_label = QLabel("to")
+        x_to_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        params_frame_layout.addWidget(x_to_label, 9, 2)
+
+        self.expert_region_x_max_spin = QDoubleSpinBox()
+        self.expert_region_x_max_spin.setRange(-2.0, 15.0)
+        self.expert_region_x_max_spin.setSingleStep(0.1)
+        self.expert_region_x_max_spin.setDecimals(2)
+        self.expert_region_x_max_spin.setValue(self.manual_detection_x_max)
+        self.expert_region_x_max_spin.setToolTip("Maximum 1H ppm for detection")
+        self.expert_region_x_max_spin.valueChanged.connect(self._on_manual_region_change)
+        self.expert_region_x_max_spin.setEnabled(self.use_manual_detection_region)
+        params_frame_layout.addWidget(self.expert_region_x_max_spin, 9, 3)
+
+        # Row 10: Y range (15N/13C)
+        y_range_label = QLabel("Y range (15N/13C):")
+        params_frame_layout.addWidget(y_range_label, 10, 0)
+
+        self.expert_region_y_min_spin = QDoubleSpinBox()
+        self.expert_region_y_min_spin.setRange(-10.0, 250.0)
+        self.expert_region_y_min_spin.setSingleStep(1.0)
+        self.expert_region_y_min_spin.setDecimals(1)
+        self.expert_region_y_min_spin.setValue(self.manual_detection_y_min)
+        self.expert_region_y_min_spin.setToolTip("Minimum 15N/13C ppm for detection")
+        self.expert_region_y_min_spin.valueChanged.connect(self._on_manual_region_change)
+        self.expert_region_y_min_spin.setEnabled(self.use_manual_detection_region)
+        params_frame_layout.addWidget(self.expert_region_y_min_spin, 10, 1)
+
+        y_to_label = QLabel("to")
+        y_to_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        params_frame_layout.addWidget(y_to_label, 10, 2)
+
+        self.expert_region_y_max_spin = QDoubleSpinBox()
+        self.expert_region_y_max_spin.setRange(-10.0, 250.0)
+        self.expert_region_y_max_spin.setSingleStep(1.0)
+        self.expert_region_y_max_spin.setDecimals(1)
+        self.expert_region_y_max_spin.setValue(self.manual_detection_y_max)
+        self.expert_region_y_max_spin.setToolTip("Maximum 15N/13C ppm for detection")
+        self.expert_region_y_max_spin.valueChanged.connect(self._on_manual_region_change)
+        self.expert_region_y_max_spin.setEnabled(self.use_manual_detection_region)
+        params_frame_layout.addWidget(self.expert_region_y_max_spin, 10, 3)
+
+        # Row 11: Reset button
+        self.expert_region_reset_btn = QPushButton("Reset to Spectrum Bounds")
+        self.expert_region_reset_btn.setToolTip("Reset region to current spectrum bounds")
+        self.expert_region_reset_btn.clicked.connect(self._reset_manual_region_to_bounds)
+        self.expert_region_reset_btn.setEnabled(self.use_manual_detection_region)
+        params_frame_layout.addWidget(self.expert_region_reset_btn, 11, 0, 1, 4)
 
         self.expert_params_frame.setVisible(False)
         detection_layout.addWidget(self.expert_params_frame)
@@ -2628,6 +3053,27 @@ class LunaNMRMainWindow(BaseWindow):
         if hasattr(self, 'expert_lw_gauss_15n_spin'):
             self.expert_lw_gauss_15n_spin.setValue(self.lw_gauss_15n)
 
+        # Peak list S/N threshold
+        if hasattr(self, 'expert_peak_list_sn_spin'):
+            self.expert_peak_list_sn_spin.setValue(self.peak_list_sn_threshold)
+
+        # Manual detection region
+        if hasattr(self, 'expert_manual_region_check'):
+            self.expert_manual_region_check.blockSignals(True)
+            self.expert_manual_region_check.setChecked(self.use_manual_detection_region)
+            self.expert_manual_region_check.blockSignals(False)
+        if hasattr(self, 'expert_region_x_min_spin'):
+            enabled = self.use_manual_detection_region
+            self.expert_region_x_min_spin.setValue(self.manual_detection_x_min)
+            self.expert_region_x_max_spin.setValue(self.manual_detection_x_max)
+            self.expert_region_y_min_spin.setValue(self.manual_detection_y_min)
+            self.expert_region_y_max_spin.setValue(self.manual_detection_y_max)
+            self.expert_region_x_min_spin.setEnabled(enabled)
+            self.expert_region_x_max_spin.setEnabled(enabled)
+            self.expert_region_y_min_spin.setEnabled(enabled)
+            self.expert_region_y_max_spin.setEnabled(enabled)
+            self.expert_region_reset_btn.setEnabled(enabled)
+
     # =================== EXPERT MODE HANDLER METHODS ===================
 
     def _toggle_expert_params(self):
@@ -2665,8 +3111,64 @@ class LunaNMRMainWindow(BaseWindow):
 
     def _on_auto_add_dummy_change(self, state):
         """Handle auto-add dummy peaks checkbox change."""
-        self.auto_add_dummy_peaks = (state == Qt.Checked)
+        # In PySide6, stateChanged passes int: 0=Unchecked, 2=Checked
+        self.auto_add_dummy_peaks = (state == 2)
         logger.info(f"Auto-add dummy peaks: {self.auto_add_dummy_peaks}")
+
+    def _on_peak_list_sn_change(self, value):
+        """Handle peak_list S/N threshold spinbox change."""
+        self.peak_list_sn_threshold = value
+        logger.info(f"Peak List S/N threshold: {self.peak_list_sn_threshold}")
+
+    def _on_manual_region_toggle(self, state):
+        """Handle manual detection region checkbox toggle."""
+        # In PySide6, stateChanged passes int: 0=Unchecked, 2=Checked
+        self.use_manual_detection_region = (state == 2)
+
+        # Enable/disable spinboxes and reset button
+        enabled = self.use_manual_detection_region
+        if hasattr(self, 'expert_region_x_min_spin'):
+            self.expert_region_x_min_spin.setEnabled(enabled)
+            self.expert_region_x_max_spin.setEnabled(enabled)
+            self.expert_region_y_min_spin.setEnabled(enabled)
+            self.expert_region_y_max_spin.setEnabled(enabled)
+            self.expert_region_reset_btn.setEnabled(enabled)
+
+        logger.info(f"Manual detection region: {'enabled' if enabled else 'disabled'}")
+
+    def _on_manual_region_change(self):
+        """Handle manual detection region spinbox changes."""
+        if hasattr(self, 'expert_region_x_min_spin'):
+            self.manual_detection_x_min = self.expert_region_x_min_spin.value()
+            self.manual_detection_x_max = self.expert_region_x_max_spin.value()
+            self.manual_detection_y_min = self.expert_region_y_min_spin.value()
+            self.manual_detection_y_max = self.expert_region_y_max_spin.value()
+
+            logger.info(
+                f"Manual region: X=[{self.manual_detection_x_min:.2f}, {self.manual_detection_x_max:.2f}] "
+                f"Y=[{self.manual_detection_y_min:.1f}, {self.manual_detection_y_max:.1f}]"
+            )
+
+    def _reset_manual_region_to_bounds(self):
+        """Reset manual detection region to current spectrum bounds."""
+        if hasattr(self, 'integrator') and self.integrator:
+            if hasattr(self.integrator, 'ppm_x_axis') and self.integrator.ppm_x_axis is not None:
+                x_min = float(min(self.integrator.ppm_x_axis))
+                x_max = float(max(self.integrator.ppm_x_axis))
+                y_min = float(min(self.integrator.ppm_y_axis))
+                y_max = float(max(self.integrator.ppm_y_axis))
+
+                # Update spinboxes (which will trigger _on_manual_region_change)
+                self.expert_region_x_min_spin.setValue(x_min)
+                self.expert_region_x_max_spin.setValue(x_max)
+                self.expert_region_y_min_spin.setValue(y_min)
+                self.expert_region_y_max_spin.setValue(y_max)
+
+                logger.info(f"Reset manual region to spectrum bounds: X=[{x_min:.2f}, {x_max:.2f}] Y=[{y_min:.1f}, {y_max:.1f}]")
+            else:
+                logger.warning("Cannot reset region: no spectrum loaded")
+        else:
+            logger.warning("Cannot reset region: no integrator available")
 
     def _on_expert_detection_size_change(self):
         """Handle detection rectangle size changes."""
@@ -2898,37 +3400,71 @@ class LunaNMRMainWindow(BaseWindow):
     def on_reset_results(self):
         """Handle Reset Results button click.
 
-        Resets the application to initial startup state:
-        - No peaks loaded
-        - Synthetic test spectrum loaded
-        - All fitting results cleared
+        Full application reset - equivalent to closing and reopening the app.
+        Resets ALL state: parameters, results, loaded files, GUI widgets.
         """
         logger.info("Reset Results button clicked")
 
         # Confirm destructive action
         reply = QMessageBox.question(
             self,
-            "Reset to Initial State",
-            "This will reset the application to startup state:\n\n"
-            "• Clear all peaks (reference and detected)\n"
-            "• Clear all fitting results\n"
-            "• Load synthetic test spectrum\n\n"
+            "Reset Application",
+            "This will completely reset the application:\n\n"
+            "• Clear all data (spectrum, peaks, results)\n"
+            "• Reset all parameters to defaults\n"
+            "• Clear project state\n\n"
+            "Equivalent to closing and reopening the app.\n"
             "This action cannot be undone.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
 
         if reply == QMessageBox.Yes:
-            logger.info("Resetting to initial state")
+            logger.info("Full application reset initiated")
 
-            # Reset the integrator to fresh instance
-            self.integrator = EnhancedVoigtIntegrator()
+            # Close any open DynamiXs dialog
+            if self.dynamixs_dialog is not None:
+                try:
+                    self.dynamixs_dialog.close()
+                except Exception:
+                    pass
 
-            # Clear fitting results
-            self.current_voigt_result = None
+            # Save GUI component references (they already exist, don't null them)
+            gui_refs = {
+                'file_panel': self.file_panel,
+                'controls_panel': self.controls_panel,
+                'contour_params_widget': self.contour_params_widget,
+                'workflow_peak_list_radio': self.workflow_peak_list_radio,
+                'workflow_sn_threshold_radio': self.workflow_sn_threshold_radio,
+                'sn_params_widget': self.sn_params_widget,
+                'sn_threshold_spin': self.sn_threshold_spin,
+                'expected_peaks_spin': self.expected_peaks_spin,
+                'nmr_file_label': self.nmr_file_label,
+                'peak_file_label': self.peak_file_label,
+                'spectrum_plotter': self.spectrum_plotter,
+                'peak_navigator': self.peak_navigator,
+                'voigt_analysis_plotter': self.voigt_analysis_plotter,
+                'voigt_2d_plotter': self.voigt_2d_plotter,
+                'voigt_3d_plotter': getattr(self, 'voigt_3d_plotter', None),
+                'peak_params_text': self.peak_params_text,
+                'series_plotter': self.series_plotter,
+                'main_splitter': self.main_splitter,
+                'shift_1h_spin': self.shift_1h_spin,
+                'shift_15n_spin': self.shift_15n_spin,
+            }
 
-            # Clear peak navigator (load empty lists)
-            if hasattr(self, 'peak_navigator'):
+            # Reset ALL state variables to defaults (same as __init__)
+            self.init_variables()
+
+            # Restore GUI component references
+            for name, ref in gui_refs.items():
+                setattr(self, name, ref)
+
+            # Reset GUI widgets to default values
+            self._reset_gui_widgets_to_defaults()
+
+            # Clear peak navigator
+            if hasattr(self, 'peak_navigator') and self.peak_navigator:
                 self.peak_navigator.load_reference_peaks([])
                 self.peak_navigator.load_detected_peaks([])
 
@@ -2939,14 +3475,101 @@ class LunaNMRMainWindow(BaseWindow):
             if hasattr(self, 'voigt_3d_plotter') and self.voigt_3d_plotter:
                 self.voigt_3d_plotter.show_placeholder("Select a peak to view 3D Voigt analysis")
 
-            # Load synthetic test spectrum
+            # Clear spectrum plotter
+            if hasattr(self, 'spectrum_plotter') and self.spectrum_plotter:
+                self.spectrum_plotter.clear()
+
+            # Load synthetic test spectrum (as on startup)
             self.create_test_spectrum()
 
-            # Reset button colors to initial state
+            # Sync parameters to integrator
+            self.sync_parameters_to_integrator()
+
+            # Reset button colors
             self._reset_button_colors()
 
-            logger.info("Application reset to initial state")
-            self.update_status("Reset complete - synthetic spectrum loaded")
+            # Reset window title
+            self.setWindowTitle("lunaNMR v1.0 - NMR Peak Analysis")
+
+            logger.info("Full application reset complete")
+            self.update_status("Application reset - ready")
+
+    def _reset_gui_widgets_to_defaults(self):
+        """Reset all GUI widgets to their default values."""
+        # Block signals to prevent cascading updates during reset
+        widgets_to_reset = []
+
+        # Workflow Selection
+        if self.workflow_peak_list_radio:
+            self.workflow_peak_list_radio.setChecked(True)
+        if self.workflow_sn_threshold_radio:
+            self.workflow_sn_threshold_radio.setChecked(False)
+        if self.sn_params_widget:
+            self.sn_params_widget.setVisible(False)
+        if self.sn_threshold_spin:
+            self.sn_threshold_spin.setValue(10.0)
+        if self.expected_peaks_spin:
+            self.expected_peaks_spin.setValue(50)
+
+        # Data Loading labels
+        if self.nmr_file_label:
+            self.nmr_file_label.setText("No file loaded")
+        if self.peak_file_label:
+            self.peak_file_label.setText("No file loaded")
+
+        # Processing Options checkboxes
+        if hasattr(self, 'voigt_checkbox') and self.voigt_checkbox:
+            self.voigt_checkbox.setChecked(True)
+        if hasattr(self, 'parallel_checkbox') and self.parallel_checkbox:
+            self.parallel_checkbox.setChecked(True)
+        if hasattr(self, 'fix_linewidths_checkbox') and self.fix_linewidths_checkbox:
+            self.fix_linewidths_checkbox.setChecked(False)
+        if hasattr(self, 'fix_positions_checkbox') and self.fix_positions_checkbox:
+            self.fix_positions_checkbox.setChecked(False)
+
+        # Expert Mode parameters (if expanded)
+        if hasattr(self, 'expert_noise_spin') and self.expert_noise_spin:
+            self.expert_noise_spin.setValue(3.0)
+        if hasattr(self, 'expert_search_x_spin') and self.expert_search_x_spin:
+            self.expert_search_x_spin.setValue(0.01)
+        if hasattr(self, 'expert_search_y_spin') and self.expert_search_y_spin:
+            self.expert_search_y_spin.setValue(0.04)
+        if hasattr(self, 'expert_centroid_x_spin') and self.expert_centroid_x_spin:
+            self.expert_centroid_x_spin.setValue(0.01)
+        if hasattr(self, 'expert_centroid_y_spin') and self.expert_centroid_y_spin:
+            self.expert_centroid_y_spin.setValue(0.1)
+
+        # Contour parameters
+        if hasattr(self, 'contour_levels_spin') and self.contour_levels_spin:
+            self.contour_levels_spin.setValue(24)
+        if hasattr(self, 'contour_min_spin') and self.contour_min_spin:
+            self.contour_min_spin.setValue(0.05)
+        if hasattr(self, 'contour_increment_spin') and self.contour_increment_spin:
+            self.contour_increment_spin.setValue(1.1)
+
+        # Zoom parameters
+        if hasattr(self, 'zoom_x_spin') and self.zoom_x_spin:
+            self.zoom_x_spin.setValue(4.0)
+        if hasattr(self, 'zoom_y_spin') and self.zoom_y_spin:
+            self.zoom_y_spin.setValue(30.0)
+
+        # Shift Peak List
+        if hasattr(self, 'shift_1h_spin') and self.shift_1h_spin:
+            self.shift_1h_spin.setValue(0.0)
+        if hasattr(self, 'shift_15n_spin') and self.shift_15n_spin:
+            self.shift_15n_spin.setValue(0.0)
+
+        # Display toggles
+        if hasattr(self, 'show_detected_checkbox') and self.show_detected_checkbox:
+            self.show_detected_checkbox.setChecked(True)
+        if hasattr(self, 'show_assigned_checkbox') and self.show_assigned_checkbox:
+            self.show_assigned_checkbox.setChecked(True)
+
+        # Statistics display
+        if hasattr(self, 'statistics_display') and self.statistics_display:
+            self.statistics_display.setText("No results")
+
+        logger.debug("GUI widgets reset to defaults")
 
     def create_center_panel(self) -> QWidget:
         """Create the center panel with tabbed plot display.
@@ -2991,6 +3614,11 @@ class LunaNMRMainWindow(BaseWindow):
         self.spectrum_plotter.peak_edit_requested.connect(self._on_peak_edit_with_modifier)
         # Connect peak select signal (middle-click = select for moving)
         self.spectrum_plotter.peak_select_requested.connect(self._on_peak_select_for_move)
+        # Connect area select signal (middle-click + drag = rectangle selection)
+        self.spectrum_plotter.area_select_requested.connect(self._on_area_select)
+        # Connect keyboard signals for selection management
+        self.spectrum_plotter.escape_pressed.connect(self._on_escape_key)
+        self.spectrum_plotter.delete_pressed.connect(self._on_delete_key)
 
         # Add Main Spectrum tab first
         tab_widget.addTab(main_spectrum_tab, "Main Spectrum")
@@ -4112,6 +4740,12 @@ class LunaNMRMainWindow(BaseWindow):
         dynamixs_action.triggered.connect(self.launch_dynamixs)
         modules_menu.addAction(dynamixs_action)
 
+        modules_menu.addSeparator()
+
+        ml_learning_action = QAction("ML Learning Center...", self)
+        ml_learning_action.triggered.connect(self.show_ml_learning_center)
+        modules_menu.addAction(ml_learning_action)
+
         # === Help Menu (v0o9 lines 1043-1047) ===
         help_menu = menu_bar.addMenu("&Help")
 
@@ -5080,6 +5714,40 @@ class LunaNMRMainWindow(BaseWindow):
 
         return results
 
+    # =================== ML LEARNING CENTER ===================
+
+    def show_ml_learning_center(self):
+        """Show ML Learning Center dialog.
+
+        Opens the ML Learning Center panel for viewing and controlling
+        ML prediction settings, training status, and configuration.
+        """
+        from lunaNMR.ml.gui import MLLearningPanel
+        from lunaNMR.ml import ModelManager
+
+        # Get or create model manager
+        model_manager = getattr(self, '_ml_model_manager', None)
+        if model_manager is None:
+            try:
+                model_manager = ModelManager()
+                self._ml_model_manager = model_manager
+            except Exception as e:
+                logger.warning(f"Could not create ModelManager: {e}")
+                model_manager = None
+
+        dialog = MLLearningPanel(
+            parent=self,
+            model_manager=model_manager,
+            main_window=self
+        )
+        dialog.exec()
+
+        # Apply any config changes
+        if model_manager:
+            dialog.apply_config()
+
+        self.update_status("ML Learning Center closed")
+
     # =================== HELP MENU HANDLERS ===================
 
     def show_help(self):
@@ -5350,6 +6018,21 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 except (ValueError, AttributeError):
                     pass
 
+            # Sync S/N from-GUI mode parameters
+            if hasattr(self, 'sn_from_gui_checkbox'):
+                sn_from_gui = self.sn_from_gui_checkbox.isChecked()
+                self.integrator.sn_from_gui_mode = sn_from_gui
+
+                if sn_from_gui and hasattr(self.integrator, 'nmr_data') and self.integrator.nmr_data is not None:
+                    max_intensity = np.max(self.integrator.nmr_data)
+                    # Apply 5% safety margin to ensure all detected peaks are clearly visible
+                    safety_factor = 1.05
+                    self.integrator.sn_absolute_threshold = max_intensity * self.contour_min_spin.value() * safety_factor
+                    self.integrator.sn_contour_min_value = self.contour_min_spin.value()
+
+                    logger.info(f"S/N from-GUI mode: threshold={self.integrator.sn_absolute_threshold:.2e}, "
+                                f"contour_min={self.contour_min_spin.value():.3f} (with 5% safety margin)")
+
             # Sync PS2D expert parameters from spinboxes to global config
             ps2d_config = get_ps2d_config()
             if hasattr(self, 'expert_radF1_spin') and self.expert_radF1_spin is not None:
@@ -5381,6 +6064,26 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             # Sync auto-add dummy peaks setting
             if hasattr(self, 'auto_add_dummy_peaks'):
                 self.integrator.auto_add_dummy_peaks = self.auto_add_dummy_peaks
+
+            # Sync peak_list S/N threshold
+            if hasattr(self, 'peak_list_sn_threshold'):
+                self.integrator.peak_list_sn_threshold = self.peak_list_sn_threshold
+
+            # Sync manual detection region
+            if hasattr(self, 'use_manual_detection_region') and self.use_manual_detection_region:
+                self.integrator.manual_detection_region = [
+                    self.manual_detection_x_min,
+                    self.manual_detection_x_max,
+                    self.manual_detection_y_min,
+                    self.manual_detection_y_max
+                ]
+                logger.debug(
+                    f"Manual detection region: X=[{self.manual_detection_x_min:.2f}, "
+                    f"{self.manual_detection_x_max:.2f}], Y=[{self.manual_detection_y_min:.1f}, "
+                    f"{self.manual_detection_y_max:.1f}]"
+                )
+            else:
+                self.integrator.manual_detection_region = None
 
             # Sync workflow mode
             if hasattr(self, 'workflow_mode'):
@@ -5837,6 +6540,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     status_msg += " - Results saved"
                     self.update_status(status_msg)
 
+            # Collect ML training data
+            self._collect_training_data(summary)
+
             logger.info("Fitting results updated in GUI")
 
         except Exception as e:
@@ -6255,6 +6961,10 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             x_ppm: X coordinate in ppm where clicked
             y_ppm: Y coordinate in ppm where clicked
         """
+        # Clear any multi-selection when doing single selection
+        if self.selected_peaks_multi:
+            self.clear_multi_selection()
+
         # If we already have a selected peak, this click moves it
         if self.selected_peak_info is not None:
             self.move_selected_peak(x_ppm, y_ppm)
@@ -6274,6 +6984,223 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             logger.info(f"Middle-click: Selected {peak_info['type']} peak '{peak_info['assignment']}' for moving")
         else:
             logger.warning(f"Middle-click: No peak found near ({x_ppm:.4f}, {y_ppm:.4f})")
+
+    # --- Rectangle/Area selection methods ---
+
+    def _on_area_select(self, x1: float, y1: float, x2: float, y2: float):
+        """Handle rectangle area selection for multiple peaks.
+
+        Finds all peaks within the selected rectangle and highlights them.
+
+        Args:
+            x1, y1: First corner of rectangle (ppm)
+            x2, y2: Second corner of rectangle (ppm)
+        """
+        # Clear any single-peak selection
+        self.selected_peak_info = None
+        self.spectrum_plotter.clear_selection_highlight()
+
+        # Normalize rectangle bounds (handle any drag direction)
+        x_min, x_max = min(x1, x2), max(x1, x2)
+        y_min, y_max = min(y1, y2), max(y1, y2)
+
+        # Find all peaks within rectangle
+        selected = self.find_peaks_in_rectangle(x_min, x_max, y_min, y_max)
+
+        if selected:
+            self.selected_peaks_multi = selected
+            # Show visual highlights
+            self.spectrum_plotter.show_multi_selection_highlights(selected)
+            # Update status
+            self._update_multi_selection_display()
+            logger.info(f"Rectangle selection: {len(selected)} peaks selected")
+        else:
+            self.clear_multi_selection()
+            logger.info("Rectangle selection: no peaks found in area")
+
+    def find_peaks_in_rectangle(self, x_min: float, x_max: float,
+                                y_min: float, y_max: float) -> list:
+        """Find all peaks within a rectangle region.
+
+        Args:
+            x_min, x_max: X bounds (ppm)
+            y_min, y_max: Y bounds (ppm)
+
+        Returns:
+            List of peak_info dicts for peaks within the rectangle
+        """
+        candidates = []
+
+        # Check reference peaks
+        if (hasattr(self.integrator, 'peak_list') and
+            self.integrator.peak_list is not None):
+            for idx, row in self.integrator.peak_list.iterrows():
+                peak_x = float(row['Position_X'])
+                peak_y = float(row['Position_Y'])
+
+                if x_min <= peak_x <= x_max and y_min <= peak_y <= y_max:
+                    candidates.append({
+                        'type': 'reference',
+                        'index': idx,
+                        'x': peak_x,
+                        'y': peak_y,
+                        'assignment': row.get('Assignment', f'Peak_{idx+1}')
+                    })
+
+        # Check detected peaks
+        if (hasattr(self.integrator, 'fitted_peaks') and
+            self.integrator.fitted_peaks):
+            for idx, peak in enumerate(self.integrator.fitted_peaks):
+                peak_x = float(peak.get('ppm_x', 0))
+                peak_y = float(peak.get('ppm_y', 0))
+
+                if x_min <= peak_x <= x_max and y_min <= peak_y <= y_max:
+                    candidates.append({
+                        'type': 'detected',
+                        'index': idx,
+                        'x': peak_x,
+                        'y': peak_y,
+                        'assignment': peak.get('assignment', f'Det_{idx+1}')
+                    })
+
+        return candidates
+
+    def _update_multi_selection_display(self):
+        """Update status display for multi-selection."""
+        if self.selected_peaks_multi:
+            count = len(self.selected_peaks_multi)
+            ref_count = sum(1 for p in self.selected_peaks_multi if p['type'] == 'reference')
+            det_count = count - ref_count
+
+            status_parts = []
+            if ref_count > 0:
+                status_parts.append(f"{ref_count} reference")
+            if det_count > 0:
+                status_parts.append(f"{det_count} detected")
+
+            status_text = f"Selected {count} peaks ({', '.join(status_parts)})"
+            self.update_status(status_text)
+
+            if hasattr(self, 'selected_peak_label'):
+                self.selected_peak_label.setText(status_text + " | Esc to clear, Ctrl+D to delete")
+
+    def clear_multi_selection(self):
+        """Clear multi-peak selection state and highlights."""
+        self.selected_peaks_multi = []
+        self.spectrum_plotter.clear_multi_selection_highlights()
+
+        if hasattr(self, 'selected_peak_label'):
+            self.selected_peak_label.setText("No peak selected")
+
+    def _on_escape_key(self):
+        """Handle Escape key press from spectrum plotter."""
+        # Clear multi-selection if active
+        if self.selected_peaks_multi:
+            self.clear_multi_selection()
+            logger.info("Escape: cleared multi-selection")
+            return
+        # Clear single selection if active
+        if self.selected_peak_info is not None:
+            self.selected_peak_info = None
+            self.spectrum_plotter.clear_selection_highlight()
+            if hasattr(self, 'selected_peak_label'):
+                self.selected_peak_label.setText("No peak selected")
+            logger.info("Escape: cleared single selection")
+
+    def _on_delete_key(self):
+        """Handle Delete/Backspace/Ctrl+D key press from spectrum plotter."""
+        if self.selected_peaks_multi:
+            self._delete_selected_peaks()
+
+    def keyPressEvent(self, event):
+        """Handle keyboard events for peak selection management.
+
+        Escape: Clear peak selection(s)
+        Delete/Ctrl+D: Delete all selected peaks
+        """
+        from PySide6.QtCore import Qt
+
+        key = event.key()
+        modifiers = event.modifiers()
+
+        # Escape: Clear selection
+        if key == Qt.Key_Escape:
+            # Clear multi-selection if active
+            if self.selected_peaks_multi:
+                self.clear_multi_selection()
+                logger.info("Escape: cleared multi-selection")
+                event.accept()
+                return
+            # Clear single selection if active
+            elif self.selected_peak_info is not None:
+                self.selected_peak_info = None
+                self.spectrum_plotter.clear_selection_highlight()
+                if hasattr(self, 'selected_peak_label'):
+                    self.selected_peak_label.setText("No peak selected")
+                logger.info("Escape: cleared single selection")
+                event.accept()
+                return
+
+        # Delete/Ctrl+D: Delete selected peaks
+        if self.selected_peaks_multi:
+            if key == Qt.Key_Delete or (key == Qt.Key_D and modifiers & Qt.ControlModifier):
+                self._delete_selected_peaks()
+                event.accept()
+                return
+
+        # Pass to parent for other keys
+        super().keyPressEvent(event)
+
+    def _delete_selected_peaks(self):
+        """Delete all multi-selected peaks from data structures."""
+        if not self.selected_peaks_multi:
+            return
+
+        # Group by type and sort indices in reverse order to avoid index shifting
+        ref_indices = sorted(
+            [p['index'] for p in self.selected_peaks_multi if p['type'] == 'reference'],
+            reverse=True
+        )
+        det_indices = sorted(
+            [p['index'] for p in self.selected_peaks_multi if p['type'] == 'detected'],
+            reverse=True
+        )
+
+        count = len(self.selected_peaks_multi)
+
+        # Delete from reference peak list (DataFrame)
+        if ref_indices and hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
+            for idx in ref_indices:
+                try:
+                    self.integrator.peak_list = self.integrator.peak_list.drop(idx)
+                except (KeyError, IndexError):
+                    pass
+            # Reset index after deletion
+            self.integrator.peak_list = self.integrator.peak_list.reset_index(drop=True)
+
+        # Delete from detected peaks list
+        if det_indices and hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
+            for idx in det_indices:
+                try:
+                    del self.integrator.fitted_peaks[idx]
+                except (IndexError, KeyError):
+                    pass
+
+        # Clear selection and update display
+        self.clear_multi_selection()
+
+        # Refresh the spectrum plot
+        self.update_spectrum_plot(preserve_zoom=True)
+
+        # Refresh the peak navigator list
+        if hasattr(self, 'peak_navigator') and self.peak_navigator is not None:
+            if ref_indices and hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
+                self.peak_navigator.load_reference_peaks(self.integrator.peak_list)
+            if det_indices and hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
+                self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
+
+        logger.info(f"Deleted {count} peaks ({len(ref_indices)} reference, {len(det_indices)} detected)")
+        self.update_status(f"Deleted {count} peaks")
 
     def on_peak_edit_click(self, event):
         """Handle mouse clicks in peak edit mode (v0o9 line 5632)."""

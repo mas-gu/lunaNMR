@@ -98,15 +98,45 @@ except ImportError as e:
             self.peak_list_path = None
             self.fitted_peaks = []
 
+        def _detect_nmr_format(self, file_path):
+            """Detect NMR file format from file path.
+
+            Returns:
+                'bruker_pdata': Bruker processed data (2rr, 2ri, 2ir, 2ii, 1r, 1i)
+                'pipe': NMRPipe format (.ft, .ft2, .pipe, etc.)
+            """
+            import os
+            basename = os.path.basename(file_path)
+
+            # Bruker processed data files (no extension, specific names)
+            bruker_pdata_names = (
+                '2rr', '2ri', '2ir', '2ii', '1r', '1i',
+                '3rrr', '3rri', '3rir', '3rii', '3irr', '3iri', '3iir', '3iii'
+            )
+            if basename in bruker_pdata_names:
+                return 'bruker_pdata'
+
+            return 'pipe'
+
         def _calculate_ppm_axes(self):
             """Calculate PPM axes from NMR dictionary"""
             if self.nmr_dict is None or self.nmr_data is None:
                 return
             try:
                 import nmrglue as ng
-                # Calculate ppm axes using nmrglue
-                uc_x = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=1)
-                uc_y = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=0)
+
+                nmr_format = getattr(self, '_nmr_format', 'pipe')
+
+                if nmr_format == 'bruker':
+                    # Bruker: use universal dictionary approach
+                    # strip_fake=True is required for processed data to get correct SW from procs
+                    udic = ng.bruker.guess_udic(self.nmr_dict, self.nmr_data, strip_fake=True)
+                    uc_x = ng.fileiobase.uc_from_udic(udic, dim=1)  # F2 / 1H
+                    uc_y = ng.fileiobase.uc_from_udic(udic, dim=0)  # F1 / 15N
+                else:
+                    # NMRPipe format (default)
+                    uc_x = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=1)
+                    uc_y = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=0)
 
                 self.ppm_x_axis = uc_x.ppm_scale()
                 self.ppm_y_axis = uc_y.ppm_scale()
@@ -229,7 +259,7 @@ class VoigtIntegrator(BaseIntegrator):
         self.processing_mode = 'full_detection'  # 'full_detection' or 'in_place' or 'sn_native'
 
         # S/N threshold parameters
-        self.sn_threshold = 3.0
+        self.sn_threshold = 10.0
         self.expected_peak_count = 50
         self.sn_detection_params = {
             'min_snr': 2.0,          # Minimum signal-to-noise ratio
@@ -237,6 +267,13 @@ class VoigtIntegrator(BaseIntegrator):
             'noise_estimation': 'corners',  # 'corners' or 'median'
             'peak_separation': 0.01  # Minimum peak separation in ppm
         }
+
+        # Manual detection region (expert mode)
+        # Format: [x_min, x_max, y_min, y_max] in ppm, or None for automatic mode
+        self.manual_detection_region = None
+
+        # S/N threshold for peak_list mode initial detection (expert mode)
+        self.peak_list_sn_threshold = 10.0  # Multiplier for noise level
 
         # Initialize enhanced fitter if available
         if ENHANCED_FITTING_AVAILABLE:
@@ -2342,10 +2379,19 @@ class VoigtIntegrator(BaseIntegrator):
                     'method': '2d_simultaneous_multi_peak',
                     'overlap_group_size': len(overlap_group),
                     # Peak quantitation (from 2D fit)
+                    # intensity = volume for normalized Voigt (same physical parameter)
+                    'intensity': target_peak['intensity'],
                     'volume': target_peak['volume'],
                     'height': target_peak['height'],
                     'amplitude': target_peak['amplitude'],
                     'detected_intensity': detected_intensity,  # Intensity from peak detection (before fitting)
+                    # Cluster-level fit statistics
+                    'chi2': result_2d.get('chi2', 0),
+                    'iterations': result_2d.get('iterations', 0),
+                    # Convergence flags (at least one should be true if success=true)
+                    'formal_convergence': result_2d.get('formal_convergence', False),
+                    'pragmatic_acceptance': result_2d.get('pragmatic_acceptance', False),
+                    'chi2_reduction_success': result_2d.get('chi2_reduction_success', False),
                     # 2D visualization data
                     'region_2d': region_2d,
                     'fitted_2d_surface': fitted_2d_surface,
@@ -2637,7 +2683,10 @@ class VoigtIntegrator(BaseIntegrator):
             'gui_window_y': self.fitting_parameters.get('fitting_window_y', 'unknown'),
             'window_source': window_optimization.get('optimization_type', 'gui_parameters') if window_optimization else 'gui_parameters',
             'window_optimization': window_optimization,
-            'timestamp': pd.Timestamp.now()
+            'timestamp': pd.Timestamp.now(),
+            # PS2D fitting statistics (from x_params if available)
+            'chi2': x_params.get('chi2', 0),
+            'iterations': x_params.get('iterations', 0)
         }
 
         # Store in voigt_fits list
@@ -3231,11 +3280,11 @@ class VoigtIntegrator(BaseIntegrator):
         if not hasattr(self, 'noise_level') or self.noise_level is None:
             self._estimate_noise_level_advanced()
 
-        # Use GUI threshold parameters (1H/15N ppm values are search windows)
-        threshold_multiplier = 3.0  # Default threshold multiplier
+        # Use configurable S/N threshold from expert mode
+        threshold_multiplier = getattr(self, 'peak_list_sn_threshold', 10.0)
         signal_threshold = self.noise_level * threshold_multiplier
 
-        log_info(f"Step 1: Detecting all peaks (threshold={signal_threshold:.2e})")
+        log_info(f"Step 1: Detecting all peaks (S/N threshold={threshold_multiplier}, signal_threshold={signal_threshold:.2e})")
 
         # Detect all peaks using the existing threshold method
         all_detected_peaks = self._detect_peaks_by_threshold(signal_threshold)
@@ -3261,6 +3310,13 @@ class VoigtIntegrator(BaseIntegrator):
                 best_match = None
                 best_distance = float('inf')
 
+                # Elliptical normalization radii (standard PS2D values)
+                rad_f2 = 0.04  # 1H radius (ppm)
+                rad_f1 = 0.4   # 15N radius (ppm)
+
+                best_x_dist = 0.0
+                best_y_dist = 0.0
+
                 for i, detected_peak in enumerate(all_detected_peaks):
                     if i in used_peaks:  # Skip already used peaks
                         continue
@@ -3274,12 +3330,17 @@ class VoigtIntegrator(BaseIntegrator):
                         total_distance = np.sqrt(x_distance**2 + y_distance**2)
                         if total_distance < best_distance:
                             best_distance = total_distance
+                            best_x_dist = x_distance
+                            best_y_dist = y_distance
                             best_match = (i, detected_peak)
 
                 if best_match is not None:
                     # Use the matched detected peak
                     peak_idx, detected_peak = best_match
                     used_peaks.add(peak_idx)
+
+                    # Calculate elliptical distance (normalized by typical linewidth radii)
+                    elliptical_distance = np.sqrt((best_x_dist / rad_f2)**2 + (best_y_dist / rad_f1)**2)
 
                     matched_peak = {
                         'assignment': assignment,
@@ -3291,7 +3352,10 @@ class VoigtIntegrator(BaseIntegrator):
                         'snr': detected_peak['snr'],
                         'detected': True,
                         'detection_quality': 'Matched',
-                        'distance_from_reference': best_distance
+                        'distance_from_reference': best_distance,
+                        'distance_from_reference_x': best_x_dist,
+                        'distance_from_reference_y': best_y_dist,
+                        'distance_from_reference_elliptical': elliptical_distance
                     }
 
                     #if best_distance > 0.001:
@@ -3475,15 +3539,29 @@ class VoigtIntegrator(BaseIntegrator):
         Parameters:
         -----------
         nmr_file : str
-            Path to NMR data file
+            Path to NMR data file (NMRPipe .ft/.ft2 or Bruker 2rr/2ii etc.)
         skip_nucleus_detection : bool, optional
             If True, skip auto-detection of nucleus type (default: False)
             Used in series integration to avoid redundant detection for spectra 2+
         """
         try:
             import nmrglue as ng
-            self.nmr_dict, self.nmr_data = ng.pipe.read(nmr_file)
-            log_info(f"Loaded NMR data: {self.nmr_data.shape} from {nmr_file}")
+            import os
+
+            # Detect format and load accordingly
+            file_format = self._detect_nmr_format(nmr_file)
+
+            if file_format == 'bruker_pdata':
+                # Bruker processed data - use parent directory
+                pdata_dir = os.path.dirname(nmr_file)
+                self.nmr_dict, self.nmr_data = ng.bruker.read_pdata(dir=pdata_dir)
+                self._nmr_format = 'bruker'
+                log_info(f"Loaded Bruker pdata: {self.nmr_data.shape} from {pdata_dir}")
+            else:
+                # NMRPipe format (default)
+                self.nmr_dict, self.nmr_data = ng.pipe.read(nmr_file)
+                self._nmr_format = 'pipe'
+                log_info(f"Loaded NMR data: {self.nmr_data.shape} from {nmr_file}")
 
             # Calculate PPM axes
             self._calculate_ppm_axes()
@@ -3556,32 +3634,53 @@ class VoigtIntegrator(BaseIntegrator):
             raise ValueError(f"Unknown processing mode: {self.processing_mode}")
 
     def detect_peaks_sn_native(self, **kwargs):
-        """Native S/N threshold-based peak detection without peak list"""
-        log_progress(f"Starting S/N native detection (threshold={self.sn_threshold}, expected={self.expected_peak_count})")
+        """Native S/N threshold-based peak detection without peak list
 
+        Supports two modes:
+        1. Standard S/N mode: threshold = noise_level × sn_threshold
+        2. From-GUI mode: threshold = max_intensity × contour_min (absolute)
+        """
         if self.nmr_data is None:
             log_error("No NMR data loaded")
             return []
 
-        # Step 1: Estimate noise level
-        noise_level = self._estimate_noise_level_advanced()
-        signal_threshold = noise_level * self.sn_threshold
+        # Check mode: from-GUI or standard multiplier
+        if getattr(self, 'sn_from_gui_mode', False) and getattr(self, 'sn_absolute_threshold', None) is not None:
+            # FROM-GUI MODE: Use absolute threshold from contour_min
+            signal_threshold = self.sn_absolute_threshold
+            noise_level = self._estimate_noise_level_advanced()
+            effective_sn = signal_threshold / noise_level if noise_level > 0 else 0
 
-        log_info(f"Noise level: {noise_level:.2e}, S/N threshold: {self.sn_threshold}, Signal threshold: {signal_threshold:.2e}")
+            log_progress(f"Starting S/N from-GUI detection (contour_min={self.sn_contour_min_value:.3f})")
+            log_info(f"Absolute threshold: {signal_threshold:.2e}, Effective S/N: {effective_sn:.1f}")
 
-        # Step 2: Detect peaks using threshold
-        detected_peaks = self._detect_peaks_by_threshold(signal_threshold)
+            # Detect ALL peaks above threshold (ignore expected_peak_count)
+            detected_peaks = self._detect_peaks_by_threshold(signal_threshold)
+            log_info(f"S/N from-GUI detection complete: {len(detected_peaks)} peaks")
 
-        # Step 3: Apply expected count cutoff
-        if len(detected_peaks) > self.expected_peak_count:
-            # Sort by intensity and keep top N
-            detected_peaks.sort(key=lambda p: p['intensity'], reverse=True)
-            detected_peaks = detected_peaks[:self.expected_peak_count]
-            log_info(f"Applied count cutoff: {self.expected_peak_count} peaks")
+            detection_method = 'sn_from_gui'
 
-        log_info(f"S/N native detection complete: {len(detected_peaks)} peaks")
+        else:
+            # STANDARD MODE: Use noise_level × multiplier
+            log_progress(f"Starting S/N native detection (threshold={self.sn_threshold})")
 
-        # Step 4: Convert to standard format for compatibility
+            noise_level = self._estimate_noise_level_advanced()
+            signal_threshold = noise_level * self.sn_threshold
+
+            log_info(f"Noise: {noise_level:.2e}, S/N: {self.sn_threshold}, Threshold: {signal_threshold:.2e}")
+
+            detected_peaks = self._detect_peaks_by_threshold(signal_threshold)
+
+            # Apply expected count cutoff
+            if len(detected_peaks) > self.expected_peak_count:
+                detected_peaks.sort(key=lambda p: p['intensity'], reverse=True)
+                detected_peaks = detected_peaks[:self.expected_peak_count]
+                log_info(f"Applied count cutoff: {self.expected_peak_count} peaks")
+
+            log_info(f"S/N native detection complete: {len(detected_peaks)} peaks")
+            detection_method = 'sn_threshold'
+
+        # Convert to standard format
         standardized_peaks = []
         for i, peak in enumerate(detected_peaks):
             peak_data = {
@@ -3590,23 +3689,34 @@ class VoigtIntegrator(BaseIntegrator):
                 'ppm_y': peak['y_ppm'],
                 'intensity': peak['intensity'],
                 'snr': peak['snr'],
-                'detection_method': 'sn_threshold',
-                'detected': True,  # Mark as detected for GUI statistics
-                'fitted': False    # No fitting performed in S/N mode
+                'detection_method': detection_method,
+                'detected': True,
+                'fitted': False
             }
             standardized_peaks.append(peak_data)
 
-        # Step 5: Populate fitted_peaks for GUI compatibility
         self.fitted_peaks = standardized_peaks
 
-        # Step 6: Update detection statistics for GUI status display
+        # Also create peak_list DataFrame for fitting workflow compatibility
+        peak_list_data = []
+        for peak in standardized_peaks:
+            peak_list_data.append({
+                'Assignment': peak['assignment'],
+                'Position_X': peak['ppm_x'],
+                'Position_Y': peak['ppm_y'],
+                'Height': peak['intensity'],
+                'SNR': peak.get('snr', 0.0)
+            })
+        self.peak_list = pd.DataFrame(peak_list_data)
+
+        # Update statistics
         detected_count = len(standardized_peaks)
         self.detection_statistics = {
-            'total_peaks': detected_count,  # For S/N detection, all found peaks are the total
+            'total_peaks': detected_count,
             'detected_peaks': detected_count,
-            'detection_rate': 100.0,  # 100% since we're finding peaks directly
-            'reference_retained': 0,  # No reference peaks in S/N mode
-            'method': 'sn_native'
+            'detection_rate': 100.0,
+            'reference_retained': 0,
+            'method': detection_method
         }
         log_info(f"Updated detection statistics: {detected_count} peaks (100% detection rate)")
 
@@ -3617,25 +3727,61 @@ class VoigtIntegrator(BaseIntegrator):
         return self.detection_statistics.copy()
 
     def _estimate_noise_level_advanced(self):
-        """Advanced noise level estimation for S/N detection"""
+        """Advanced noise level estimation for S/N detection.
+
+        Uses only the valid detection region (manual or nucleus-adaptive).
+        """
+        if self.manual_detection_region is not None:
+            # Manual region: full override of automatic filtering
+            x_min, x_max, y_min, y_max = self.manual_detection_region
+            x_valid = (self.ppm_x_axis >= x_min) & (self.ppm_x_axis <= x_max)
+            y_valid = (self.ppm_y_axis >= y_min) & (self.ppm_y_axis <= y_max)
+        else:
+            # Automatic mode: nucleus-adaptive constraints
+            nucleus = self._detect_nucleus_type()
+
+            # Nucleus-adaptive 1H constraint
+            # 15N-HSQC: 1H >= 5.8 ppm (exclude water/aliphatic, keep amide region)
+            # 13C-HSQC: 1H <= 2.75 ppm (exclude downfield, keep aliphatic region)
+            if nucleus == '15N':
+                x_valid = self.ppm_x_axis >= 5.8
+            elif nucleus == '13C':
+                x_valid = self.ppm_x_axis <= 2.75
+            else:
+                x_valid = np.ones(len(self.ppm_x_axis), dtype=bool)
+
+            # Exclude Y-dimension edges (0.5 ppm margin)
+            Y_EDGE_MARGIN = 0.5
+            y_min_edge, y_max_edge = self.ppm_y_axis.min(), self.ppm_y_axis.max()
+            y_valid = (self.ppm_y_axis >= y_min_edge + Y_EDGE_MARGIN) & (self.ppm_y_axis <= y_max_edge - Y_EDGE_MARGIN)
+
+        # Extract valid region
+        valid_data = self.nmr_data[np.ix_(y_valid, x_valid)]
+
         if self.sn_detection_params['noise_estimation'] == 'corners':
-            # Use corner regions (more reliable for 2D NMR)
-            h, w = self.nmr_data.shape
+            # Use corner regions of the VALID area
+            h, w = valid_data.shape
             corner_size = min(20, h//20, w//20)
 
-            corners = [
-                self.nmr_data[:corner_size, :corner_size],
-                self.nmr_data[:corner_size, -corner_size:],
-                self.nmr_data[-corner_size:, :corner_size],
-                self.nmr_data[-corner_size:, -corner_size:]
-            ]
-
-            noise_data = np.concatenate([corner.flatten() for corner in corners])
-            noise_level = np.std(noise_data)
+            if corner_size < 5:
+                # Fallback to MAD if corners too small
+                flattened = valid_data.flatten()
+                median = np.median(flattened)
+                mad = np.median(np.abs(flattened - median))
+                noise_level = mad * 1.4826
+            else:
+                corners = [
+                    valid_data[:corner_size, :corner_size],
+                    valid_data[:corner_size, -corner_size:],
+                    valid_data[-corner_size:, :corner_size],
+                    valid_data[-corner_size:, -corner_size:]
+                ]
+                noise_data = np.concatenate([corner.flatten() for corner in corners])
+                noise_level = np.std(noise_data)
 
         else:  # median-based estimation
             # Use median absolute deviation (more robust to outliers)
-            flattened = self.nmr_data.flatten()
+            flattened = valid_data.flatten()
             median = np.median(flattened)
             mad = np.median(np.abs(flattened - median))
             noise_level = mad * 1.4826  # Convert MAD to std equivalent
@@ -3785,6 +3931,33 @@ class VoigtIntegrator(BaseIntegrator):
         # Apply threshold to identify peak regions
         peak_mask = self.nmr_data > signal_threshold
 
+        if self.manual_detection_region is not None:
+            # Manual region: full override of automatic filtering
+            x_min, x_max, y_min, y_max = self.manual_detection_region
+            x_valid = (self.ppm_x_axis >= x_min) & (self.ppm_x_axis <= x_max)
+            y_valid = (self.ppm_y_axis >= y_min) & (self.ppm_y_axis <= y_max)
+            peak_mask = peak_mask & x_valid[np.newaxis, :]
+            peak_mask = peak_mask & y_valid[:, np.newaxis]
+        else:
+            # Automatic mode: nucleus-adaptive constraints
+            nucleus = self._detect_nucleus_type()
+
+            # Nucleus-adaptive 1H constraint
+            # 15N-HSQC: 1H >= 5.8 ppm (exclude water/aliphatic, keep amide region)
+            # 13C-HSQC: 1H <= 2.75 ppm (exclude downfield, keep aliphatic region)
+            if nucleus == '15N':
+                x_valid = self.ppm_x_axis >= 5.8
+                peak_mask = peak_mask & x_valid[np.newaxis, :]
+            elif nucleus == '13C':
+                x_valid = self.ppm_x_axis <= 2.75
+                peak_mask = peak_mask & x_valid[np.newaxis, :]
+
+            # Exclude Y-dimension edges (0.5 ppm margin from spectrum boundaries)
+            Y_EDGE_MARGIN = 0.5
+            y_min_edge, y_max_edge = self.ppm_y_axis.min(), self.ppm_y_axis.max()
+            y_valid = (self.ppm_y_axis >= y_min_edge + Y_EDGE_MARGIN) & (self.ppm_y_axis <= y_max_edge - Y_EDGE_MARGIN)
+            peak_mask = peak_mask & y_valid[:, np.newaxis]
+
         # Use local maxima to find individual peaks
         local_maxima = maximum_filter(self.nmr_data, size=3) == self.nmr_data
         peak_candidates = peak_mask & local_maxima
@@ -3910,6 +4083,11 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             'multi_resolution_detection': True,
             'quality_filtering': True,
         }
+
+        # S/N from-GUI mode parameters
+        self.sn_from_gui_mode = False
+        self.sn_absolute_threshold = None
+        self.sn_contour_min_value = None
 
     def get_statistics(self):
         """Get processing statistics"""
@@ -4128,14 +4306,27 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             # Get peak positions from original result
             peak_position = voigt2d_result.get('peak_position', (center_x, center_y))
 
-            # CRITICAL FIX: Calculate proper height using PS2D formula
-            # For single peak 1D fits, calculate height from fitted Voigt parameters
-            # Height = maximum value at peak center, not amplitude
-            from lunaNMR.core.ps2d_2d_fitter import calculate_peak_height
+            # CRITICAL: Preserve volume/height/intensity from PS2D if already present
+            # These values come directly from fit_peak_voigt_2d which gets them from ps2d_2d_fitter
+            # Only calculate if not present (legacy fallback)
+            if 'volume' in voigt2d_result:
+                volume = voigt2d_result['volume']
+            else:
+                # Legacy fallback: approximate volume
+                volume = amplitude * width * np.pi
 
-            # Calculate proper height (maximum value at peak center)
-            # Note: calculate_peak_height expects (lw_lor_f1, lw_gau_f1, lw_lor_f2, lw_gau_f2, intensity)
-            height = calculate_peak_height(gamma_y, sigma_y, gamma_x, sigma_x, amplitude)
+            if 'height' in voigt2d_result:
+                height = voigt2d_result['height']
+            else:
+                # Legacy fallback: calculate height using PS2D formula
+                from lunaNMR.core.ps2d_2d_fitter import calculate_peak_height
+                height = calculate_peak_height(gamma_y, sigma_y, gamma_x, sigma_x, amplitude)
+
+            if 'amplitude' in voigt2d_result:
+                amplitude = voigt2d_result['amplitude']
+
+            # For PS2D, intensity = volume (normalized Voigt integral)
+            intensity = volume
 
             # Create flat result dictionary
             avg_r2 = voigt2d_result.get('avg_r_squared', 0)
@@ -4144,10 +4335,11 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
                 'peak_x': peak_position[0],
                 'peak_y': peak_position[1],
                 'amplitude': amplitude,
-                'volume': amplitude * width * np.pi,  # Approximate volume
+                'intensity': intensity,  # Same as volume for normalized Voigt
+                'volume': volume,
                 'avg_r_squared': avg_r2,
                 'r_squared': avg_r2,  # Alias for GUI compatibility
-                'height': height,  # FIXED: Use calculated height instead of amplitude
+                'height': height,
                 'width': width,
                 'sigma': sigma_x,
                 'gamma': gamma_x,
@@ -4182,6 +4374,20 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             # Preserve detected_intensity (from peak detection, before fitting)
             if 'detected_intensity' in voigt2d_result:
                 result['detected_intensity'] = voigt2d_result['detected_intensity']
+
+            # Preserve chi2 and iterations from PS2D fitting
+            if 'chi2' in voigt2d_result:
+                result['chi2'] = voigt2d_result['chi2']
+            if 'iterations' in voigt2d_result:
+                result['iterations'] = voigt2d_result['iterations']
+
+            # Preserve convergence flags from PS2D fitting
+            if 'formal_convergence' in voigt2d_result:
+                result['formal_convergence'] = voigt2d_result['formal_convergence']
+            if 'pragmatic_acceptance' in voigt2d_result:
+                result['pragmatic_acceptance'] = voigt2d_result['pragmatic_acceptance']
+            if 'chi2_reduction_success' in voigt2d_result:
+                result['chi2_reduction_success'] = voigt2d_result['chi2_reduction_success']
 
             return result
 

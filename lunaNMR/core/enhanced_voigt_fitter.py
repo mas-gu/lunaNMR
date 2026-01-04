@@ -3208,9 +3208,9 @@ class EnhancedVoigtFitter:
                 enable_adaptive = True  # Default: ON
                 if parent_integrator and hasattr(parent_integrator, 'gui_params'):
                     enable_adaptive = parent_integrator.gui_params.get('use_adaptive_optimization', True)
-
                 log_progress(f"Using parallel Voigt fitting for {len(peak_list)} peaks")
                 parallel_processor = ParallelVoigtProcessor(self, enable_adaptive=enable_adaptive)
+                self.parallel_processor = parallel_processor  # Store for ML training data collection
 
                 # Pass series_params if available (for subsequent spectra in series)
                 if hasattr(self, 'series_params') and self.series_params is not None:
@@ -3251,6 +3251,13 @@ class EnhancedVoigtFitter:
         Sequential processing fallback that calls existing enhanced_peak_fitting
         method for each peak individually.
         """
+        # Build detection info lookup from fitted_peaks if available
+        fitted_peaks_by_pos = {}
+        if parent_integrator and hasattr(parent_integrator, 'fitted_peaks'):
+            for fp in parent_integrator.fitted_peaks:
+                key = (fp.get('ppm_x', 0), fp.get('ppm_y', 0))
+                fitted_peaks_by_pos[key] = fp
+
         results = []
 
         for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
@@ -3264,6 +3271,19 @@ class EnhancedVoigtFitter:
                 if result:
                     result['processing_mode'] = 'sequential'
                     result['peak_number'] = i + 1
+
+                    # Add detection fields from fitted_peaks if available
+                    for (fp_x, fp_y), fp_data in fitted_peaks_by_pos.items():
+                        if abs(fp_x - peak_x) < 0.001 and abs(fp_y - peak_y) < 0.01:
+                            result['detected'] = fp_data.get('detected', True)
+                            result['detection_quality'] = fp_data.get('detection_quality', 'Matched')
+                            result['distance_from_reference'] = fp_data.get('distance_from_reference', 0)
+                            result['distance_from_reference_x'] = fp_data.get('distance_from_reference_x', 0)
+                            result['distance_from_reference_y'] = fp_data.get('distance_from_reference_y', 0)
+                            result['distance_from_reference_elliptical'] = fp_data.get('distance_from_reference_elliptical', 0)
+                            result['reference_retained'] = fp_data.get('reference_retained', False)
+                            break
+
                     results.append(result)
 
                 if progress_callback:

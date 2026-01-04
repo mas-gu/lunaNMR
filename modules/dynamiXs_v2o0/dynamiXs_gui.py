@@ -263,6 +263,153 @@ class DynamiXsMainWindow(QMainWindow):
             os.chdir(new_dir)
             self.dir_label.setText(f"Working Directory: {self.current_dir}")
 
+    def get_state(self) -> dict:
+        """Get complete DynamiXs state for project saving.
+
+        Collects state from all pages including field data, session results,
+        and source_series_map for series-based data.
+        """
+        state = {
+            't1t2': {},
+            'spectral_density': {},
+            'model_free': {},
+        }
+
+        # T1/T2 Fitting page state
+        if hasattr(self, 't1t2_page'):
+            page = self.t1t2_page
+            state['t1t2'] = {
+                'session_results': getattr(page, 'session_results', {}),
+                'fitted_experiments': getattr(page, 'fitted_experiments', []),
+                'output_dir': getattr(page, 'output_dir', None),
+                'field2_enabled': getattr(page, 'field2_enabled', False),
+                'source_series_map': getattr(page, 'source_series_map', {}),
+                # Field frequencies
+                'field1_freq': page.field1_freq_spin.value() if hasattr(page, 'field1_freq_spin') else 600.0,
+                'field2_freq': page.field2_freq_spin.value() if hasattr(page, 'field2_freq_spin') else 700.0,
+            }
+
+        # Spectral Density page state
+        if hasattr(self, 'spectral_page'):
+            page = self.spectral_page
+            state['spectral_density'] = {
+                'session_results': getattr(page, 'session_results', {}),
+                'output_dir': getattr(page, 'output_dir', None),
+                'source_series_map': getattr(page, 'source_series_map', {}),
+            }
+
+        # Model Free / Integrated Analysis page state
+        if hasattr(self, 'integrated_page'):
+            page = self.integrated_page
+            state['model_free'] = {
+                'session_results': getattr(page, 'session_results', {}),
+                'output_dir': getattr(page, 'output_dir', None),
+                'source_series_map': getattr(page, 'source_series_map', {}),
+            }
+
+        return state
+
+    def get_file_refs(self) -> dict:
+        """Get file references from all pages for project saving.
+
+        Returns dict of all file paths used by DynamiXs pages.
+        """
+        file_refs = {
+            't1t2': {},
+            'spectral_density': {},
+            'model_free': {},
+        }
+
+        # T1/T2 Fitting page file refs
+        if hasattr(self, 't1t2_page'):
+            page = self.t1t2_page
+            file_refs['t1t2'] = {
+                'field1_t1_file': getattr(page, 'field1_t1_file', None),
+                'field1_t2_file': getattr(page, 'field1_t2_file', None),
+                'field1_t1rho_file': getattr(page, 'field1_t1rho_file', None),
+                'field2_t1_file': getattr(page, 'field2_t1_file', None),
+                'field2_t2_file': getattr(page, 'field2_t2_file', None),
+                'field2_t1rho_file': getattr(page, 'field2_t1rho_file', None),
+                'peak_list_file': getattr(page, 'peak_list_file', None),
+            }
+
+        # Spectral Density page file refs
+        if hasattr(self, 'spectral_page'):
+            page = self.spectral_page
+            file_refs['spectral_density'] = {
+                'field1_t1_file': getattr(page, 'field1_t1_file', None),
+                'field1_t2_file': getattr(page, 'field1_t2_file', None),
+                'field1_noe_sat_file': getattr(page, 'field1_noe_sat_file', None),
+                'field1_noe_unsat_file': getattr(page, 'field1_noe_unsat_file', None),
+                'field2_t1_file': getattr(page, 'field2_t1_file', None),
+                'field2_t2_file': getattr(page, 'field2_t2_file', None),
+                'field2_noe_sat_file': getattr(page, 'field2_noe_sat_file', None),
+                'field2_noe_unsat_file': getattr(page, 'field2_noe_unsat_file', None),
+            }
+
+        return file_refs
+
+    def restore_state(self, state: dict, file_refs: dict):
+        """Restore DynamiXs state from project load.
+
+        Args:
+            state: State dict from get_state()
+            file_refs: File refs dict from get_file_refs()
+        """
+        # Restore T1/T2 Fitting page
+        if hasattr(self, 't1t2_page') and 't1t2' in state:
+            page = self.t1t2_page
+            t1t2_state = state['t1t2']
+            t1t2_refs = file_refs.get('t1t2', {})
+
+            # Restore session results
+            if 'session_results' in t1t2_state:
+                page.session_results = t1t2_state['session_results']
+            if 'fitted_experiments' in t1t2_state:
+                page.fitted_experiments = t1t2_state['fitted_experiments']
+            if 'output_dir' in t1t2_state:
+                page.output_dir = t1t2_state['output_dir']
+            if 'field2_enabled' in t1t2_state:
+                page.field2_enabled = t1t2_state['field2_enabled']
+            if 'source_series_map' in t1t2_state:
+                page.source_series_map = t1t2_state['source_series_map']
+
+            # Restore frequencies
+            if hasattr(page, 'field1_freq_spin') and 'field1_freq' in t1t2_state:
+                page.field1_freq_spin.setValue(t1t2_state['field1_freq'])
+            if hasattr(page, 'field2_freq_spin') and 'field2_freq' in t1t2_state:
+                page.field2_freq_spin.setValue(t1t2_state['field2_freq'])
+
+            # Restore file references and update displays
+            for attr in ['field1_t1_file', 'field1_t2_file', 'field1_t1rho_file',
+                        'field2_t1_file', 'field2_t2_file', 'field2_t1rho_file',
+                        'peak_list_file']:
+                if attr in t1t2_refs and t1t2_refs[attr]:
+                    setattr(page, attr, t1t2_refs[attr])
+
+            # Update displays for field data
+            page._update_field_displays()
+
+        # Restore Spectral Density page
+        if hasattr(self, 'spectral_page') and 'spectral_density' in state:
+            page = self.spectral_page
+            sd_state = state['spectral_density']
+            sd_refs = file_refs.get('spectral_density', {})
+
+            if 'session_results' in sd_state:
+                page.session_results = sd_state['session_results']
+            if 'output_dir' in sd_state:
+                page.output_dir = sd_state['output_dir']
+            if 'source_series_map' in sd_state:
+                page.source_series_map = sd_state['source_series_map']
+
+            # Restore file references
+            for attr in ['field1_t1_file', 'field1_t2_file', 'field1_noe_sat_file',
+                        'field1_noe_unsat_file', 'field2_t1_file', 'field2_t2_file',
+                        'field2_noe_sat_file', 'field2_noe_unsat_file']:
+                if attr in sd_refs and sd_refs[attr]:
+                    setattr(page, attr, sd_refs[attr])
+
 
 # =============================================================================
 # BASE PAGE CLASS
@@ -518,6 +665,7 @@ class T1T2FittingPage(BasePage):
         """Get list of available series from lunaNMR project.
 
         Returns list of dicts with 'name' and 'csv_path' keys.
+        Uses csv_path from BatchResults metadata (stored when series was created).
         """
         series_list = []
 
@@ -532,22 +680,71 @@ class T1T2FittingPage(BasePage):
         # Get saved_series from lunaNMR main window
         saved_series = getattr(lunaNMR_main, 'saved_series', {}) or {}
 
-        # Get project path to find CSV files
+        # Get project path for fallback
         project_path = getattr(lunaNMR_main, 'current_project_path', None)
 
-        for series_name in saved_series.keys():
+        for series_name, batch_results in saved_series.items():
             csv_path = ""
-            # Try to find series_analysis_tidy.csv for this series
-            if project_path:
-                tidy_csv = Path(project_path) / ".lunaNMR" / "series_results" / series_name / "series_analysis_tidy.csv"
-                if tidy_csv.exists():
-                    csv_path = str(tidy_csv)
+
+            # Primary: use csv_path from metadata (stored when series was created)
+            if hasattr(batch_results, 'metadata') and batch_results.metadata.get('csv_path'):
+                csv_path = batch_results.metadata['csv_path']
+
+            # Fallback 1: construct from output_folder
+            if not csv_path and hasattr(batch_results, 'metadata') and batch_results.metadata.get('output_folder'):
+                csv_path = os.path.join(batch_results.metadata['output_folder'], "series_analysis_tidy.csv")
+
+            # Fallback 2: project path .lunaNMR/series_results/{series_name}/
+            if not csv_path and project_path:
+                csv_path = str(Path(project_path) / ".lunaNMR" / "series_results" / series_name / "series_analysis_tidy.csv")
+
             series_list.append({
                 'name': series_name,
                 'csv_path': csv_path
             })
 
         return series_list
+
+    def _get_fitting_dataframe_from_series(self, series_name: str):
+        """Get fitting DataFrame from BatchResults in memory.
+
+        Accesses lunaNMR's saved_series to get BatchResults and calls
+        to_fitting_dataframe() to generate the pivot format needed for T1/T2 fitting.
+
+        Args:
+            series_name: Name of the series to retrieve
+
+        Returns:
+            DataFrame in fitting format (Assignment + delay columns), or None if not found
+        """
+        # Access lunaNMR main window through DynamiXsDialog
+        lunaNMR_main = None
+        if hasattr(self.main_window, 'main_window'):
+            lunaNMR_main = self.main_window.main_window
+
+        if not lunaNMR_main:
+            return None
+
+        # Get saved_series from lunaNMR main window
+        saved_series = getattr(lunaNMR_main, 'saved_series', {}) or {}
+
+        if series_name not in saved_series:
+            return None
+
+        batch_results = saved_series[series_name]
+
+        # Check if BatchResults has the to_fitting_dataframe method
+        if not hasattr(batch_results, 'to_fitting_dataframe'):
+            return None
+
+        try:
+            fitting_df = batch_results.to_fitting_dataframe(value_column='volume')
+            if fitting_df.empty:
+                return None
+            return fitting_df
+        except Exception as e:
+            print(f"Error generating fitting DataFrame from series '{series_name}': {e}")
+            return None
 
     def _populate_series_list(self):
         """Populate the series list widget with available series."""
@@ -586,12 +783,25 @@ class T1T2FittingPage(BasePage):
         # Set the file path
         if csv_path:
             setattr(self, f"{field_name}_file", csv_path)
+        else:
+            # CSV path not found - warn user
+            show_warning(
+                self,
+                "CSV Not Found",
+                f"Could not find series_analysis_tidy.csv for series '{series_name}'.\n\n"
+                "The series was saved but the CSV output file could not be located.\n"
+                "Please use the Browse button to select the CSV file manually."
+            )
 
         # Update the display
         display = getattr(self, f"{field_name}_display", None)
         if display:
-            display.setText(f"📊 {series_name}")
-            display.setToolTip(f"Series: {series_name}\nCSV: {csv_path}")
+            if csv_path:
+                display.setText(f"📊 {series_name}")
+                display.setToolTip(f"Series: {series_name}\nCSV: {csv_path}")
+            else:
+                display.setText(f"⚠️ {series_name} (CSV not found)")
+                display.setToolTip(f"Series: {series_name}\nCSV: Not found - use Browse to select")
 
         # Store source_series metadata for later use in Inspect Peak
         if not hasattr(self, 'source_series_map'):
@@ -603,6 +813,50 @@ class T1T2FittingPage(BasePage):
             self.results_text.appendPlainText(
                 f"Assigned series '{series_name}' to {field_name.replace('_', ' ').title()}"
             )
+
+    def _update_field_displays(self):
+        """Update field display widgets after state restore.
+
+        Called after loading a project to show the assigned files/series
+        in the UI displays.
+        """
+        source_series_map = getattr(self, 'source_series_map', {})
+
+        # Field mapping: attribute name -> display widget attribute
+        field_mappings = [
+            ('field1_t1', 'field1_t1_display'),
+            ('field1_t2', 'field1_t2_display'),
+            ('field1_t1rho', 'field1_t1rho_display'),
+            ('field2_t1', 'field2_t1_display'),
+            ('field2_t2', 'field2_t2_display'),
+            ('field2_t1rho', 'field2_t1rho_display'),
+        ]
+
+        for field_key, display_attr in field_mappings:
+            file_attr = f"{field_key}_file"
+            file_path = getattr(self, file_attr, None)
+            display = getattr(self, display_attr, None)
+
+            if display is None:
+                continue
+
+            # Check if this field was set from a series
+            series_name = source_series_map.get(field_key)
+            if series_name:
+                display.setText(f"📊 {series_name}")
+                display.setToolTip(f"Series: {series_name}\nFile: {file_path or 'In memory'}")
+            elif file_path:
+                # Show filename only
+                display.setText(os.path.basename(file_path))
+                display.setToolTip(file_path)
+            else:
+                display.setText("No file selected")
+                display.setToolTip("")
+
+        # Update output directory display
+        if hasattr(self, 'outdir_display') and self.output_dir:
+            self.outdir_display.setText(os.path.basename(self.output_dir))
+            self.outdir_display.setToolTip(self.output_dir)
 
     def _toggle_field2(self):
         """Enable or disable Field 2 data section."""
@@ -1162,18 +1416,36 @@ class T1T2FittingPage(BasePage):
             self._run_all_analyses(field_name)
             return
 
-        # Determine experiment type and input file
+        # Determine experiment type and get data source
         if "T1ρ" in selection:
             exp_type = "T1rho"
-            input_file = getattr(self, f"{field_name}_t1rho_file", None)
+            data_field_key = f"{field_name}_t1rho"
         elif "T2" in selection:
             exp_type = "T2"
-            input_file = getattr(self, f"{field_name}_t2_file", None)
+            data_field_key = f"{field_name}_t2"
         else:  # T1
             exp_type = "T1"
-            input_file = getattr(self, f"{field_name}_t1_file", None)
+            data_field_key = f"{field_name}_t1"
 
-        if not input_file:
+        # Try to get data from memory (series) first, then fall back to file path
+        input_df = None
+        input_file = None
+        series_name = None
+
+        # Check if data was set from a series (memory-based)
+        source_series_map = getattr(self, 'source_series_map', {})
+        if data_field_key in source_series_map:
+            series_name = source_series_map[data_field_key]
+            # Try to get BatchResults from lunaNMR's saved_series
+            input_df = self._get_fitting_dataframe_from_series(series_name)
+            if input_df is not None:
+                self.results_text.appendPlainText(f"Using data from series '{series_name}' in memory")
+
+        # Fall back to file path if no memory data
+        if input_df is None:
+            input_file = getattr(self, f"{data_field_key}_file", None)
+
+        if input_df is None and not input_file:
             show_error(self, "Error", f"Please select a {exp_type} data file for {field_name.replace('field', 'Field ')}.")
             return
 
@@ -1187,9 +1459,9 @@ class T1T2FittingPage(BasePage):
         # Determine error method from dropdown
         error_method = "bootstrap" if self.error_method_combo.currentIndex() == 1 else "analytical"
 
-        # Create parameters
+        # Create parameters (input_df takes priority over input_file)
         params = T1T2FittingParams(
-            input_file=input_file,
+            input_file=input_file or "",
             output_dir=output_dir,
             experiment_type=exp_type,
             results_prefix=f"{field_name}_{self.prefix_edit.text()}",
@@ -1200,7 +1472,9 @@ class T1T2FittingPage(BasePage):
             error_method=error_method,
             json_folder=json_folder,
             field_name=field_name,
-            field_freq=field_freq
+            field_freq=field_freq,
+            input_df=input_df,
+            series_name=series_name or ""
         )
 
         # Show progress bar and reset
@@ -1780,6 +2054,9 @@ class T1T2FittingPage(BasePage):
             'field2_t2_file': self.field2_t2_file,
             'field2_t1rho_file': self.field2_t1rho_file,
 
+            # Source series mapping (for memory-based data from lunaNMR)
+            'source_series_map': getattr(self, 'source_series_map', {}),
+
             # UI settings
             'field1_freq': self.field1_freq_spin.value(),
             'field2_freq': self.field2_freq_spin.value(),
@@ -1817,30 +2094,17 @@ class T1T2FittingPage(BasePage):
         self.field1_t2_file = state.get('field1_t2_file')
         self.field1_t1rho_file = state.get('field1_t1rho_file')
 
-        # Update Field 1 displays
-        if self.field1_t1_file:
-            self.field1_t1_display.setText(os.path.basename(self.field1_t1_file))
-        if self.field1_t2_file:
-            self.field1_t2_display.setText(os.path.basename(self.field1_t2_file))
-        if self.field1_t1rho_file:
-            self.field1_t1rho_display.setText(os.path.basename(self.field1_t1rho_file))
-
         # Restore Field 2 settings
         self.field2_t1_file = state.get('field2_t1_file')
         self.field2_t2_file = state.get('field2_t2_file')
         self.field2_t1rho_file = state.get('field2_t1rho_file')
 
+        # Restore source series mapping (for memory-based data)
+        self.source_series_map = state.get('source_series_map', {})
+
         # Enable Field 2 if it was enabled
         if state.get('field2_enabled', False) and not self.field2_enabled:
             self._toggle_field2()
-
-        # Update Field 2 displays
-        if self.field2_t1_file:
-            self.field2_t1_display.setText(os.path.basename(self.field2_t1_file))
-        if self.field2_t2_file:
-            self.field2_t2_display.setText(os.path.basename(self.field2_t2_file))
-        if self.field2_t1rho_file:
-            self.field2_t1rho_display.setText(os.path.basename(self.field2_t1rho_file))
 
         # Restore UI settings
         self.field1_freq_spin.setValue(state.get('field1_freq', 600.0))
@@ -1873,6 +2137,9 @@ class T1T2FittingPage(BasePage):
 
         # Update status indicators
         self._update_status_indicators()
+
+        # Update field displays (handles both series and file paths)
+        self._update_field_displays()
 
     def _browse_t1_file(self):
         """Browse for T1 results CSV file."""
@@ -2860,6 +3127,7 @@ class IntegratedAnalysisPage(BasePage):
         """Get list of available series from lunaNMR project.
 
         Returns list of dicts with 'name' and 'csv_path' keys.
+        Uses csv_path from BatchResults metadata (stored when series was created).
         """
         series_list = []
 
@@ -2874,16 +3142,24 @@ class IntegratedAnalysisPage(BasePage):
         # Get saved_series from lunaNMR main window
         saved_series = getattr(lunaNMR_main, 'saved_series', {}) or {}
 
-        # Get project path to find CSV files
+        # Get project path for fallback
         project_path = getattr(lunaNMR_main, 'current_project_path', None)
 
-        for series_name in saved_series.keys():
+        for series_name, batch_results in saved_series.items():
             csv_path = ""
-            # Try to find series_analysis_tidy.csv for this series
-            if project_path:
-                tidy_csv = Path(project_path) / ".lunaNMR" / "series_results" / series_name / "series_analysis_tidy.csv"
-                if tidy_csv.exists():
-                    csv_path = str(tidy_csv)
+
+            # Primary: use csv_path from metadata (stored when series was created)
+            if hasattr(batch_results, 'metadata') and batch_results.metadata.get('csv_path'):
+                csv_path = batch_results.metadata['csv_path']
+
+            # Fallback 1: construct from output_folder
+            if not csv_path and hasattr(batch_results, 'metadata') and batch_results.metadata.get('output_folder'):
+                csv_path = os.path.join(batch_results.metadata['output_folder'], "series_analysis_tidy.csv")
+
+            # Fallback 2: project path .lunaNMR/series_results/{series_name}/
+            if not csv_path and project_path:
+                csv_path = str(Path(project_path) / ".lunaNMR" / "series_results" / series_name / "series_analysis_tidy.csv")
+
             series_list.append({
                 'name': series_name,
                 'csv_path': csv_path
@@ -2928,12 +3204,25 @@ class IntegratedAnalysisPage(BasePage):
         # Set the file path
         if csv_path:
             setattr(self, f"{field_name}_file", csv_path)
+        else:
+            # CSV path not found - warn user
+            show_warning(
+                self,
+                "CSV Not Found",
+                f"Could not find series_analysis_tidy.csv for series '{series_name}'.\n\n"
+                "The series was saved but the CSV output file could not be located.\n"
+                "Please use the Browse button to select the CSV file manually."
+            )
 
         # Update the display
         display = getattr(self, f"{field_name}_display", None)
         if display:
-            display.setText(f"📊 {series_name}")
-            display.setToolTip(f"Series: {series_name}\nCSV: {csv_path}")
+            if csv_path:
+                display.setText(f"📊 {series_name}")
+                display.setToolTip(f"Series: {series_name}\nCSV: {csv_path}")
+            else:
+                display.setText(f"⚠️ {series_name} (CSV not found)")
+                display.setToolTip(f"Series: {series_name}\nCSV: Not found - use Browse to select")
 
         # Store source_series metadata for later use in Inspect Peak
         if not hasattr(self, 'source_series_map'):

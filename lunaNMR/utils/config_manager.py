@@ -95,6 +95,16 @@ class ConfigurationManager:
                 "model_selection_criterion": "BIC",
                 "cv_threshold": 0.2,
                 "amplitude_correlation_threshold": 0.7
+            },
+            "ml_learning": {
+                "enabled": True,  # Master switch for ML features
+                "use_predictions": True,  # Use ML to predict parameters
+                "collect_training_data": True,  # Learn from processing
+                "use_statistical_fallback": True,  # Use stats when ML unavailable
+                "ml_confidence_threshold": 0.6,  # Min confidence to use ML prediction
+                "stats_confidence_threshold": 0.4,  # Min confidence for stats prediction
+                "min_r2_for_training": 0.80,  # Min R² to collect as training data
+                "show_predictions_in_log": True  # Log ML predictions to output
             }
         }
 

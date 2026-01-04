@@ -174,6 +174,25 @@ class InPlaceAdvancedNMRIntegrator:
         self.use_custom_noise_regions = True
         print(f"Custom noise regions set: {len(regions_ppm)} regions")
 
+    def _detect_nmr_format(self, file_path):
+        """Detect NMR file format from file path.
+
+        Returns:
+            'bruker_pdata': Bruker processed data (2rr, 2ri, 2ir, 2ii, 1r, 1i)
+            'pipe': NMRPipe format (.ft, .ft2, .pipe, etc.)
+        """
+        basename = os.path.basename(file_path)
+
+        # Bruker processed data files (no extension, specific names)
+        bruker_pdata_names = (
+            '2rr', '2ri', '2ir', '2ii', '1r', '1i',
+            '3rrr', '3rri', '3rir', '3rii', '3irr', '3iri', '3iir', '3iii'
+        )
+        if basename in bruker_pdata_names:
+            return 'bruker_pdata'
+
+        return 'pipe'
+
     def load_data(self, peak_list_file, nmr_file):
         """Load peak list and NMR data"""
         # Load peak list
@@ -187,8 +206,20 @@ class InPlaceAdvancedNMRIntegrator:
 
         # Load NMR data
         try:
-            self.nmr_dict, self.nmr_data = ng.pipe.read(nmr_file)
-            print(f"Loaded NMR data: {self.nmr_data.shape} from {nmr_file}")
+            # Detect format and load accordingly
+            file_format = self._detect_nmr_format(nmr_file)
+
+            if file_format == 'bruker_pdata':
+                # Bruker processed data - use parent directory
+                pdata_dir = os.path.dirname(nmr_file)
+                self.nmr_dict, self.nmr_data = ng.bruker.read_pdata(dir=pdata_dir)
+                self._nmr_format = 'bruker'
+                print(f"Loaded Bruker pdata: {self.nmr_data.shape} from {pdata_dir}")
+            else:
+                # NMRPipe format (default)
+                self.nmr_dict, self.nmr_data = ng.pipe.read(nmr_file)
+                self._nmr_format = 'pipe'
+                print(f"Loaded NMR data: {self.nmr_data.shape} from {nmr_file}")
 
             # Calculate PPM axes
             self._calculate_ppm_axes()
@@ -204,15 +235,24 @@ class InPlaceAdvancedNMRIntegrator:
     def _calculate_ppm_axes(self):
         """Calculate proper PPM axes using nmrglue's built-in conversion"""
         try:
-            # Use nmrglue's proper PPM conversion which handles NMRPipe parameters correctly
-            uc_f2 = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=1)  # F2 dimension (1H)
-            uc_f1 = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=0)  # F1 dimension (15N/13C)
+            nmr_format = getattr(self, '_nmr_format', 'pipe')
+
+            if nmr_format == 'bruker':
+                # Bruker: use universal dictionary approach
+                # strip_fake=True is required for processed data to get correct SW from procs
+                udic = ng.bruker.guess_udic(self.nmr_dict, self.nmr_data, strip_fake=True)
+                uc_f2 = ng.fileiobase.uc_from_udic(udic, dim=1)  # F2 / 1H
+                uc_f1 = ng.fileiobase.uc_from_udic(udic, dim=0)  # F1 / 15N/13C
+            else:
+                # NMRPipe: use pipe-specific conversion
+                uc_f2 = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=1)  # F2 dimension (1H)
+                uc_f1 = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=0)  # F1 dimension (15N/13C)
 
             # Get the full PPM scales
             f2_ppm_scale = uc_f2.ppm_scale()
             f1_ppm_scale = uc_f1.ppm_scale()
 
-            # Create PPM axes (nmrglue handles all the complex NMRPipe parameter conversion)
+            # Create PPM axes (nmrglue handles all the complex parameter conversion)
             self.ppm_x_axis = f2_ppm_scale
             self.ppm_y_axis = f1_ppm_scale
             self._using_fallback_ppm_axes = False

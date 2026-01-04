@@ -650,6 +650,8 @@ class ProjectManager:
             return int(obj)
         if isinstance(obj, np.floating):
             return float(obj)
+        if isinstance(obj, (np.bool_, bool)):
+            return bool(obj)
         if isinstance(obj, Path):
             return str(obj)
         # Handle mock objects (for testing) - serialize as None

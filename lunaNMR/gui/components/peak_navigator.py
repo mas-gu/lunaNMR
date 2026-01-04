@@ -585,6 +585,7 @@ class PeakNavigator(QWidget):
             return
 
         try:
+            import os
             from datetime import datetime
             from PySide6.QtWidgets import QFileDialog
 
@@ -592,11 +593,22 @@ class PeakNavigator(QWidget):
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             default_filename = f"detected_peaks_{timestamp}.txt"
 
+            # Try to get spectrum directory as default save location
+            default_dir = ""
+            main_window = self.window()
+            if hasattr(main_window, 'integrator') and main_window.integrator:
+                nmr_path = getattr(main_window.integrator, 'nmr_file_path', None)
+                if nmr_path and os.path.exists(nmr_path):
+                    default_dir = os.path.dirname(nmr_path)
+
+            # Combine directory and filename
+            default_path = os.path.join(default_dir, default_filename) if default_dir else default_filename
+
             # Open file dialog for saving
             filename, _ = QFileDialog.getSaveFileName(
                 self,
                 "Export Detected Peak List",
-                default_filename,
+                default_path,
                 "Text files (*.txt);;CSV files (*.csv);;All files (*.*)"
             )
 

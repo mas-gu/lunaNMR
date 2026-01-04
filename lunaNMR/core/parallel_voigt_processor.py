@@ -81,6 +81,13 @@ class ParallelVoigtProcessor:
         self.optimal_params = None  # Stores grid search optimization results
         self.series_params = None   # Locked params for series integration
 
+        # Intermediate results for ML training data collection
+        self.timing_info = {}       # Timing for each processing phase
+        self.cluster_info = {}      # Clustering information
+        self.pass1_results = None   # PASS1 (isolated) results
+        self.pass1bis_results = None  # PASS1-bis (refit) results
+        self.pass2_results = None   # PASS2 (multi-peak) results
+
         # Configure worker processes
         if max_workers is None:
             self.max_workers = max(1, int(cpu_count() * 0.75))
@@ -141,19 +148,54 @@ class ParallelVoigtProcessor:
             log_info(f"Per-peak linewidth reuse enabled: {len(reference_linewidths)} reference linewidths")
         start_time = time.time()
 
+        # Reset intermediate results for ML training data collection
+        self.timing_info = {'total': 0, 'pass1': 0, 'adaptive': 0, 'pass1bis': 0, 'pass2': 0}
+        self.cluster_info = {}
+        self.pass1_results = None
+        self.pass1bis_results = None
+        self.pass2_results = None
+
         try:
             # STEP 1: Build all_peaks_context (identical to sequential mode)
+            # Include detection fields from fitted_peaks if available
+            fitted_peaks_by_pos = {}
+            if hasattr(self.original_fitter, 'parent') and hasattr(self.original_fitter.parent, 'fitted_peaks'):
+                for fp in self.original_fitter.parent.fitted_peaks:
+                    key = (fp.get('ppm_x', 0), fp.get('ppm_y', 0))
+                    fitted_peaks_by_pos[key] = fp
+
             all_peaks_context = []
             for _, row in peak_list.iterrows():
                 intensity = row.get('Height', row.get('Intensity', None))
-                all_peaks_context.append({
+                x_ppm = float(row['Position_X'])
+                y_ppm = float(row['Position_Y'])
+
+                peak_ctx = {
                     'assignment': str(row.get('Assignment', 'Unknown')),
-                    'x_ppm': float(row['Position_X']),
-                    'y_ppm': float(row['Position_Y']),
-                    'pos_x': float(row['Position_X']),
-                    'pos_y': float(row['Position_Y']),
+                    'x_ppm': x_ppm,
+                    'y_ppm': y_ppm,
+                    'pos_x': x_ppm,
+                    'pos_y': y_ppm,
                     'intensity': intensity
-                })
+                }
+
+                # Merge detection fields from fitted_peaks if available
+                # Match by position with tolerance (detected peaks can drift from reference)
+                for (fp_x, fp_y), fp_data in fitted_peaks_by_pos.items():
+                    if abs(fp_x - x_ppm) < 0.001 and abs(fp_y - y_ppm) < 0.01:
+                        peak_ctx['detected'] = fp_data.get('detected', True)
+                        peak_ctx['detection_quality'] = fp_data.get('detection_quality', 'Matched')
+                        peak_ctx['distance_from_reference'] = fp_data.get('distance_from_reference', 0)
+                        peak_ctx['distance_from_reference_x'] = fp_data.get('distance_from_reference_x', 0)
+                        peak_ctx['distance_from_reference_y'] = fp_data.get('distance_from_reference_y', 0)
+                        peak_ctx['distance_from_reference_elliptical'] = fp_data.get('distance_from_reference_elliptical', 0)
+                        peak_ctx['reference_retained'] = fp_data.get('reference_retained', False)
+                        # Copy detected intensity if not already in peak_list
+                        if peak_ctx['intensity'] is None:
+                            peak_ctx['intensity'] = fp_data.get('intensity')
+                        break
+
+                all_peaks_context.append(peak_ctx)
             log_info(f"2D overlap detection enabled with {len(all_peaks_context)} peaks context")
 
             # STEP 2: Get clusters - either locked or computed
@@ -238,6 +280,8 @@ class ParallelVoigtProcessor:
                     spectrum_statistics = self._collect_linewidth_statistics(isolated_results)
 
                     pass1_time = time.time() - pass1_start
+                    self.timing_info['pass1'] = pass1_time
+                    self.pass1_results = isolated_results  # Store PASS1 results
 
                     if spectrum_statistics:
                         log_info(f"PASS 1 completed in {pass1_time:.1f}s")
@@ -334,6 +378,7 @@ class ParallelVoigtProcessor:
                         self.optimal_params = optimal_params
 
                         adaptive_time = time.time() - adaptive_start
+                        self.timing_info['adaptive'] = adaptive_time
                         log_info(f"Adaptive optimization completed in {adaptive_time:.1f}s")
 
                         # ========== RE-CLUSTER originally clustered peaks with optimal thresholds ==========
@@ -392,6 +437,8 @@ class ParallelVoigtProcessor:
                 spectrum_statistics = self._collect_linewidth_statistics(isolated_results)
 
                 pass1bis_time = time.time() - pass1bis_start
+                self.timing_info['pass1bis'] = pass1bis_time
+                self.pass1bis_results = isolated_results  # Store PASS1-bis results
                 log_info(f"PASS 1-bis completed in {pass1bis_time:.1f}s")
 
             # ========== PASS 2: Fit remaining clusters using learned/pre-learned statistics ==========
@@ -423,6 +470,8 @@ class ParallelVoigtProcessor:
                 multi_peak_results = self._execute_parallel_cluster_fitting(pass2_tasks, progress_callback, pass_name="PASS 2")
 
                 pass2_time = time.time() - pass2_start
+                self.timing_info['pass2'] = pass2_time
+                self.pass2_results = multi_peak_results  # Store PASS2 results
                 log_info(f"PASS 2 completed in {pass2_time:.1f}s")
             else:
                 log_warning("No clusters to fit in Pass 2")
@@ -430,6 +479,14 @@ class ParallelVoigtProcessor:
             # ========== Consolidate results from both passes ==========
             all_cluster_results = isolated_results + multi_peak_results
             consolidated_results = self._consolidate_cluster_results(all_cluster_results, peak_list, peak_metadata)
+
+            # Store cluster info for ML training
+            self.cluster_info = {
+                'n_clusters': len(clusters),
+                'n_isolated_clusters': len(isolated_clusters),
+                'n_multi_peak_clusters': len(multi_peak_clusters),
+                'cluster_sizes': [len(c) for c in clusters],
+            }
 
             # ========== Create series_params if adaptive optimization succeeded ==========
             if self.optimal_params and self.optimal_params.get('success'):
@@ -452,6 +509,7 @@ class ParallelVoigtProcessor:
                 log_info("Series parameters saved for consistent series integration")
 
             elapsed_time = time.time() - start_time
+            self.timing_info['total'] = elapsed_time
             log_info(f"Two-pass parallel fitting completed in {elapsed_time:.1f}s")
             log_info(f"Results: {len(consolidated_results)} successful fits from {len(clusters)} clusters")
             if spectrum_statistics:
@@ -637,8 +695,14 @@ class ParallelVoigtProcessor:
         spectrum_lg_f2 = np.median(linewidth_stats['lg_f2']) if len(linewidth_stats['lg_f2']) > 0 else 1.0
 
         # Calculate MAD (Median Absolute Deviation) for uncertainty estimate
-        mad_f1 = np.median(np.abs(np.array(linewidth_stats['lw_f1']) - spectrum_lw_f1))
-        mad_f2 = np.median(np.abs(np.array(linewidth_stats['lw_f2']) - spectrum_lw_f2))
+        lw_f1_array = np.array(linewidth_stats['lw_f1'])
+        lw_f2_array = np.array(linewidth_stats['lw_f2'])
+        mad_f1 = np.median(np.abs(lw_f1_array - spectrum_lw_f1))
+        mad_f2 = np.median(np.abs(lw_f2_array - spectrum_lw_f2))
+
+        # Also compute std, min, max for ML training data collection
+        std_f1 = np.std(lw_f1_array) if len(lw_f1_array) > 1 else 0.0
+        std_f2 = np.std(lw_f2_array) if len(lw_f2_array) > 1 else 0.0
 
         return {
             'lw_f1_median': spectrum_lw_f1,
@@ -646,8 +710,15 @@ class ParallelVoigtProcessor:
             'lg_f1_median': spectrum_lg_f1,
             'lg_f2_median': spectrum_lg_f2,
             'n_samples': n_samples,  # Use actual valid samples, not successful_fits
+            'n_good_peaks': n_samples,  # Alias for ML collector
             'lw_f1_mad': mad_f1,
             'lw_f2_mad': mad_f2,
+            'lw_f1_std': std_f1,  # For ML training data
+            'lw_f2_std': std_f2,
+            'lw_f1_min': float(np.min(lw_f1_array)),
+            'lw_f1_max': float(np.max(lw_f1_array)),
+            'lw_f2_min': float(np.min(lw_f2_array)),
+            'lw_f2_max': float(np.max(lw_f2_array)),
             'alpha': alpha  # Sample-size-dependent multiplier for PASS2 bounds
         }
 
@@ -1279,6 +1350,21 @@ def _parallel_cluster_worker(cluster_task):
                 result['peak_number'] = peak_number
                 result['processing_mode'] = 'parallel'
                 result['cluster_size'] = 1
+
+                # Add detection fields from original peak data (cluster_dicts)
+                if cluster_dicts:
+                    orig_peak = cluster_dicts[0]
+                    result['detected'] = orig_peak.get('detected', True)
+                    result['detection_quality'] = orig_peak.get('detection_quality', 'Matched')
+                    result['distance_from_reference'] = orig_peak.get('distance_from_reference', 0)
+                    result['distance_from_reference_x'] = orig_peak.get('distance_from_reference_x', 0)
+                    result['distance_from_reference_y'] = orig_peak.get('distance_from_reference_y', 0)
+                    result['distance_from_reference_elliptical'] = orig_peak.get('distance_from_reference_elliptical', 0)
+                    result['reference_retained'] = orig_peak.get('reference_retained', False)
+                    # Copy detected_intensity if not already set by enhanced_peak_fitting
+                    if result.get('detected_intensity') is None:
+                        result['detected_intensity'] = orig_peak.get('intensity')
+
                 peak_results.append(result)
 
         else:
@@ -1356,6 +1442,9 @@ def _parallel_cluster_worker(cluster_task):
                         best_match = None
 
                     if best_match:
+                        # Get detected_intensity from original cluster_dicts (before fitting)
+                        orig_detected_intensity = cluster_dicts[i].get('intensity') if i < len(cluster_dicts) else None
+
                         # Convert to standard format (IDENTICAL to sequential lines 338-387)
                         result = {
                             'assignment': cluster_assignments[i],
@@ -1363,10 +1452,11 @@ def _parallel_cluster_worker(cluster_task):
                             'peak_position': (best_match['pos_f2'], best_match['pos_f1']),
                             'peak_x': peak_x,
                             'peak_y': peak_y,
-                            'amplitude': best_match['intensity'],
-                            'height': best_match['intensity'],
-                            'volume': best_match['intensity'],
-                            'detected_intensity': best_match.get('detected_intensity'),  # From peak detection
+                            'intensity': best_match['intensity'],  # Fitted Voigt parameter (for ML training)
+                            'amplitude': best_match.get('amplitude', best_match['intensity']),
+                            'height': best_match.get('height', best_match['intensity']),
+                            'volume': best_match.get('volume', best_match['intensity']),
+                            'detected_intensity': orig_detected_intensity,  # From peak detection (before fitting)
                             'r_squared': group_result['r_squared'],
                             'avg_r_squared': group_result['r_squared'],
                             'center_x': best_match['pos_f2'],
@@ -1381,6 +1471,7 @@ def _parallel_cluster_worker(cluster_task):
                             'fitted': True,
                             'method': '2d_simultaneous_multi_peak',
                             'processing_mode': 'parallel',
+                            'cluster_idx': cluster_task['cluster_idx'],  # Cluster ID for ML training
                             'cluster_size': cluster_size,
                             'overlap_group_size': cluster_size,
                             # Visualization data
@@ -1402,12 +1493,32 @@ def _parallel_cluster_worker(cluster_task):
                                 'success': True,
                                 'method': '2d_simultaneous'
                             },
+                            # Cluster-level fit statistics
+                            'chi2': group_result.get('chi2', 0),
+                            'iterations': group_result.get('iterations', 0),
+                            # Convergence flags from PS2D
+                            'formal_convergence': group_result.get('formal_convergence', False),
+                            'pragmatic_acceptance': group_result.get('pragmatic_acceptance', False),
+                            'chi2_reduction_success': group_result.get('chi2_reduction_success', False),
+                            # 2D visualization data
                             'region_2d': region_2d,
                             'fitted_2d_surface': fitted_2d_surface,
                             'individual_surfaces': individual_surfaces,
                             'all_peaks': group_result['peaks'],
                             'baseline': baseline  # Baseline offset for visualization
                         }
+
+                        # Add detection fields from original peak data (cluster_dicts)
+                        if i < len(cluster_dicts):
+                            orig_peak = cluster_dicts[i]
+                            result['detected'] = orig_peak.get('detected', True)
+                            result['detection_quality'] = orig_peak.get('detection_quality', 'Matched')
+                            result['distance_from_reference'] = orig_peak.get('distance_from_reference', 0)
+                            result['distance_from_reference_x'] = orig_peak.get('distance_from_reference_x', 0)
+                            result['distance_from_reference_y'] = orig_peak.get('distance_from_reference_y', 0)
+                            result['distance_from_reference_elliptical'] = orig_peak.get('distance_from_reference_elliptical', 0)
+                            result['reference_retained'] = orig_peak.get('reference_retained', False)
+
                         peak_results.append(result)
 
         # Return success with all peaks fitted in this cluster

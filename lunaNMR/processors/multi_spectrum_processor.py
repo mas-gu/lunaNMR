@@ -74,11 +74,20 @@ class MultiSpectrumProcessor:
         #          'lw_f2_mad': float, 'n_samples': int, 'alpha': float}
         self.reference_spectrum_statistics = None
 
+        # ML Training Data Collection
+        self.training_collector = None
+        self.collect_training_data = self.voigt_params.get('collect_training_data', False)
+        if not self.collect_training_data and 'gui_params' in self.voigt_params:
+            self.collect_training_data = self.voigt_params['gui_params'].get('collect_training_data', False)
+        if self.collect_training_data:
+            self._init_training_collector()
+
     def process_nmr_series(self, nmr_files: List[str], reference_peaks: pd.DataFrame,
                           output_folder: str, peak_source_mode: str = 'reference',
                           progress_callback: Optional[callable] = None,
                           extract_delays: bool = False,
-                          pre_detected_peaks: Optional[List[Dict]] = None) -> Dict[str, Any]:
+                          pre_detected_peaks: Optional[List[Dict]] = None,
+                          sn_from_gui_locked: Optional[Dict] = None) -> Dict[str, Any]:
         """
         Main entry point for processing NMR series.
         Returns comprehensive results in both new and legacy-compatible formats.
@@ -91,6 +100,8 @@ class MultiSpectrumProcessor:
             progress_callback: Optional callback for progress updates
             extract_delays: If True, extract delay values from filenames and use as headers
             pre_detected_peaks: Optional list of already-detected peaks from GUI (skips detection for spectrum 1)
+            sn_from_gui_locked: Optional dict with {'absolute_threshold': float, 'contour_min': float}
+                               If provided, all spectra use same absolute threshold (no rescaling)
         """
         self.reference_peaks = reference_peaks.copy()
         self.pre_detected_peaks = pre_detected_peaks  # Store for cascade mode spectrum 1
@@ -100,6 +111,8 @@ class MultiSpectrumProcessor:
         self.peak_source_mode = peak_source_mode  # Store for cascade mode
         self.previous_fitted_results = None  # Initialize cascade tracking
         self.extract_delays = extract_delays  # Store for output file generation
+        self.nmr_files = nmr_files  # Store for ML training data collection
+        self.sn_from_gui_locked = sn_from_gui_locked  # Store locked threshold for series
 
         # Build original reference position dictionary for cascade mode drift limiting
         # Maps assignment -> (x_ppm, y_ppm) for absolute bounds enforcement
@@ -262,7 +275,22 @@ class MultiSpectrumProcessor:
         if not load_success or self.integrator.nmr_data is None:
             try:
                 import nmrglue as ng
-                self.integrator.nmr_dict, self.integrator.nmr_data = ng.pipe.read(nmr_file)
+                import os
+
+                # Detect format and load accordingly
+                basename = os.path.basename(nmr_file)
+                bruker_pdata_names = ('2rr', '2ri', '2ir', '2ii', '1r', '1i',
+                                      '3rrr', '3rri', '3rir', '3rii', '3irr', '3iri', '3iir', '3iii')
+
+                if basename in bruker_pdata_names:
+                    # Bruker processed data - use parent directory
+                    pdata_dir = os.path.dirname(nmr_file)
+                    self.integrator.nmr_dict, self.integrator.nmr_data = ng.bruker.read_pdata(dir=pdata_dir)
+                    self.integrator._nmr_format = 'bruker'
+                else:
+                    # NMRPipe format (default)
+                    self.integrator.nmr_dict, self.integrator.nmr_data = ng.pipe.read(nmr_file)
+                    self.integrator._nmr_format = 'pipe'
 
                 # Only calculate axes if not already done
                 if not hasattr(self.integrator, 'ppm_x_axis') or self.integrator.ppm_x_axis is None:
@@ -292,6 +320,19 @@ class MultiSpectrumProcessor:
             self.integrator.ppm_y_axis is None):
             log_error(f"NMR data verification failed for {spectrum_name}")
             raise IOError(f"NMR data not properly loaded after direct loading: {nmr_file}")
+
+        # APPLY LOCKED THRESHOLD FROM GUI (if in from-GUI mode)
+        if self.sn_from_gui_locked:
+            self.integrator.sn_from_gui_mode = True
+            self.integrator.sn_absolute_threshold = self.sn_from_gui_locked['absolute_threshold']
+            self.integrator.sn_contour_min_value = self.sn_from_gui_locked['contour_min']
+
+            if spectrum_number == 1:
+                log_info(f"Spectrum {spectrum_number} (reference): Using from-GUI threshold "
+                         f"{self.integrator.sn_absolute_threshold:.2e}")
+            else:
+                log_info(f"Spectrum {spectrum_number}: Using locked threshold from reference "
+                         f"(absolute={self.integrator.sn_absolute_threshold:.2e})")
 
         # DETECTION-BASED MATCHING: Choose reference source based on mode
         if self.peak_source_mode == 'reference':
@@ -520,6 +561,16 @@ class MultiSpectrumProcessor:
         # Store fitted results for next spectrum (used by all modes now)
         self.previous_fitted_results = fitted_results
 
+        # Collect ML training data if enabled
+        if self.collect_training_data and self.training_collector is not None:
+            self._collect_spectrum_training_data(
+                spectrum_name=spectrum_name,
+                spectrum_number=spectrum_number,
+                fitted_results=fitted_results,
+                learned_statistics=learned_statistics,
+                total_spectra=len(self.nmr_files),
+            )
+
         return {
             'success': successful_fits > 0,
             'fitted_results': fitted_results,
@@ -697,12 +748,14 @@ class MultiSpectrumProcessor:
         batch_obj.metadata['processing_mode'] = 'series_integration'
         batch_obj.metadata['total_spectra'] = batch_results_dict.get('summary', {}).get('total_spectra', 0)
 
-        # Copy data_folder from batch_results_dict metadata for viewers
+        # Copy data_folder, output_folder, csv_path from batch_results_dict metadata
         source_metadata = batch_results_dict.get('metadata', {})
         if 'data_folder' in source_metadata:
             batch_obj.metadata['data_folder'] = source_metadata['data_folder']
         if 'output_folder' in source_metadata:
             batch_obj.metadata['output_folder'] = source_metadata['output_folder']
+        if 'csv_path' in source_metadata:
+            batch_obj.metadata['csv_path'] = source_metadata['csv_path']
 
         # Copy results - mark status as 'success' or 'failed' for each spectrum
         for spectrum_name, result in batch_results_dict.get('results', {}).items():
@@ -1011,6 +1064,7 @@ class MultiSpectrumProcessor:
                 'peak_source_mode': peak_source_mode,
                 'total_spectra': len(nmr_files),
                 'output_folder': output_folder,
+                'csv_path': os.path.join(output_folder, "series_analysis_tidy.csv"),
                 'data_folder': data_folder,  # Store folder containing NMR files
                 'reference_peaks_count': len(self.reference_peaks)
             },
@@ -1364,6 +1418,199 @@ class MultiSpectrumProcessor:
         except Exception as e:
             log_warning(f"Could not extract linewidths for {assignment}: {e}")
 
+    def _init_training_collector(self):
+        """Initialize the ML training data collector."""
+        try:
+            from lunaNMR.ml.comprehensive_collector import ComprehensiveTrainingCollector
+            self.training_collector = ComprehensiveTrainingCollector(
+                min_r2=0.70,
+                auto_save=True,
+            )
+            log_info("ML training data collector initialized for series processing")
+        except Exception as e:
+            log_warning(f"Could not initialize ML training collector: {e}")
+            self.training_collector = None
+            self.collect_training_data = False
+
+    def _collect_spectrum_training_data(
+        self,
+        spectrum_name: str,
+        spectrum_number: int,
+        fitted_results: List[Dict],
+        learned_statistics: Optional[Dict],
+        total_spectra: int,
+    ):
+        """Collect training data for a single spectrum in series processing.
+
+        Parameters
+        ----------
+        spectrum_name : str
+            Name of the spectrum file
+        spectrum_number : int
+            Position in series (1-indexed)
+        fitted_results : list
+            Fit results for all peaks
+        learned_statistics : dict, optional
+            PASS1 statistics
+        total_spectra : int
+            Total number of spectra in series
+        """
+        if self.training_collector is None:
+            return
+
+        try:
+            # Get spectrum data from integrator
+            spectrum_data = self.integrator.nmr_data
+            if spectrum_data is None:
+                return
+
+            # Get peak list
+            peak_list = self.integrator.peak_list
+            if peak_list is None or len(peak_list) == 0:
+                return
+            if hasattr(peak_list, 'to_dict'):
+                peak_list_dicts = peak_list.to_dict('records')
+            else:
+                peak_list_dicts = peak_list
+
+            # Enhance learned_statistics with additional stats from fit results
+            if learned_statistics is None:
+                learned_statistics = {}
+
+            # Calculate additional statistics from fit results if not present
+            if fitted_results and 'lw_f1_std' not in learned_statistics:
+                lw_f1_values = []
+                lw_f2_values = []
+                r2_values = []
+                for r in fitted_results:
+                    if r.get('success', False):
+                        # Get linewidths from fit results
+                        # PS2D 2D fits: lw_lor_f1/lw_gau_f1 or gamma_y/sigma_y
+                        # 1D fits: linewidths in nested y_fit/x_fit dicts
+                        y_fit = r.get('y_fit', {})
+                        x_fit = r.get('x_fit', {})
+
+                        # F1 linewidth (Y dimension)
+                        lw_lor_f1 = r.get('lw_lor_f1', r.get('gamma_y', y_fit.get('gamma', 0)))
+                        lw_gau_f1 = r.get('lw_gau_f1', r.get('sigma_y', y_fit.get('sigma', 0)))
+                        lw_f1 = lw_lor_f1 + lw_gau_f1
+
+                        # F2 linewidth (X dimension)
+                        lw_lor_f2 = r.get('lw_lor_f2', r.get('gamma_x', r.get('gamma', x_fit.get('gamma', 0))))
+                        lw_gau_f2 = r.get('lw_gau_f2', r.get('sigma_x', r.get('sigma', x_fit.get('sigma', 0))))
+                        lw_f2 = lw_lor_f2 + lw_gau_f2
+
+                        if lw_f1 > 0:
+                            lw_f1_values.append(lw_f1)
+                        if lw_f2 > 0:
+                            lw_f2_values.append(lw_f2)
+                        r2 = r.get('r_squared', r.get('avg_r_squared', 0))
+                        if r2 > 0:
+                            r2_values.append(r2)
+
+                if lw_f1_values:
+                    learned_statistics['lw_f1_std'] = float(np.std(lw_f1_values))
+                    learned_statistics['lw_f1_min'] = float(np.min(lw_f1_values))
+                    learned_statistics['lw_f1_max'] = float(np.max(lw_f1_values))
+                if lw_f2_values:
+                    learned_statistics['lw_f2_std'] = float(np.std(lw_f2_values))
+                    learned_statistics['lw_f2_min'] = float(np.min(lw_f2_values))
+                    learned_statistics['lw_f2_max'] = float(np.max(lw_f2_values))
+                if r2_values:
+                    learned_statistics['n_good_peaks'] = len(r2_values)
+                    learned_statistics['mean_r_squared'] = float(np.mean(r2_values))
+
+            # Get PPM ranges from integrator's ppm axes
+            ppm_ranges = {}
+            if hasattr(self.integrator, 'ppm_y_axis') and self.integrator.ppm_y_axis is not None:
+                ppm_y = self.integrator.ppm_y_axis
+                ppm_ranges['f1'] = (float(min(ppm_y)), float(max(ppm_y)))
+            if hasattr(self.integrator, 'ppm_x_axis') and self.integrator.ppm_x_axis is not None:
+                ppm_x = self.integrator.ppm_x_axis
+                ppm_ranges['f2'] = (float(min(ppm_x)), float(max(ppm_x)))
+
+            # Detect nucleus type from F1 range
+            nucleus_type = "15N"
+            if ppm_ranges.get('f1'):
+                f1_max = ppm_ranges['f1'][1]
+                if f1_max > 150:
+                    nucleus_type = "13C"
+
+            # Get field strength from metadata
+            field_strength = 600.0
+            if hasattr(self.integrator, 'dic') and self.integrator.dic:
+                field_strength = float(
+                    self.integrator.dic.get('FDF2OBS',
+                    self.integrator.dic.get('SFO1',
+                    self.integrator.dic.get('bf1', 600.0)))
+                )
+
+            # Get intermediate results from parallel processor (if available)
+            adaptive_results = None
+            timing_info = None
+            cluster_info = None
+            pass1_results = None
+            pass1bis_results = None
+            pass2_results = None
+
+            if hasattr(self.integrator, 'enhanced_fitter'):
+                fitter = self.integrator.enhanced_fitter
+                if hasattr(fitter, 'parallel_processor') and fitter.parallel_processor:
+                    pp = fitter.parallel_processor
+                    if hasattr(pp, 'optimal_params') and pp.optimal_params:
+                        adaptive_results = pp.optimal_params
+                    if hasattr(pp, 'timing_info') and pp.timing_info:
+                        timing_info = pp.timing_info
+                    if hasattr(pp, 'cluster_info') and pp.cluster_info:
+                        cluster_info = pp.cluster_info
+                    if hasattr(pp, 'pass1_results'):
+                        pass1_results = pp.pass1_results
+                    if hasattr(pp, 'pass1bis_results'):
+                        pass1bis_results = pp.pass1bis_results
+                    if hasattr(pp, 'pass2_results'):
+                        pass2_results = pp.pass2_results
+
+            # Get detection parameters and statistics from integrator
+            detection_params = {
+                'search_window_x': getattr(self.integrator, 'search_window_x', 0.01),
+                'search_window_y': getattr(self.integrator, 'search_window_y', 0.05),
+                'noise_threshold': getattr(self.integrator, 'threshold_multiplier', 3.0),
+                'noise_level': getattr(self.integrator, 'noise_level', 0),
+            }
+            detection_statistics = None
+            if hasattr(self.integrator, 'get_detection_statistics'):
+                detection_statistics = self.integrator.get_detection_statistics()
+
+            # Collect training data
+            from pathlib import Path
+            success = self.training_collector.collect_spectrum_processing(
+                spectrum_data=spectrum_data,
+                peak_list=peak_list_dicts,
+                fit_results=fitted_results,
+                pass1_statistics=learned_statistics,
+                adaptive_results=adaptive_results,
+                pass1_results=pass1_results,
+                pass1bis_results=pass1bis_results,
+                pass2_results=pass2_results,
+                cluster_info=cluster_info,
+                timing_info=timing_info,
+                spectrum_name=Path(spectrum_name).name,
+                nucleus_type=nucleus_type,
+                field_strength_mhz=field_strength,
+                ppm_ranges=ppm_ranges,
+                processing_mode='parallel',
+                is_reference=(spectrum_number == 1),
+                series_index=spectrum_number - 1,
+                detection_params=detection_params,
+                detection_statistics=detection_statistics,
+            )
+
+            if success:
+                log_info(f"Collected ML training data: {Path(spectrum_name).name} ({spectrum_number}/{total_spectra})")
+
+        except Exception as e:
+            log_warning(f"Failed to collect training data for {spectrum_name}: {e}")
+
     def _sample_intensities_for_peak_list(self):
         """
         Sample intensities from current spectrum at each peak position.
@@ -1535,3 +1782,134 @@ class BatchResults:
                 integration_df_formatted.to_csv(integration_file, index=False)
 
         return output_folder
+
+    def to_tidy_dataframe(self) -> pd.DataFrame:
+        """Generate tidy DataFrame from BatchResults for T1/T2 fitting.
+
+        This method extracts the same data structure that would be in
+        series_analysis_tidy.csv, allowing DynamiXs to consume results
+        directly from memory without requiring a CSV file.
+
+        Returns:
+            DataFrame with columns: spectrum_name, assignment, peak_number,
+            ppm_x, ppm_y, height, volume, snr, quality, r_squared
+        """
+        tidy_data = []
+
+        for spectrum_name, result_data in self.results.items():
+            # Skip failed spectra
+            if not result_data.get('success', False) and result_data.get('status') != 'success':
+                continue
+
+            # Use filename without extension as spectrum header
+            spectrum_header = os.path.splitext(spectrum_name)[0]
+
+            # Extract integration results
+            integration_results = result_data.get('integration_results', [])
+            for peak in integration_results:
+                row = {
+                    'spectrum_name': spectrum_header,
+                    'assignment': peak.get('assignment', ''),
+                    'peak_number': peak.get('peak_number', 0),
+                    'ppm_x': peak.get('ppm_x', 0.0),
+                    'ppm_y': peak.get('ppm_y', 0.0),
+                    'height': peak.get('height', 0.0),
+                    'volume': peak.get('volume', 0.0),
+                    'snr': peak.get('snr', 0.0),
+                    'quality': peak.get('quality', 'Unknown'),
+                    'r_squared': peak.get('r_squared', 0.0)
+                }
+                tidy_data.append(row)
+
+        if not tidy_data:
+            return pd.DataFrame(columns=['spectrum_name', 'assignment', 'peak_number',
+                                        'ppm_x', 'ppm_y', 'height', 'volume',
+                                        'snr', 'quality', 'r_squared'])
+
+        return pd.DataFrame(tidy_data)
+
+    def to_fitting_dataframe(self, value_column: str = 'volume') -> pd.DataFrame:
+        """Generate pivot DataFrame for T1/T2 fitting analysis.
+
+        Creates the wide format expected by the fitting module:
+        - Row per peak (identified by assignment)
+        - Column per spectrum (numeric delay time)
+        - Values are volumes (or heights)
+
+        The fitting module expects numeric column names (e.g., "10", "50", "100")
+        representing delay times in ms. This method extracts delays from spectrum
+        names like "T1_10ms" -> "10".
+
+        Args:
+            value_column: Which value to use for fitting ('volume' or 'height')
+
+        Returns:
+            DataFrame with columns: Assignment, <delay1>, <delay2>, ...
+            Suitable for direct use with dynamiXs_T1_T2 fitting module.
+        """
+        from lunaNMR.utils.delay_extractor import DelayExtractor
+
+        # First get the tidy DataFrame
+        tidy_df = self.to_tidy_dataframe()
+
+        if tidy_df.empty:
+            return pd.DataFrame(columns=['Assignment'])
+
+        # Extract delay values from spectrum names and create mapping
+        extractor = DelayExtractor()
+        spectrum_names = tidy_df['spectrum_name'].unique()
+
+        # Build mapping: spectrum_name -> numeric delay column name
+        delay_mapping = {}
+        delay_counts = {}  # Track duplicate delays
+
+        for spec_name in spectrum_names:
+            delay_ms = extractor.extract_delay_ms(spec_name)
+            if delay_ms is not None:
+                # Format as integer if whole number, else with decimal
+                delay_str = str(int(delay_ms)) if delay_ms == int(delay_ms) else str(delay_ms)
+
+                # Handle duplicate delays (e.g., two spectra at 50ms)
+                if delay_str in delay_counts:
+                    delay_counts[delay_str] += 1
+                    delay_mapping[spec_name] = f"{delay_str}_{delay_counts[delay_str]}"
+                else:
+                    delay_counts[delay_str] = 1
+                    delay_mapping[spec_name] = delay_str
+            else:
+                # Fallback: use spectrum name as-is (may cause fitting issues)
+                delay_mapping[spec_name] = spec_name
+
+        # Apply mapping to spectrum_name column
+        tidy_df = tidy_df.copy()
+        tidy_df['delay_column'] = tidy_df['spectrum_name'].map(delay_mapping)
+
+        # Pivot: rows=assignment, columns=delay_column, values=volume or height
+        pivot_df = tidy_df.pivot_table(
+            index='assignment',
+            columns='delay_column',
+            values=value_column,
+            aggfunc='first'  # In case of duplicates, take first
+        )
+
+        # Reset index to make Assignment a column
+        pivot_df = pivot_df.reset_index()
+        pivot_df = pivot_df.rename(columns={'assignment': 'Assignment'})
+
+        # Sort columns: Assignment first, then numeric delay columns in order
+        cols = pivot_df.columns.tolist()
+        delay_cols = [c for c in cols if c != 'Assignment']
+
+        # Sort delay columns numerically
+        def sort_key(col):
+            try:
+                # Handle "50" or "50_2" format
+                base = col.split('_')[0]
+                return float(base)
+            except (ValueError, IndexError):
+                return float('inf')
+
+        delay_cols.sort(key=sort_key)
+        pivot_df = pivot_df[['Assignment'] + delay_cols]
+
+        return pivot_df
