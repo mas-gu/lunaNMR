@@ -1,4 +1,9 @@
 # LunaNMR v1.0
+⚠️ Caution
+LunaNMR is an internal research tool developed for use by Guillaume Mas only. If that's not you, please do not use this software.
+
+This project is experimental and under active development. Expect instability, breaking API changes, incomplete features, and limited documentation. No support or warranty is provided. Use at your own risk
+
 
 **Advanced NMR Peak Analysis and Integration Suite**
 
