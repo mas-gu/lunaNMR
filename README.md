@@ -134,22 +134,6 @@ LunaNMR implements professional-grade Voigt profile fitting, combining Gaussian 
 
 Launch `python3 launch_lunaNMR.py` to access the unified launcher:
 
-```
-┌─────────────────────────────────────────┐
-│           LunaNMR Suite v1.0            │
-│                                         │
-│  Select Application to Launch:          │
-│                                         │
-│  ○ LunaNMR                             │
-│    Advanced NMR Peak Analysis          │
-│                                         │
-│  ○ DynamiXs                            │
-│    Dynamic Exchange Analysis           │
-│                                         │
-│         [Launch]    [Cancel]            │
-└─────────────────────────────────────────┘
-```
-
 ---
 
 ---
@@ -158,29 +142,21 @@ Launch `python3 launch_lunaNMR.py` to access the unified launcher:
 
 ### **Complete Documentation**
 
-- **[Installation Guide](docs/INSTALLATION.md)** - Comprehensive setup instructions
-- **[Quick Start](docs/QUICKSTART.md)** - 5-minute tutorial
-- **[Architecture](docs/ARCHITECTURE.md)** - Technical architecture overview
-- **[Package Structure](docs/PACKAGE_STRUCTURE.md)** - Detailed package organization
-- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
-- **[File Formats](docs/FILE_FORMATS.md)** - Supported data formats
-
 ## Supported File Formats
 
 ### **Input Formats**
 
-| Format | Extension | Vendor | Support |
-|--------|-----------|---------|---------|
-| **Bruker TopSpin** | `2ii`, `.2rr` | Bruker | ✅ Full |
-| **Varian/Agilent** | `.fid`, `.ft` | Agilent | ✅ Full |
-| **NMRPipe** | `.ft`, `.pipe` | NIH | ✅ Full |
-| **SPARKY** | `.ucsf` | UCSF | ✅ Full |
+| Format | Extension | Support |
+|--------|-----------|---------|
+| **Bruker TopSpin** | `2ii`, `.2rr`  | ✅ Full |
+| **Varian/Agilent** | `.fid`, `.ft`  | ✅ Full |
+| **NMRPipe** | `.ft`, `.pipe` | ✅ Full |
+| **SPARKY** | `.ucsf` | ✅ Full |
 
 ### **Export Formats**
 
-- **Data**: CSV, Excel, JSON, HDF5
+- **Data**: CSV, Excel, JSON, 
 - **Figures**: PNG, PDF, SVG, EPS
-- **Reports**: HTML, LaTeX, Markdown
 
 ---
 
@@ -229,13 +205,6 @@ python -m pytest tests/
 ## 📈 Performance
 
 ### **Benchmarks**
-
-| Operation | Dataset Size | Time | Memory |
-|-----------|--------------|------|--------|
-| **Peak Detection** | 1000 points | <1s | 50MB |
-| **Voigt Fitting** | 10 peaks | 2-5s | 100MB |
-| **Series Analysis** | 100 spectra | 1-2min | 500MB |
-| **Batch Processing** | 1000 spectra | 10-20min | 2GB |
 
 ### **Optimization Tips**
 
