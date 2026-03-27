@@ -15,6 +15,30 @@ LunaNMR is a professional-grade software suite for Nuclear Magnetic Resonance (N
 
 ---
 
+## Screenshots
+
+<div align="center">
+ LunaNMR interface <br> 
+  <img width="776" height="494" alt="luna_interface" src="https://github.com/user-attachments/assets/21e991e3-e622-4e60-8d32-c3b6ccd6d365" />
+</div> 
+
+<div align="center">
+ LunaNMR serie integration <br> 
+<img width="405" height="494" alt="serie_integration" src="https://github.com/user-attachments/assets/1b71dcea-e2a6-46d8-ad68-e29f8049ef71" /> 
+</div> 
+
+<div align="center">
+ Individual-peak fitting vs volume integration <br> 
+<img width="776" height="494" alt="individualpeak" src="https://github.com/user-attachments/assets/899ef2f6-3f1c-42aa-87c4-3b4b3702de66" />
+</div> 
+
+<div align="center">
+ Multi-peaks fitting vs volume integration  <br> 
+<img width="776" height="494" alt="multipeaks" src="https://github.com/user-attachments/assets/163800b4-081c-42e3-988f-ad015242c306" />
+</div> 
+
+---
+
 ## Key Features
 
 ###  **Advanced Peak Analysis**
