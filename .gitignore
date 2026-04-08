@@ -339,6 +339,7 @@ INTEGRATION_SUMMARY.txt
 # Internal dev docs (not for release)
 docs/phase0_completion_summary.md
 docs/how_to_lunaNMR.docx
+docs/LunaNMR_V1_Workflow.pptx
 
 # Example data files (too large for repo)
 data_example/
