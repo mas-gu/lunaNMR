@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QComboBox, QTextEdit, QStackedWidget
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QIcon
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.components.peak_navigator_table import PeakNavigatorTable
@@ -1295,6 +1295,30 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.peak_params_text.setPlainText("\n".join(lines))
         logger.debug(f"Updated Peak Parameters tab for {assignment}")
 
+    def _create_color_icon(self, color: str, size: int = 12) -> QIcon:
+        """Create a small colored square icon for list items.
+
+        Args:
+            color: Color as hex string (e.g., '#1f77b4')
+            size: Icon size in pixels
+
+        Returns:
+            QIcon with colored square
+        """
+        from PySide6.QtGui import QPixmap, QPainter, QBrush, QPen
+
+        pixmap = QPixmap(size, size)
+        pixmap.fill(QColor('transparent'))
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(QBrush(QColor(color)))
+        painter.setPen(QPen(QColor('#333333'), 1))
+        painter.drawRect(1, 1, size - 2, size - 2)
+        painter.end()
+
+        return QIcon(pixmap)
+
     def _get_group_style(self) -> str:
         """Get standard group box style."""
         return f"""
@@ -1376,9 +1400,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
         # Min level
         layout.addWidget(QLabel("Min Level:"))
         self.min_spin = QDoubleSpinBox()
-        self.min_spin.setRange(0.01, 10.0)
+        self.min_spin.setRange(0.0001, 10.0)
         self.min_spin.setValue(0.2)
-        self.min_spin.setSingleStep(0.01)
+        self.min_spin.setSingleStep(0.002)
+        self.min_spin.setDecimals(5)
         self.min_spin.setMaximumWidth(80)
         layout.addWidget(self.min_spin)
 
@@ -2110,7 +2135,11 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self._voigt_peak_mode_available_spectra = []
 
         for i, spec in enumerate(self.spectra):
-            item = QListWidgetItem(spec['name'])
+            # Create colored icon for spectrum (matches overlay view colors)
+            spectrum_color = spec.get('color', self.default_colors[i % len(self.default_colors)])
+            icon = self._create_color_icon(spectrum_color)
+
+            item = QListWidgetItem(icon, spec['name'])
             item.setData(Qt.UserRole, i)
 
             if i in spectra_with_peak:
@@ -2311,7 +2340,11 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self._voigt_3d_peak_mode_available_spectra = []
 
         for i, spec in enumerate(self.spectra):
-            item = QListWidgetItem(spec['name'])
+            # Create colored icon for spectrum (matches overlay view colors)
+            spectrum_color = spec.get('color', self.default_colors[i % len(self.default_colors)])
+            icon = self._create_color_icon(spectrum_color)
+
+            item = QListWidgetItem(icon, spec['name'])
             item.setData(Qt.UserRole, i)
 
             if i in spectra_with_peak:

@@ -1405,7 +1405,7 @@ class SpectraInputWidget(QFrame):
                     # Count any NMR files
                     nmr_files = [f for f in os.listdir(folder_path)
                                  if os.path.splitext(f)[1].lower() in
-                                 {'.ft', '.ucsf', '.pipe', '.fid', '.2rr', '.2ii'}]
+                                 {'.ft', '.ucsf', '.pipe', '.2rr', '.2ii'}]
                     if nmr_files:
                         widgets['status'].setText("Found")
                         widgets['status'].setStyleSheet(f"color: {SUCCESS_GREEN};")

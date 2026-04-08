@@ -25,7 +25,7 @@ class DelayExtractor:
     ]
 
     # NMR file extensions to look for when scanning folders
-    NMR_EXTENSIONS = {'.ft', '.ucsf', '.pipe', '.fid', '.2rr', '.2ii'}
+    NMR_EXTENSIONS = {'.ft', '.ucsf', '.pipe', '.2rr', '.2ii'}
 
     def extract_delay_ms(self, filename: str) -> Optional[float]:
         """

@@ -126,6 +126,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         # Store event connection ID to prevent accumulation
         self.click_event_cid = None
 
+        # Peak color mapping - ensures same peak gets same color across spectra
+        self._peak_color_map = {}  # assignment -> color_index
+
         # Feature 5: Color scheme presets for 3D plots
         self.color_presets = {
             'Classic': {
@@ -216,6 +219,25 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         """
         self.clip_individual_peaks = enabled
         self.refresh_plot()
+
+    def _get_peak_color(self, assignment: str, colors: list) -> str:
+        """Get consistent color for a peak based on its assignment.
+
+        Assigns colors in order of first appearance. Same assignment always
+        gets the same color across different spectra within this viewer.
+
+        Args:
+            assignment: Peak assignment string (e.g., 'A.142.ALA.H')
+            colors: List of available colors
+
+        Returns:
+            Color string from the colors list
+        """
+        if assignment not in self._peak_color_map:
+            # Assign next available color index
+            self._peak_color_map[assignment] = len(self._peak_color_map)
+        color_idx = self._peak_color_map[assignment] % len(colors)
+        return colors[color_idx]
 
     def set_residual_mode(self, mode):
         """Set residual visualization mode
@@ -403,14 +425,17 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
         # Add individual peak components if available
         individual_surfaces = result.get('individual_surfaces', [])
+        all_peaks = result.get('all_peaks', [])
         if individual_surfaces:
             colors = ['orange', 'purple', 'brown', 'pink', 'olive']
             for i, surf in enumerate(individual_surfaces):
                 component_slice = surf[:, f2_idx]
-                color = colors[i % len(colors)]
+                # Use assignment-based color for consistency across spectra
+                peak_assignment = all_peaks[i].get('assignment', f'Peak {i+1}') if i < len(all_peaks) else f'Peak {i+1}'
+                color = self._get_peak_color(peak_assignment, colors)
                 self.ax_f1_cross.plot(f1_ppm, component_slice, '--',
                                       color=color, linewidth=1, alpha=0.7,
-                                      label=f"Peak {i+1}")
+                                      label=peak_assignment)
 
         self.ax_f1_cross.set_xlabel('F1 (ppm)', fontsize=8)
         self.ax_f1_cross.set_ylabel('Intensity', fontsize=8)
@@ -430,10 +455,12 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             colors = ['orange', 'purple', 'brown', 'pink', 'olive']
             for i, surf in enumerate(individual_surfaces):
                 component_slice = surf[f1_idx, :]
-                color = colors[i % len(colors)]
+                # Use assignment-based color for consistency across spectra
+                peak_assignment = all_peaks[i].get('assignment', f'Peak {i+1}') if i < len(all_peaks) else f'Peak {i+1}'
+                color = self._get_peak_color(peak_assignment, colors)
                 self.ax_f2_cross.plot(f2_ppm, component_slice, '--',
                                       color=color, linewidth=1, alpha=0.7,
-                                      label=f"Peak {i+1}")
+                                      label=peak_assignment)
 
         self.ax_f2_cross.set_xlabel('F2 (ppm)', fontsize=8)
         self.ax_f2_cross.set_ylabel('Intensity', fontsize=8)
@@ -649,7 +676,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
             # Plot each peak with same global levels
             for i, (peak_with_baseline, peak) in enumerate(zip(all_peaks_with_baseline, all_peaks)):
-                color = colors[i % len(colors)]
+                # Use assignment-based color for consistency across spectra
+                peak_assignment = peak.get('assignment', f'Peak {i+1}')
+                color = self._get_peak_color(peak_assignment, colors)
                 ax_fit.contour(f2_ppm, f1_ppm, peak_with_baseline, levels=global_levels,
                              colors=color, linewidths=1.2, alpha=0.7)
 
@@ -670,15 +699,17 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
         # Mark peak positions with matching colors
         for i, peak in enumerate(all_peaks):
+            peak_assignment = peak.get('assignment', f'Peak {i+1}')
             if individual_surfaces is not None and len(individual_surfaces) > 0:
-                color = colors[i % len(colors)]
+                # Use assignment-based color for consistency across spectra
+                color = self._get_peak_color(peak_assignment, colors)
             else:
                 color = 'blue'
             pos_f2 = _to_scalar(peak['pos_f2'])
             pos_f1 = _to_scalar(peak['pos_f1'])
             ax_fit.plot(pos_f2, pos_f1, '+', color=color,
                        markersize=12, markeredgewidth=2)
-            peak_label = peak.get('assignment', str(i+1))
+            peak_label = peak_assignment
             ax_fit.text(pos_f2, pos_f1, f"  {peak_label}",
                        fontsize=8, color=color, fontweight='bold', va='center')
 
@@ -943,8 +974,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         # Overlay individual fitted peaks if enabled
         if self.show_individual_peaks and individual_surfaces is not None and len(individual_surfaces) > 0:
             for i, (surf, peak) in enumerate(zip(individual_surfaces, all_peaks)):
-                color = colors[i % len(colors)]
+                # Use assignment-based color for consistency across spectra
                 peak_assignment = peak.get('assignment', f'Peak {i+1}')
+                color = self._get_peak_color(peak_assignment, colors)
 
                 # If clipping is enabled, mask where surface is zero
                 if self.clip_individual_peaks:
@@ -968,7 +1000,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             theta = np.linspace(0, 2*np.pi, 100)
 
             for i, peak in enumerate(all_peaks):
-                color = colors[i % len(colors)]
+                # Use assignment-based color for consistency across spectra
+                peak_assignment = peak.get('assignment', f'Peak {i+1}')
+                color = self._get_peak_color(peak_assignment, colors)
 
                 pos_f2 = _to_scalar(peak['pos_f2'])
                 pos_f1 = _to_scalar(peak['pos_f1'])
@@ -986,8 +1020,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             label_positions = []
 
             for i, (surf, peak) in enumerate(zip(individual_surfaces, all_peaks)):
-                color = colors[i % len(colors)]
+                # Use assignment-based color for consistency across spectra
                 peak_assignment = peak.get('assignment', f'Peak {i+1}')
+                color = self._get_peak_color(peak_assignment, colors)
 
                 pos_f2 = _to_scalar(peak['pos_f2'])
                 pos_f1 = _to_scalar(peak['pos_f1'])

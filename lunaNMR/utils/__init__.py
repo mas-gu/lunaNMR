@@ -60,6 +60,17 @@ try:
 except ImportError:
     pass
 
+try:
+    from .undo_manager import (
+        PeakUndoManager,
+        DeletePeakCommand,
+        DeleteMultiplePeaksCommand,
+        MovePeakCommand,
+        AddPeakCommand
+    )
+except ImportError:
+    pass
+
 __all__ = [
     'ConfigManager',
     'FileManager',
@@ -78,4 +89,9 @@ __all__ = [
     'log_warning',
     'log_error',
     'ProjectManager',
+    'PeakUndoManager',
+    'DeletePeakCommand',
+    'DeleteMultiplePeaksCommand',
+    'MovePeakCommand',
+    'AddPeakCommand',
 ]

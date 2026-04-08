@@ -1,16 +1,17 @@
 # ABOUTME: Widget for displaying intensity vs delay plots for NMR relaxation series
-# ABOUTME: Shows volume decay across spectra with highlighted current spectrum point
+# ABOUTME: Shows volume/height/detected intensity decay with selectable value type
 
 """
 IntensityDecayWidget - Relaxation Decay Visualization
 
-Displays peak volume vs delay time for T1/T2 relaxation analysis.
+Displays peak values vs delay time for T1/T2 relaxation analysis.
 Shows data points across all spectra in a series with the current
 spectrum highlighted for easy comparison with the 3D Voigt surface.
 
 Features:
+- Selectable value type: Volume, Height, or Detected Intensity
 - Extracts delay values from spectrum names (numeric or filename patterns)
-- Plots volume vs delay with highlighted current point
+- Plots selected value vs delay with highlighted current point
 - Updates highlight as user navigates through spectra
 - Minimal design for side-by-side display with 3D Voigt plot
 """
@@ -18,7 +19,7 @@ Features:
 import re
 from typing import List, Tuple, Optional, Dict, Any
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QSizePolicy, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSizePolicy, QLabel, QComboBox
 from PySide6.QtCore import Signal
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
@@ -77,54 +78,134 @@ def extract_delay_from_spectrum_name(spectrum_name: str) -> Optional[float]:
     return None
 
 
+def extract_index_from_spectrum_name(spectrum_name: str) -> Optional[int]:
+    """
+    Extract spectrum index from trailing 3+ digits in filename.
+
+    Fallback for when no delay pattern is found. Extracts the last
+    group of 3 or more digits before the file extension.
+
+    Examples:
+        "03_2D_NR_ATP_ref_noCa_001.ft" -> 1
+        "experiment_042.ucsf" -> 42
+        "scan_0123.ft" -> 123
+
+    Args:
+        spectrum_name: Filename to parse
+
+    Returns:
+        Index as integer, or None if no 3+ digit pattern found
+    """
+    if not spectrum_name:
+        return None
+
+    # Match 3+ digits immediately before extension (e.g., _001.ft, _042.ucsf)
+    match = re.search(r'_(\d{3,})(?:\.[^.]+)?$', spectrum_name)
+    if match:
+        return int(match.group(1))
+
+    return None
+
+
+def _extract_peak_value(peak: Dict[str, Any], value_type: str) -> Optional[float]:
+    """Extract value from peak dict based on value_type."""
+    if value_type == 'volume':
+        return (
+            peak.get('volume') or
+            peak.get('Volume') or
+            peak.get('intensity') or
+            peak.get('Intensity') or
+            0.0
+        )
+    elif value_type == 'height':
+        return (
+            peak.get('height') or
+            peak.get('Height') or
+            0.0
+        )
+    elif value_type == 'detected_intensity':
+        return (
+            peak.get('detected_intensity') or
+            peak.get('Detected_Intensity') or
+            0.0
+        )
+    else:
+        return peak.get('volume', 0.0)
+
+
 def collect_decay_data(
     spectra: List[Dict[str, Any]],
-    assignment: str
-) -> Tuple[List[float], List[float], List[int]]:
+    assignment: str,
+    value_type: str = 'volume'
+) -> Tuple[List[float], List[float], List[int], str]:
     """
-    Collect decay data (delay vs volume) for a peak across all spectra.
+    Collect decay data (x-axis vs value) for a peak across all spectra.
+
+    X-axis priority:
+    1. Delay mode: Extract delay from filename patterns (_50ms, _1s, etc.)
+    2. Index mode (fallback): Extract 3+ digit index from filename (_001.ft)
 
     Args:
         spectra: List of spectrum dicts with 'name' and 'fitted_peaks'
         assignment: Peak assignment to find
+        value_type: Type of value to extract ('volume', 'height', 'detected_intensity')
 
     Returns:
-        Tuple of (delays_ms, volumes, spectrum_indices)
-        Only includes spectra where peak exists and delay is parseable
+        Tuple of (x_values, values, spectrum_indices, mode)
+        - x_values: delays in ms (delay mode) or indices (index mode)
+        - values: peak values
+        - spectrum_indices: original spectrum indices
+        - mode: 'delay' or 'index'
     """
+    # First pass: try delay extraction
     delays = []
-    volumes = []
+    values = []
     indices = []
 
     for idx, spec in enumerate(spectra):
-        # Parse delay from spectrum name
         delay_ms = extract_delay_from_spectrum_name(spec.get('name', ''))
         if delay_ms is None:
             continue
 
         # Find peak in this spectrum
         fitted_peaks = spec.get('fitted_peaks', [])
-        peak_volume = None
-
         for peak in fitted_peaks:
             peak_assignment = peak.get('assignment', peak.get('Assignment', ''))
             if peak_assignment == assignment:
-                # Try multiple keys for volume
-                peak_volume = (
-                    peak.get('volume') or
-                    peak.get('Volume') or
-                    peak.get('intensity') or
-                    peak.get('Intensity') or
-                    0.0
-                )
+                peak_value = _extract_peak_value(peak, value_type)
+                if peak_value is not None:
+                    delays.append(delay_ms)
+                    values.append(peak_value)
+                    indices.append(idx)
                 break
 
-        if peak_volume is not None:
-            delays.append(delay_ms)
-            volumes.append(peak_volume)
-            indices.append(idx)
+    # If any delays found, use delay mode
+    if delays:
+        return delays, values, indices, 'delay'
 
-    return delays, volumes, indices
+    # Fallback: try index extraction from 3+ trailing digits
+    x_values = []
+    values = []
+    indices = []
+
+    for idx, spec in enumerate(spectra):
+        spec_index = extract_index_from_spectrum_name(spec.get('name', ''))
+        if spec_index is None:
+            continue
+
+        # Find peak in this spectrum
+        fitted_peaks = spec.get('fitted_peaks', [])
+        for peak in fitted_peaks:
+            peak_assignment = peak.get('assignment', peak.get('Assignment', ''))
+            if peak_assignment == assignment:
+                peak_value = _extract_peak_value(peak, value_type)
+                if peak_value is not None:
+                    x_values.append(float(spec_index))
+                    values.append(peak_value)
+                    indices.append(idx)
+                break
+
+    return x_values, values, indices, 'index'
 
 
 class IntensityDecayWidget(QWidget):
@@ -140,15 +221,25 @@ class IntensityDecayWidget(QWidget):
 
     point_clicked = Signal(int)  # Emits spectrum index when point is clicked
 
+    # Value type options for the combo box
+    VALUE_TYPES = [
+        ('Volume', 'volume'),
+        ('Height', 'height'),
+        ('Detected Intensity', 'detected_intensity'),
+    ]
+
     def __init__(self, parent=None):
         """Initialize the intensity decay widget."""
         super().__init__(parent)
 
-        self._delays = []
-        self._volumes = []
+        self._x_values = []  # Delay (ms) or spectrum index depending on mode
+        self._values = []
         self._indices = []
         self._current_index = None
         self._assignment = ""
+        self._value_type = 'volume'  # Default to volume
+        self._x_mode = 'delay'  # 'delay' or 'index' - determines X-axis label
+        self._spectra = []  # Store spectra reference for re-collection on mode change
 
         # Exponential fit data from DynamiXs T1/T2 fitting
         self._fit_curve_time = None
@@ -166,6 +257,11 @@ class IntensityDecayWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACING_SM)
 
+        # Header row with title and value type selector
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(SPACING_SM)
+
         # Title label
         self.title_label = QLabel("Intensity vs Delay")
         self.title_label.setStyleSheet(f"""
@@ -176,7 +272,27 @@ class IntensityDecayWidget(QWidget):
                 padding: 4px;
             }}
         """)
-        layout.addWidget(self.title_label)
+        header_layout.addWidget(self.title_label)
+
+        header_layout.addStretch()
+
+        # Value type selector combo box
+        self.value_type_combo = QComboBox()
+        self.value_type_combo.setToolTip("Select which value to plot vs delay")
+        for display_name, _ in self.VALUE_TYPES:
+            self.value_type_combo.addItem(display_name)
+        self.value_type_combo.setCurrentIndex(0)  # Default to Volume
+        self.value_type_combo.currentIndexChanged.connect(self._on_value_type_changed)
+        self.value_type_combo.setStyleSheet(f"""
+            QComboBox {{
+                font-size: 11px;
+                padding: 2px 6px;
+                min-width: 100px;
+            }}
+        """)
+        header_layout.addWidget(self.value_type_combo)
+
+        layout.addLayout(header_layout)
 
         # Create matplotlib figure
         self.figure = Figure(figsize=(4, 3), dpi=100)
@@ -216,11 +332,25 @@ class IntensityDecayWidget(QWidget):
             assignment: Peak assignment to display
             current_spectrum_index: Index of currently selected spectrum (highlighted)
         """
+        self._spectra = spectra  # Store for re-collection on mode change
         self._assignment = assignment
-        self._delays, self._volumes, self._indices = collect_decay_data(spectra, assignment)
+        self._x_values, self._values, self._indices, self._x_mode = collect_decay_data(
+            spectra, assignment, self._value_type
+        )
         self._current_index = current_spectrum_index
 
         self._update_plot()
+
+    def _on_value_type_changed(self, index: int):
+        """Handle value type combo box selection change."""
+        if 0 <= index < len(self.VALUE_TYPES):
+            _, self._value_type = self.VALUE_TYPES[index]
+            # Re-collect data with new value type
+            if self._spectra and self._assignment:
+                self._x_values, self._values, self._indices, self._x_mode = collect_decay_data(
+                    self._spectra, self._assignment, self._value_type
+                )
+                self._update_plot()
 
     def set_highlight(self, spectrum_index: int):
         """
@@ -265,14 +395,30 @@ class IntensityDecayWidget(QWidget):
         """Clear exponential fit data."""
         self.set_exponential_fit(None)
 
+    def _get_y_axis_label(self) -> str:
+        """Get Y-axis label based on current value type."""
+        labels = {
+            'volume': 'Volume',
+            'height': 'Height',
+            'detected_intensity': 'Detected Intensity',
+        }
+        return labels.get(self._value_type, 'Volume')
+
+    def _get_x_axis_label(self) -> str:
+        """Get X-axis label based on current mode."""
+        if self._x_mode == 'delay':
+            return f"Delay ({self._time_units})" if self._time_units else "Delay (ms)"
+        else:
+            return "Spectrum #"
+
     def _update_plot(self):
         """Redraw the plot with current data."""
         self.axes.clear()
         self._style_axes()
 
-        if not self._delays:
+        if not self._x_values:
             self.axes.text(
-                0.5, 0.5, "No decay data available",
+                0.5, 0.5, "No data available",
                 ha='center', va='center',
                 transform=self.axes.transAxes,
                 fontsize=10, color='gray'
@@ -282,24 +428,24 @@ class IntensityDecayWidget(QWidget):
 
         # Plot all points
         self.axes.scatter(
-            self._delays, self._volumes,
+            self._x_values, self._values,
             s=50, c='#1f77b4', alpha=0.7, zorder=2,
             label='Data points'
         )
 
         # Connect with line (only if no exponential fit, otherwise fit curve replaces this)
         if not self._fit_curve_time:
-            sorted_data = sorted(zip(self._delays, self._volumes, self._indices))
-            sorted_delays = [d[0] for d in sorted_data]
-            sorted_volumes = [d[1] for d in sorted_data]
+            sorted_data = sorted(zip(self._x_values, self._values, self._indices))
+            sorted_x = [d[0] for d in sorted_data]
+            sorted_values = [d[1] for d in sorted_data]
 
             self.axes.plot(
-                sorted_delays, sorted_volumes,
+                sorted_x, sorted_values,
                 '-', color='#1f77b4', alpha=0.3, linewidth=1, zorder=1
             )
 
-        # Plot exponential fit curve from DynamiXs (if available)
-        if self._fit_curve_time and self._fit_curve_intensity:
+        # Plot exponential fit curve from DynamiXs (if available, only in delay mode)
+        if self._x_mode == 'delay' and self._fit_curve_time and self._fit_curve_intensity:
             self.axes.plot(
                 self._fit_curve_time, self._fit_curve_intensity,
                 '-', color='#e63946', linewidth=2, zorder=1.5,
@@ -310,14 +456,14 @@ class IntensityDecayWidget(QWidget):
         if self._current_index is not None and self._current_index in self._indices:
             idx_pos = self._indices.index(self._current_index)
             self.axes.scatter(
-                [self._delays[idx_pos]], [self._volumes[idx_pos]],
+                [self._x_values[idx_pos]], [self._values[idx_pos]],
                 s=150, c='red', marker='o', zorder=3,
                 edgecolors='darkred', linewidths=2,
                 label='Current'
             )
 
-        # Add T1/T2 annotation if available
-        if self._t_value is not None:
+        # Add T1/T2 annotation if available (only in delay mode)
+        if self._x_mode == 'delay' and self._t_value is not None:
             exp_type = self._experiment_type or 'T'
             if self._t_error is not None:
                 annotation = f"{exp_type} = {self._t_value:.2f} ± {self._t_error:.2f} {self._time_units}"
@@ -330,17 +476,20 @@ class IntensityDecayWidget(QWidget):
                 bbox=dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='#cccccc')
             )
 
-        # Labels (use time_units if available)
-        time_label = f"Delay ({self._time_units})" if self._time_units else "Delay (ms)"
-        self.axes.set_xlabel(time_label, fontsize=10)
-        self.axes.set_ylabel("Volume", fontsize=10)
+        # Labels
+        self.axes.set_xlabel(self._get_x_axis_label(), fontsize=10)
+        self.axes.set_ylabel(self._get_y_axis_label(), fontsize=10)
 
-        # Title with assignment
+        # Title with assignment and value type
         if self._assignment:
-            self.title_label.setText(f"Intensity vs Delay: {self._assignment}")
+            x_label = "Delay" if self._x_mode == 'delay' else "Spectrum #"
+            self.title_label.setText(f"{self._get_y_axis_label()} vs {x_label}: {self._assignment}")
 
         # Format y-axis with scientific notation if needed
         self.axes.ticklabel_format(axis='y', style='scientific', scilimits=(0, 3))
+
+        # Force y-axis to start at 0
+        self.axes.set_ylim(bottom=0)
 
         self.figure.tight_layout()
         self.canvas.draw()
@@ -350,7 +499,7 @@ class IntensityDecayWidget(QWidget):
         if event.inaxes != self.axes:
             return
 
-        if not self._delays:
+        if not self._x_values:
             return
 
         # Find closest point
@@ -361,14 +510,14 @@ class IntensityDecayWidget(QWidget):
             return
 
         # Normalize distances (x and y have different scales)
-        x_range = max(self._delays) - min(self._delays) if len(self._delays) > 1 else 1
-        y_range = max(self._volumes) - min(self._volumes) if len(self._volumes) > 1 else 1
+        x_range = max(self._x_values) - min(self._x_values) if len(self._x_values) > 1 else 1
+        y_range = max(self._values) - min(self._values) if len(self._values) > 1 else 1
 
         min_dist = float('inf')
         closest_idx = None
 
-        for i, (d, v, spec_idx) in enumerate(zip(self._delays, self._volumes, self._indices)):
-            dx = (d - click_x) / x_range if x_range > 0 else 0
+        for i, (x, v, spec_idx) in enumerate(zip(self._x_values, self._values, self._indices)):
+            dx = (x - click_x) / x_range if x_range > 0 else 0
             dy = (v - click_y) / y_range if y_range > 0 else 0
             dist = dx * dx + dy * dy
 
@@ -382,11 +531,13 @@ class IntensityDecayWidget(QWidget):
 
     def clear(self):
         """Clear the plot."""
-        self._delays = []
-        self._volumes = []
+        self._x_values = []
+        self._values = []
         self._indices = []
         self._current_index = None
         self._assignment = ""
+        self._x_mode = 'delay'
+        self._spectra = []
         # Clear exponential fit data
         self._fit_curve_time = None
         self._fit_curve_intensity = None

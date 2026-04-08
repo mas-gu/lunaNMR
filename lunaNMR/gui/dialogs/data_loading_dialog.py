@@ -364,7 +364,7 @@ class DataLoadingDialog(BaseDialog):
             self,
             "Select NMR Spectrum",
             initial_dir,
-            "NMR Files (*.ft2 *.ft *.fid *.pipe *.ucsf 2rr 2ri 2ir 2ii 1r 1i);;Bruker Processed (2rr 2ri 2ir 2ii);;NMRPipe (*.ft2 *.ft *.pipe);;All Files (*)"
+            "NMR Files (*.ft2 *.ft *.pipe *.ucsf 2rr 2ri 2ir 2ii 1r 1i);;Bruker Processed (2rr 2ri 2ir 2ii);;NMRPipe (*.ft2 *.ft *.pipe);;Varian/Agilent (fid);;All Files (*)"
         )
 
         if file_path:

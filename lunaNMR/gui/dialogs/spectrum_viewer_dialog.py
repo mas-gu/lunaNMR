@@ -532,9 +532,10 @@ class SpectrumViewerDialog(BaseDialog):
         # Min level
         layout.addWidget(QLabel("Min Level:"))
         self.min_spin = QDoubleSpinBox()
-        self.min_spin.setRange(0.01, 10.0)
+        self.min_spin.setRange(0.0001, 10.0)
         self.min_spin.setValue(self.contour_min)
-        self.min_spin.setSingleStep(0.01)
+        self.min_spin.setSingleStep(0.002)
+        self.min_spin.setDecimals(5)
         self.min_spin.setMaximumWidth(80)
         self.min_spin.valueChanged.connect(self._on_contour_changed)
         layout.addWidget(self.min_spin)

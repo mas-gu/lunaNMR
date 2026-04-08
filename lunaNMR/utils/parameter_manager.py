@@ -37,14 +37,14 @@ class NMRParameterManager:
 
         # Define all default parameters with validation ranges
         self.parameter_definitions = {
-            # Detection Parameters
-            'search_window_x': {'default': 0.1, 'min': 0.01, 'max': 1.0, 'type': float},
-            'search_window_y': {'default': 0.5, 'min': 0.01, 'max': 2.0, 'type': float},
+            # Detection Parameters (nucleus-adaptive tight values)
+            'search_window_x': {'default': 0.005, 'min': 0.001, 'max': 1.0, 'type': float},  # Tight: 0.005 ppm (F2/1H)
+            'search_window_y': {'default': 0.020, 'min': 0.001, 'max': 2.0, 'type': float},  # Tight: 0.020 ppm (F1/15N default)
             'noise_threshold': {'default': 0.1, 'min': 0.01, 'max': 10.0, 'type': float},
 
             # Fitting Parameters
             'fitting_window_x': {'default': 0.15, 'min': 0.01, 'max': 0.5, 'type': float},  # Increased from 0.05 to ensure adequate data points
-            'fitting_window_y': {'default': 2, 'min': 0.01, 'max': 10.0, 'type': float},
+            'fitting_window_y': {'default': 2.0, 'min': 0.01, 'max': 10.0, 'type': float},  # Fixed: float not int
             'min_r_squared': {'default': 0.1, 'min': 0.0, 'max': 1.0, 'type': float},  # Lowered to 0.1 for debugging/QC
             'max_iterations': {'default': 1000, 'min': 10, 'max': 1000, 'type': int},  # Increased from 100 to ensure convergence
 

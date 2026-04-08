@@ -34,7 +34,7 @@ class NMRFileManager:
                           '3rrr', '3rri', '3rir', '3rii', '3irr', '3iri', '3iir', '3iii')
 
     def __init__(self):
-        self.supported_nmr_formats = ['ft', 'fid', 'ser', 'ft2', 'ft3', 'pipe', 'ucsf']
+        self.supported_nmr_formats = ['ft', 'ser', 'ft2', 'ft3', 'pipe', 'ucsf']
         self.supported_peak_formats = ['txt', 'csv', 'peaks']
         self.recent_files = []
         self.max_recent = 10
@@ -44,12 +44,49 @@ class NMRFileManager:
         basename = os.path.basename(file_path)
         return basename in self.BRUKER_PDATA_NAMES
 
+    def _is_varian_fid(self, file_path):
+        """Check if file is Varian/Agilent FID data.
+
+        Varian format uses a directory structure:
+        - Directory named *.fid/
+        - Contains file 'fid' (no extension) with the data
+        - Contains 'procpar' file with parameters
+        """
+        basename = os.path.basename(file_path)
+        parent_dir = os.path.dirname(file_path)
+
+        # Check if this is a file named 'fid' with no extension
+        if basename != 'fid':
+            return False
+
+        # Check if parent directory name ends with .fid
+        parent_name = os.path.basename(parent_dir)
+        if not parent_name.endswith('.fid'):
+            return False
+
+        # Check if procpar exists (required companion file)
+        procpar_path = os.path.join(parent_dir, 'procpar')
+        if not os.path.exists(procpar_path):
+            return False
+
+        return True
+
     def validate_nmr_file(self, file_path):
         """Validate NMR data file"""
         if not os.path.exists(file_path):
             return False, "File does not exist"
 
         try:
+            # Check for Varian/Agilent FID data (file named 'fid' in *.fid/ directory)
+            if self._is_varian_fid(file_path):
+                # Check file size (basic validation)
+                size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                if size_mb < 0.001:
+                    return False, "File too small"
+                if size_mb > 1000:
+                    return False, "File too large"
+                return True, "Valid Varian/Agilent FID file"
+
             # Check for Bruker pdata files (no extension)
             if self._is_bruker_pdata(file_path):
                 # Check file size (basic validation)
@@ -145,12 +182,17 @@ class NMRFileManager:
                 raise ValueError(message)
 
             # Load based on file type
-            ext = os.path.splitext(file_path)[1].lower().lstrip('.')
-
-            if ext in ['ft', 'fid']:
+            # Check for Varian/Agilent FID (file named 'fid' in *.fid/ directory)
+            if self._is_varian_fid(file_path):
                 dic, data = ng.varian.read(os.path.dirname(file_path))
             else:
-                raise ValueError(f"Unsupported format for loading: {ext}")
+                # Load based on file extension
+                ext = os.path.splitext(file_path)[1].lower().lstrip('.')
+
+                if ext == 'ft':
+                    dic, data = ng.varian.read(os.path.dirname(file_path))
+                else:
+                    raise ValueError(f"Unsupported format for loading: {ext}")
 
             # Add to recent files
             self.add_recent_file(file_path)

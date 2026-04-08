@@ -75,7 +75,7 @@ class ProjectManager:
         'lw_lorentz_15n', 'lw_gauss_15n',
 
         # Series integration parameters
-        'use_ps2d_linewidth_reuse', 'series_peak_source', 'enable_cascade_drift_limit',
+        'use_ps2d_linewidth_reuse', 'enable_cascade_drift_limit',
 
         # Shift peak list
         'shift_1h_value', 'shift_15n_value',
@@ -115,31 +115,44 @@ class ProjectManager:
         }
 
         try:
+            # Import QApplication for processEvents
+            try:
+                from PySide6.QtWidgets import QApplication
+                process_events = lambda: QApplication.processEvents()
+            except ImportError:
+                process_events = lambda: None  # No-op if not in GUI context
+
             # Create bundle directory
             project_path.mkdir(parents=True, exist_ok=True)
 
             # Save components and track what was saved
             self._save_manifest(project_path)
             summary['saved_items'].append('Project manifest')
+            process_events()
 
             self._save_gui_state(project_path)
             summary['saved_items'].append('GUI state')
+            process_events()
 
             if self._save_peak_list(project_path):
                 peak_count = len(getattr(self.main_window, 'peaks', []))
                 if peak_count > 0:
                     summary['saved_items'].append(f'Peak list ({peak_count} peaks)')
+            process_events()
 
             if self._save_fit_results(project_path):
                 summary['saved_items'].append('Fit results')
+            process_events()
 
             if self._save_series_results(project_path):
                 summary['saved_items'].append('Series results')
+            process_events()
 
             # Save DynamiXs state and get detailed summary
             dynamixs_summary = self._save_dynamixs_state_with_summary(project_path)
             if dynamixs_summary:
                 summary['dynamixs'] = dynamixs_summary
+            process_events()
 
             logger.info(f"Project saved to {project_path}")
             return True, summary
@@ -268,10 +281,10 @@ class ProjectManager:
             serialized = self._serialize_fit_result(fit_result, peak_id, arrays_dir)
             serialized_results.append(serialized)
 
-        # Save scalars to JSON
+        # Save scalars to JSON (compact format for faster saving)
         fits_path = fit_dir / "fits.json"
         with open(fits_path, 'w') as f:
-            json.dump(serialized_results, f, indent=2, default=self._json_serializer)
+            json.dump(serialized_results, f, default=self._json_serializer)
 
         logger.info(f"Saved {len(serialized_results)} fit results to {fit_dir}")
         return True
@@ -702,6 +715,13 @@ class ProjectManager:
         Each series is saved in its own subdirectory:
         series_results/{series_name}/batch_results.json
         """
+        # Import QApplication for processEvents
+        try:
+            from PySide6.QtWidgets import QApplication
+            process_events = lambda: QApplication.processEvents()
+        except ImportError:
+            process_events = lambda: None  # No-op if not in GUI context
+
         # Create series_results directory
         series_dir = bundle_path / "series_results"
         series_dir.mkdir(exist_ok=True)
@@ -727,6 +747,7 @@ class ProjectManager:
 
         # Save each series
         for series_name, batch_results in saved_series.items():
+            process_events()  # Keep GUI responsive
             # Create subdirectory for this series
             series_subdir = series_dir / series_name
             series_subdir.mkdir(exist_ok=True)
@@ -744,10 +765,10 @@ class ProjectManager:
                 for name, result in batch_results.results.items():
                     data['results'][name] = self._serialize_spectrum_result(result)
 
-            # Write to JSON
+            # Write to JSON (compact format for faster saving)
             batch_file = series_subdir / "batch_results.json"
             with open(batch_file, 'w') as f:
-                json.dump(data, f, indent=2, default=self._json_serializer)
+                json.dump(data, f, default=self._json_serializer)
 
             # Add to manifest
             spectrum_count = len(batch_results.results) if hasattr(batch_results, 'results') else 0
@@ -758,10 +779,10 @@ class ProjectManager:
 
             logger.info(f"Saved series '{series_name}': {spectrum_count} spectra")
 
-        # Write manifest
+        # Write manifest (compact format for faster saving)
         manifest_file = series_dir / "series_manifest.json"
         with open(manifest_file, 'w') as f:
-            json.dump(manifest, f, indent=2)
+            json.dump(manifest, f)
 
         logger.info(f"Saved {len(saved_series)} series integrations")
         return True

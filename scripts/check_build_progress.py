@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Set, Tuple
 
 
-SPECTRUM_EXTENSIONS = {'.ft', '.ft2', '.ft1', '.2rr', '.2ii', '.fid', '.ucsf', '.pipe'}
+SPECTRUM_EXTENSIONS = {'.ft', '.ft2', '.ft1', '.2rr', '.2ii', '.ucsf', '.pipe'}
 PEAK_LIST_EXTENSIONS = {'.txt', '.csv'}
 
 

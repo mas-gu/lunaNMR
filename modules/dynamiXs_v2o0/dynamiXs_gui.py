@@ -1982,11 +1982,23 @@ class T1T2FittingPage(BasePage):
         self.results_text.appendPlainText(f"\nSession updated: {session_key} stored")
         self.results_text.appendPlainText(f"Fitted experiments: {sorted(self.fitted_experiments)}")
 
+        # Clean up worker thread to prevent crash on exit
+        if hasattr(self, 'worker') and self.worker is not None:
+            self.worker.wait()
+            self.worker.deleteLater()
+            self.worker = None
+
     @Slot(str)
     def _on_error(self, error_msg: str):
         """Handle analysis error."""
         self.progress_bar.hide()
         self.results_text.appendPlainText(f"\nError during analysis:\n{error_msg}")
+
+        # Clean up worker thread to prevent crash on exit
+        if hasattr(self, 'worker') and self.worker is not None:
+            self.worker.wait()
+            self.worker.deleteLater()
+            self.worker = None
 
     def _update_status_indicators(self):
         """Update visual status indicators for fitted experiments."""

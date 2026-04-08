@@ -87,7 +87,7 @@ class TrainingDataBuilder:
     comprehensive training data for ML model development.
     """
 
-    SUPPORTED_EXTENSIONS = {'.ft', '.ft2', '.ft1', '.2rr', '.2ii', '.fid', '.ucsf'}
+    SUPPORTED_EXTENSIONS = {'.ft', '.ft2', '.ft1', '.2rr', '.2ii', '.ucsf'}
     PEAK_LIST_PATTERNS = ['*_peaks.txt', '*_peaklist.txt', '*.txt', '*.csv']
 
     def __init__(
