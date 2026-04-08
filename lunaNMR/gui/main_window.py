@@ -356,9 +356,13 @@ class LunaNMRMainWindow(BaseWindow):
         self.dynamixs_dialog = None  # Reference to open DynamiXs dialog
 
         # ===== Selection State =====
-        self.selected_peak_info = None  # {type, index, data}
+        self.selected_peak_info = None  # {type, index, peak_id, data}
         self.selected_peaks_multi = []  # List of peak_info dicts for multi-selection
         self.selected_peak_number = 1  # For peak navigation
+
+        # ===== Undo/Redo Manager =====
+        from lunaNMR.utils.undo_manager import PeakUndoManager
+        self.undo_manager = PeakUndoManager(self)
 
         # ===== Workflow Configuration =====
         # Workflow mode: "peak_list" (default) or "sn_threshold"
@@ -396,8 +400,9 @@ class LunaNMRMainWindow(BaseWindow):
         # ===== Peak Detection Parameters (Expert Mode) =====
         # Detection parameters from parameter_manager defaults
         self.noise_threshold = 3.0
-        self.search_window_x = 0.01  # 1H dimension (ppm)
-        self.search_window_y = 0.04  # 15N dimension (ppm)
+        # Nucleus-adaptive search windows (from ps2d_config)
+        self.search_window_x = 0.02  # 1H dimension (ppm) - F2
+        self.search_window_y = 0.05  # 15N/13C dimension (ppm) - F1
         self.detection_square_size = 3  # X-dimension/1H (pixels)
         self.detection_rectangle_y = 1  # Y-dimension/15N (pixels)
         self.detection_square_ppm_x = "0.000"  # Auto-calculated ppm conversion
@@ -457,9 +462,11 @@ class LunaNMRMainWindow(BaseWindow):
         self.lw_gauss_15n = 0.3    # 15N Gaussian (ppm)
 
         # ===== Series Integration Parameters (Expert Mode) =====
-        self.use_ps2d_linewidth_reuse = True  # Per-Peak Linewidth Reuse for ~40% speedup (ON by default)
-        self.series_peak_source = "cascade"    # "detected" or "cascade"
+        self.use_ps2d_linewidth_reuse = False  # Per-Peak Linewidth Reuse as initial guess (OFF by default)
         self.enable_cascade_drift_limit = True  # Enforce absolute drift limits in cascade mode (ON by default)
+        self.rerun_adaptive_per_spectrum = True  # Rerun PASS 1 + adaptive for each spectrum (ON by default)
+        self.lock_cluster_assignments = True  # Lock clusters from reference in Independent mode (ON by default)
+        self.lock_detection_threshold = True  # Lock detection threshold from spectrum 1 (ON by default)
 
         # ===== Expert Mode Dialog State =====
         self.params_visible = False           # Peak Detection Parameters visibility
@@ -2067,12 +2074,12 @@ class LunaNMRMainWindow(BaseWindow):
         """)
         params_layout.addRow("Levels:", self.contour_levels_spin)
 
-        # Min Level spinbox (0.001-1.0, default 0.05)
+        # Min Level spinbox (0.0001-1.0, default 0.05, step 0.002)
         self.contour_min_spin = QDoubleSpinBox()
-        self.contour_min_spin.setRange(0.001, 1.0)
+        self.contour_min_spin.setRange(0.0001, 1.0)
         self.contour_min_spin.setValue(self.contour_min)
-        self.contour_min_spin.setSingleStep(0.01)
-        self.contour_min_spin.setDecimals(3)
+        self.contour_min_spin.setSingleStep(0.002)
+        self.contour_min_spin.setDecimals(5)
         self.contour_min_spin.valueChanged.connect(self.on_contour_min_changed)
         self.contour_min_spin.setStyleSheet(f"""
             QDoubleSpinBox {{
@@ -2162,7 +2169,7 @@ class LunaNMRMainWindow(BaseWindow):
 
         # Update S/N from-GUI display if active
         if hasattr(self, 'sn_from_gui_checkbox') and self.sn_from_gui_checkbox.isChecked():
-            self.sn_contour_min_display.setText(f"{value:.3f}")
+            self.sn_contour_min_display.setText(f"{value:.5f}")
 
             # Recalculate effective S/N
             if hasattr(self, 'integrator') and hasattr(self.integrator, 'nmr_data') and self.integrator.nmr_data is not None:
@@ -2422,17 +2429,17 @@ class LunaNMRMainWindow(BaseWindow):
         # Row 0: 1H/15N search window
         params_frame_layout.addWidget(QLabel("1H/15N (ppm):"), 0, 0)
         self.expert_search_x_spin = QDoubleSpinBox()
-        self.expert_search_x_spin.setRange(0.01, 0.2)
-        self.expert_search_x_spin.setSingleStep(0.01)
+        self.expert_search_x_spin.setRange(0.001, 0.2)  # Min lowered to allow tight windows
+        self.expert_search_x_spin.setSingleStep(0.005)
         self.expert_search_x_spin.setDecimals(3)
         self.expert_search_x_spin.setValue(self.search_window_x)
         self.expert_search_x_spin.valueChanged.connect(self._on_expert_param_change)
         params_frame_layout.addWidget(self.expert_search_x_spin, 0, 1)
 
         self.expert_search_y_spin = QDoubleSpinBox()
-        self.expert_search_y_spin.setRange(0.01, 4.0)
+        self.expert_search_y_spin.setRange(0.005, 4.0)  # Min lowered to allow tight windows
         self.expert_search_y_spin.setSingleStep(0.01)
-        self.expert_search_y_spin.setDecimals(2)
+        self.expert_search_y_spin.setDecimals(3)
         self.expert_search_y_spin.setValue(self.search_window_y)
         self.expert_search_y_spin.valueChanged.connect(self._on_expert_param_change)
         params_frame_layout.addWidget(self.expert_search_y_spin, 0, 2)
@@ -2892,11 +2899,12 @@ class LunaNMRMainWindow(BaseWindow):
 
         # Per-Peak Linewidth Reuse checkbox
         lw_reuse_row = QHBoxLayout()
-        self.expert_lw_reuse_check = QCheckBox("🔒 Per-Peak Linewidth Reuse (Use spectrum 1 linewidths for all)")
+        self.expert_lw_reuse_check = QCheckBox("📐 Use Spectrum 1 Linewidths as Initial Guess")
         self.expert_lw_reuse_check.setToolTip(
-            "Extract per-peak linewidths from spectrum 1 and apply them as fixed\n"
-            "constraints when fitting the same peaks in spectra 2+.\n"
-            "Improves fitting speed (~40%) and consistency across relaxation series.\n"
+            "Extract per-peak linewidths from spectrum 1 and use them as initial\n"
+            "guesses when fitting the same peaks in spectra 2+.\n"
+            "The optimizer can still adjust linewidths to find the best fit.\n"
+            "Improves convergence speed and consistency across series.\n"
             "Falls back to median statistics if a peak wasn't successfully fitted in spectrum 1."
         )
         self.expert_lw_reuse_check.setChecked(self.use_ps2d_linewidth_reuse)
@@ -2905,51 +2913,81 @@ class LunaNMRMainWindow(BaseWindow):
         lw_reuse_row.addStretch()
         series_layout.addLayout(lw_reuse_row)
 
+        # Rerun Adaptive per Spectrum checkbox
+        adaptive_row = QHBoxLayout()
+        self.expert_rerun_adaptive_check = QCheckBox("🔄 Rerun Adaptive Optimization per Spectrum")
+        self.expert_rerun_adaptive_check.setToolTip(
+            "When enabled, runs full PASS 1 learning and adaptive grid search\n"
+            "(radF1/radF2 optimization) for EACH spectrum in the series.\n"
+            "When disabled (default), spectrum 1 statistics are reused for all spectra.\n"
+            "Enable this if linewidth characteristics vary significantly across the series."
+        )
+        self.expert_rerun_adaptive_check.setChecked(self.rerun_adaptive_per_spectrum)
+        self.expert_rerun_adaptive_check.stateChanged.connect(self._on_rerun_adaptive_change)
+        adaptive_row.addWidget(self.expert_rerun_adaptive_check)
+        adaptive_row.addStretch()
+        series_layout.addLayout(adaptive_row)
+
         # Separator
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
         separator.setFrameShadow(QFrame.Sunken)
         series_layout.addWidget(separator)
 
-        # Peak List Source label
-        peak_source_label = QLabel("🎯 Peak List Source:")
-        peak_source_label.setStyleSheet("font-weight: bold;")
-        series_layout.addWidget(peak_source_label)
-
-        # Peak source radio buttons
-        self.expert_peak_source_group = QButtonGroup(dialog)
-        detected_radio = QRadioButton("Use detected peaks")
-        cascade_radio = QRadioButton("Cascade mode (propagate positions: n→n+1→n+2)")
-        self.expert_peak_source_group.addButton(detected_radio, 0)
-        self.expert_peak_source_group.addButton(cascade_radio, 1)
-
-        if self.series_peak_source == "detected":
-            detected_radio.setChecked(True)
-        else:
-            cascade_radio.setChecked(True)
-
-        self.expert_peak_source_group.buttonClicked.connect(self._on_peak_source_change)
-        series_layout.addWidget(detected_radio)
-        series_layout.addWidget(cascade_radio)
-
-        # Cascade drift limit checkbox (indented under cascade mode)
+        # Cascade/Independent drift limit checkbox
         drift_limit_row = QHBoxLayout()
-        drift_limit_row.addSpacing(20)  # Indent to show it's related to cascade mode
         self.expert_cascade_drift_check = QCheckBox("🔒 Enforce max drift from reference")
         self.expert_cascade_drift_check.setChecked(self.enable_cascade_drift_limit)
         self.expert_cascade_drift_check.stateChanged.connect(self._on_cascade_drift_limit_change)
         self.expert_cascade_drift_check.setToolTip(
             "When enabled, peak positions are constrained to stay within max drift\n"
-            "of their ORIGINAL reference positions (15N: ±0.10/±0.05, 13C: ±0.05/±0.05 ppm).\n"
+            "of their ORIGINAL reference positions (15N: ±0.025/±0.005, 13C: ±0.01/±0.005 ppm).\n"
+            "Applies to Cascade and Independent modes.\n"
             "This prevents unbounded drift accumulation across many spectra.\n"
             "Disable if you expect large genuine chemical shift changes."
         )
         drift_limit_row.addWidget(self.expert_cascade_drift_check)
-        drift_limit_hint = QLabel("(15N: ±0.10/±0.05, 13C: ±0.05/±0.05 ppm)")
+        drift_limit_hint = QLabel("(15N: ±0.025/±0.005, 13C: ±0.01/±0.005 ppm)")
         drift_limit_hint.setStyleSheet("font-size: 10px; color: gray;")
         drift_limit_row.addWidget(drift_limit_hint)
         drift_limit_row.addStretch()
         series_layout.addLayout(drift_limit_row)
+
+        # Lock Cluster Assignments checkbox (for Independent mode)
+        lock_clusters_row = QHBoxLayout()
+        self.expert_lock_clusters_check = QCheckBox("Lock Cluster Assignments from Reference")
+        self.expert_lock_clusters_check.setChecked(self.lock_cluster_assignments)
+        self.expert_lock_clusters_check.stateChanged.connect(self._on_lock_clusters_change)
+        self.expert_lock_clusters_check.setToolTip(
+            "When enabled in Independent mode:\n"
+            "- Cluster assignments from spectrum 1 are used for all spectra\n"
+            "- Prevents volume variation from cluster membership changes\n"
+            "- Still runs fresh adaptive optimization per spectrum\n"
+            "Recommended for titration/relaxation series where peak groupings should be consistent."
+        )
+        lock_clusters_row.addWidget(self.expert_lock_clusters_check)
+        lock_clusters_hint = QLabel("(Independent mode only)")
+        lock_clusters_hint.setStyleSheet("font-size: 10px; color: gray;")
+        lock_clusters_row.addWidget(lock_clusters_hint)
+        lock_clusters_row.addStretch()
+        series_layout.addLayout(lock_clusters_row)
+
+        # Lock Detection Threshold checkbox
+        lock_threshold_row = QHBoxLayout()
+        self.expert_lock_threshold_check = QCheckBox("🔒 Lock detection threshold from spectrum 1")
+        self.expert_lock_threshold_check.setChecked(self.lock_detection_threshold)
+        self.expert_lock_threshold_check.stateChanged.connect(self._on_lock_threshold_change)
+        self.expert_lock_threshold_check.setToolTip(
+            "When enabled:\n"
+            "- Detection threshold from spectrum 1 is used for all spectra\n"
+            "- Ensures consistent peak detection across series\n"
+            "When disabled:\n"
+            "- Each spectrum computes threshold from its own max intensity\n"
+            "- Better for series with varying intensity (relaxation, degradation)"
+        )
+        lock_threshold_row.addWidget(self.expert_lock_threshold_check)
+        lock_threshold_row.addStretch()
+        series_layout.addLayout(lock_threshold_row)
 
         content_layout.addWidget(series_group)
 
@@ -3042,6 +3080,10 @@ class LunaNMRMainWindow(BaseWindow):
             self.expert_lw_reuse_check.blockSignals(True)
             self.expert_lw_reuse_check.setChecked(self.use_ps2d_linewidth_reuse)
             self.expert_lw_reuse_check.blockSignals(False)
+        if hasattr(self, 'expert_rerun_adaptive_check'):
+            self.expert_rerun_adaptive_check.blockSignals(True)
+            self.expert_rerun_adaptive_check.setChecked(self.rerun_adaptive_per_spectrum)
+            self.expert_rerun_adaptive_check.blockSignals(False)
 
         # Custom linewidth values
         if hasattr(self, 'expert_lw_lor_1h_spin'):
@@ -3213,6 +3255,10 @@ class LunaNMRMainWindow(BaseWindow):
         self.ps2d_overlap_x = config.overlap_threshold_x
         self.ps2d_overlap_y = config.overlap_threshold_y
 
+        # Update nucleus-adaptive search windows
+        self.search_window_y = config.search_window_f1  # F1 (15N/13C)
+        self.search_window_x = config.search_window_f2  # F2 (1H)
+
         # Update spinboxes if they exist
         if hasattr(self, 'expert_radF1_spin'):
             self.expert_radF1_spin.setValue(config.radF1)
@@ -3223,7 +3269,18 @@ class LunaNMRMainWindow(BaseWindow):
         if hasattr(self, 'expert_max_cluster_spin'):
             self.expert_max_cluster_spin.setValue(config.max_cluster_size)
 
-        logger.info(f"PS2D config switched to: {nucleus} (radF1={config.radF1:.3f}, radF2={config.radF2:.4f})")
+        # Update search window spinboxes
+        if hasattr(self, 'expert_search_x_spin'):
+            self.expert_search_x_spin.setValue(self.search_window_x)
+        if hasattr(self, 'expert_search_y_spin'):
+            self.expert_search_y_spin.setValue(self.search_window_y)
+
+        # Update integrator search windows
+        if hasattr(self, 'integrator') and self.integrator:
+            self.integrator.set_search_window(self.search_window_x, self.search_window_y)
+
+        logger.info(f"PS2D config switched to: {nucleus} (radF1={config.radF1:.3f}, radF2={config.radF2:.4f}, "
+                    f"search_window_f1={config.search_window_f1:.4f}, search_window_f2={config.search_window_f2:.4f})")
         self.update_status(f"PS2D configuration: {nucleus}-HSQC (radF1={config.radF1:.2f}, radF2={config.radF2:.3f})")
 
         # Update plot if ellipses are shown (v0.9 main_gui.py:3228-3229)
@@ -3381,14 +3438,6 @@ class LunaNMRMainWindow(BaseWindow):
         else:
             logger.info("Per-Peak Linewidth Reuse DISABLED")
 
-    def _on_peak_source_change(self, button):
-        """Handle peak source radio button change."""
-        if self.expert_peak_source_group.id(button) == 0:
-            self.series_peak_source = "detected"
-        else:
-            self.series_peak_source = "cascade"
-        logger.info(f"Series peak source: {self.series_peak_source}")
-
     def _on_cascade_drift_limit_change(self, state):
         """Handle cascade drift limit toggle."""
         self.enable_cascade_drift_limit = (state == 2)  # Qt.CheckState.Checked = 2
@@ -3396,6 +3445,30 @@ class LunaNMRMainWindow(BaseWindow):
             logger.info("Cascade drift limit ENABLED - positions bounded to nucleus-specific max drift from reference")
         else:
             logger.info("Cascade drift limit DISABLED - positions can drift freely in cascade mode")
+
+    def _on_lock_clusters_change(self, state):
+        """Handle lock cluster assignments toggle for Independent mode."""
+        self.lock_cluster_assignments = (state == 2)  # Qt.CheckState.Checked = 2
+        if self.lock_cluster_assignments:
+            logger.info("Lock Cluster Assignments ENABLED - clusters from spectrum 1 will be used for all spectra (Independent mode)")
+        else:
+            logger.info("Lock Cluster Assignments DISABLED - clusters recomputed per spectrum")
+
+    def _on_lock_threshold_change(self, state):
+        """Handle lock detection threshold toggle."""
+        self.lock_detection_threshold = (state == 2)  # Qt.CheckState.Checked = 2
+        if self.lock_detection_threshold:
+            logger.info("Lock Detection Threshold ENABLED - spectrum 1 threshold used for all spectra")
+        else:
+            logger.info("Lock Detection Threshold DISABLED - per-spectrum threshold based on max intensity")
+
+    def _on_rerun_adaptive_change(self, state):
+        """Handle rerun adaptive optimization per spectrum toggle."""
+        self.rerun_adaptive_per_spectrum = (state == 2)  # Qt.CheckState.Checked = 2
+        if self.rerun_adaptive_per_spectrum:
+            logger.info("Rerun Adaptive ENABLED - full PASS 1 + adaptive grid search for each spectrum")
+        else:
+            logger.info("Rerun Adaptive DISABLED - spectrum 1 statistics reused for all spectra")
 
     def on_reset_results(self):
         """Handle Reset Results button click.
@@ -4410,7 +4483,7 @@ class LunaNMRMainWindow(BaseWindow):
         5. Shows success status in status bar
 
         Args:
-            file_path: Path to NMR spectrum file (.ft, .ft2, .pipe, .fid)
+            file_path: Path to NMR spectrum file (.ft, .ft2, .pipe, .ucsf, or 'fid' file in Varian *.fid/ directory)
 
         Raises:
             Exception: If file loading fails
@@ -4698,6 +4771,18 @@ class LunaNMRMainWindow(BaseWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
+        # === Edit Menu (Undo/Redo) ===
+        edit_menu = menu_bar.addMenu("&Edit")
+
+        # Use undo manager's auto-generated actions (handles shortcuts, enable/disable, text updates)
+        self.undo_action = self.undo_manager.create_undo_action(self)
+        self.undo_action.setShortcut("Ctrl+Z")
+        edit_menu.addAction(self.undo_action)
+
+        self.redo_action = self.undo_manager.create_redo_action(self)
+        self.redo_action.setShortcut("Ctrl+Shift+Z")
+        edit_menu.addAction(self.redo_action)
+
         # === Results Analysis Menu (v0o9 lines 1020-1029) ===
         results_menu = menu_bar.addMenu("&Results Analysis")
 
@@ -4739,6 +4824,10 @@ class LunaNMRMainWindow(BaseWindow):
         dynamixs_action = QAction("DynamiXs Relaxation Analysis", self)
         dynamixs_action.triggered.connect(self.launch_dynamixs)
         modules_menu.addAction(dynamixs_action)
+
+        series_qc_action = QAction("Series QC Analysis", self)
+        series_qc_action.triggered.connect(self.launch_series_qc)
+        modules_menu.addAction(series_qc_action)
 
         modules_menu.addSeparator()
 
@@ -5617,6 +5706,24 @@ class LunaNMRMainWindow(BaseWindow):
         self.dynamixs_dialog = DynamiXsDialog(parent=self, main_window=self)
         self.dynamixs_dialog.show()
 
+    def launch_series_qc(self):
+        """Launch Series QC Analysis dialog.
+
+        Opens the Series QC dialog for analyzing and comparing
+        series integration results from training_data.json files.
+        """
+        from lunaNMR.gui.dialogs import SeriesQCDialog
+
+        # Reuse existing dialog if already open
+        if hasattr(self, 'series_qc_dialog') and self.series_qc_dialog and self.series_qc_dialog.isVisible():
+            self.series_qc_dialog.raise_()
+            self.series_qc_dialog.activateWindow()
+            return
+
+        # Create and show new dialog
+        self.series_qc_dialog = SeriesQCDialog(parent=self, main_window=self)
+        self.series_qc_dialog.show()
+
     # =================== TOOLS MENU HANDLERS ===================
 
     def open_config_dialog(self):
@@ -6065,9 +6172,23 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             if hasattr(self, 'auto_add_dummy_peaks'):
                 self.integrator.auto_add_dummy_peaks = self.auto_add_dummy_peaks
 
-            # Sync peak_list S/N threshold
+            # Sync peak_list S/N threshold (legacy, used as fallback)
             if hasattr(self, 'peak_list_sn_threshold'):
                 self.integrator.peak_list_sn_threshold = self.peak_list_sn_threshold
+
+            # Sync peak_list contour threshold (preferred method)
+            # Uses GUI contour minimum so "what you see is what you detect"
+            if (hasattr(self, 'workflow_mode') and self.workflow_mode == 'peak_list' and
+                hasattr(self.integrator, 'nmr_data') and self.integrator.nmr_data is not None):
+                max_intensity = np.max(self.integrator.nmr_data)
+                contour_min = self.contour_min_spin.value()
+                safety_factor = 1.05  # 5% margin to ensure visible peaks are detected
+                self.integrator.peak_list_contour_threshold = max_intensity * contour_min * safety_factor
+                logger.info(f"Peak List mode: contour threshold={self.integrator.peak_list_contour_threshold:.2e}, "
+                            f"contour_min={contour_min:.3f}")
+            else:
+                # Not in peak_list mode or no data - don't use contour threshold
+                self.integrator.peak_list_contour_threshold = None
 
             # Sync manual detection region
             if hasattr(self, 'use_manual_detection_region') and self.use_manual_detection_region:
@@ -6273,10 +6394,21 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         """
         logger.info("Fit Spectrum button clicked")
 
+        # Clear undo stack before major fitting operation
+        # (fitted_peaks will be completely replaced, making undo impossible)
+        if hasattr(self, 'undo_manager') and self.undo_manager is not None:
+            self.undo_manager.on_major_operation()
+
         # CRITICAL: Sync GUI parameters to param_manager BEFORE fitting
         # This ensures Expert Mode settings (fix_positions, fix_linewidths, etc.) are passed
         self.sync_parameters_to_integrator()
         logger.info(f"Parameters synced: fix_positions={self.fix_positions}, fix_linewidths={self.fix_linewidths}")
+
+        # Clear cached series_params to ensure fresh clustering with current settings.
+        # This prevents stale cluster assignments from being reused when the user
+        # changes parameters like max_cluster_size between fits.
+        if hasattr(self.integrator, 'fitter') and hasattr(self.integrator.fitter, 'series_params'):
+            self.integrator.fitter.series_params = None
 
         # Validate peak_list is loaded (required for fitting)
         if not hasattr(self.integrator, 'peak_list') or self.integrator.peak_list is None:
@@ -6326,7 +6458,11 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         processing_options = {
             'use_parallel': self.use_parallel_processing,
             'use_global_optimization': getattr(self, 'use_global_optimization', False),
-            'use_voigt_fitting': self.use_voigt_fitting
+            'use_voigt_fitting': self.use_voigt_fitting,
+            # For single spectrum fitting, always recompute clusters fresh.
+            # This ensures changes to max_cluster_size and other Expert Mode
+            # settings take effect immediately (don't reuse cached series_params).
+            'skip_series_params': True
         }
 
         logger.info(f"Processing options: {processing_options}")
@@ -7042,6 +7178,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     candidates.append({
                         'type': 'reference',
                         'index': idx,
+                        'peak_id': row.get('peak_id', idx),
                         'x': peak_x,
                         'y': peak_y,
                         'assignment': row.get('Assignment', f'Peak_{idx+1}')
@@ -7058,6 +7195,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     candidates.append({
                         'type': 'detected',
                         'index': idx,
+                        'peak_id': peak.get('peak_id', idx),
                         'x': peak_x,
                         'y': peak_y,
                         'assignment': peak.get('assignment', f'Det_{idx+1}')
@@ -7111,6 +7249,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         """Handle Delete/Backspace/Ctrl+D key press from spectrum plotter."""
         if self.selected_peaks_multi:
             self._delete_selected_peaks()
+        elif self.selected_peak_info is not None:
+            # Single peak selected via middle-click
+            self.delete_selected_peak(self.selected_peak_info)
 
     def keyPressEvent(self, event):
         """Handle keyboard events for peak selection management.
@@ -7142,9 +7283,14 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 return
 
         # Delete/Ctrl+D: Delete selected peaks
-        if self.selected_peaks_multi:
-            if key == Qt.Key_Delete or (key == Qt.Key_D and modifiers & Qt.ControlModifier):
+        if key == Qt.Key_Delete or (key == Qt.Key_D and modifiers & Qt.ControlModifier):
+            if self.selected_peaks_multi:
                 self._delete_selected_peaks()
+                event.accept()
+                return
+            elif self.selected_peak_info is not None:
+                # Single peak selected via middle-click
+                self.delete_selected_peak(self.selected_peak_info)
                 event.accept()
                 return
 
@@ -7156,50 +7302,52 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         if not self.selected_peaks_multi:
             return
 
-        # Group by type and sort indices in reverse order to avoid index shifting
-        ref_indices = sorted(
-            [p['index'] for p in self.selected_peaks_multi if p['type'] == 'reference'],
-            reverse=True
-        )
-        det_indices = sorted(
-            [p['index'] for p in self.selected_peaks_multi if p['type'] == 'detected'],
-            reverse=True
-        )
-
         count = len(self.selected_peaks_multi)
 
-        # Delete from reference peak list (DataFrame)
-        if ref_indices and hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
-            for idx in ref_indices:
-                try:
-                    self.integrator.peak_list = self.integrator.peak_list.drop(idx)
-                except (KeyError, IndexError):
-                    pass
-            # Reset index after deletion
-            self.integrator.peak_list = self.integrator.peak_list.reset_index(drop=True)
+        # Use undo manager if available
+        has_undo = hasattr(self, 'undo_manager') and self.undo_manager is not None
 
-        # Delete from detected peaks list
-        if det_indices and hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
-            for idx in det_indices:
-                try:
-                    del self.integrator.fitted_peaks[idx]
-                except (IndexError, KeyError):
-                    pass
+        # Build list of peaks with peak_id for undo manager
+        peaks_info = []
+        for p in self.selected_peaks_multi:
+            peak_id = p.get('peak_id')
+            if peak_id is not None:
+                peaks_info.append({'peak_id': peak_id, 'type': p['type']})
+
+        if has_undo and peaks_info:
+            # Use undo manager for undoable deletion
+            self.undo_manager.delete_multiple_peaks(peaks_info)
+        else:
+            # Fallback: direct manipulation using peak_id
+            ref_peak_ids = [p.get('peak_id') for p in self.selected_peaks_multi
+                           if p['type'] == 'reference' and p.get('peak_id') is not None]
+            det_peak_ids = [p.get('peak_id') for p in self.selected_peaks_multi
+                           if p['type'] == 'detected' and p.get('peak_id') is not None]
+
+            # Delete from reference peak list (DataFrame) using peak_id
+            if ref_peak_ids and hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
+                if 'peak_id' in self.integrator.peak_list.columns:
+                    mask = self.integrator.peak_list['peak_id'].isin(ref_peak_ids)
+                    self.integrator.peak_list = self.integrator.peak_list[~mask]
+
+            # Delete from detected peaks list using peak_id
+            if det_peak_ids and hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
+                self.integrator.fitted_peaks = [
+                    p for p in self.integrator.fitted_peaks
+                    if p.get('peak_id') not in det_peak_ids
+                ]
+
+            # Refresh the spectrum plot
+            self.update_spectrum_plot(preserve_zoom=True)
+
+            # Refresh the peak navigator list
+            if hasattr(self, 'peak_navigator') and self.peak_navigator is not None:
+                self.peak_navigator.refresh_peak_list()
 
         # Clear selection and update display
         self.clear_multi_selection()
 
-        # Refresh the spectrum plot
-        self.update_spectrum_plot(preserve_zoom=True)
-
-        # Refresh the peak navigator list
-        if hasattr(self, 'peak_navigator') and self.peak_navigator is not None:
-            if ref_indices and hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
-                self.peak_navigator.load_reference_peaks(self.integrator.peak_list)
-            if det_indices and hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
-                self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
-
-        logger.info(f"Deleted {count} peaks ({len(ref_indices)} reference, {len(det_indices)} detected)")
+        logger.info(f"Deleted {count} peaks")
         self.update_status(f"Deleted {count} peaks")
 
     def on_peak_edit_click(self, event):
@@ -7264,6 +7412,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     candidates.append({
                         'type': 'reference',
                         'index': idx,
+                        'peak_id': row.get('peak_id', idx),  # Stable ID for undo/redo
                         'distance': distance,
                         'x': peak_x,
                         'y': peak_y,
@@ -7282,6 +7431,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     candidates.append({
                         'type': 'detected',
                         'index': idx,
+                        'peak_id': peak.get('peak_id', idx),  # Stable ID for undo/redo
                         'distance': distance,
                         'x': peak_x,
                         'y': peak_y,
@@ -7316,46 +7466,67 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         peak_info = self.selected_peak_info
         old_x, old_y = peak_info['x'], peak_info['y']
+        peak_id = peak_info.get('peak_id')
+        peak_type = peak_info['type']
 
-        logger.info(f"Moving {peak_info['type']} peak '{peak_info['assignment']}' from ({old_x:.3f}, {old_y:.1f}) to ({new_x:.3f}, {new_y:.1f})")
+        logger.info(f"Moving {peak_type} peak '{peak_info['assignment']}' from ({old_x:.3f}, {old_y:.1f}) to ({new_x:.3f}, {new_y:.1f})")
 
-        if peak_info['type'] == 'reference':
-            # Update DataFrame
-            peak_idx = peak_info['index']
-            self.integrator.peak_list.loc[peak_idx, 'Position_X'] = new_x
-            self.integrator.peak_list.loc[peak_idx, 'Position_Y'] = new_y
+        # Use undo manager if available
+        if hasattr(self, 'undo_manager') and self.undo_manager is not None and peak_id is not None:
+            self.undo_manager.move_peak(peak_id, peak_type, old_x, old_y, new_x, new_y)
+        else:
+            # Fallback to direct manipulation (for backwards compatibility)
+            if peak_type == 'reference':
+                # Update DataFrame using peak_id
+                if peak_id is not None and 'peak_id' in self.integrator.peak_list.columns:
+                    mask = self.integrator.peak_list['peak_id'] == peak_id
+                    self.integrator.peak_list.loc[mask, 'Position_X'] = new_x
+                    self.integrator.peak_list.loc[mask, 'Position_Y'] = new_y
+                else:
+                    # Legacy: use row index
+                    peak_idx = peak_info['index']
+                    self.integrator.peak_list.loc[peak_idx, 'Position_X'] = new_x
+                    self.integrator.peak_list.loc[peak_idx, 'Position_Y'] = new_y
 
-            # Update peak navigator if showing reference peaks
-            if hasattr(self, 'peak_navigator') and hasattr(self.peak_navigator, 'selected_peak_type') and self.peak_navigator.selected_peak_type == 'reference':
-                self.peak_navigator.load_reference_peaks(self.integrator.peak_list)
+            elif peak_type == 'detected':
+                # Update list of dictionaries using peak_id
+                if peak_id is not None:
+                    for peak in self.integrator.fitted_peaks:
+                        if peak.get('peak_id') == peak_id:
+                            peak['ppm_x'] = new_x
+                            peak['ppm_y'] = new_y
+                            break
+                else:
+                    # Legacy: use list index
+                    peak_idx = peak_info['index']
+                    self.integrator.fitted_peaks[peak_idx]['ppm_x'] = new_x
+                    self.integrator.fitted_peaks[peak_idx]['ppm_y'] = new_y
 
-        elif peak_info['type'] == 'detected':
-            # Update list of dictionaries
-            peak_idx = peak_info['index']
-            self.integrator.fitted_peaks[peak_idx]['ppm_x'] = new_x
-            self.integrator.fitted_peaks[peak_idx]['ppm_y'] = new_y
+            # Refresh the main plot
+            self.update_spectrum_plot()
 
-            # Update peak navigator if showing detected peaks
-            if hasattr(self, 'peak_navigator') and hasattr(self.peak_navigator, 'selected_peak_type') and self.peak_navigator.selected_peak_type == 'detected':
-                self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
-
-        # Refresh the main plot
-        self.update_spectrum_plot()
+        # Update peak navigator
+        if hasattr(self, 'peak_navigator') and self.peak_navigator is not None:
+            self.peak_navigator.refresh_peak_list()
 
         logger.info("✅ Peak position updated successfully")
 
     def delete_selected_peak(self, peak_info):
         """Delete the selected peak from the appropriate peak list (v0o9 line 5761)."""
-        # Confirm deletion
         assignment = peak_info['assignment']
         peak_type = peak_info['type']
+        peak_id = peak_info.get('peak_id')
+
+        # Confirm deletion (mention undo if available)
+        has_undo = hasattr(self, 'undo_manager') and self.undo_manager is not None
+        undo_note = "Use Cmd+Z to undo." if has_undo else "This action cannot be undone."
 
         result = QMessageBox.question(
             self,
             "Confirm Peak Deletion",
             f"Are you sure you want to delete {peak_type} peak '{assignment}'?\n\n"
             f"Position: ({peak_info['x']:.3f}, {peak_info['y']:.1f})\n"
-            f"This action cannot be undone.",
+            f"{undo_note}",
             QMessageBox.Yes | QMessageBox.No
         )
 
@@ -7363,46 +7534,53 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             return
 
         try:
-            if peak_info['type'] == 'reference':
-                # Delete from DataFrame
-                peak_idx = peak_info['index']
+            # Use undo manager if available
+            if has_undo and peak_id is not None:
+                self.undo_manager.delete_peak(peak_id, peak_type)
+            else:
+                # Fallback to direct manipulation
+                if peak_type == 'reference':
+                    # Delete from DataFrame using peak_id
+                    if peak_id is not None and 'peak_id' in self.integrator.peak_list.columns:
+                        mask = self.integrator.peak_list['peak_id'] == peak_id
+                        self.integrator.peak_list = self.integrator.peak_list[~mask]
+                    else:
+                        # Legacy: use row index (no reset_index to preserve IDs)
+                        peak_idx = peak_info['index']
+                        self.integrator.peak_list = self.integrator.peak_list.drop(index=peak_idx)
 
-                # Remove the row from the DataFrame
-                self.integrator.peak_list = self.integrator.peak_list.drop(index=peak_idx).reset_index(drop=True)
+                    logger.info(f"✅ Deleted reference peak '{assignment}'")
 
-                logger.info(f"✅ Deleted reference peak '{assignment}' at index {peak_idx}")
+                elif peak_type == 'detected':
+                    # Delete from list using peak_id
+                    if peak_id is not None:
+                        self.integrator.fitted_peaks = [
+                            p for p in self.integrator.fitted_peaks
+                            if p.get('peak_id') != peak_id
+                        ]
+                    else:
+                        # Legacy: use list index
+                        peak_idx = peak_info['index']
+                        if 0 <= peak_idx < len(self.integrator.fitted_peaks):
+                            del self.integrator.fitted_peaks[peak_idx]
 
-                # Update peak navigator if showing reference peaks
-                if hasattr(self, 'peak_navigator') and hasattr(self.peak_navigator, 'selected_peak_type') and self.peak_navigator.selected_peak_type == 'reference':
-                    self.peak_navigator.load_reference_peaks(self.integrator.peak_list)
+                    logger.info(f"✅ Deleted detected peak '{assignment}'")
 
-            elif peak_info['type'] == 'detected':
-                # Delete from list of dictionaries
-                peak_idx = peak_info['index']
+                # Refresh the main plot
+                self.update_spectrum_plot()
 
-                # Remove the peak from the list
-                if 0 <= peak_idx < len(self.integrator.fitted_peaks):
-                    del self.integrator.fitted_peaks[peak_idx]
+                # Update peak navigator
+                if hasattr(self, 'peak_navigator') and self.peak_navigator is not None:
+                    self.peak_navigator.refresh_peak_list()
 
-                    logger.info(f"✅ Deleted detected peak '{assignment}' at index {peak_idx}")
+                # Update statistics
+                self.update_statistics_panel()
 
-                    # Update peak navigator if showing detected peaks
-                    if hasattr(self, 'peak_navigator') and hasattr(self.peak_navigator, 'selected_peak_type') and self.peak_navigator.selected_peak_type == 'detected':
-                        self.peak_navigator.load_detected_peaks(self.integrator.fitted_peaks)
-                else:
-                    logger.error(f"❌ Invalid peak index: {peak_idx}")
-                    return
-
-            # Clear selected peak
+            # Clear selected peak and visual highlight
             self.selected_peak_info = None
+            self.spectrum_plotter.clear_selection_highlight()
             if hasattr(self, 'selected_peak_label'):
                 self.selected_peak_label.setText(f"Deleted {peak_type} peak '{assignment}'")
-
-            # Refresh the main plot
-            self.update_spectrum_plot()
-
-            # Update statistics
-            self.update_statistics_panel()
 
             logger.info("✅ Peak deletion completed successfully")
 
@@ -7490,26 +7668,45 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             max_assignment = max(max_assignment_ref, max_assignment_det)
             new_assignment = str(max_assignment + 1)
 
-            # ============================================================
-            # ADD TO REFERENCE PEAK LIST (DataFrame)
-            # ============================================================
-            new_peak_ref = pd.DataFrame([{
+            # Get a stable peak_id from the integrator
+            peak_id = self.integrator.get_next_peak_id() if hasattr(self.integrator, 'get_next_peak_id') else None
+
+            # Build peak data dict
+            peak_data = {
                 'Assignment': new_assignment,
                 'Position_X': click_x,
                 'Position_Y': click_y,
                 'Height': intensity
-            }])
+            }
+            if peak_id is not None:
+                peak_data['peak_id'] = peak_id
 
-            if hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
-                self.integrator.peak_list = pd.concat([self.integrator.peak_list, new_peak_ref], ignore_index=True)
+            # Use undo manager if available
+            has_undo = hasattr(self, 'undo_manager') and self.undo_manager is not None
+
+            if has_undo and peak_id is not None:
+                # Use undo manager for undoable addition
+                self.undo_manager.add_peak(peak_data, 'reference')
             else:
-                self.integrator.peak_list = new_peak_ref
+                # Fallback: direct manipulation
+                new_peak_ref = pd.DataFrame([peak_data])
+
+                if hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
+                    self.integrator.peak_list = pd.concat([self.integrator.peak_list, new_peak_ref], ignore_index=True)
+                else:
+                    self.integrator.peak_list = new_peak_ref
+
+                # Refresh the main plot
+                self.update_spectrum_plot()
+
+                # Update peak navigator
+                if hasattr(self, 'peak_navigator'):
+                    self.peak_navigator.refresh_peak_list()
+
+                # Update statistics
+                self.update_statistics_panel()
 
             logger.info(f"✅ Added to reference peak list: '{new_assignment}'")
-
-            # Update peak navigator to show the new reference peak
-            if hasattr(self, 'peak_navigator'):
-                self.peak_navigator.load_reference_peaks(self.integrator.peak_list)
 
             # Update status label
             if hasattr(self, 'selected_peak_label'):
@@ -7517,13 +7714,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     f"Added peak '{new_assignment}' at ({click_x:.3f}, {click_y:.1f}) | Intensity: {intensity:.2e}"
                 )
 
-            # Refresh the main plot
-            self.update_spectrum_plot()
-
-            # Update statistics
-            self.update_statistics_panel()
-
-            logger.info("✅ Peak addition completed: added to BOTH lists with intensity extraction")
+            logger.info("✅ Peak addition completed")
 
         except Exception as e:
             QMessageBox.critical(self, "Addition Error", f"Failed to add peak: {str(e)}")
@@ -7614,6 +7805,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         if success:
             self.current_project_path = project_path
 
+            # Set data folders to project parent for convenient browsing
+            self._update_data_folders_from_project(project_path)
+
             if remapped_paths:
                 pm.apply_path_remapping(remapped_paths)
 
@@ -7636,6 +7830,31 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 f"Failed to load project:\n{', '.join(error_messages)}"
             )
 
+    def _update_data_folders_from_project(self, project_path: Path):
+        """Update current data folders to project location for convenient browsing.
+
+        When a project is loaded, file dialogs should start in the project's
+        data location rather than some arbitrary folder.
+        """
+        # Use project's parent folder (where the .lunaNMR folder lives)
+        # This is typically where the user's NMR data is located
+        project_parent = project_path.parent
+        self.current_nmr_folder = str(project_parent)
+        self.current_peak_folder = str(project_parent)
+        logger.debug(f"Data folders set to project location: {project_parent}")
+
+    def get_preferred_data_directory(self) -> str:
+        """Get the preferred starting directory for file dialogs.
+
+        Returns project folder if loaded, otherwise current_nmr_folder,
+        otherwise home directory.
+        """
+        if self.current_project_path and self.current_project_path.exists():
+            return str(self.current_project_path.parent)
+        if self.current_nmr_folder:
+            return self.current_nmr_folder
+        return str(Path.home())
+
     def _clear_recent_projects(self):
         """Clear the recent projects list."""
         self._get_recent_projects_manager().clear_recent_projects()
@@ -7650,11 +7869,11 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         if not self._check_unsaved_changes():
             return
 
-        # Get project path
+        # Get project path (start in preferred directory)
         project_path = QFileDialog.getExistingDirectory(
             self,
             "Open Project",
-            str(Path.home()),
+            self.get_preferred_data_directory(),
         )
 
         if not project_path:
@@ -7693,6 +7912,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         if success:
             self.current_project_path = project_path
+
+            # Set data folders to project parent for convenient browsing
+            self._update_data_folders_from_project(project_path)
 
             # Apply path remapping
             if remapped_paths:
@@ -7757,13 +7979,32 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
     def _do_save_project(self, project_path: Path):
         """Actually save the project to the given path."""
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
+
+        # Show progress dialog to prevent "not responding" on Linux
+        progress = QProgressDialog("Saving project...", None, 0, 0, self)
+        progress.setWindowTitle("Saving Project")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)  # Show immediately
+        progress.setCancelButton(None)  # Cannot cancel save
+        progress.setValue(0)
+        progress.show()
+        QApplication.processEvents()  # Force show
+
         pm = self._get_project_manager()
         success, summary = pm.save_project(project_path)
+
+        progress.close()
 
         if success:
             self.current_project_path = project_path
             self.update_status(f"Project saved: {project_path.name}")
             logger.info(f"Project saved to {project_path}")
+
+            # Mark undo stack as clean (saved state)
+            if hasattr(self, 'undo_manager') and self.undo_manager is not None:
+                self.undo_manager.on_save()
 
             # Update recent projects
             self._get_recent_projects_manager().add_recent_project(project_path)
@@ -7880,6 +8121,10 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
     def _refresh_after_project_load(self):
         """Refresh UI after loading a project."""
+        # Clear undo stack when loading a new project
+        if hasattr(self, 'undo_manager') and self.undo_manager is not None:
+            self.undo_manager.on_file_load()
+
         # Update file labels
         self.update_file_status_labels(
             nmr_file=self.current_nmr_file,

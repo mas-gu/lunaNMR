@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 # Default configuration
 DEFAULT_CONFIG = {
-    "enabled": True,
-    "use_predictions": True,
-    "collect_training_data": True,
+    "enabled": False,
+    "use_predictions": False,
+    "collect_training_data": False,
     "use_statistical_fallback": True,
     "ml_threshold": 0.6,
     "stats_threshold": 0.4,

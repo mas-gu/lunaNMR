@@ -52,11 +52,26 @@ class MultiSpectrumProcessor:
         # Initialize output folder for retrocompatibility
         self.output_folder = None
 
-        # PS2D linewidth reuse configuration 
+        # PS2D linewidth reuse configuration
         self.use_ps2d_linewidth_reuse = self.voigt_params.get('use_ps2d_linewidth_reuse', False)
         if not self.use_ps2d_linewidth_reuse and 'gui_params' in self.voigt_params:
             # Try nested structure
             self.use_ps2d_linewidth_reuse = self.voigt_params['gui_params'].get('use_ps2d_linewidth_reuse', False)
+
+        # Rerun adaptive optimization per spectrum (instead of reusing spectrum 1 stats)
+        self.rerun_adaptive_per_spectrum = self.voigt_params.get('rerun_adaptive_per_spectrum', False)
+        if not self.rerun_adaptive_per_spectrum and 'processing_options' in self.voigt_params:
+            self.rerun_adaptive_per_spectrum = self.voigt_params['processing_options'].get('rerun_adaptive_per_spectrum', False)
+
+        # Use original reference for detection (independent mode - no N-1 position propagation)
+        self.use_original_reference_for_detection = self.voigt_params.get('use_original_reference_for_detection', False)
+        if not self.use_original_reference_for_detection and 'processing_options' in self.voigt_params:
+            self.use_original_reference_for_detection = self.voigt_params['processing_options'].get('use_original_reference_for_detection', False)
+
+        # Lock cluster assignments from reference spectrum (for Independent mode)
+        self.lock_cluster_assignments = self.voigt_params.get('lock_cluster_assignments', False)
+        if not self.lock_cluster_assignments and 'processing_options' in self.voigt_params:
+            self.lock_cluster_assignments = self.voigt_params['processing_options'].get('lock_cluster_assignments', False)
 
         self.reference_linewidths = {}  # Stores {assignment: {x_sigma, x_gamma, y_sigma, y_gamma}}
 
@@ -66,7 +81,10 @@ class MultiSpectrumProcessor:
 
         # Cluster locking: Store reference spectrum clusters by assignment
         # This ensures consistent peak grouping across all spectra in series
-        self.reference_clusters_by_assignment = None  # List of lists of assignments
+        # CRITICAL: Initialize from voigt_params if clusters were passed from reference fit
+        self.reference_clusters_by_assignment = self.voigt_params.get('reference_clusters_by_assignment', None)
+        if self.reference_clusters_by_assignment:
+            log_info(f"Using {len(self.reference_clusters_by_assignment)} clusters from reference fit")
 
         # Learned statistics from reference spectrum (PASS 1 learning)
         # Used as initial guesses for spectrum 2+ (not fixed, just better starting point)
@@ -74,20 +92,20 @@ class MultiSpectrumProcessor:
         #          'lw_f2_mad': float, 'n_samples': int, 'alpha': float}
         self.reference_spectrum_statistics = None
 
-        # ML Training Data Collection
+        # ML Training Data Collection (initialized in process_nmr_series with output_folder)
         self.training_collector = None
         self.collect_training_data = self.voigt_params.get('collect_training_data', False)
-        if not self.collect_training_data and 'gui_params' in self.voigt_params:
+        if 'gui_params' in self.voigt_params:
             self.collect_training_data = self.voigt_params['gui_params'].get('collect_training_data', False)
-        if self.collect_training_data:
-            self._init_training_collector()
 
     def process_nmr_series(self, nmr_files: List[str], reference_peaks: pd.DataFrame,
                           output_folder: str, peak_source_mode: str = 'reference',
                           progress_callback: Optional[callable] = None,
                           extract_delays: bool = False,
                           pre_detected_peaks: Optional[List[Dict]] = None,
-                          sn_from_gui_locked: Optional[Dict] = None) -> Dict[str, Any]:
+                          sn_from_gui_locked: Optional[Dict] = None,
+                          peak_list_contour_min: Optional[float] = None,
+                          lock_detection_threshold: bool = True) -> Dict[str, Any]:
         """
         Main entry point for processing NMR series.
         Returns comprehensive results in both new and legacy-compatible formats.
@@ -102,6 +120,9 @@ class MultiSpectrumProcessor:
             pre_detected_peaks: Optional list of already-detected peaks from GUI (skips detection for spectrum 1)
             sn_from_gui_locked: Optional dict with {'absolute_threshold': float, 'contour_min': float}
                                If provided, all spectra use same absolute threshold (no rescaling)
+            peak_list_contour_min: Optional float for Peak List mode detection threshold
+                               Each spectrum computes: threshold = max_intensity * contour_min * 1.05
+            lock_detection_threshold: If True, use spectrum 1 threshold for all spectra (default True)
         """
         self.reference_peaks = reference_peaks.copy()
         self.pre_detected_peaks = pre_detected_peaks  # Store for cascade mode spectrum 1
@@ -113,6 +134,13 @@ class MultiSpectrumProcessor:
         self.extract_delays = extract_delays  # Store for output file generation
         self.nmr_files = nmr_files  # Store for ML training data collection
         self.sn_from_gui_locked = sn_from_gui_locked  # Store locked threshold for series
+        self.peak_list_contour_min = peak_list_contour_min  # Store for Peak List mode detection
+        self.lock_detection_threshold = lock_detection_threshold  # Lock threshold from spectrum 1
+        self.locked_contour_threshold = None  # Will store spectrum 1 threshold if locking enabled
+
+        # Initialize ML training collector with series output folder
+        if self.collect_training_data and output_folder:
+            self._init_training_collector(output_folder)
 
         # Build original reference position dictionary for cascade mode drift limiting
         # Maps assignment -> (x_ppm, y_ppm) for absolute bounds enforcement
@@ -334,17 +362,53 @@ class MultiSpectrumProcessor:
                 log_info(f"Spectrum {spectrum_number}: Using locked threshold from reference "
                          f"(absolute={self.integrator.sn_absolute_threshold:.2e})")
 
+        # APPLY CONTOUR THRESHOLD FOR PEAK LIST MODE DETECTION
+        if self.peak_list_contour_min is not None:
+            if spectrum_number == 1:
+                # Spectrum 1: Compute and optionally store threshold
+                max_intensity = np.max(self.integrator.nmr_data)
+                safety_factor = 1.05  # 5% margin to ensure visible peaks are detected
+                self.integrator.peak_list_contour_threshold = max_intensity * self.peak_list_contour_min * safety_factor
+                log_info(f"Spectrum {spectrum_number}: Peak List contour threshold={self.integrator.peak_list_contour_threshold:.2e} "
+                         f"(contour_min={self.peak_list_contour_min:.5f}, max={max_intensity:.2e})")
+                # Store for locking if enabled
+                if self.lock_detection_threshold:
+                    self.locked_contour_threshold = self.integrator.peak_list_contour_threshold
+                    log_info(f"Detection threshold locked at {self.locked_contour_threshold:.2e}")
+            elif self.lock_detection_threshold and self.locked_contour_threshold is not None:
+                # Spectrum 2+: Use locked threshold from spectrum 1
+                self.integrator.peak_list_contour_threshold = self.locked_contour_threshold
+                log_info(f"Spectrum {spectrum_number}: Using locked threshold={self.locked_contour_threshold:.2e}")
+            else:
+                # Spectrum 2+ without locking: Compute per-spectrum threshold
+                max_intensity = np.max(self.integrator.nmr_data)
+                safety_factor = 1.05
+                self.integrator.peak_list_contour_threshold = max_intensity * self.peak_list_contour_min * safety_factor
+                log_info(f"Spectrum {spectrum_number}: Peak List contour threshold={self.integrator.peak_list_contour_threshold:.2e} "
+                         f"(contour_min={self.peak_list_contour_min:.5f}, max={max_intensity:.2e})")
+
         # DETECTION-BASED MATCHING: Choose reference source based on mode
         if self.peak_source_mode == 'reference':
             # REFERENCE MODE: Always use original reference peaks
             self.integrator.peak_list = self.reference_peaks.copy()
 
+        elif self.peak_source_mode == 'independent':
+            # INDEPENDENT MODE: Always use original reference peaks for detection
+            # Full detection + fitting pipeline runs for each spectrum
+            log_info(f"Spectrum {spectrum_number}: Independent mode - using original reference for detection")
+            self.integrator.peak_list = self.reference_peaks.copy()
+
         elif self.peak_source_mode in ['cascade', 'detected']:
             # CASCADE/DETECTED MODE: Use n-1 fitted results for spectrum 2+
+            # UNLESS use_original_reference_for_detection is enabled
             if spectrum_number > 1 and self.previous_fitted_results is not None:
-                # Convert previous fitted results to reference DataFrame format
-                detection_reference = self._convert_fitted_results_to_reference_df(self.previous_fitted_results)
-                self.integrator.peak_list = detection_reference.copy()
+                if self.use_original_reference_for_detection:
+                    log_info(f"Spectrum {spectrum_number}: Using original reference (override enabled)")
+                    self.integrator.peak_list = self.reference_peaks.copy()
+                else:
+                    # Convert previous fitted results to reference DataFrame format
+                    detection_reference = self._convert_fitted_results_to_reference_df(self.previous_fitted_results)
+                    self.integrator.peak_list = detection_reference.copy()
             else:
                 # Spectrum 1: Use provided reference peaks
                 self.integrator.peak_list = self.reference_peaks.copy()
@@ -358,8 +422,9 @@ class MultiSpectrumProcessor:
         # Spectrum 2+ skips detection entirely and uses spectrum N-1's fitted positions directly.
         # This prevents detection from finding different positions in different spectra,
         # which was causing peaks to jump dramatically (e.g., peak 168.0 jumping 0.48 ppm in 15N).
+        # EXCEPTION: If use_original_reference_for_detection is enabled, run detection anyway.
 
-        if self.peak_source_mode == 'cascade' and spectrum_number > 1:
+        if self.peak_source_mode == 'cascade' and spectrum_number > 1 and not self.use_original_reference_for_detection:
             # CASCADE MODE SPECTRUM 2+: Skip detection, use reference positions directly
             # peak_list already contains positions from previous spectrum's fitted results
 
@@ -482,43 +547,62 @@ class MultiSpectrumProcessor:
         else:
             enable_cascade_drift_limit = self.voigt_params.get('enable_cascade_drift_limit', True)
 
-        # Only pass reference positions if cascade mode AND drift limit enabled
-        use_drift_limit = (self.peak_source_mode == 'cascade' and enable_cascade_drift_limit)
+        # Only pass reference positions if cascade/independent mode AND drift limit enabled
+        use_drift_limit = (self.peak_source_mode in ['cascade', 'independent'] and enable_cascade_drift_limit)
 
         processing_options = {
             'use_parallel': use_parallel,
             'use_global_optimization': False,
             'use_voigt_fitting': use_voigt,
-            # Pass original reference positions for cascade mode drift limiting
-            # Only if cascade mode AND drift limit enabled
+            # Pass original reference positions for drift limiting
+            # Only if cascade/independent mode AND drift limit enabled
             'original_reference_positions': self.original_reference_positions if use_drift_limit else None,
-            'enable_cascade_drift_limit': enable_cascade_drift_limit
+            'enable_cascade_drift_limit': enable_cascade_drift_limit,
+            # Skip series_params to allow fresh adaptive optimization per spectrum
+            # (used for Independent mode where each spectrum runs full pipeline)
+            'skip_series_params': self.rerun_adaptive_per_spectrum
         }
 
         # PER-PEAK LINEWIDTH REUSE: Pass reference linewidths for spectrum 2+
         # Spectrum 1: linewidths are extracted and stored in self.reference_linewidths
-        # Spectrum 2+: use stored linewidths as fixed constraints
+        # Spectrum 2+: use stored linewidths as initial guesses (optimizer can adjust)
         if self.use_ps2d_linewidth_reuse and spectrum_number > 1 and self.reference_linewidths:
             processing_options['reference_linewidths'] = self.reference_linewidths
-            processing_options['force_reference_linewidths'] = True
-            log_info(f"Spectrum {spectrum_number}: Using {len(self.reference_linewidths)} stored linewidths from reference")
+            processing_options['force_reference_linewidths'] = True  # Use as initial guess
+            log_info(f"Spectrum {spectrum_number}: Using {len(self.reference_linewidths)} reference linewidths as initial guess")
 
         if self.peak_source_mode == 'cascade':
             pass  # Cascade mode uses drift limiting
 
         # CLUSTER LOCKING: Use reference spectrum clusters for consistent grouping
         # Spectrum 1: compute clusters fresh, then store them
-        # Spectrum 2+: use locked clusters from spectrum 1
+        # Spectrum 2+: use locked clusters from spectrum 1 (except in independent mode without lock)
         locked_clusters = None
         if spectrum_number > 1 and self.reference_clusters_by_assignment is not None:
-            locked_clusters = self.reference_clusters_by_assignment
+            if self.peak_source_mode == 'independent':
+                if self.lock_cluster_assignments:
+                    # INDEPENDENT MODE with lock: Use reference clusters for consistent grouping
+                    locked_clusters = self.reference_clusters_by_assignment
+                    log_info(f"Spectrum {spectrum_number}: Using locked clusters from reference (Independent mode)")
+                else:
+                    # INDEPENDENT MODE: Each spectrum computes its own clusters (true GUI behavior)
+                    log_info(f"Spectrum {spectrum_number}: Independent mode - computing fresh clusters")
+            else:
+                # CASCADE/REFERENCE MODE: Use reference clusters for consistent grouping
+                locked_clusters = self.reference_clusters_by_assignment
+                log_info(f"Spectrum {spectrum_number}: Using {len(locked_clusters)} locked clusters from spectrum 1")
+
 
         # LEARNED STATISTICS: Use reference spectrum statistics as initial guesses
         # Spectrum 1: run full learning cycle (PASS 1 → PASS 1-bis → PASS 2)
         # Spectrum 2+: skip PASS 1 learning, use reference stats as initial guesses
+        #              UNLESS rerun_adaptive_per_spectrum is enabled
         pre_learned_statistics = None
         if spectrum_number > 1 and self.reference_spectrum_statistics is not None:
-            pre_learned_statistics = self.reference_spectrum_statistics
+            if self.rerun_adaptive_per_spectrum:
+                log_info(f"Spectrum {spectrum_number}: Rerunning PASS 1 + adaptive (per-spectrum mode)")
+            else:
+                pre_learned_statistics = self.reference_spectrum_statistics
 
         # This calls _sync_parameters_to_integrator() internally, ensuring proper parameter flow
         # CRITICAL: Use integrator.peak_list which now contains DETECTED positions (not reference_peaks)
@@ -531,14 +615,69 @@ class MultiSpectrumProcessor:
         )
 
         # Extract and store clusters from reference spectrum (spectrum 1)
-        if spectrum_number == 1 and self.reference_clusters_by_assignment is None:
-            self.reference_clusters_by_assignment = single_processor.extract_clusters_by_assignment(
-                self.integrator.peak_list
-            )
+        # CRITICAL: Use the ACTUAL clusters from fitting, not recomputed clusters
+        if spectrum_number == 1 and self.reference_clusters_by_assignment is not None:
+            # Clusters already set from reference fit passed via voigt_params
+            log_info(f"Spectrum 1: Using {len(self.reference_clusters_by_assignment)} pre-set clusters from reference fit")
+        elif spectrum_number == 1 and self.reference_clusters_by_assignment is None:
+            # Try multiple sources for clusters, in order of preference:
+            clusters_found = None
+
+            # Source 1: SingleSpectrumProcessor's computed clusters (works for sequential AND parallel)
+            if hasattr(single_processor, '_computed_clusters_by_assignment') and single_processor._computed_clusters_by_assignment is not None and len(single_processor._computed_clusters_by_assignment) > 0:
+                clusters_found = single_processor._computed_clusters_by_assignment
+                log_info(f"Using ACTUAL clusters from single_processor: {len(clusters_found)} clusters")
+
+            # Source 2: ParallelVoigtProcessor's series_params (parallel mode only)
+            if clusters_found is None:
+                if (hasattr(self.integrator, 'enhanced_fitter') and
+                    hasattr(self.integrator.enhanced_fitter, 'series_params') and
+                    self.integrator.enhanced_fitter.series_params):
+                    clusters_found = self.integrator.enhanced_fitter.series_params.get(
+                        'locked_clusters_by_assignment'
+                    )
+                    if clusters_found:
+                        log_info(f"Using clusters from enhanced_fitter.series_params: {len(clusters_found)} clusters")
+
+            # Source 3: Fallback - recompute (should not happen anymore)
+            if clusters_found is None:
+                log_warning("Fallback: No clusters found from fitting, recomputing (may differ!)")
+                from lunaNMR.core.ps2d_config import get_ps2d_config
+                config = get_ps2d_config()
+                if learned_statistics is not None:
+                    overlap_x = learned_statistics.get('overlap_threshold_x')
+                    overlap_y = learned_statistics.get('overlap_threshold_y')
+                    if overlap_x is not None and overlap_y is not None:
+                        config.overlap_threshold_x = overlap_x
+                        config.overlap_threshold_y = overlap_y
+
+                clusters_found = single_processor.extract_clusters_by_assignment(
+                    self.integrator.peak_list
+                )
+
+            self.reference_clusters_by_assignment = clusters_found
+            log_info(f"Spectrum 1: Stored {len(clusters_found) if clusters_found else 0} clusters for series propagation")
 
         # Store learned statistics from reference spectrum (spectrum 1)
         if spectrum_number == 1 and learned_statistics is not None:
             self.reference_spectrum_statistics = learned_statistics
+
+        # Add dummy peaks to original_reference_positions (spectrum 1 only)
+        # This enables drift limiting for auto-detected dummy peaks in subsequent spectra
+        if spectrum_number == 1:
+            dummy_count = 0
+            for result in fitted_results:
+                if result and result.get('success', False):
+                    assignment = result.get('assignment', '')
+                    if isinstance(assignment, str) and assignment.startswith('dummy_'):
+                        # Use detected position as reference (not fitted position)
+                        pos_x = result.get('peak_x', result.get('center_x', 0))
+                        pos_y = result.get('peak_y', result.get('center_y', 0))
+                        if pos_x != 0 or pos_y != 0:
+                            self.original_reference_positions[assignment] = (pos_x, pos_y)
+                            dummy_count += 1
+            if dummy_count > 0:
+                log_info(f"Added {dummy_count} dummy peaks to drift limit reference positions")
 
         # Post-process results: Add spectrum metadata and handle linewidth reuse
         successful_fits = 0
@@ -1418,15 +1557,21 @@ class MultiSpectrumProcessor:
         except Exception as e:
             log_warning(f"Could not extract linewidths for {assignment}: {e}")
 
-    def _init_training_collector(self):
-        """Initialize the ML training data collector."""
+    def _init_training_collector(self, output_folder: str):
+        """Initialize the ML training data collector with series output folder."""
         try:
             from lunaNMR.ml.comprehensive_collector import ComprehensiveTrainingCollector
+            from pathlib import Path
+
+            # Use series_results folder for data collection
+            storage_dir = Path(output_folder) / "data_collection"
+
             self.training_collector = ComprehensiveTrainingCollector(
+                storage_dir=storage_dir,
                 min_r2=0.70,
                 auto_save=True,
             )
-            log_info("ML training data collector initialized for series processing")
+            log_info(f"ML training data collector initialized: {storage_dir}")
         except Exception as e:
             log_warning(f"Could not initialize ML training collector: {e}")
             self.training_collector = None

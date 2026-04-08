@@ -56,7 +56,8 @@ class ProcessingWorker(QObject):
     error = Signal(str)
 
     def __init__(self, processor, nmr_files, reference_peaks, peak_source_mode, voigt_params,
-                 extract_delays: bool = False, pre_detected_peaks=None, sn_from_gui_locked=None):
+                 extract_delays: bool = False, pre_detected_peaks=None, sn_from_gui_locked=None,
+                 peak_list_contour_min: float = None, lock_detection_threshold: bool = True):
         super().__init__()
         self.processor = processor
         self.nmr_files = nmr_files
@@ -66,6 +67,8 @@ class ProcessingWorker(QObject):
         self.extract_delays = extract_delays
         self.pre_detected_peaks = pre_detected_peaks
         self.sn_from_gui_locked = sn_from_gui_locked
+        self.peak_list_contour_min = peak_list_contour_min
+        self.lock_detection_threshold = lock_detection_threshold
         self._cancelled = False
         self._paused = False
 
@@ -126,7 +129,9 @@ class ProcessingWorker(QObject):
                 progress_callback=progress_callback,
                 extract_delays=self.extract_delays,
                 pre_detected_peaks=self.pre_detected_peaks,
-                sn_from_gui_locked=self.sn_from_gui_locked
+                sn_from_gui_locked=self.sn_from_gui_locked,
+                peak_list_contour_min=self.peak_list_contour_min,
+                lock_detection_threshold=self.lock_detection_threshold
             )
 
             if not self._cancelled:
@@ -268,12 +273,25 @@ class SeriesIntegrationDialog(BaseDialog):
         self.peak_source_group.addButton(self.detected_radio)
         layout.addWidget(self.detected_radio)
 
+        # Independent mode option
+        self.independent_radio = QRadioButton("Independent Mode (full detect + fit per spectrum)")
+        self.independent_radio.setToolTip(
+            "Runs the exact same process as GUI 'Fit Spectrum' for each spectrum:\n"
+            "- Uses original reference peaks for detection (no position drift)\n"
+            "- Full PASS 1 learning + adaptive optimization\n"
+            "- Complete fitting pipeline per spectrum\n"
+            "Best for maximum accuracy when spectra may differ significantly."
+        )
+        self.peak_source_group.addButton(self.independent_radio)
+        layout.addWidget(self.independent_radio)
+
         # Default selection: Cascade mode
         self.cascade_radio.setChecked(True)
 
         # Connect signals for terminal feedback
         self.cascade_radio.toggled.connect(self._on_peak_source_cascade)
         self.detected_radio.toggled.connect(self._on_peak_source_detected)
+        self.independent_radio.toggled.connect(self._on_peak_source_independent)
 
         group.setLayout(layout)
         return group
@@ -287,6 +305,11 @@ class SeriesIntegrationDialog(BaseDialog):
         """Handle cascade mode radio button toggle."""
         if checked:
             print("Peak source: CASCADE - Refining positions across series")
+
+    def _on_peak_source_independent(self, checked: bool):
+        """Handle independent mode radio button toggle."""
+        if checked:
+            print("Peak source: INDEPENDENT - Full detect + fit for each spectrum")
 
     def _create_file_list_section(self) -> QGroupBox:
         """Create NMR file list section."""
@@ -814,6 +837,20 @@ class SeriesIntegrationDialog(BaseDialog):
                 return
             reference_peaks = self.main_window.integrator.peak_list.copy()
 
+        elif self.independent_radio.isChecked():
+            peak_source_mode = "independent"
+            # Use fitted_peaks (includes dummies) - user cleans up peak list in GUI before series
+            if not hasattr(self.main_window.integrator, 'fitted_peaks') or not self.main_window.integrator.fitted_peaks:
+                QMessageBox.warning(
+                    self, "No Peaks",
+                    "No detected peaks available for independent mode. Run 'Fit All Peaks' first."
+                )
+                return
+            reference_peaks = self._convert_fitted_peaks_to_dataframe(
+                self.main_window.integrator.fitted_peaks
+            )
+            self._log(f"Independent mode: Using {len(reference_peaks)} GUI-detected peaks (includes dummies)")
+
         # For cascade mode, check if user already ran detection (fitted_peaks available)
         pre_detected_peaks = None
         if peak_source_mode == "cascade":
@@ -833,6 +870,15 @@ class SeriesIntegrationDialog(BaseDialog):
                 }
                 self._log(f"Series integration: Locking threshold at {sn_from_gui_locked['absolute_threshold']:.2e} "
                          f"(contour_min={sn_from_gui_locked['contour_min']:.3f})")
+
+        # Always capture contour_min for Peak List mode detection threshold
+        # Each spectrum computes: peak_list_contour_threshold = max_intensity * contour_min * 1.05
+        peak_list_contour_min = self.main_window.contour_min_spin.value()
+        lock_detection_threshold = getattr(self.main_window, 'lock_detection_threshold', True)
+        if lock_detection_threshold:
+            self._log(f"Peak List mode: Using contour_min={peak_list_contour_min:.5f} (locked from spectrum 1)")
+        else:
+            self._log(f"Peak List mode: Using contour_min={peak_list_contour_min:.5f} (per-spectrum threshold)")
 
         # Get parameters
         voigt_params = self._get_voigt_params()
@@ -870,7 +916,9 @@ class SeriesIntegrationDialog(BaseDialog):
             None, self.nmr_files, reference_peaks, peak_source_mode, voigt_params,
             extract_delays=extract_delays,
             pre_detected_peaks=pre_detected_peaks,
-            sn_from_gui_locked=sn_from_gui_locked
+            sn_from_gui_locked=sn_from_gui_locked,
+            peak_list_contour_min=peak_list_contour_min,
+            lock_detection_threshold=lock_detection_threshold
         )
         self.worker.moveToThread(self.thread)
 
@@ -1284,16 +1332,40 @@ class SeriesIntegrationDialog(BaseDialog):
                 'use_parallel_processing': getattr(self.main_window, 'use_parallel_processing', False),
                 'use_global_optimization': getattr(self.main_window, 'use_global_optimization', False),
                 'enable_cascade_drift_limit': getattr(self.main_window, 'enable_cascade_drift_limit', True),
+                'rerun_adaptive_per_spectrum': getattr(self.main_window, 'rerun_adaptive_per_spectrum', False),
+                'lock_cluster_assignments': getattr(self.main_window, 'lock_cluster_assignments', False),
+                'use_original_reference_for_detection': False,
             }
         }
+
+        # CRITICAL: Pass clusters from reference fit to ensure series uses same clusters
+        # The clusters are stored in enhanced_fitter.series_params after "Fit All Peaks"
+        reference_clusters = None
+        try:
+            if (hasattr(self.main_window, 'integrator') and
+                hasattr(self.main_window.integrator, 'enhanced_fitter') and
+                hasattr(self.main_window.integrator.enhanced_fitter, 'series_params') and
+                self.main_window.integrator.enhanced_fitter.series_params):
+                reference_clusters = self.main_window.integrator.enhanced_fitter.series_params.get(
+                    'locked_clusters_by_assignment'
+                )
+                if reference_clusters:
+                    self._log(f"Passing {len(reference_clusters)} clusters from reference fit to series")
+        except Exception as e:
+            self._log(f"Warning: Could not get reference clusters: {e}")
+
+        if reference_clusters:
+            params['reference_clusters_by_assignment'] = reference_clusters
+
+        # Independent mode: Force full pipeline (rerun adaptive + original reference)
+        if hasattr(self, 'independent_radio') and self.independent_radio.isChecked():
+            params['processing_options']['rerun_adaptive_per_spectrum'] = True
+            params['processing_options']['use_original_reference_for_detection'] = True
 
         return params
 
     def _get_ml_collect_enabled(self) -> bool:
-        """Check if ML training data collection is enabled.
-
-        Returns True if the config has collect_training_data enabled.
-        """
+        """Check if ML training data collection is enabled via ML Learning Center config."""
         if not self.main_window:
             return False
 
@@ -1305,4 +1377,4 @@ class SeriesIntegrationDialog(BaseDialog):
         except Exception:
             pass
 
-        return False  # Default to disabled in GUI mode
+        return False

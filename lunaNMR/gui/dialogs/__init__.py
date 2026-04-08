@@ -12,6 +12,7 @@ from .series_manager_dialog import SeriesManagerDialog
 from .results_browser_dialog import ResultsBrowserDialog
 from .missing_files_dialog import MissingFilesDialog
 from .dynamixs_dialog import DynamiXsDialog
+from .series_qc_dialog import SeriesQCDialog
 
 __all__ = [
     'DataLoadingDialog',
@@ -24,4 +25,5 @@ __all__ = [
     'ResultsBrowserDialog',
     'MissingFilesDialog',
     'DynamiXsDialog',
+    'SeriesQCDialog',
 ]
