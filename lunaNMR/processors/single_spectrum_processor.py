@@ -100,6 +100,8 @@ class SingleSpectrumProcessor:
         # Store reference linewidths for per-peak linewidth reuse
         self._reference_linewidths = processing_options.get('reference_linewidths', {}) if processing_options else {}
         self._force_reference_linewidths = processing_options.get('force_reference_linewidths', False) if processing_options else False
+        # Skip series_params to force fresh adaptive optimization (Independent mode)
+        self._skip_series_params = processing_options.get('skip_series_params', False) if processing_options else False
 
         try:
             # Update integrator parameters from parameter manager
@@ -323,6 +325,23 @@ class SingleSpectrumProcessor:
         else:
             clusters = self.integrator.identify_overlap_clusters(all_peaks_context)
 
+        # CRITICAL: Store clusters for series integration (needed for sequential mode)
+        # Convert position-based clusters to assignment-based for series propagation
+        self._computed_clusters_by_assignment = []
+        position_to_assignment = {
+            (peak['x_ppm'], peak['y_ppm']): peak['assignment']
+            for peak in all_peaks_context
+        }
+        for cluster in clusters:
+            cluster_assignments = [
+                position_to_assignment.get(pos, 'Unknown')
+                for pos in cluster
+                if pos in position_to_assignment
+            ]
+            if cluster_assignments:
+                self._computed_clusters_by_assignment.append(cluster_assignments)
+        log_info(f"Stored {len(self._computed_clusters_by_assignment)} clusters for series propagation")
+
         # STEP 2: Build peak position → metadata mapping for result retrieval
         peak_metadata = {}  # (x_ppm, y_ppm) → (peak_number, assignment, index)
         for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
@@ -446,6 +465,7 @@ class SingleSpectrumProcessor:
                 fix_linewidths = self.integrator.gui_params.get('fix_linewidths', False)
 
                 # Build reference linewidths dict for peaks in this cluster
+                # Reference linewidths are used as initial guesses, NOT fixed constraints
                 cluster_reference_linewidths = None
                 if self._force_reference_linewidths and self._reference_linewidths:
                     cluster_reference_linewidths = {}
@@ -455,9 +475,8 @@ class SingleSpectrumProcessor:
                             assignment = str(meta['assignment'])
                             if assignment in self._reference_linewidths:
                                 cluster_reference_linewidths[assignment] = self._reference_linewidths[assignment]
-                    # If we have reference linewidths, force fix_linewidths=True
-                    if cluster_reference_linewidths:
-                        fix_linewidths = True
+                    # fix_linewidths remains as set by GUI (user choice)
+                    # Reference linewidths guide the optimizer but don't constrain it
 
                 # Call 2D overlap fitting with dictionary format
                 group_result = self.integrator.fit_overlap_group_2d(
@@ -700,13 +719,16 @@ class SingleSpectrumProcessor:
             try:
                 # Use new complete parallel implementation
                 # Returns tuple: (fitted_results, learned_statistics)
+                # skip_series_params forces fresh adaptive optimization (Independent mode)
+                skip_series_params = getattr(self, '_skip_series_params', False)
                 result = self.integrator.enhanced_fitter.enhanced_peak_fitting_parallel(
                     peak_list,
                     use_parallel=True,
                     progress_callback=parallel_progress_callback,
                     locked_clusters_by_assignment=locked_clusters,
                     pre_learned_statistics=pre_learned_statistics,
-                    reference_linewidths=reference_linewidths if force_reference_linewidths else None
+                    reference_linewidths=reference_linewidths if force_reference_linewidths else None,
+                    skip_series_params=skip_series_params
                 )
 
                 # Handle both old (list) and new (tuple) return formats
@@ -728,6 +750,19 @@ class SingleSpectrumProcessor:
                             result['peak_number'] = i + 1
 
                 log_info(f"Enhanced parallel processing completed: {len(fitted_results)} results")
+
+                # CRITICAL: Copy clusters from enhanced_fitter.series_params for series propagation
+                # This ensures the same cluster storage works for both parallel and sequential modes
+                if (hasattr(self.integrator, 'enhanced_fitter') and
+                    hasattr(self.integrator.enhanced_fitter, 'series_params') and
+                    self.integrator.enhanced_fitter.series_params):
+                    clusters_from_parallel = self.integrator.enhanced_fitter.series_params.get(
+                        'locked_clusters_by_assignment'
+                    )
+                    if clusters_from_parallel:
+                        self._computed_clusters_by_assignment = clusters_from_parallel
+                        log_info(f"Stored {len(clusters_from_parallel)} clusters from parallel fitting for series propagation")
+
                 return (fitted_results, learned_statistics)
 
             except Exception as e:

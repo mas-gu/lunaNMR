@@ -58,12 +58,12 @@ SQRT_2PI = np.sqrt(2.0 * np.pi)
 SQRT_8LN2 = np.sqrt(8.0 * np.log(2.0))
 
 # Levenberg-Marquardt parameters
-LAMBDA_INIT = 0.0001      # Initial damping (line 40)
-LAMBDA_UP = 5.0         # Increase factor on rejection (line 135)
-LAMBDA_DOWN = 0.2        # Decrease factor on acceptance #was 0.05, restored to 0.1 for stability
-MAX_ITER = 500           # Default max iterations was 250
-CONV_TOL = 1e-4          # Convergence tolerance (EPS_CONV) #was 1e-9
-NDONE = 1                # Must converge for 1 consecutive iteration
+LAMBDA_INIT = 0.0001      # Initial damping
+LAMBDA_UP = 5.0           # Increase factor on rejection
+LAMBDA_DOWN = 0.2         # Decrease factor on acceptance
+MAX_ITER = 500            # Default max iterations
+CONV_TOL = 1e-4           # Convergence tolerance
+NDONE = 2                 # Must converge for 1 consecutive iteration
 SLOW_PROGRESS_TOL = 1e-5 # Slow progress threshold: Δχ²/χ² < 1e-5 (0.001%)
 SLOW_PROGRESS_LIMIT = 15 # Exit after 15 consecutive slow-progress iterations
 STAGNATION_LIMIT = 150   # Exit after N consecutive rejected steps (was hardcoded as 50)

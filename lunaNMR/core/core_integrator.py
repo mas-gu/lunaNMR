@@ -97,6 +97,42 @@ except ImportError as e:
             self.nmr_file_path = None
             self.peak_list_path = None
             self.fitted_peaks = []
+            self._next_peak_id = 0  # Counter for stable peak IDs
+
+        def ensure_peak_ids(self):
+            """Ensure all peaks have stable peak_id values.
+
+            Called after loading peak lists or adding peaks to ensure
+            every peak has a unique, stable identifier for undo/redo.
+            """
+            import pandas as pd
+
+            # Handle reference peaks (DataFrame)
+            if self.peak_list is not None and isinstance(self.peak_list, pd.DataFrame):
+                if 'peak_id' not in self.peak_list.columns:
+                    self.peak_list['peak_id'] = range(len(self.peak_list))
+                    self._next_peak_id = len(self.peak_list)
+                else:
+                    # Find max existing ID and set counter above it
+                    max_id = self.peak_list['peak_id'].max()
+                    if pd.notna(max_id):
+                        self._next_peak_id = max(self._next_peak_id, int(max_id) + 1)
+
+            # Handle fitted peaks (list of dicts)
+            if self.fitted_peaks:
+                for peak in self.fitted_peaks:
+                    if 'peak_id' not in peak:
+                        peak['peak_id'] = self._next_peak_id
+                        self._next_peak_id += 1
+                    else:
+                        # Track max ID
+                        self._next_peak_id = max(self._next_peak_id, peak['peak_id'] + 1)
+
+        def get_next_peak_id(self):
+            """Get the next available peak_id and increment counter."""
+            peak_id = self._next_peak_id
+            self._next_peak_id += 1
+            return peak_id
 
         def _detect_nmr_format(self, file_path):
             """Detect NMR file format from file path.
@@ -247,6 +283,7 @@ class VoigtIntegrator(BaseIntegrator):
     def __init__(self):
         super().__init__()
         self.voigt_fits = []  # Store detailed Voigt fitting results
+        self._next_peak_id = 0  # Counter for stable peak IDs (undo/redo)
         self.fitting_parameters = {
             'max_iterations': 1000,
             'tolerance': 1e-6,
@@ -274,6 +311,10 @@ class VoigtIntegrator(BaseIntegrator):
 
         # S/N threshold for peak_list mode initial detection (expert mode)
         self.peak_list_sn_threshold = 10.0  # Multiplier for noise level
+
+        # Contour-based threshold for peak_list mode (takes precedence over S/N)
+        # When set, uses absolute threshold = max_intensity * contour_min * safety_factor
+        self.peak_list_contour_threshold = None  # None means use S/N threshold
 
         # Initialize enhanced fitter if available
         if ENHANCED_FITTING_AVAILABLE:
@@ -326,6 +367,41 @@ class VoigtIntegrator(BaseIntegrator):
         self.search_window_x = x_ppm
         self.search_window_y = y_ppm
         #print(f"🔍 Search windows set: X=±{x_ppm:.3f} ppm, Y=±{y_ppm:.3f} ppm")
+
+    def ensure_peak_ids(self):
+        """Ensure all peaks have stable peak_id values.
+
+        Called after loading peak lists or adding peaks to ensure
+        every peak has a unique, stable identifier for undo/redo.
+        """
+        import pandas as pd
+
+        # Handle reference peaks (DataFrame)
+        if self.peak_list is not None and isinstance(self.peak_list, pd.DataFrame):
+            if 'peak_id' not in self.peak_list.columns:
+                self.peak_list['peak_id'] = range(len(self.peak_list))
+                self._next_peak_id = len(self.peak_list)
+            else:
+                # Find max existing ID and set counter above it
+                max_id = self.peak_list['peak_id'].max()
+                if pd.notna(max_id):
+                    self._next_peak_id = max(self._next_peak_id, int(max_id) + 1)
+
+        # Handle fitted peaks (list of dicts)
+        if self.fitted_peaks:
+            for peak in self.fitted_peaks:
+                if 'peak_id' not in peak:
+                    peak['peak_id'] = self._next_peak_id
+                    self._next_peak_id += 1
+                else:
+                    # Track max ID
+                    self._next_peak_id = max(self._next_peak_id, peak['peak_id'] + 1)
+
+    def get_next_peak_id(self):
+        """Get the next available peak_id and increment counter."""
+        peak_id = self._next_peak_id
+        self._next_peak_id += 1
+        return peak_id
 
     def configure_overlap_resolution(self, enable: bool = True, config: Dict = None):
         """
@@ -2213,6 +2289,8 @@ class VoigtIntegrator(BaseIntegrator):
         spectrum_stats = getattr(self, 'spectrum_statistics', None)
 
         fitter = Ps2dMultiPeakFitter2D(verbose=True)
+        # Get noise level for weak peak detection (robust corner-based estimation)
+        spectrum_noise_level = getattr(self, 'noise_level', None)
         result = fitter.fit_multi_peak_2d(
             region['f1_grid'], region['f2_grid'], normalized_data,
             initial_peaks,
@@ -2221,7 +2299,8 @@ class VoigtIntegrator(BaseIntegrator):
             data_mask=data_mask,
             spectrum_statistics=spectrum_stats,  # PASS1 learned statistics for bounds
             reference_positions=reference_positions,  # Cascade mode absolute drift limits
-            peak_assignments=peak_assignments  # Needed for reference_positions lookup
+            peak_assignments=peak_assignments,  # Needed for reference_positions lookup
+            noise_level=spectrum_noise_level  # For weak peak detection (S/N < 5)
         )
 
         # Denormalize fitted intensities AND derived quantities
@@ -3276,15 +3355,20 @@ class VoigtIntegrator(BaseIntegrator):
         log_progress(f"Detection: detect all peaks then match closest to {len(self.peak_list)} reference peaks")
 
         # Step 1: Detect ALL peaks using threshold (like S/N native mode)
-        # Ensure noise level is estimated
+        # Ensure noise level is estimated (fix: actually capture return value)
         if not hasattr(self, 'noise_level') or self.noise_level is None:
-            self._estimate_noise_level_advanced()
+            self.noise_level = self._estimate_noise_level_advanced()
 
-        # Use configurable S/N threshold from expert mode
-        threshold_multiplier = getattr(self, 'peak_list_sn_threshold', 10.0)
-        signal_threshold = self.noise_level * threshold_multiplier
-
-        log_info(f"Step 1: Detecting all peaks (S/N threshold={threshold_multiplier}, signal_threshold={signal_threshold:.2e})")
+        # Use contour-based threshold if set, otherwise fall back to S/N threshold
+        if self.peak_list_contour_threshold is not None:
+            # Contour threshold: absolute value from GUI (max_intensity * contour_min * safety)
+            signal_threshold = self.peak_list_contour_threshold
+            log_info(f"Step 1: Detecting all peaks (contour threshold={signal_threshold:.2e})")
+        else:
+            # Legacy S/N threshold: multiplier for noise level
+            threshold_multiplier = getattr(self, 'peak_list_sn_threshold', 10.0)
+            signal_threshold = self.noise_level * threshold_multiplier
+            log_info(f"Step 1: Detecting all peaks (S/N threshold={threshold_multiplier}, signal_threshold={signal_threshold:.2e})")
 
         # Detect all peaks using the existing threshold method
         all_detected_peaks = self._detect_peaks_by_threshold(signal_threshold)
@@ -3397,6 +3481,9 @@ class VoigtIntegrator(BaseIntegrator):
         # Store results
         self.fitted_peaks = matched_peaks
 
+        # Ensure all peaks have stable IDs for undo/redo
+        self.ensure_peak_ids()
+
         # Update statistics
         detected_count = sum(1 for p in matched_peaks if p.get('detected', False) and not p.get('is_dummy', False))
         reference_retained = sum(1 for p in matched_peaks if p.get('reference_retained', False))
@@ -3448,10 +3535,10 @@ class VoigtIntegrator(BaseIntegrator):
         percentile_idx = max(0, int(len(sorted_intensities) * 0.10) - 1)
         intensity_threshold = sorted_intensities[percentile_idx]
 
-        # Get 3× overlap radius based on nucleus type (from PS2D config)
+        # Get overlap radius based on nucleus type (from PS2D config)
         ps2d_config = get_ps2d_config()
-        overlap_x = 3.0 * ps2d_config.radF2  # 1H dimension (radF2 is 1H in PS2D)
-        overlap_y = 3.0 * ps2d_config.radF1  # 15N/13C dimension (radF1 is indirect)
+        overlap_x = ps2d_config.radF2  # 1H dimension (radF2 is 1H in PS2D)
+        overlap_y = ps2d_config.radF1  # 15N/13C dimension (radF1 is indirect)
 
         # Collect user peak positions for proximity check
         user_positions = [
@@ -3595,6 +3682,9 @@ class VoigtIntegrator(BaseIntegrator):
             self.peak_list.columns = self.peak_list.columns.str.strip()
             log_info(f"Loaded peak list: {len(self.peak_list)} peaks from {peak_list_file}")
 
+            # Ensure all peaks have stable IDs for undo/redo
+            self.ensure_peak_ids()
+
             self.peak_list_path = peak_list_file
 
             # If NMR data was already loaded, we're ready to go
@@ -3708,6 +3798,9 @@ class VoigtIntegrator(BaseIntegrator):
                 'SNR': peak.get('snr', 0.0)
             })
         self.peak_list = pd.DataFrame(peak_list_data)
+
+        # Ensure all peaks have stable IDs for undo/redo
+        self.ensure_peak_ids()
 
         # Update statistics
         detected_count = len(standardized_peaks)

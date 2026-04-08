@@ -28,6 +28,186 @@ Usage:
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
+import multiprocessing as mp
+import time
+
+
+def _fit_peak_worker(args):
+    """
+    Worker function for parallel peak evaluation in adaptive optimization.
+
+    Evaluates one peak against all parameter combinations in the grid search.
+    Uses the same shared memory pattern as _parallel_cluster_worker.
+
+    Parameters
+    ----------
+    args : tuple
+        (peak_idx, peak, is_train, combinations, shared_context)
+
+        peak_idx : int
+            Index of this peak in the sample set
+        peak : dict
+            Peak data with 'x_ppm', 'y_ppm'
+        is_train : bool
+            True if training peak, False if validation peak
+        combinations : list of tuple
+            List of (mult_f1, mult_f2) combinations to evaluate
+        shared_context : dict
+            Shared context from ParallelVoigtProcessor (spectrum in shared memory)
+
+    Returns
+    -------
+    tuple : (peak_idx, is_train, scores_by_combo)
+        scores_by_combo is list of (combo_idx, score, success) for each combination
+    """
+    peak_idx, peak, is_train, combinations, shared_context = args
+
+    median_lw_f1 = shared_context['adaptive_context']['median_lw_f1']
+    median_lw_f2 = shared_context['adaptive_context']['median_lw_f2']
+    noise_level = shared_context['adaptive_context']['noise_level']
+    weights = shared_context['adaptive_context']['weights']
+    all_peaks_context = shared_context['adaptive_context']['all_peaks_context']
+
+    # Initialize worker fitter (reconstructs integrator with shared memory spectrum)
+    from lunaNMR.core.parallel_voigt_processor import _initialize_worker_fitter
+    worker_integrator = _initialize_worker_fitter(shared_context)
+
+    # Import PS2D config
+    from lunaNMR.core.ps2d_config import get_ps2d_config
+    config = get_ps2d_config()
+
+    scores_by_combo = []
+
+    # Evaluate this peak against all combinations
+    for combo_idx, (mult_f1, mult_f2) in enumerate(combinations):
+        radF1 = mult_f1 * median_lw_f1
+        radF2 = mult_f2 * median_lw_f2
+
+        # Save original config values
+        old_radF1 = config.radF1
+        old_radF2 = config.radF2
+
+        try:
+            # Temporarily update config for this combination
+            config.radF1 = radF1
+            config.radF2 = radF2
+
+            # Fit peak using full PS2D pipeline (same as sequential mode)
+            result = worker_integrator.enhanced_peak_fitting(
+                peak.get('x_ppm'),
+                peak.get('y_ppm'),
+                all_peaks_context=all_peaks_context
+            )
+
+            if result is None:
+                scores_by_combo.append((combo_idx, 0.0, False))
+                continue
+
+            # Extract r_squared
+            r_squared = _extract_r_squared_helper(result)
+            if r_squared is None:
+                scores_by_combo.append((combo_idx, 0.0, False))
+                continue
+
+            # Compute composite score
+            score = _compute_composite_score_helper(
+                result,
+                initial_pos=(peak.get('x_ppm'), peak.get('y_ppm')),
+                noise_level=noise_level,
+                config=config,
+                weights=weights
+            )
+            scores_by_combo.append((combo_idx, score, True))
+
+        except Exception:
+            scores_by_combo.append((combo_idx, 0.0, False))
+
+        finally:
+            # Always restore config
+            config.radF1 = old_radF1
+            config.radF2 = old_radF2
+
+    return (peak_idx, is_train, scores_by_combo)
+
+
+def _extract_r_squared_helper(result: Dict) -> Optional[float]:
+    """Helper function for extracting R² in worker processes."""
+    if result is None:
+        return None
+
+    if 'r_squared' in result:
+        return result['r_squared']
+
+    if 'fit_result' in result and isinstance(result['fit_result'], dict):
+        if 'r_squared' in result['fit_result']:
+            return result['fit_result']['r_squared']
+
+    if 'peak_results' in result and isinstance(result['peak_results'], list):
+        for pr in result['peak_results']:
+            if pr and 'r_squared' in pr:
+                return pr['r_squared']
+
+    if isinstance(result, list) and len(result) > 0:
+        if isinstance(result[0], dict) and 'r_squared' in result[0]:
+            return result[0]['r_squared']
+
+    if 'results' in result and isinstance(result['results'], dict):
+        if 'r_squared' in result['results']:
+            return result['results']['r_squared']
+
+    return None
+
+
+def _compute_composite_score_helper(result: Dict,
+                                    initial_pos: Tuple[float, float],
+                                    noise_level: float,
+                                    config,
+                                    weights: Dict[str, float]) -> float:
+    """Helper function for computing composite score in worker processes."""
+    # Extract weights
+    weight_r2 = weights['r2']
+    weight_snr = weights['snr']
+    weight_position = weights['position']
+    weight_linewidth = weights['linewidth']
+
+    # 1. R² component
+    r2 = _extract_r_squared_helper(result) or 0
+    r2_score = max(0, min(1, r2))
+
+    # 2. Residual SNR component
+    residuals = result.get('residuals', None)
+    if residuals is not None and len(residuals) > 0 and noise_level > 0:
+        res_snr = np.std(residuals) / noise_level
+        snr_score = 1.0 / (1.0 + abs(res_snr - 1.0))
+    else:
+        snr_score = 0.5
+
+    # 3. Position stability component
+    fitted_x = result.get('pos_x') or result.get('pos_f2', initial_pos[0])
+    fitted_y = result.get('pos_y') or result.get('pos_f1', initial_pos[1])
+    pos_shift = np.sqrt((fitted_x - initial_pos[0])**2 +
+                       (fitted_y - initial_pos[1])**2)
+    pos_score = 1.0 / (1.0 + 100 * pos_shift)
+
+    # 4. Linewidth physicality component
+    lw_f1 = result.get('fwhm_f1') or result.get('lw_y', None)
+    if lw_f1 is not None and config is not None:
+        min_lw = getattr(config, 'min_linewidth_f1', 0.01)
+        max_lw = getattr(config, 'max_linewidth_f1', 1.0)
+        if min_lw < lw_f1 < max_lw * 0.9:
+            lw_score = 1.0
+        else:
+            lw_score = 0.5
+    else:
+        lw_score = 0.75
+
+    # Weighted combination
+    composite = (weight_r2 * r2_score +
+                weight_snr * snr_score +
+                weight_position * pos_score +
+                weight_linewidth * lw_score)
+
+    return composite
 
 
 class AdaptiveOptimizer:
@@ -39,7 +219,7 @@ class AdaptiveOptimizer:
     """
 
     # Grid search multipliers
-    MULTIPLIERS = [1.0, 1.5, 2.0]
+    MULTIPLIERS = [1.0, 1.5, 2.0]  # scaled back from [1.0, 1.5, 2.0, 2.5, 3.0]
 
     # Train/validation split ratio
     TRAIN_RATIO = 0.7
@@ -48,10 +228,10 @@ class AdaptiveOptimizer:
     MIN_PEAKS_FOR_OPTIMIZATION = 10
 
     # Composite score weights
-    WEIGHT_R2 = 0.4
-    WEIGHT_SNR = 0.3
-    WEIGHT_POSITION = 0.2
-    WEIGHT_LINEWIDTH = 0.1
+    WEIGHT_R2 = 0.2  # was 0.4
+    WEIGHT_SNR = 0.6  # was 0.3
+    WEIGHT_POSITION = 0.1  # was 0.2
+    WEIGHT_LINEWIDTH = 0.1  # was 0.1
 
     def __init__(self, noise_level: float, config=None):
         """
@@ -77,7 +257,10 @@ class AdaptiveOptimizer:
                  median_lw_f1: float,
                  median_lw_f2: float,
                  fit_function: callable,
-                 progress_callback: callable = None) -> Dict[str, Any]:
+                 progress_callback: callable = None,
+                 use_parallel: bool = False,
+                 shared_context: Dict = None,
+                 all_peaks_context: List[Dict] = None) -> Dict[str, Any]:
         """
         Run grid search optimization to find optimal radF1/radF2.
 
@@ -98,6 +281,12 @@ class AdaptiveOptimizer:
             Result must contain 'r_squared' key.
         progress_callback : callable, optional
             Function to report progress: progress_callback(percent, task_desc, detail)
+        use_parallel : bool, optional
+            Enable parallel optimization (default: False)
+        shared_context : dict, optional
+            Shared context for parallel mode (spectrum in shared memory, etc.)
+        all_peaks_context : list of dict, optional
+            List of all peaks for overlap detection (required for parallel mode)
 
         Returns
         -------
@@ -111,10 +300,33 @@ class AdaptiveOptimizer:
         if len(isolated_peaks) < self.MIN_PEAKS_FOR_OPTIMIZATION:
             return self._get_fallback_params(median_lw_f1, median_lw_f2, reason="insufficient_peaks")
 
+        # Route to parallel or sequential mode
+        if use_parallel and shared_context is not None:
+            return self._optimize_parallel(
+                isolated_peaks, median_lw_f1, median_lw_f2,
+                shared_context, all_peaks_context, progress_callback
+            )
+
+        # Sequential mode (original implementation)
+        return self._optimize_sequential(
+            isolated_peaks, median_lw_f1, median_lw_f2,
+            fit_function, progress_callback
+        )
+
+    def _optimize_sequential(self,
+                            isolated_peaks: List[Dict],
+                            median_lw_f1: float,
+                            median_lw_f2: float,
+                            fit_function: callable,
+                            progress_callback: callable = None) -> Dict[str, Any]:
+        """
+        Sequential grid search optimization (original implementation).
+
+        This is the original optimize() logic extracted into a separate method.
+        """
         # Split into train/validation sets
         train_peaks, val_peaks = self._split_train_validation(isolated_peaks)
 
-        import time
         opt_start_time = time.time()
 
         n_combinations = len(self.MULTIPLIERS) ** 2
@@ -256,6 +468,201 @@ class AdaptiveOptimizer:
             'median_lw_f2': median_lw_f2,
             'search_history': self.search_history,
             'success': True
+        }
+
+        return self.optimization_results
+
+    def _optimize_parallel(self,
+                          isolated_peaks: List[Dict],
+                          median_lw_f1: float,
+                          median_lw_f2: float,
+                          shared_context: Dict,
+                          all_peaks_context: List[Dict],
+                          progress_callback: callable = None) -> Dict[str, Any]:
+        """
+        Parallel grid search optimization using multiprocessing.
+
+        Distributes peaks across workers. Each worker evaluates all 9 combinations
+        for its assigned peak(s), then the main process aggregates results.
+
+        Parameters
+        ----------
+        isolated_peaks : list of dict
+            Isolated peaks for optimization
+        median_lw_f1 : float
+            Median F1 linewidth
+        median_lw_f2 : float
+            Median F2 linewidth
+        shared_context : dict
+            Shared context with spectrum in shared memory
+        all_peaks_context : list of dict
+            All peaks for overlap detection
+        progress_callback : callable, optional
+            Progress reporting function
+
+        Returns
+        -------
+        dict : Optimal parameters and optimization metadata
+        """
+        # Split into train/validation sets
+        train_peaks, val_peaks = self._split_train_validation(isolated_peaks)
+
+        opt_start_time = time.time()
+
+        # Build list of all parameter combinations
+        combinations = [(m1, m2) for m1 in self.MULTIPLIERS for m2 in self.MULTIPLIERS]
+        n_combinations = len(combinations)
+
+        # Build extended shared context for adaptive optimization
+        adaptive_context = {
+            'median_lw_f1': median_lw_f1,
+            'median_lw_f2': median_lw_f2,
+            'noise_level': self.noise_level,
+            'weights': {
+                'r2': self.WEIGHT_R2,
+                'snr': self.WEIGHT_SNR,
+                'position': self.WEIGHT_POSITION,
+                'linewidth': self.WEIGHT_LINEWIDTH
+            },
+            'all_peaks_context': all_peaks_context
+        }
+
+        # Add adaptive context to shared_context
+        extended_context = shared_context.copy()
+        extended_context['adaptive_context'] = adaptive_context
+
+        # Prepare worker tasks (one task per peak)
+        worker_tasks = []
+
+        # Training peaks
+        for peak_idx, peak in enumerate(train_peaks):
+            worker_tasks.append((peak_idx, peak, True, combinations, extended_context))
+
+        # Validation peaks
+        for peak_idx, peak in enumerate(val_peaks):
+            # Use offset index to distinguish from train peaks
+            worker_tasks.append((len(train_peaks) + peak_idx, peak, False, combinations, extended_context))
+
+        # Execute parallel optimization
+        from multiprocessing import Pool
+        max_workers = mp.cpu_count() - 2  # Leave 2 cores free
+        max_workers = max(1, max_workers)
+
+        # Storage for aggregated results
+        # combo_results[combo_idx] = {'train_scores': [], 'val_scores': []}
+        combo_results = [{'train_scores': [], 'val_scores': []} for _ in range(n_combinations)]
+
+        try:
+            with Pool(processes=max_workers) as pool:
+                # Submit all peak tasks
+                async_results = []
+                for task in worker_tasks:
+                    async_result = pool.apply_async(_fit_peak_worker, (task,))
+                    async_results.append(async_result)
+
+                # Collect results with progress tracking
+                completed = 0
+                for async_result in async_results:
+                    try:
+                        peak_idx, is_train, scores_by_combo = async_result.get(timeout=600)
+
+                        # Aggregate scores by combination
+                        for combo_idx, score, success in scores_by_combo:
+                            if success:
+                                if is_train:
+                                    combo_results[combo_idx]['train_scores'].append(score)
+                                else:
+                                    combo_results[combo_idx]['val_scores'].append(score)
+
+                        # Progress reporting
+                        completed += 1
+                        if progress_callback:
+                            progress = int(100 * completed / len(async_results))
+                            task_desc = f"OPTIMIZE [parallel]: {completed}/{len(async_results)} peaks"
+                            detail = f"Completed peak {peak_idx + 1}"
+                            progress_callback(progress, task_desc, detail)
+
+                    except mp.TimeoutError:
+                        # Skip this peak if it times out
+                        completed += 1
+                        continue
+                    except Exception:
+                        # Skip this peak on error
+                        completed += 1
+                        continue
+
+        except Exception as e:
+            # Fallback to sequential mode on error
+            from lunaNMR.utils.output_manager import log_warning
+            log_warning(f"Parallel optimization failed: {e}. Falling back to sequential.")
+            return self._get_fallback_params(median_lw_f1, median_lw_f2, reason="parallel_failed")
+
+        # Aggregate results across combinations
+        best_score = -np.inf
+        best_params = None
+        self.search_history = []
+
+        for combo_idx, (mult_f1, mult_f2) in enumerate(combinations):
+            train_scores = combo_results[combo_idx]['train_scores']
+            val_scores = combo_results[combo_idx]['val_scores']
+
+            if len(train_scores) == 0 or len(val_scores) == 0:
+                continue
+
+            train_score = np.mean(train_scores)
+            val_score = np.mean(val_scores)
+
+            radF1 = mult_f1 * median_lw_f1
+            radF2 = mult_f2 * median_lw_f2
+
+            # Record in history
+            self.search_history.append({
+                'multiplier_f1': mult_f1,
+                'multiplier_f2': mult_f2,
+                'radF1': radF1,
+                'radF2': radF2,
+                'train_score': train_score,
+                'val_score': val_score,
+                'n_train_fits': len(train_scores),
+                'n_val_fits': len(val_scores)
+            })
+
+            # Select based on VALIDATION score
+            if val_score > best_score:
+                best_score = val_score
+                best_params = {
+                    'multiplier_f1': mult_f1,
+                    'multiplier_f2': mult_f2,
+                    'radF1': radF1,
+                    'radF2': radF2,
+                    'train_score': train_score,
+                    'val_score': val_score
+                }
+
+        # Check if optimization succeeded
+        if best_params is None or best_score < 0.6:
+            return self._get_fallback_params(median_lw_f1, median_lw_f2, reason="poor_score")
+
+        # Build result
+        self.best_params = best_params
+        self.optimization_results = {
+            'radF1': best_params['radF1'],
+            'radF2': best_params['radF2'],
+            'overlap_threshold_x': best_params['radF2'],  # Linked
+            'overlap_threshold_y': best_params['radF1'],  # Linked
+            'multiplier_f1': best_params['multiplier_f1'],
+            'multiplier_f2': best_params['multiplier_f2'],
+            'validation_score': best_params['val_score'],
+            'train_score': best_params['train_score'],
+            'generalization_gap': best_params['train_score'] - best_params['val_score'],
+            'n_peaks_used': len(isolated_peaks),
+            'n_train': len(train_peaks),
+            'n_val': len(val_peaks),
+            'median_lw_f1': median_lw_f1,
+            'median_lw_f2': median_lw_f2,
+            'search_history': self.search_history,
+            'success': True,
+            'parallel': True  # Flag to indicate parallel mode was used
         }
 
         return self.optimization_results

@@ -536,7 +536,8 @@ class Ps2dMultiPeakFitter2D:
                           data_mask: np.ndarray = None,
                           spectrum_statistics: Dict = None,
                           reference_positions: Dict = None,
-                          peak_assignments: List[str] = None) -> Dict:
+                          peak_assignments: List[str] = None,
+                          noise_level: float = None) -> Dict:
         """
         Fit multiple overlapping 2D Voigt peaks simultaneously
 
@@ -647,6 +648,9 @@ class Ps2dMultiPeakFitter2D:
             mask_flat = np.ones(len(y_flat), dtype=bool)
             y_flat_masked = y_flat
 
+        # Weak peak detection disabled - all peaks can move freely
+        weak_peak_indices = set()
+
         # Create wrapper functions for optimizer
         def model_function(_f1_f2_dummy, *p):
             """Model function for optimizer (ignores x, uses stored grids)"""
@@ -695,9 +699,23 @@ class Ps2dMultiPeakFitter2D:
         #   - Works automatically - no manual parameter tuning needed
         # ====================================================================
 
-        # Minimum bounds (allow nearly pure Gaussian peaks)
-        absolute_min_lw_f1 = 0.0001   # Minimum realistic 15N/13C linewidth (ppm)
-        absolute_min_lw_f2 = 0.000005 # Minimum realistic 1H linewidth (ppm)
+        # Linewidth bounds strategy depends on cluster vs isolated peak:
+        # - Isolated (n_peaks == 1): Absolute bounds, full optimizer freedom
+        # - Cluster (n_peaks > 1): Per-peak bounds (30-200% of reference), prevents collapse
+        is_cluster = n_peaks > 1
+
+        # Absolute minimum bounds (per component: Lorentzian or Gaussian)
+        # Physical minimum linewidths at 600 MHz:
+        # - 15N: ~0.03 ppm (T2 relaxation limit)
+        # - 1H:  ~0.005 ppm (T2 relaxation limit)
+        # Too-loose bounds cause optimizer to find unrealistic narrow peaks,
+        # leading to unstable volume attribution in overlapping clusters.
+        absolute_min_lw_f1 = 0.03    # ppm - realistic 15N minimum
+        absolute_min_lw_f2 = 0.005   # ppm - realistic 1H minimum
+
+        # Fallback minimum for cluster per-peak bounds
+        fallback_min_lw_f1 = config.min_linewidth_f1  # 0.05 for 15N, 0.025 for 13C
+        fallback_min_lw_f2 = config.min_linewidth_f2  # 0.001 for 15N, 0.005 for 13C
 
         # Maximum bounds: use learned statistics if available, else config defaults
         if spectrum_statistics is not None:
@@ -757,9 +775,8 @@ class Ps2dMultiPeakFitter2D:
             lower_bounds.append(peak['pos_f1'] - pos_f1_margin)
             upper_bounds.append(peak['pos_f1'] + pos_f1_margin)
 
-            # F1 linewidths - absolute bounds: give optimizer full freedom
-            # Independent of initial guesses, based on physical limits
-            # Applies same bounds to both Lorentzian and Gaussian components
+            # F1 linewidths - absolute bounds for all peaks (cluster bounds temporarily disabled)
+            # TODO: Re-enable cluster-specific bounds after testing
             lower_bounds.extend([absolute_min_lw_f1, absolute_min_lw_f1])  # Lor, Gau
             upper_bounds.extend([absolute_max_lw_f1, absolute_max_lw_f1])  # Lor, Gau
 
@@ -771,9 +788,8 @@ class Ps2dMultiPeakFitter2D:
             lower_bounds.append(peak['pos_f2'] - pos_f2_margin)
             upper_bounds.append(peak['pos_f2'] + pos_f2_margin)
 
-            # F2 linewidths - absolute bounds: give optimizer full freedom
-            # Independent of initial guesses, based on physical limits
-            # Applies same bounds to both Lorentzian and Gaussian components
+            # F2 linewidths - absolute bounds for all peaks (cluster bounds temporarily disabled)
+            # TODO: Re-enable cluster-specific bounds after testing
             lower_bounds.extend([absolute_min_lw_f2, absolute_min_lw_f2])  # Lor, Gau
             upper_bounds.extend([absolute_max_lw_f2, absolute_max_lw_f2])  # Lor, Gau
 
@@ -844,7 +860,6 @@ class Ps2dMultiPeakFitter2D:
                         bounds[1][f1_idx] = new_upper_f1
                         bounds[0][f2_idx] = new_lower_f2
                         bounds[1][f2_idx] = new_upper_f2
-
 
         # Log position constraints for diagnostics (showing last peak's margins as example)
         #if self.verbose:
@@ -1000,7 +1015,7 @@ class Ps2dMultiPeakFitter2D:
         # ====================================================================
         if not fix_positions:
 
-            # Fix spare parameters + respect fix_linewidths flag
+            # Fix spare parameters + respect fix_linewidths flag + fix weak peak positions
             fixed_stage2 = {}
             for i in range(n_peaks):
                 offset = i * NPAR_VOIGT
@@ -1013,6 +1028,11 @@ class Ps2dMultiPeakFitter2D:
                     fixed_stage2[offset + 2] = params[offset + 2]  # Fix lw_gau_f1
                     fixed_stage2[offset + 4] = params[offset + 4]  # Fix lw_lor_f2
                     fixed_stage2[offset + 5] = params[offset + 5]  # Fix lw_gau_f2
+
+                # Fix positions for weak peaks (low S/N or weak in cluster)
+                if i in weak_peak_indices:
+                    fixed_stage2[offset + 0] = params[offset + 0]  # Fix pos_f1
+                    fixed_stage2[offset + 3] = params[offset + 3]  # Fix pos_f2
 
             params, cov, info = self.optimizer.fit(
                 func=model_function,
@@ -1047,7 +1067,8 @@ class Ps2dMultiPeakFitter2D:
             fixed_stage4[offset + 7] = 0.0  # Always fix spare parameter
 
             # CRITICAL: Respect fix_positions flag (user's absolute constraint)
-            if fix_positions:
+            # Also fix positions for weak peaks (low S/N or weak in cluster)
+            if fix_positions or i in weak_peak_indices:
                 fixed_stage4[offset + 0] = params[offset + 0]  # Fix pos_f1
                 fixed_stage4[offset + 3] = params[offset + 3]  # Fix pos_f2
 
@@ -1162,12 +1183,29 @@ class Ps2dMultiPeakFitter2D:
         y_fit_flat = multi_voigt_profile_2d(f1_grid, f2_grid, params, n_peaks).ravel()
         y_fit_2d = y_fit_flat.reshape(f1_grid.shape)  # Use grid shape instead of intensity.shape
 
-        # Compute R² using ONLY masked data (PS2D approach)
-        # This prevents unfitted peaks outside ellipses from degrading R²
+        # Correlation-based R² metric
+        # Measures shape similarity between data and fit (Pearson correlation squared)
+        # Intuitive: visually perfect fit → R² ≈ 1.0
         y_fit_masked = y_fit_flat[mask_flat]
-        ss_res = np.sum((y_flat_masked - y_fit_masked)**2)
-        ss_tot = np.sum((y_flat_masked - np.mean(y_flat_masked))**2)
-        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+        # Compute Pearson correlation coefficient
+        if len(y_flat_masked) > 1:
+            # Correlation = cov(x,y) / (std(x) * std(y))
+            data_mean = np.mean(y_flat_masked)
+            fit_mean = np.mean(y_fit_masked)
+            data_centered = y_flat_masked - data_mean
+            fit_centered = y_fit_masked - fit_mean
+
+            numerator = np.sum(data_centered * fit_centered)
+            denominator = np.sqrt(np.sum(data_centered**2) * np.sum(fit_centered**2))
+
+            if denominator > 0:
+                correlation = numerator / denominator
+                r_squared = correlation ** 2  # Square to get R² (0-1 scale)
+            else:
+                r_squared = 1.0  # No variance = perfect match
+        else:
+            r_squared = 1.0  # Single point = perfect match
 
         # Pragmatic success criterion for 2D multi-peak fitting:
         # Accept result if ANY of:

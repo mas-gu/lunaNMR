@@ -96,6 +96,13 @@ class PS2DConfig:
             'tooclose_threshold': 0.8,       # Elliptical distance threshold for L/G and intensity constraints
 
             # ================================================================
+            # Detection search windows (nucleus-adaptive)
+            # ================================================================
+            # Maximum distance from reference peak to search for detected peak
+            'search_window_f1': 0.05,      # 15N search window (ppm)
+            'search_window_f2': 0.02,      # 1H search window (ppm)
+
+            # ================================================================
             # Position bounds (fitting movement limits)
             # ================================================================
             # Maximum distance peaks can move from initial position during fitting
@@ -109,8 +116,8 @@ class PS2DConfig:
             # These limits enforce ABSOLUTE bounds relative to ORIGINAL reference.
             # Set enable_cascade_drift_limit=False in Expert Mode to disable this feature.
             'enable_cascade_drift_limit': True,  # ON by default, can disable in Expert Mode
-            'max_drift_f1': 0.05,          # Max 15N drift from original reference (ppm)
-            'max_drift_f2': 0.02,          # Max 1H drift from original reference (ppm)
+            'max_drift_f1': 0.025,         # Max 15N drift from original reference (ppm)
+            'max_drift_f2': 0.005,         # Max 1H drift from original reference (ppm)
 
             # ================================================================
             # Cluster size limits
@@ -174,17 +181,29 @@ class PS2DConfig:
             # intensity ratio constraints to prevent unrealistic decompositions
             'tooclose_threshold': 0.8,       # Elliptical distance threshold for L/G and intensity constraints
 
-            # Position bounds (moderate for peak movement)
+            # ================================================================
+            # Detection search windows (nucleus-adaptive)
+            # ================================================================
+            # Maximum distance from reference peak to search for detected peak
+            'search_window_f1': 0.05,      # 13C search window (ppm)
+            'search_window_f2': 0.02,      # 1H search window (ppm)
+
+            # ================================================================
+            # Position bounds (fitting movement limits)
+            # ================================================================
+            # Maximum distance peaks can move from initial position during fitting
             'pos_margin_f1': 0.01,        # 13C position movement limit (ppm)
             'pos_margin_f2': 0.01,        # 1H position movement limit (ppm)
 
+            # ================================================================
             # Maximum drift from reference (cascade mode absolute bounds)
+            # ================================================================
             # In cascade mode, peaks can drift from spectrum to spectrum.
             # These limits enforce ABSOLUTE bounds relative to ORIGINAL reference.
             # Set enable_cascade_drift_limit=False in Expert Mode to disable this feature.
             'enable_cascade_drift_limit': True,  # ON by default, can disable in Expert Mode
-            'max_drift_f1': 0.03,         # Max 13C drift from original reference (ppm)
-            'max_drift_f2': 0.02,         # Max 1H drift from original reference (ppm)
+            'max_drift_f1': 0.01,         # Max 13C drift from original reference (ppm)
+            'max_drift_f2': 0.005,        # Max 1H drift from original reference (ppm)
 
             # Cluster size limits
             'max_cluster_size': 20,       # Maximum peaks in overlap group

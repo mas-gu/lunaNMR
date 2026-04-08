@@ -3128,7 +3128,8 @@ class EnhancedVoigtFitter:
 
     def enhanced_peak_fitting_parallel(self, peak_list, use_parallel=True, progress_callback=None,
                                         parent_integrator=None, locked_clusters_by_assignment=None,
-                                        pre_learned_statistics=None, reference_linewidths=None):
+                                        pre_learned_statistics=None, reference_linewidths=None,
+                                        skip_series_params=False):
         """
         New parallel entry point that maintains complete compatibility with existing interface.
 
@@ -3142,6 +3143,8 @@ class EnhancedVoigtFitter:
                 If provided, PASS 1 learning is skipped and these values are used as initial guesses.
             reference_linewidths: Optional dict mapping assignment -> {lw_lor_f1, lw_gau_f1, etc.}
                 for per-peak linewidth reuse. If provided, linewidths are fixed to these values.
+            skip_series_params: If True, don't apply series_params from previous spectra.
+                This forces fresh adaptive optimization (used for Independent mode).
 
         Returns:
             Tuple of (fitted_results, learned_statistics) where learned_statistics is the
@@ -3213,7 +3216,8 @@ class EnhancedVoigtFitter:
                 self.parallel_processor = parallel_processor  # Store for ML training data collection
 
                 # Pass series_params if available (for subsequent spectra in series)
-                if hasattr(self, 'series_params') and self.series_params is not None:
+                # Skip if skip_series_params=True (Independent mode wants fresh adaptive each spectrum)
+                if not skip_series_params and hasattr(self, 'series_params') and self.series_params is not None:
                     parallel_processor.set_series_params(self.series_params)
 
                 # Pass locked clusters, pre-learned statistics, and reference linewidths

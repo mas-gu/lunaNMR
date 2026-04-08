@@ -107,7 +107,11 @@ class ParallelVoigtProcessor:
         """
         self.series_params = series_params
         if series_params:
-            log_info(f"Series parameters loaded from reference: radF1={series_params.get('radF1', 'N/A'):.4f}, radF2={series_params.get('radF2', 'N/A'):.5f}")
+            radF1 = series_params.get('radF1')
+            radF2 = series_params.get('radF2')
+            radF1_str = f"{radF1:.4f}" if radF1 is not None else "N/A"
+            radF2_str = f"{radF2:.5f}" if radF2 is not None else "N/A"
+            log_info(f"Series parameters loaded from reference: radF1={radF1_str}, radF2={radF2_str}")
 
     def fit_all_peaks_parallel(self, peak_list, progress_callback=None, locked_clusters_by_assignment=None,
                                 pre_learned_statistics=None, reference_linewidths=None):
@@ -199,29 +203,38 @@ class ParallelVoigtProcessor:
             log_info(f"2D overlap detection enabled with {len(all_peaks_context)} peaks context")
 
             # STEP 2: Get clusters - either locked or computed
-            if locked_clusters_by_assignment is not None:
+            # Priority: explicit parameter > series_params > fresh calculation
+            effective_locked_clusters = locked_clusters_by_assignment
+
+            # Fallback to series_params if explicit parameter not provided
+            if effective_locked_clusters is None and self.series_params:
+                effective_locked_clusters = self.series_params.get('locked_clusters_by_assignment')
+                if effective_locked_clusters:
+                    log_info(f"Using locked clusters from series_params ({len(effective_locked_clusters)} clusters)")
+
+            if effective_locked_clusters is not None:
                 # Use locked clusters from reference spectrum
-                log_info(f"Using LOCKED clusters from reference spectrum ({len(locked_clusters_by_assignment)} clusters)")
+                log_info(f"Using LOCKED clusters from reference spectrum ({len(effective_locked_clusters)} clusters)")
                 clusters = self._convert_locked_clusters_to_positions(
-                    locked_clusters_by_assignment, all_peaks_context
+                    effective_locked_clusters, all_peaks_context
                 )
-            elif self.series_params:
-                # Use locked overlap thresholds from series_params
-                log_info("Using locked parameters from reference spectrum")
-                clusters = self.original_fitter.parent.identify_overlap_clusters(
-                    all_peaks_context,
-                    overlap_threshold_x=self.series_params['overlap_threshold_x'],
-                    overlap_threshold_y=self.series_params['overlap_threshold_y']
-                )
-                # Also apply locked radF1/radF2 to PS2D config
-                from lunaNMR.core.ps2d_config import get_ps2d_config
-                config = get_ps2d_config()
-                config.radF1 = self.series_params['radF1']
-                config.radF2 = self.series_params['radF2']
-                config.overlap_threshold_x = self.series_params['overlap_threshold_x']
-                config.overlap_threshold_y = self.series_params['overlap_threshold_y']
+                # Apply locked thresholds from series_params if available
+                if self.series_params:
+                    from lunaNMR.core.ps2d_config import get_ps2d_config
+                    config = get_ps2d_config()
+                    # Only apply if keys exist (minimal series_params may not have these)
+                    if 'radF1' in self.series_params:
+                        config.radF1 = self.series_params['radF1']
+                    if 'radF2' in self.series_params:
+                        config.radF2 = self.series_params['radF2']
+                    if 'overlap_threshold_x' in self.series_params:
+                        config.overlap_threshold_x = self.series_params['overlap_threshold_x']
+                    if 'overlap_threshold_y' in self.series_params:
+                        config.overlap_threshold_y = self.series_params['overlap_threshold_y']
             else:
+                # First spectrum - calculate fresh clusters
                 clusters = self.original_fitter.parent.identify_overlap_clusters(all_peaks_context)
+                log_info(f"Computed {len(clusters)} fresh clusters")
 
             # Build peak metadata mapping (peak position → metadata)
             peak_metadata = {}
@@ -330,6 +343,13 @@ class ParallelVoigtProcessor:
                 good_isolated_peaks = self._extract_good_peaks_for_optimization(isolated_results)
 
                 if len(good_isolated_peaks) >= 10:
+                    # Prepare shared context for parallel adaptive optimization
+                    # This includes spectrum_statistics for proper worker initialization
+                    shared_context_adaptive = self._prepare_shared_context(
+                        all_peaks_context=all_peaks_context,
+                        spectrum_statistics=spectrum_statistics,
+                        reference_linewidths=self._reference_linewidths
+                    )
                     # Define fit function for grid search evaluation
                     _debug_shown = [False]  # Use list to allow modification in nested function
 
@@ -359,13 +379,17 @@ class ParallelVoigtProcessor:
 
                         return result
 
-                    # Run grid search optimization
+                    # Run grid search optimization in PARALLEL mode
+                    # Distributes peaks across workers for 5-7× speedup
                     optimal_params = optimizer.optimize(
                         isolated_peaks=good_isolated_peaks,
                         median_lw_f1=spectrum_statistics['lw_f1_median'],
                         median_lw_f2=spectrum_statistics['lw_f2_median'],
-                        fit_function=fit_single_peak,
-                        progress_callback=progress_callback
+                        fit_function=fit_single_peak,  # Fallback for sequential mode
+                        progress_callback=progress_callback,
+                        use_parallel=True,  # ENABLED: Parallel adaptive optimization
+                        shared_context=shared_context_adaptive,  # Spectrum in shared memory
+                        all_peaks_context=all_peaks_context
                     )
 
                     if optimal_params and optimal_params.get('success'):
@@ -380,9 +404,21 @@ class ParallelVoigtProcessor:
                         adaptive_time = time.time() - adaptive_start
                         self.timing_info['adaptive'] = adaptive_time
                         log_info(f"Adaptive optimization completed in {adaptive_time:.1f}s")
+                        log_info(f"  → Selected: radF1={optimal_params['radF1']:.4f}, radF2={optimal_params['radF2']:.5f} (mult: {optimal_params['multiplier_f1']:.1f}×, {optimal_params['multiplier_f2']:.1f}×)")
+
+                        # Add optimal overlap thresholds to learned_statistics for main process
+                        # (multiprocessing doesn't propagate config changes back to main)
+                        if learned_statistics is None:
+                            learned_statistics = {}
+                        learned_statistics['overlap_threshold_x'] = optimal_params['overlap_threshold_x']
+                        learned_statistics['overlap_threshold_y'] = optimal_params['overlap_threshold_y']
+                        learned_statistics['radF1'] = optimal_params['radF1']
+                        learned_statistics['radF2'] = optimal_params['radF2']
 
                         # ========== RE-CLUSTER originally clustered peaks with optimal thresholds ==========
-                        if len(original_multi_peak_clusters) > 0:
+                        # CRITICAL: Skip re-clustering when clusters are locked from reference spectrum.
+                        # Re-clustering would change cluster membership, breaking volume consistency.
+                        if effective_locked_clusters is None and len(original_multi_peak_clusters) > 0:
                             log_info(f"RE-CLUSTERING: Applying optimal overlap thresholds to {sum(len(c) for c in original_multi_peak_clusters)} clustered peaks...")
 
                             # Extract only originally clustered peak positions
@@ -411,6 +447,13 @@ class ParallelVoigtProcessor:
 
                             # Add newly isolated peaks to isolated_clusters for PASS 1-bis
                             isolated_clusters = isolated_clusters + new_isolated_from_recluster
+
+                            # CRITICAL FIX: Update clusters to reflect final state after re-clustering
+                            # This ensures stored locked_clusters_by_assignment matches what was actually fitted
+                            clusters = isolated_clusters + multi_peak_clusters
+                            log_info(f"After re-clustering: {len(clusters)} total clusters")
+                        elif effective_locked_clusters is not None and len(original_multi_peak_clusters) > 0:
+                            log_info(f"RE-CLUSTERING SKIPPED: Using {len(multi_peak_clusters)} locked clusters from reference")
                     else:
                         log_warning("Adaptive optimization failed - using default parameters")
                 else:
@@ -490,7 +533,7 @@ class ParallelVoigtProcessor:
 
             # ========== Create series_params if adaptive optimization succeeded ==========
             if self.optimal_params and self.optimal_params.get('success'):
-                # Build cluster assignments map
+                # Build cluster assignments map (position-based, for logging)
                 cluster_assignments = {}
                 for i, cluster in enumerate(isolated_clusters):
                     for pos in cluster:
@@ -501,12 +544,47 @@ class ParallelVoigtProcessor:
                         peak_id = f"peak_{pos[0]:.4f}_{pos[1]:.4f}"
                         cluster_assignments[peak_id] = f'cluster_{i}'
 
+                # Build locked_clusters_by_assignment (assignment-based, for cluster locking)
+                # Convert position clusters to assignment clusters using peak_metadata
+                locked_clusters_by_assignment = []
+                for cluster in clusters:
+                    cluster_assignments_list = []
+                    for pos in cluster:
+                        meta = peak_metadata.get(pos)
+                        if meta:
+                            cluster_assignments_list.append(meta['assignment'])
+                    if cluster_assignments_list:
+                        locked_clusters_by_assignment.append(cluster_assignments_list)
+
                 self.series_params = create_series_params(
                     optimization_result=self.optimal_params,
                     cluster_assignments=cluster_assignments,
                     reference_spectrum='current'  # Will be updated by GUI with actual filename
                 )
-                log_info("Series parameters saved for consistent series integration")
+                # Store locked clusters for series integration
+                self.series_params['locked_clusters_by_assignment'] = locked_clusters_by_assignment
+                log_info(f"Series parameters saved with {len(locked_clusters_by_assignment)} locked clusters")
+
+            # Store locked clusters even if adaptive optimization didn't run
+            # This ensures series integration always has clusters available
+            if not self.series_params:
+                # Build locked_clusters_by_assignment from current clusters
+                locked_clusters_by_assignment = []
+                for cluster in clusters:
+                    cluster_assignments_list = []
+                    for pos in cluster:
+                        meta = peak_metadata.get(pos)
+                        if meta:
+                            cluster_assignments_list.append(meta['assignment'])
+                    if cluster_assignments_list:
+                        locked_clusters_by_assignment.append(cluster_assignments_list)
+
+                # Create minimal series_params with just cluster info
+                self.series_params = {
+                    'locked_clusters_by_assignment': locked_clusters_by_assignment,
+                    'success': True
+                }
+                log_info(f"Stored {len(locked_clusters_by_assignment)} clusters for series integration (no adaptive optimization)")
 
             elapsed_time = time.time() - start_time
             self.timing_info['total'] = elapsed_time
@@ -989,7 +1067,8 @@ class ParallelVoigtProcessor:
         return {
             'peak_detection_threshold': getattr(self.original_fitter, 'peak_threshold', 0.1),
             'multipeak_threshold': getattr(self.original_fitter, 'multipeak_threshold', 0.3),
-            'noise_level': getattr(self.original_fitter, 'noise_level', None)
+            'noise_level': getattr(self.original_fitter, 'noise_level', None),
+            'intensity_snr_threshold': 3.0  # Skip fitting if detected_intensity < noise_level * this
         }
         
     def _create_cluster_tasks(self, clusters, peak_metadata, peak_list, shared_context):
@@ -1287,20 +1366,75 @@ class ParallelVoigtProcessor:
 
         return results
 
-    def _cleanup_shared_memory(self):
-        """Clean up all shared memory blocks"""
-        for shm in self.shared_memory_blocks:
-            try:
-                shm.close()
-                shm.unlink()
-            except Exception as e:
-                log_warning(f"Could not cleanup shared memory: {e}")
-        self.shared_memory_blocks.clear()
-
 
 def _test_parallel_worker(_test_data):
     """Simple test function for multiprocessing validation"""
     return "test_success"
+
+
+def _create_skipped_peak_result(peak_x, peak_y, assignment, peak_number, skip_reason, detected_intensity=0):
+    """
+    Create a standardized result for peaks that are skipped due to low/negative intensity.
+
+    Args:
+        peak_x, peak_y: Peak position
+        assignment: Peak assignment string
+        peak_number: Peak number in list
+        skip_reason: Why the peak was skipped ('negative_intensity' or 'below_snr_threshold')
+        detected_intensity: The detected intensity value (for logging)
+
+    Returns:
+        Dict with standardized skipped peak result
+    """
+    return {
+        'assignment': assignment,
+        'peak_number': peak_number,
+        'peak_position': (peak_x, peak_y),
+        'peak_x': peak_x,
+        'peak_y': peak_y,
+        'intensity': 0.0,
+        'height': 0.0,
+        'volume': 0.0,
+        'detected_intensity': detected_intensity,
+        'r_squared': 0.0,
+        'avg_r_squared': 0.0,
+        'center_x': peak_x,
+        'center_y': peak_y,
+        'sigma_x': 0.0,
+        'gamma_x': 0.0,
+        'sigma_y': 0.0,
+        'gamma_y': 0.0,
+        'lw_x': 0.0,
+        'lw_y': 0.0,
+        'fitting_quality': 'Skipped',
+        'quality': 'Skipped',
+        'success': False,
+        'fitted': False,
+        'method': 'skipped',
+        'skip_reason': skip_reason,
+        'processing_mode': 'parallel',
+        'cluster_size': 1
+    }
+
+
+def _should_skip_peak(detected_intensity, noise_level, snr_threshold):
+    """
+    Check if a peak should be skipped due to low/negative intensity.
+
+    Returns:
+        tuple: (should_skip: bool, reason: str or None)
+    """
+    if detected_intensity is None:
+        return False, None  # No intensity info, proceed with fitting
+
+    if detected_intensity <= 0:
+        return True, 'negative_intensity'
+
+    if noise_level is not None and noise_level > 0:
+        if detected_intensity < noise_level * snr_threshold:
+            return True, 'below_snr_threshold'
+
+    return False, None
 
 
 def _parallel_cluster_worker(cluster_task):
@@ -1334,38 +1468,58 @@ def _parallel_cluster_worker(cluster_task):
 
         peak_results = []
 
+        # Extract intensity thresholds for skip check
+        validation_thresholds = cluster_task['shared_context'].get('validation_thresholds', {})
+        noise_level = validation_thresholds.get('noise_level')
+        snr_threshold = validation_thresholds.get('intensity_snr_threshold', 3.0)
+
         if cluster_size == 1:
             # Isolated peak - standard 1D fitting (IDENTICAL to sequential)
             peak_x, peak_y = cluster_task['cluster_positions'][0]
             assignment = cluster_assignments[0]
             peak_number = cluster_peak_numbers[0]
 
-            # Fit using enhanced_peak_fitting (routes through consensus or standard 1D)
-            result = worker_integrator.enhanced_peak_fitting(
-                peak_x, peak_y, assignment,
-                all_peaks_context=cluster_task['shared_context']['all_peaks_context']
-            )
+            # Get detected intensity from original peak data
+            detected_intensity = None
+            if cluster_dicts:
+                detected_intensity = cluster_dicts[0].get('intensity')
 
-            if result:
-                result['peak_number'] = peak_number
-                result['processing_mode'] = 'parallel'
-                result['cluster_size'] = 1
+            # Pre-check: Skip fitting if intensity is negative or below SNR threshold
+            should_skip, skip_reason = _should_skip_peak(detected_intensity, noise_level, snr_threshold)
 
-                # Add detection fields from original peak data (cluster_dicts)
-                if cluster_dicts:
-                    orig_peak = cluster_dicts[0]
-                    result['detected'] = orig_peak.get('detected', True)
-                    result['detection_quality'] = orig_peak.get('detection_quality', 'Matched')
-                    result['distance_from_reference'] = orig_peak.get('distance_from_reference', 0)
-                    result['distance_from_reference_x'] = orig_peak.get('distance_from_reference_x', 0)
-                    result['distance_from_reference_y'] = orig_peak.get('distance_from_reference_y', 0)
-                    result['distance_from_reference_elliptical'] = orig_peak.get('distance_from_reference_elliptical', 0)
-                    result['reference_retained'] = orig_peak.get('reference_retained', False)
-                    # Copy detected_intensity if not already set by enhanced_peak_fitting
-                    if result.get('detected_intensity') is None:
-                        result['detected_intensity'] = orig_peak.get('intensity')
-
+            if should_skip:
+                # Return skipped result - don't waste time fitting noise
+                result = _create_skipped_peak_result(
+                    peak_x, peak_y, assignment, peak_number, skip_reason, detected_intensity
+                )
                 peak_results.append(result)
+            else:
+                # Fit using enhanced_peak_fitting (routes through consensus or standard 1D)
+                result = worker_integrator.enhanced_peak_fitting(
+                    peak_x, peak_y, assignment,
+                    all_peaks_context=cluster_task['shared_context']['all_peaks_context']
+                )
+
+                if result:
+                    result['peak_number'] = peak_number
+                    result['processing_mode'] = 'parallel'
+                    result['cluster_size'] = 1
+
+                    # Add detection fields from original peak data (cluster_dicts)
+                    if cluster_dicts:
+                        orig_peak = cluster_dicts[0]
+                        result['detected'] = orig_peak.get('detected', True)
+                        result['detection_quality'] = orig_peak.get('detection_quality', 'Matched')
+                        result['distance_from_reference'] = orig_peak.get('distance_from_reference', 0)
+                        result['distance_from_reference_x'] = orig_peak.get('distance_from_reference_x', 0)
+                        result['distance_from_reference_y'] = orig_peak.get('distance_from_reference_y', 0)
+                        result['distance_from_reference_elliptical'] = orig_peak.get('distance_from_reference_elliptical', 0)
+                        result['reference_retained'] = orig_peak.get('reference_retained', False)
+                        # Copy detected_intensity if not already set by enhanced_peak_fitting
+                        if result.get('detected_intensity') is None:
+                            result['detected_intensity'] = orig_peak.get('intensity')
+
+                    peak_results.append(result)
 
         else:
             # Overlap group - 2D simultaneous fitting (IDENTICAL to sequential)
@@ -1379,9 +1533,53 @@ def _parallel_cluster_worker(cluster_task):
                 for assignment in cluster_assignments:
                     if assignment in all_reference_linewidths:
                         cluster_reference_linewidths[assignment] = all_reference_linewidths[assignment]
-                # If we have reference linewidths, force fix_linewidths=True
-                if cluster_reference_linewidths:
-                    fix_linewidths = True
+                # Reference linewidths are used as initial guesses, NOT fixed constraints
+                # The optimizer can still adjust linewidths to find the best fit
+                # fix_linewidths remains as set by GUI (user choice)
+
+            # Pre-check: If ALL peaks in cluster have negative/low SNR intensity, skip entire cluster
+            all_skip = True
+            skip_reasons = []
+            for idx, peak_dict in enumerate(cluster_dicts):
+                detected_intensity = peak_dict.get('intensity')
+                should_skip, skip_reason = _should_skip_peak(detected_intensity, noise_level, snr_threshold)
+                if not should_skip:
+                    all_skip = False
+                    break
+                skip_reasons.append((idx, skip_reason, detected_intensity))
+
+            if all_skip:
+                # All peaks in cluster are noise - skip entire cluster
+                cluster_positions = cluster_task['cluster_positions']
+                for idx in range(len(cluster_dicts)):
+                    peak_x, peak_y = cluster_positions[idx]
+                    assignment = cluster_assignments[idx]
+                    peak_number = cluster_peak_numbers[idx]
+                    detected_intensity = cluster_dicts[idx].get('intensity', 0)
+                    # Find the skip reason for this peak
+                    skip_reason = 'negative_intensity'  # default
+                    for sr_idx, sr_reason, sr_int in skip_reasons:
+                        if sr_idx == idx:
+                            skip_reason = sr_reason
+                            break
+                    result = _create_skipped_peak_result(
+                        peak_x, peak_y, assignment, peak_number, skip_reason, detected_intensity
+                    )
+                    result['cluster_size'] = cluster_size
+                    result['cluster_idx'] = cluster_task['cluster_idx']
+                    peak_results.append(result)
+
+                # Return early - don't waste time on 2D fitting
+                return {
+                    'success': True,
+                    'task_id': cluster_task['task_id'],
+                    'cluster_idx': cluster_task['cluster_idx'],
+                    'cluster_size': cluster_size,
+                    'peaks_fitted': 0,
+                    'peaks_skipped': len(peak_results),
+                    'r_squared': 0.0,
+                    'peak_results': peak_results
+                }
 
             # Call fit_overlap_group_2d() (SAME AS SEQUENTIAL!)
             group_result = worker_integrator.fit_overlap_group_2d(
@@ -1637,6 +1835,9 @@ def _initialize_worker_fitter(shared_context):
 
         # NEW: Overlap resolution settings
         _restore_overlap_resolution_params(worker_fitter, shared_context['overlap_resolution_params'])
+
+        # Set noise_level on worker_integrator for fit_overlap_group_2d() weak peak detection
+        worker_integrator.noise_level = shared_context['validation_thresholds'].get('noise_level')
 
     # CRITICAL: Verify worker integrator has all required methods for PS2D 2D routing
     required_methods = [

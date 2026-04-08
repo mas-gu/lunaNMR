@@ -342,3 +342,6 @@ docs/how_to_lunaNMR.docx
 
 # Example data files (too large for repo)
 data_example/
+
+# AI assistant config directories
+.serena/

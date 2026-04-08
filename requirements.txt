@@ -31,6 +31,12 @@ PySide6>=6.6.0
 # - typing, dataclasses, enum, ast, pickle, copy, inspect, math
 # - multiprocessing, shutil, traceback, tkinter
 
+# Deep Learning - for CNN peak classifier (optional)
+# Provides CNN-based peak classification as alternative to RF/XGBoost
+# Install with: pip install torch torchvision
+torch>=2.0.0
+torchvision>=0.15.0
+
 # Development and testing (optional)
 # pytest>=6.0.0
 # jupyter>=1.0.0
