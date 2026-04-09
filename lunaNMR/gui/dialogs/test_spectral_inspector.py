@@ -700,3 +700,56 @@ class TestInspectorGroup:
         found = next((s for s in group.spectra if s.spectrum_id == spec.spectrum_id), None)
         assert found is not None
         assert found.display_name == 'myspec'
+
+
+class TestSpectrumDragDrop:
+    """Tests for drag-drop spectrum movement between groups (data model only)."""
+
+    def _make_inspector(self):
+        from unittest.mock import MagicMock
+        from lunaNMR.gui.dialogs.spectral_inspector import (
+            SpectralInspector, InspectorGroup, InspectorSpectrum
+        )
+        insp = SpectralInspector.__new__(SpectralInspector)
+        insp.groups = []
+        insp._color_index = 0
+        insp._contour_levels = 10
+        insp._contour_min_pct = 5.0
+        insp._contour_increment = 1.3
+        insp._canvas = MagicMock()
+        insp._toolbar_buttons = {}
+        insp._status_bar_enabled = False
+        insp._library_panel = MagicMock()
+        g1 = InspectorGroup(name='G1')
+        g2 = InspectorGroup(name='G2')
+        s1 = InspectorSpectrum(display_name='s1')
+        g1.spectra.append(s1)
+        insp.groups.extend([g1, g2])
+        return insp, g1, g2, s1
+
+    def test_move_spectrum_removes_from_source_group(self):
+        insp, g1, g2, s1 = self._make_inspector()
+        insp._on_spectrum_moved(s1.spectrum_id, g2.group_id)
+        assert s1 not in g1.spectra
+
+    def test_move_spectrum_adds_to_target_group(self):
+        insp, g1, g2, s1 = self._make_inspector()
+        insp._on_spectrum_moved(s1.spectrum_id, g2.group_id)
+        assert s1 in g2.spectra
+
+    def test_move_to_same_group_is_noop(self):
+        insp, g1, g2, s1 = self._make_inspector()
+        insp._on_spectrum_moved(s1.spectrum_id, g1.group_id)
+        assert s1 in g1.spectra
+        assert s1 not in g2.spectra
+
+    def test_move_nonexistent_spectrum_is_noop(self):
+        insp, g1, g2, s1 = self._make_inspector()
+        insp._on_spectrum_moved('bad-id', g2.group_id)
+        assert len(g1.spectra) == 1
+        assert len(g2.spectra) == 0
+
+    def test_move_to_nonexistent_group_is_noop(self):
+        insp, g1, g2, s1 = self._make_inspector()
+        insp._on_spectrum_moved(s1.spectrum_id, 'bad-group-id')
+        assert s1 in g1.spectra

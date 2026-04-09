@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget, QSplitter, QLabel, QVBoxLayout, QHBoxLayout,
     QPushButton, QCheckBox, QToolBar, QTreeWidget, QTreeWidgetItem,
     QFileDialog, QInputDialog, QMessageBox, QDoubleSpinBox, QSpinBox,
-    QGroupBox, QColorDialog, QMenu
+    QGroupBox, QColorDialog, QMenu, QAbstractItemView
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
@@ -180,6 +180,54 @@ class SpectrumRowWidget(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Drag-aware tree widget
+# ---------------------------------------------------------------------------
+
+class _LibraryTree(QTreeWidget):
+    """QTreeWidget that emits spectrum_moved when a spectrum is dropped onto a different group."""
+
+    spectrum_moved = Signal(str, str)  # spectrum_id, target_group_id
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.InternalMove)
+        self.setDefaultDropAction(Qt.MoveAction)
+
+    def dropEvent(self, event):
+        dragged = self.currentItem()
+        if dragged is None or dragged.data(0, _ROLE_TYPE) != ITEM_SPECTRUM:
+            event.ignore()
+            return
+
+        spectrum_id = dragged.data(0, _ROLE_ID)
+        target_item = self.itemAt(event.position().toPoint())
+
+        # Resolve drop target to a group item
+        target_group_item = None
+        if target_item is not None:
+            if target_item.data(0, _ROLE_TYPE) == ITEM_GROUP:
+                target_group_item = target_item
+            elif target_item.data(0, _ROLE_TYPE) == ITEM_SPECTRUM:
+                target_group_item = target_item.parent()
+
+        if target_group_item is None:
+            event.ignore()
+            return
+
+        source_group_item = dragged.parent()
+        if source_group_item is target_group_item:
+            event.ignore()
+            return
+
+        target_group_id = target_group_item.data(0, _ROLE_ID)
+        self.spectrum_moved.emit(spectrum_id, target_group_id)
+        event.accept()
+
+
+# ---------------------------------------------------------------------------
 # Spectrum Library Panel
 # ---------------------------------------------------------------------------
 
@@ -199,6 +247,7 @@ class SpectrumLibraryPanel(QWidget):
     spectrum_renamed = Signal(str, str)         # spectrum_id, new_name
     group_properties_requested = Signal(str)    # group_id
     spectrum_contour_requested = Signal(str)    # spectrum_id
+    spectrum_moved = Signal(str, str)           # spectrum_id, target_group_id
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -221,13 +270,14 @@ class SpectrumLibraryPanel(QWidget):
         layout.addLayout(btn_row)
 
         # Tree
-        self._tree = QTreeWidget()
+        self._tree = _LibraryTree()
         self._tree.setHeaderHidden(True)
         self._tree.setIndentation(12)
         self._tree.setAnimated(True)
         self._tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_context_menu)
         self._tree.currentItemChanged.connect(self._on_selection_changed)
+        self._tree.spectrum_moved.connect(self.spectrum_moved)
         layout.addWidget(self._tree, stretch=1)
 
         # Contour controls
@@ -775,6 +825,7 @@ class SpectralInspector(BaseWindow):
         self._library_panel.spectrum_renamed.connect(self._on_spectrum_renamed)
         self._library_panel.group_properties_requested.connect(self._on_group_properties_requested)
         self._library_panel.spectrum_contour_requested.connect(self._on_spectrum_contour_requested)
+        self._library_panel.spectrum_moved.connect(self._on_spectrum_moved)
         splitter.addWidget(self._library_panel)
 
         self._canvas = InspectorCanvas()
@@ -1028,6 +1079,33 @@ class SpectralInspector(BaseWindow):
         self._remove_toolbar_button(spectrum_id)
         self._remove_spectrum(spectrum_id)
         self._library_panel.remove_spectrum(spectrum_id)
+        self._refresh_canvas()
+
+    def _on_spectrum_moved(self, spectrum_id: str, target_group_id: str):
+        """Move a spectrum to a different group (data model + tree)."""
+        target_group = next((g for g in self.groups if g.group_id == target_group_id), None)
+        if target_group is None:
+            return
+
+        spectrum = None
+        source_group = None
+        for g in self.groups:
+            for s in g.spectra:
+                if s.spectrum_id == spectrum_id:
+                    spectrum = s
+                    source_group = g
+                    break
+            if spectrum is not None:
+                break
+
+        if spectrum is None or source_group is target_group:
+            return
+
+        source_group.spectra.remove(spectrum)
+        target_group.spectra.append(spectrum)
+
+        self._library_panel.remove_spectrum(spectrum_id)
+        self._library_panel.add_spectrum(spectrum, target_group_id)
         self._refresh_canvas()
 
     def _on_group_renamed(self, group_id: str, new_name: str):
