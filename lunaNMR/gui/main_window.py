@@ -4829,6 +4829,10 @@ class LunaNMRMainWindow(BaseWindow):
         series_qc_action.triggered.connect(self.launch_series_qc)
         modules_menu.addAction(series_qc_action)
 
+        spectral_inspector_action = QAction("Spectral Inspector", self)
+        spectral_inspector_action.triggered.connect(self.launch_spectral_inspector)
+        modules_menu.addAction(spectral_inspector_action)
+
         modules_menu.addSeparator()
 
         ml_learning_action = QAction("ML Learning Center...", self)
@@ -5723,6 +5727,20 @@ class LunaNMRMainWindow(BaseWindow):
         # Create and show new dialog
         self.series_qc_dialog = SeriesQCDialog(parent=self, main_window=self)
         self.series_qc_dialog.show()
+
+    def launch_spectral_inspector(self):
+        """Launch Spectral Inspector as a standalone top-level window."""
+        from lunaNMR.gui.dialogs import SpectralInspector
+
+        if (hasattr(self, '_spectral_inspector')
+                and self._spectral_inspector is not None
+                and self._spectral_inspector.isVisible()):
+            self._spectral_inspector.raise_()
+            self._spectral_inspector.activateWindow()
+            return
+
+        self._spectral_inspector = SpectralInspector(parent=None)
+        self._spectral_inspector.show()
 
     # =================== TOOLS MENU HANDLERS ===================
 

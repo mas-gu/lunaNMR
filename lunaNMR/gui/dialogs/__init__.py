@@ -13,6 +13,7 @@ from .results_browser_dialog import ResultsBrowserDialog
 from .missing_files_dialog import MissingFilesDialog
 from .dynamixs_dialog import DynamiXsDialog
 from .series_qc_dialog import SeriesQCDialog
+from .spectral_inspector import SpectralInspector
 
 __all__ = [
     'DataLoadingDialog',
@@ -26,4 +27,5 @@ __all__ = [
     'MissingFilesDialog',
     'DynamiXsDialog',
     'SeriesQCDialog',
+    'SpectralInspector',
 ]
