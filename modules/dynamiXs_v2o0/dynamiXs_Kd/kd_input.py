@@ -47,6 +47,45 @@ def load_titration_tidy(csv_path):
     return points, residues
 
 
+def load_titration_tracking(csv_path):
+    """Load comprehensive_peak_tracking.csv (wide, per-point columns) into the same
+    per-residue format as load_titration_tidy.
+
+    Columns look like: Assignment, {label}_Position_X, {label}_Position_Y,
+    {label}_Height, {label}_Volume, ... for each titration point label.
+    """
+    df = pd.read_csv(csv_path)
+    labels = [c[:-len('_Position_X')] for c in df.columns if c.endswith('_Position_X')]
+    labels = [lbl for lbl in labels if _to_point(lbl) is not None]
+    labels.sort(key=_to_point)
+    points = [_to_point(lbl) for lbl in labels]
+
+    col_map = (('Position_X', 'ppm_x'), ('Position_Y', 'ppm_y'),
+               ('Height', 'height'), ('Volume', 'volume'))
+    residues = {}
+    for _, row in df.iterrows():
+        a = str(row.get('Assignment', '')).strip()
+        if not a or a.lower() in ('nan', 'dummy', ''):
+            continue
+        rec = {'points': list(points)}
+        for suffix, key in col_map:
+            vals = []
+            for lbl in labels:
+                col = f'{lbl}_{suffix}'
+                vals.append(float(row[col]) if col in df.columns and pd.notna(row[col]) else np.nan)
+            rec[key] = vals
+        residues[a] = rec
+    return points, residues
+
+
+def load_titration(csv_path):
+    """Auto-detect tidy vs tracking format and load it."""
+    head = pd.read_csv(csv_path, nrows=0)
+    if 'spectrum_name' in head.columns:
+        return load_titration_tidy(csv_path)
+    return load_titration_tracking(csv_path)
+
+
 def csp_series(residue, alpha=0.14):
     """Per-point CSP for one residue, relative to the first (reference) point."""
     px = np.asarray(residue['ppm_x'], dtype=float)

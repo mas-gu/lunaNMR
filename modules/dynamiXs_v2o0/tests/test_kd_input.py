@@ -55,6 +55,26 @@ class TestLoadTidy:
         assert np.isnan(residues["R1"]["height"][-1])  # point 1 missing -> nan
 
 
+class TestLoadTracking:
+    def test_wide_tracking_csv(self, tmp_path):
+        from kd_input import load_titration_tracking, load_titration
+        # wide format: Assignment + {label}_Position_X/Y/Height/Volume
+        df = pd.DataFrame([{
+            'Assignment': 'R1',
+            '0_Position_X': 8.0, '0_Position_Y': 120.0, '0_Height': 1000.0, '0_Volume': 2000.0,
+            '0.5_Position_X': 8.02, '0.5_Position_Y': 120.1, '0.5_Height': 800.0, '0.5_Volume': 1600.0,
+            '1_Position_X': 8.05, '1_Position_Y': 120.3, '1_Height': 600.0, '1_Volume': 1200.0,
+        }])
+        p = tmp_path / "comprehensive_peak_tracking.csv"
+        df.to_csv(p, index=False)
+        points, residues = load_titration_tracking(str(p))
+        assert points == [0.0, 0.5, 1.0]
+        assert residues['R1']['ppm_x'] == [8.0, 8.02, 8.05]
+        # dispatcher routes a no-spectrum_name file to the tracking loader
+        pts2, _ = load_titration(str(p))
+        assert pts2 == [0.0, 0.5, 1.0]
+
+
 class TestCspSeries:
     def test_csp_series_relative_to_first_point(self, tmp_path):
         from kd_input import load_titration_tidy, csp_series

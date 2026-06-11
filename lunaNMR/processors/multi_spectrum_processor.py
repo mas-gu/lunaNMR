@@ -1470,7 +1470,11 @@ class MultiSpectrumProcessor:
             # Format LW_X (1H linewidth) with 4 decimal places
             elif col == 'LW_X' or col.endswith('_LW_X'):
                 df_formatted[col] = df_formatted[col].apply(lambda x: f'{x:.4f}' if pd.notna(x) else '')
-            # Format positions and LW_Y (15N linewidth) with 3 decimal places
+            # Format fitted positions with 4 decimals - CSP/titration analysis
+            # needs full ppm precision (0.1-ppm rounding destroys CSP).
+            elif col in ['Position_X', 'Position_Y'] or col.endswith('_Position_X') or col.endswith('_Position_Y'):
+                df_formatted[col] = df_formatted[col].apply(lambda x: f'{x:.4f}' if pd.notna(x) else '')
+            # Format reference positions and LW_Y (15N linewidth) with 3 decimal places
             elif col in ['Reference_X', 'Reference_Y', 'LW_Y'] or col.endswith('_LW_Y'):
                 df_formatted[col] = df_formatted[col].apply(lambda x: f'{x:.3f}' if pd.notna(x) else '')
             # Format R_Squared with 3 decimal places
