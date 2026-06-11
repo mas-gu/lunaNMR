@@ -97,17 +97,40 @@ class TestRefitAndUndo:
         assert dialog._pending_corrections == {}
         assert dialog._find_peak_obj(0, 'R1')['r_squared'] == 0.95
 
-    def test_undo_restores_pre_refit_state(self, dialog):
+    def test_undo_restores_original_position_and_state(self, dialog):
         dialog.overlay_selected_spectrum_idx = 0
         dialog._on_toggle_edit_mode(True)
-        dialog._pending_corrections[(0, 'R1')] = (8.40, 121.5)
+        orig = dialog._peak_center(dialog._find_peak_obj(0, 'R1'))
+        # drag then re-fit
+        dialog._on_edit_peak_click(8.01, 120.1)
+        dialog._on_edit_peak_click(8.40, 121.5)
         self._stub_refit(dialog)
         dialog._on_refit_corrected()
         assert dialog._find_peak_obj(0, 'R1').get('r_squared') == 0.95
         dialog._on_undo_corrections()
-        # snapshot was taken before re-fit, so r_squared is gone again
+        # undo reverts the drag AND the re-fit, back to the original fit
+        assert dialog._peak_center(dialog._find_peak_obj(0, 'R1')) == orig
         assert 'r_squared' not in dialog._find_peak_obj(0, 'R1')
         assert dialog._edited == set()
+        assert dialog._pending_corrections == {}
+
+
+class TestRefitHelpers:
+    def test_learned_linewidths_medians(self, dialog):
+        for p, lwx, lwy in zip(dialog._get_fitted_peaks(0), (0.02, 0.04), (0.1, 0.3)):
+            p['r_squared'], p['lw_x'], p['lw_y'] = 0.95, lwx, lwy
+        lw = dialog._learned_linewidths(0)
+        assert lw == {'lw_f2_median': 0.03, 'lw_f1_median': 0.2}
+
+    def test_learned_linewidths_none_when_no_data(self, dialog):
+        assert dialog._learned_linewidths(0) is None  # peaks have no lw keys
+
+    def test_write_back_ignores_none_position(self, dialog):
+        peak = dialog._find_peak_obj(0, 'R1')
+        before = dialog._peak_center(peak)
+        ok = dialog._write_back_fit(0, 'R1', {'pos_f2': None, 'pos_f1': None}, 0.9)
+        assert ok is False
+        assert dialog._peak_center(peak) == before  # not stamped with None
 
 
 class TestSaveCorrected:

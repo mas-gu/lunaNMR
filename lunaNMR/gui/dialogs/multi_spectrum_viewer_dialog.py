@@ -170,7 +170,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self._edit_selected_peak = None  # dict: idx, assignment, x, y (peak picked for move)
         self._pending_corrections = {}   # (spectrum_idx, assignment) -> (new_x, new_y)
         self._edited = set()             # (spectrum_idx, assignment) that have been re-fit
-        self._undo_snapshot = {}         # last re-fit's pre-change peaks, for Undo
+        self._pre_edit = {}              # (spectrum_idx, assignment) -> original peak, for Undo
 
         # Peak Mode axis locking (for comparing intensity/position across spectra)
         self.lock_z_scale_to_reference = True  # ON by default
@@ -2127,7 +2127,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
             self._apply_overlay_correction(spec_idx, picked['idx'], picked['assignment'], x_ppm, y_ppm)
             self.edit_status_label.setText(
                 f"Moved {picked['assignment']} → ({x_ppm:.3f}, {y_ppm:.2f}). "
-                f"(Refit not yet wired — Phase 2.)")
+                f"Click '↻ Re-fit corrected' to apply.")
             self._edit_selected_peak = None
             self._update_plot()
 
@@ -2152,10 +2152,20 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
     def _apply_overlay_correction(self, spec_idx, peak_idx, assignment, x_ppm, y_ppm):
         """Record a corrected position and update the in-memory peak so the marker moves."""
+        self._capture_pre_edit(spec_idx, assignment)
         self._pending_corrections[(spec_idx, assignment)] = (x_ppm, y_ppm)
         fitted_peaks = self._get_fitted_peaks(spec_idx)
         if 0 <= peak_idx < len(fitted_peaks):
             self._set_peak_position(fitted_peaks[peak_idx], x_ppm, y_ppm)
+
+    def _capture_pre_edit(self, spec_idx, assignment):
+        """Snapshot a peak's original state the first time it is touched, for Undo."""
+        import copy
+        key = (spec_idx, assignment)
+        if key not in self._pre_edit:
+            peak = self._find_peak_obj(spec_idx, assignment)
+            if peak is not None:
+                self._pre_edit[key] = copy.deepcopy(peak)
 
     @staticmethod
     def _set_peak_position(peak, x_ppm, y_ppm):
@@ -2195,27 +2205,49 @@ class MultiSpectrumViewerDialog(BaseDialog):
         if integ is None or integ.nmr_data is None:
             return None
 
-        # Equip the bare display integrator for fitting.
+        def sample(px, py):
+            xi = int(np.argmin(np.abs(integ.ppm_x_axis - px)))
+            yi = int(np.argmin(np.abs(integ.ppm_y_axis - py)))
+            return float(integ.nmr_data[yi, xi])
+
+        # Build the all-peaks context for this spectrum (current positions), with
+        # the corrected peak moved to the user's anchor.
+        context = []
+        for p in self._get_fitted_peaks(spec_idx):
+            a = p.get('assignment', p.get('Assignment', ''))
+            if a == assignment:
+                cx, cy = x_ppm, y_ppm
+            else:
+                cx, cy = self._peak_center(p)
+            if cx is None:
+                continue
+            context.append({'x_ppm': cx, 'y_ppm': cy, 'pos_x': cx, 'pos_y': cy,
+                            'assignment': a, 'intensity': sample(cx, cy)})
+
+        # Re-fit the peak WITHIN its overlap cluster so a clustered peak is not
+        # corrupted by being fit alone (its neighbours are deconvolved too).
+        group = self._cluster_for_anchor(integ, context, x_ppm, y_ppm, assignment)
+
+        # Equip the bare display integrator for fitting, saving state to restore.
         if getattr(integ, 'noise_level', None) is None:
             try:
                 integ._estimate_noise_level()
-            except Exception:
-                pass
-        if not getattr(integ, 'gui_params', None):
-            integ.gui_params = {}
+            except Exception as e:
+                logger.warning(f"Noise estimate failed (refit proceeds): {e}")
+        saved_gui = getattr(integ, 'gui_params', None)
+        saved_stats = getattr(integ, 'spectrum_statistics', None)
+        integ.gui_params = dict(saved_gui) if saved_gui else {}
         integ.gui_params.update({'use_ps2d_multi_peak': True,
                                  'fix_positions': False, 'fix_linewidths': False})
-
-        xi = int(np.argmin(np.abs(integ.ppm_x_axis - x_ppm)))
-        yi = int(np.argmin(np.abs(integ.ppm_y_axis - y_ppm)))
-        peak_dict = {'x_ppm': x_ppm, 'y_ppm': y_ppm, 'pos_x': x_ppm, 'pos_y': y_ppm,
-                     'assignment': assignment, 'intensity': float(integ.nmr_data[yi, xi])}
-
+        # Reuse linewidths learned from this spectrum's good fits so an isolated
+        # re-fit matches the original (PASS-1-equivalent) fit instead of degrading.
+        integ.spectrum_statistics = self._learned_linewidths(spec_idx)
         integ.titration_pos_margin_f1 = self._EDIT_POS_MARGIN_F1
         integ.titration_pos_margin_f2 = self._EDIT_POS_MARGIN_F2
         try:
             result = integ.fit_overlap_group_2d(
-                [peak_dict], assignment=assignment, peak_assignments=[assignment],
+                group, assignment=assignment,
+                peak_assignments=[g['assignment'] for g in group],
                 fix_positions=False, fix_linewidths=False)
         except Exception as e:
             logger.error(f"Refit failed for {assignment} in spectrum {spec_idx}: {e}")
@@ -2223,21 +2255,69 @@ class MultiSpectrumViewerDialog(BaseDialog):
         finally:
             integ.titration_pos_margin_f1 = None
             integ.titration_pos_margin_f2 = None
+            integ.gui_params = saved_gui
+            integ.spectrum_statistics = saved_stats
 
         if not result or not result.get('success') or not result.get('peaks'):
             return None
-        fp = result['peaks'][0]
         r2 = result.get('r_squared')
-        self._write_back_fit(spec_idx, assignment, fp, r2)
+        # Write back every peak in the group (simultaneous fit refined them all).
+        for fp in result['peaks']:
+            self._write_back_fit(spec_idx, fp.get('assignment'), fp, r2)
         return r2
+
+    def _cluster_for_anchor(self, integ, context, x_ppm, y_ppm, assignment):
+        """Return the overlap cluster (subset of context) containing the anchor peak.
+
+        Falls back to the single corrected peak if clustering is unavailable.
+        """
+        anchor = next((c for c in context
+                       if c['assignment'] == assignment), None)
+        if anchor is None:
+            anchor = {'x_ppm': x_ppm, 'y_ppm': y_ppm, 'pos_x': x_ppm, 'pos_y': y_ppm,
+                      'assignment': assignment, 'intensity': 0.0}
+        try:
+            clusters = integ.identify_overlap_clusters(context)
+        except Exception as e:
+            logger.warning(f"Clustering failed (single-peak refit): {e}")
+            return [anchor]
+        for cluster in clusters or []:
+            positions = [(round(px, 4), round(py, 4)) for px, py in cluster]
+            if (round(x_ppm, 4), round(y_ppm, 4)) in positions:
+                members = [c for c in context
+                           if (round(c['x_ppm'], 4), round(c['y_ppm'], 4)) in positions]
+                return members or [anchor]
+        return [anchor]
+
+    def _learned_linewidths(self, spec_idx):
+        """Median linewidths over this spectrum's good fits, for fit-bound seeding."""
+        import numpy as np
+        lwx, lwy = [], []
+        for p in self._get_fitted_peaks(spec_idx):
+            r2 = p.get('r_squared', p.get('R_Squared'))
+            if r2 is not None and r2 < 0.8:
+                continue
+            lx = p.get('lw_x', p.get('LW_X'))
+            ly = p.get('lw_y', p.get('LW_Y'))
+            if lx:
+                lwx.append(lx)
+            if ly:
+                lwy.append(ly)
+        if not lwx or not lwy:
+            return None
+        return {'lw_f2_median': float(np.median(lwx)),
+                'lw_f1_median': float(np.median(lwy))}
 
     def _write_back_fit(self, spec_idx, assignment, fp, r2):
         """Update the in-memory fitted peak for (spectrum, assignment) from a fit result."""
+        new_x, new_y = fp.get('pos_f2'), fp.get('pos_f1')
+        if new_x is None or new_y is None:
+            return False  # don't stamp None over a good position
         for peak in self._get_fitted_peaks(spec_idx):
             if peak.get('assignment', peak.get('Assignment', '')) == assignment:
-                self._set_peak_position(peak, fp.get('pos_f2'), fp.get('pos_f1'))
+                self._set_peak_position(peak, new_x, new_y)
                 if r2 is not None:
-                    peak['r_squared'] = peak['R_squared'] = r2
+                    peak['r_squared'] = peak['R_Squared'] = r2
                     peak['quality'] = peak['Quality'] = self._quality_from_r2(r2)
                 for src, dst in (('height', 'height'), ('volume', 'volume'),
                                  ('lw_gau_f2', 'lw_x'), ('lw_gau_f1', 'lw_y')):
@@ -2252,7 +2332,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
             self.edit_status_label.setText("No pending corrections to re-fit.")
             return
         assignments = {a for (_s, a) in self._pending_corrections}
-        self._snapshot_for_undo(assignments)
 
         done, failed = 0, 0
         for assignment in assignments:
@@ -2266,6 +2345,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
                     if cx is None:
                         continue
                     anchor = (cx, cy)
+                self._capture_pre_edit(spec_idx, assignment)
                 r2 = self._refit_peak_in_spectrum(spec_idx, assignment, anchor[0], anchor[1])
                 if r2 is None:
                     failed += 1
@@ -2285,30 +2365,22 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 return peak
         return None
 
-    def _snapshot_for_undo(self, assignments):
-        """Copy the peaks that are about to change so a single Undo can restore them."""
-        import copy
-        snap = {}
-        for spec_idx in range(len(self.spectra)):
-            for peak in self._get_fitted_peaks(spec_idx):
-                a = peak.get('assignment', peak.get('Assignment', ''))
-                if a in assignments:
-                    snap[(spec_idx, a)] = copy.deepcopy(peak)
-        self._undo_snapshot = snap
-
     def _on_undo_corrections(self):
-        """Restore the peaks changed by the last re-fit."""
-        if not getattr(self, '_undo_snapshot', None):
+        """Revert every peak touched since edit mode last changed something."""
+        if not self._pre_edit:
             self.edit_status_label.setText("Nothing to undo.")
             return
-        for (spec_idx, assignment), saved in self._undo_snapshot.items():
+        for (spec_idx, assignment), saved in self._pre_edit.items():
             peak = self._find_peak_obj(spec_idx, assignment)
             if peak is not None:
                 peak.clear()
                 peak.update(saved)
-            self._edited.discard((spec_idx, assignment))
-        self._undo_snapshot = {}
-        self.edit_status_label.setText("Reverted last re-fit.")
+        n = len(self._pre_edit)
+        self._pre_edit.clear()
+        self._edited.clear()
+        self._pending_corrections.clear()
+        self._edit_selected_peak = None
+        self.edit_status_label.setText(f"Reverted {n} edited peak(s).")
         self._update_plot()
 
     def _on_save_corrected(self):
@@ -2369,9 +2441,50 @@ class MultiSpectrumViewerDialog(BaseDialog):
             saved += 1
 
         df.to_csv(tracking, index=False)
-        self.edit_status_label.setText(
-            f"Saved {saved} corrected peak(s) to comprehensive_peak_tracking.csv"
-            + (f" ({skipped} unmatched)." if skipped else "."))
+
+        # Also update series_analysis_tidy.csv — the file DynamiXs actually reads —
+        # so a relaxation/titration analysis after a correction sees the fix.
+        tidy_updated = self._update_tidy_csv(folder, labels)
+
+        msg = f"Saved {saved} corrected peak(s) to comprehensive_peak_tracking.csv"
+        if tidy_updated is not None:
+            msg += f"; {tidy_updated} row(s) in series_analysis_tidy.csv"
+        msg += f" ({skipped} unmatched)." if skipped else "."
+        msg += " Intensity/volume matrices are not rewritten."
+        self.edit_status_label.setText(msg)
+
+    def _update_tidy_csv(self, folder, labels):
+        """Update series_analysis_tidy.csv for the edited peaks. Returns rows updated or None."""
+        import os
+        import pandas as pd
+        tidy = os.path.join(folder, "series_analysis_tidy.csv")
+        if not os.path.exists(tidy):
+            return None
+        td = pd.read_csv(tidy)
+        if 'spectrum_name' not in td.columns or 'assignment' not in td.columns:
+            return None
+        spec_col = td['spectrum_name'].astype(str)
+        assign_col = td['assignment'].astype(str)
+        updated = 0
+        for (spec_idx, assignment) in sorted(self._edited):
+            peak = self._find_peak_obj(spec_idx, assignment)
+            if peak is None:
+                continue
+            label = labels[spec_idx]
+            mask = (spec_col == str(label)) & (assign_col == str(assignment))
+            rows = td.index[mask].tolist()
+            if not rows:
+                continue
+            cx, cy = self._peak_center(peak)
+            for col, val in (('ppm_x', cx), ('ppm_y', cy),
+                             ('height', peak.get('height')), ('volume', peak.get('volume')),
+                             ('r_squared', peak.get('r_squared')),
+                             ('quality', peak.get('quality'))):
+                if col in td.columns and val is not None:
+                    td.at[rows[0], col] = val
+            updated += 1
+        td.to_csv(tidy, index=False)
+        return updated
 
     def _plot_overlay_peak_markers(self):
         """Plot peak markers on overlay spectrum.
