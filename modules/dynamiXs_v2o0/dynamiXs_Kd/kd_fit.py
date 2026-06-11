@@ -7,7 +7,7 @@ import os
 import numpy as np
 from scipy.optimize import curve_fit, least_squares
 
-from kd_models import csp_model, intensity_model
+from kd_models import csp_model, intensity_decay
 from kd_input import load_titration, csp_series, intensity_ratio_series
 
 _MIN_POINTS = 3
@@ -51,25 +51,28 @@ def fit_residue_csp(L, csp, P0, kd_init=None, n_bootstrap=0):
             'L': L.tolist(), 'obs': y.tolist()}
 
 
-def fit_residue_intensity(L, obs, P0, kd_init=None, n_bootstrap=0):
-    """Fit one residue's intensity ratio: I = baseline + amp·fraction_bound (amp free)."""
+def fit_residue_intensity(L, obs, P0=None, kd_init=None, n_bootstrap=0):
+    """Fit one residue's intensity decay: I = I0·exp(-L/Kd) (lab KD-script model).
+
+    I0 is fitted (anchors the curve to the first point); Kd is the decay constant.
+    P0 is unused (kept for signature parity with the CSP fitter).
+    """
     L, y = _clean(L, obs)
     if len(L) < _MIN_POINTS:
         return {'success': False, 'reason': 'too few points'}
     kd0 = kd_init if kd_init else max(np.max(L) / 2.0, 1.0)
-    base0, amp0 = float(y[0]), float(y[-1] - y[0])
+    i0 = max(float(y[0]), 1e-12)
     try:
         popt, pcov = curve_fit(
-            lambda L, base, amp, kd: intensity_model(L, base, amp, kd, P0), L, y,
-            p0=[base0, amp0, kd0],
-            bounds=([0, -np.inf, 0], [np.inf, np.inf, np.inf]), maxfev=20000)
+            intensity_decay, L, y, p0=[i0, kd0],
+            bounds=([0, 1e-9], [np.inf, np.inf]), maxfev=20000)
     except Exception as e:
         return {'success': False, 'reason': str(e)}
-    base, amp, kd = popt
+    I0, kd = popt
     perr = np.sqrt(np.diag(pcov))
-    return {'success': True, 'Kd': float(kd), 'Kd_err': float(perr[2]),
-            'baseline': float(base), 'amp': float(amp), 'amp_err': float(perr[1]),
-            'r_squared': _r_squared(y, intensity_model(L, base, amp, kd, P0)),
+    return {'success': True, 'Kd': float(kd), 'Kd_err': float(perr[1]),
+            'I0': float(I0), 'I0_err': float(perr[0]),
+            'r_squared': _r_squared(y, intensity_decay(L, I0, kd)),
             'L': L.tolist(), 'obs': y.tolist()}
 
 

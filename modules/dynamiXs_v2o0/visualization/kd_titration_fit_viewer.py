@@ -19,7 +19,7 @@ from matplotlib.figure import Figure
 _KD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dynamiXs_Kd")
 if _KD_DIR not in sys.path:
     sys.path.insert(0, _KD_DIR)
-from kd_models import csp_model, intensity_model  # noqa: E402
+from kd_models import csp_model, intensity_decay  # noqa: E402
 
 
 class KdTitrationFitViewer(QMainWindow):
@@ -109,7 +109,7 @@ class KdTitrationFitViewer(QMainWindow):
             self._plot_summary(ax, "Kd", "Kd_err", "Kd vs residue", "Kd")
         else:
             obs = self._obs_key()
-            key = "dd_max" if obs == "csp" else "amp"
+            key = "dd_max" if obs == "csp" else "I0"
             self._plot_summary(ax, key, key + "_err", f"{key} vs residue", key)
         self.canvas.draw()
 
@@ -132,7 +132,7 @@ class KdTitrationFitViewer(QMainWindow):
             yg = csp_model(Lg, fit["dd_max"], fit["Kd"], self.P0)
             ylab = "CSP (ppm)"
         else:
-            yg = intensity_model(Lg, fit["baseline"], fit["amp"], fit["Kd"], self.P0)
+            yg = intensity_decay(Lg, fit["I0"], fit["Kd"])
             ylab = "Intensity ratio"
         ax.plot(Lg, yg, "r-", lw=2, label="fit")
         kd, kde = fit["Kd"], fit.get("Kd_err", float("nan"))

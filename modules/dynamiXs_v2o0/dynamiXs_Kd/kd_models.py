@@ -32,13 +32,17 @@ def csp_model(L, dd_max, Kd, P):
     return dd_max * fraction_bound(L, P, Kd)
 
 
-def intensity_model(L, baseline, amp, Kd, P):
-    """Observed intensity (or ratio) for a 1:1 titration.
+def intensity_decay(L, I0, Kd):
+    """Intensity decay for a titration: I = I0 · exp(-L / Kd).
 
-    baseline + amp · fraction_bound. amp is negative when binding causes
-    intensity loss (line broadening / signal decrease).
+    Matches the lab's KD scripts (fitmulti__KD_NMRRE.py: A·exp(-x/t2)). I0 is the
+    fitted reference intensity at L=0; Kd is the decay constant (the [L] where I
+    falls to I0/e). Fitting I0 anchors the curve to the data's first point instead
+    of forcing a binding isotherm onto an intensity-loss profile.
     """
-    return baseline + amp * fraction_bound(L, P, Kd)
+    L = np.asarray(L, dtype=float)
+    out = I0 * np.exp(-L / Kd)
+    return out if out.ndim else float(out)
 
 
 def compute_csp(dH, dN, alpha=0.14):

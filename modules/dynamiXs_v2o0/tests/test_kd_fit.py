@@ -34,14 +34,14 @@ class TestPerResidueCsp:
 
 
 class TestPerResidueIntensity:
-    def test_recovers_kd_with_intensity_loss(self):
-        from kd_models import intensity_model
+    def test_recovers_decay_constant_and_I0(self):
+        from kd_models import intensity_decay
         from kd_fit import fit_residue_intensity
-        y = intensity_model(L, baseline=1.0, amp=-0.7, Kd=25.0, P=P0)
+        y = intensity_decay(L, I0=1.0, Kd=25.0)
         r = fit_residue_intensity(L, y, P0)
         assert r['success']
         assert r['Kd'] == pytest.approx(25.0, rel=1e-3)
-        assert r['amp'] == pytest.approx(-0.7, rel=1e-3)
+        assert r['I0'] == pytest.approx(1.0, rel=1e-3)
 
 
 class TestGlobalKd:
