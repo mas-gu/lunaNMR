@@ -140,6 +140,27 @@ class TestRefitHelpers:
     def test_learned_linewidths_none_when_no_data(self, dialog):
         assert dialog._learned_linewidths(0) is None  # peaks have no lw keys
 
+    def test_edit_window_scales_with_reference_lw(self, dialog):
+        # Give the reference spectrum (idx 0) good fits with known linewidths.
+        for p in dialog._get_fitted_peaks(0):
+            p['r_squared'], p['lw_x'], p['lw_y'] = 0.99, 0.0227, 0.16
+        dialog.__dict__.pop('_ref_lw_cache', None)  # recompute
+        wf1, wf2 = dialog._edit_window()
+        assert round(wf1, 4) == 0.48    # 3 x 0.16 (15N), under cap
+        assert round(wf2, 4) == 0.0681  # 3 x 0.0227 (1H)
+
+    def test_edit_window_caps_huge_lw(self, dialog):
+        for p in dialog._get_fitted_peaks(0):
+            p['r_squared'], p['lw_x'], p['lw_y'] = 0.99, 1.0, 1.0  # absurd LW
+        dialog.__dict__.pop('_ref_lw_cache', None)
+        wf1, wf2 = dialog._edit_window()
+        assert wf1 == dialog._EDIT_MARGIN_CAP_F1
+        assert wf2 == dialog._EDIT_MARGIN_CAP_F2
+
+    def test_edit_window_falls_back_without_lw(self, dialog):
+        dialog.__dict__.pop('_ref_lw_cache', None)  # peaks have no lw keys
+        assert dialog._edit_window() == (dialog._EDIT_POS_MARGIN_F1, dialog._EDIT_POS_MARGIN_F2)
+
     def test_write_back_ignores_none_position(self, dialog):
         peak = dialog._find_peak_obj(0, 'R1')
         before = dialog._peak_center(peak)

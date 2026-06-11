@@ -2203,10 +2203,31 @@ class MultiSpectrumViewerDialog(BaseDialog):
             return 'Fair'
         return 'Poor'
 
-    # Per-step position freedom for the constrained re-fit: tight enough that the
-    # optimizer centers on the local max at the user's anchor but cannot reach a neighbor.
-    _EDIT_POS_MARGIN_F1 = 0.05   # 15N/13C (ppm)
-    _EDIT_POS_MARGIN_F2 = 0.01   # 1H (ppm)
+    # Position freedom for the constrained re-fit is scaled to the reference
+    # spectrum's linewidth (window = factor x LW): a broad/shifted peak needs a
+    # wider window to reach its true center than a sharp one. Capped to avoid
+    # reaching a neighbour (the cluster-aware refit also backstops this), and
+    # floored at the constants below when no reference linewidth is available.
+    _EDIT_LW_FACTOR = 3.0
+    _EDIT_POS_MARGIN_F1 = 0.05   # 15N/13C floor (ppm)
+    _EDIT_POS_MARGIN_F2 = 0.01   # 1H floor (ppm)
+    _EDIT_MARGIN_CAP_F1 = 0.6    # 15N/13C cap (ppm)
+    _EDIT_MARGIN_CAP_F2 = 0.12   # 1H cap (ppm)
+
+    def _edit_window(self):
+        """(F1, F2) position window for the re-fit: factor x reference LW, capped/floored."""
+        ref = self._reference_linewidths()
+        if not ref:
+            return self._EDIT_POS_MARGIN_F1, self._EDIT_POS_MARGIN_F2
+        wf1 = min(self._EDIT_LW_FACTOR * ref['lw_f1_median'], self._EDIT_MARGIN_CAP_F1)
+        wf2 = min(self._EDIT_LW_FACTOR * ref['lw_f2_median'], self._EDIT_MARGIN_CAP_F2)
+        return max(wf1, self._EDIT_POS_MARGIN_F1), max(wf2, self._EDIT_POS_MARGIN_F2)
+
+    def _reference_linewidths(self):
+        """Median linewidths of the reference (first) spectrum's good fits, cached."""
+        if not hasattr(self, '_ref_lw_cache'):
+            self._ref_lw_cache = self._learned_linewidths(0) if self.spectra else None
+        return self._ref_lw_cache
 
     def _refit_peak_in_spectrum(self, spec_idx, assignment, x_ppm, y_ppm):
         """Re-fit one peak in one spectrum, anchored at (x_ppm, y_ppm) with a tight window.
@@ -2260,8 +2281,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         # Reuse linewidths learned from this spectrum's good fits so an isolated
         # re-fit matches the original (PASS-1-equivalent) fit instead of degrading.
         integ.spectrum_statistics = self._learned_linewidths(spec_idx)
-        integ.titration_pos_margin_f1 = self._EDIT_POS_MARGIN_F1
-        integ.titration_pos_margin_f2 = self._EDIT_POS_MARGIN_F2
+        integ.titration_pos_margin_f1, integ.titration_pos_margin_f2 = self._edit_window()
         try:
             result = integ.fit_overlap_group_2d(
                 group, assignment=assignment,
