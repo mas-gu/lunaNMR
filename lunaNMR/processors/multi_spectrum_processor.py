@@ -49,6 +49,12 @@ class MultiSpectrumProcessor:
     Has its own integrator instance and creates all necessary output files.
     """
 
+    # Titration per-step tracking window = factor x reference-spectrum average
+    # linewidth, capped (a backstop against a pathological linewidth estimate).
+    TITRATION_WINDOW_LW_FACTOR = 4.0
+    TITRATION_WINDOW_CAP_F1 = 1.0   # 15N/13C (ppm)
+    TITRATION_WINDOW_CAP_F2 = 0.2   # 1H (ppm)
+
     def __init__(self, voigt_params):
         """Initialize with independent integrator instance"""
         # Create OWN integrator instance - completely independent from GUI
@@ -120,6 +126,19 @@ class MultiSpectrumProcessor:
         self.collect_training_data = self.voigt_params.get('collect_training_data', False)
         if 'gui_params' in self.voigt_params:
             self.collect_training_data = self.voigt_params['gui_params'].get('collect_training_data', False)
+
+    def _titration_window(self, fallback_f1, fallback_f2):
+        """Per-step tracking window = factor x reference-spectrum average linewidth.
+
+        Falls back to the given values when the reference linewidth statistics are
+        not yet available (spectrum 1) or were not learned.
+        """
+        ref = self.reference_spectrum_statistics
+        if ref and ref.get('lw_f1_median') and ref.get('lw_f2_median'):
+            k = self.TITRATION_WINDOW_LW_FACTOR
+            return (min(k * ref['lw_f1_median'], self.TITRATION_WINDOW_CAP_F1),
+                    min(k * ref['lw_f2_median'], self.TITRATION_WINDOW_CAP_F2))
+        return fallback_f1, fallback_f2
 
     def process_nmr_series(self, nmr_files: List[str], reference_peaks: pd.DataFrame,
                           output_folder: str, peak_source_mode: str = 'reference',
@@ -648,15 +667,20 @@ class MultiSpectrumProcessor:
                 pre_learned_statistics = self.reference_spectrum_statistics
 
         # Titration tracking: give the fit wider per-step position freedom so it
-        # can follow a moving peak (nucleus-adaptive; None = relaxation defaults).
+        # can follow a moving peak. The window is scaled to the reference
+        # spectrum's average linewidth (window = k x LW), so it adapts to peak
+        # width; falls back to the config value for spectrum 1 (no reference LW
+        # yet) or if the learning produced none.
         if getattr(self, 'titration_tracking', False):
             from lunaNMR.core.ps2d_config import get_ps2d_config
             cfg = get_ps2d_config()
-            self.integrator.titration_pos_margin_f1 = cfg.titration_pos_margin_f1
-            self.integrator.titration_pos_margin_f2 = cfg.titration_pos_margin_f2
-            if spectrum_number == 1:
-                log_info(f"Titration mode: per-step position freedom widened to "
-                         f"F1=±{cfg.titration_pos_margin_f1} ppm, F2=±{cfg.titration_pos_margin_f2} ppm")
+            win_f1, win_f2 = self._titration_window(cfg.titration_pos_margin_f1,
+                                                    cfg.titration_pos_margin_f2)
+            self.integrator.titration_pos_margin_f1 = win_f1
+            self.integrator.titration_pos_margin_f2 = win_f2
+            if spectrum_number == 2:
+                log_info(f"Titration mode: per-step window = {self.TITRATION_WINDOW_LW_FACTOR}x "
+                         f"reference LW -> F1=±{win_f1:.3f} ppm, F2=±{win_f2:.3f} ppm")
         else:
             self.integrator.titration_pos_margin_f1 = None
             self.integrator.titration_pos_margin_f2 = None

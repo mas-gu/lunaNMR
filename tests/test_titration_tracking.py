@@ -61,6 +61,31 @@ class TestResolveTitrationTracking:
         assert result == ("independent", False, False)
 
 
+class TestTitrationWindow:
+    """Per-step tracking window scales with the reference spectrum's average LW."""
+
+    @staticmethod
+    def _proc(ref_stats):
+        proc = MultiSpectrumProcessor.__new__(MultiSpectrumProcessor)
+        proc.reference_spectrum_statistics = ref_stats
+        return proc
+
+    def test_window_is_factor_times_reference_lw(self):
+        proc = self._proc({'lw_f1_median': 0.16, 'lw_f2_median': 0.0227})
+        wf1, wf2 = proc._titration_window(0.3, 0.05)
+        assert round(wf1, 4) == 0.64    # 4 x 0.16
+        assert round(wf2, 4) == 0.0908  # 4 x 0.0227
+
+    def test_window_capped(self):
+        proc = self._proc({'lw_f1_median': 0.5, 'lw_f2_median': 0.5})
+        assert proc._titration_window(0.3, 0.05) == (
+            MultiSpectrumProcessor.TITRATION_WINDOW_CAP_F1,
+            MultiSpectrumProcessor.TITRATION_WINDOW_CAP_F2)
+
+    def test_window_falls_back_without_reference_stats(self):
+        assert self._proc(None)._titration_window(0.3, 0.05) == (0.3, 0.05)
+
+
 class TestProcessorWiring:
     """process_nmr_series applies the titration policy at setup."""
 
