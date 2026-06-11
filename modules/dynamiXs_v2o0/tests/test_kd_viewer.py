@@ -54,3 +54,30 @@ def test_viewer_loads_and_switches_views(app, tmp_path):
             v._refresh()
     finally:
         v.deleteLater()
+
+
+def test_exclude_point_and_refit_persists(app, tmp_path):
+    import json
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+    jf = _make_fit_json(tmp_path)
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        v.obs_combo.setCurrentIndex(0)           # CSP
+        v.residue_list.setCurrentRow(0)
+        f = v._current_residue()
+        kd_before = f["csp"]["Kd"]
+        # exclude the last point and refit
+        v.excluded["csp"][f["residue"]] = {len(f["csp"]["L"]) - 1}
+        v._on_refit()
+        # full display points are preserved; exclusion recorded; params recomputed
+        assert len(f["csp"]["L"]) == 6
+        assert f["csp"]["excluded"] == [5]
+        # persisted to disk
+        saved = json.loads(open(jf).read())
+        assert saved["fits"][0]["csp"]["excluded"] == [5]
+        # reset clears the exclusion
+        v._on_reset()
+        assert f["csp"].get("excluded") == []
+        assert f["csp"]["Kd"] == pytest.approx(kd_before, rel=1e-6)
+    finally:
+        v.deleteLater()
