@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QFileDialog, QDoubleSpinBox, QSpinBox,
-    QComboBox, QLineEdit, QProgressBar, QPlainTextEdit,
+    QComboBox, QFormLayout, QProgressBar, QPlainTextEdit,
 )
 
 from constants import (
@@ -77,9 +77,19 @@ class KdTitrationPage(BasePage):
         # Binding inputs
         sec2 = self._make_section("Binding parameters")
         b2 = sec2.layout()
-        self.conc_edit = QLineEdit()
-        self.conc_edit.setPlaceholderText("Ligand concentrations, comma-separated, one per titration point")
-        b2.addWidget(self._make_field_row("Ligand concentrations [L]", self.conc_edit, wide=True))
+
+        # Per-point ligand concentration mapping (populated when a CSV is loaded).
+        conc_hdr = create_label("Ligand concentration [L] for each titration point "
+                                "(load a CSV to populate; defaults to the point label):")
+        conc_hdr.setStyleSheet(f"color: {SECONDARY_TEXT};")
+        conc_hdr.setWordWrap(True)
+        b2.addWidget(conc_hdr)
+        self.conc_form_frame = QFrame()
+        self.conc_form = QFormLayout(self.conc_form_frame)
+        self.conc_form.setContentsMargins(SPACING_SM, 0, SPACING_SM, 0)
+        b2.addWidget(self.conc_form_frame)
+        self.conc_spins = []
+
         b2.addWidget(self._make_field_row("Protein concentration [P]₀",
                                           self._make_float_spin("p0_spin", 0.001, 1e6, 50.0, decimals=3, step=10.0)))
         b2.addWidget(self._make_field_row("CSP ¹⁵N scaling α",
@@ -193,12 +203,26 @@ class KdTitrationPage(BasePage):
             points, residues = load_titration(path)
             self.detected_points = points
             self.points_label.setText(
-                f"Detected {len(points)} points: {', '.join(str(p) for p in points)}  "
-                f"({len(residues)} residues)")
-            if not self.conc_edit.text().strip():
-                self.conc_edit.setText(", ".join(str(p) for p in points))
+                f"Detected {len(points)} points  ({len(residues)} residues)")
+            self._build_conc_rows(points)
         except Exception as e:
             self.points_label.setText(f"Could not read titration points: {e}")
+
+    def _build_conc_rows(self, points):
+        """One labelled concentration field per titration point, prefilled with the
+        point label so the user maps [L] to each spectrum explicitly."""
+        while self.conc_form.rowCount():
+            self.conc_form.removeRow(0)
+        self.conc_spins = []
+        for p in points:
+            spin = QDoubleSpinBox()
+            spin.setRange(0.0, 1e9)
+            spin.setDecimals(4)
+            spin.setSingleStep(1.0)
+            spin.setValue(float(p))
+            spin.setMaximumWidth(160)
+            self.conc_form.addRow(create_label(f"Titration point  {p}"), spin)
+            self.conc_spins.append(spin)
 
     def _choose_output_dir(self):
         initial = self.output_dir or (os.path.dirname(self.input_file) if self.input_file else "")
@@ -210,23 +234,17 @@ class KdTitrationPage(BasePage):
     # ---------- run ----------
 
     def _parse_concentrations(self):
-        txt = self.conc_edit.text().strip()
-        if not txt:
+        if not self.conc_spins:
             return None
-        return [float(t) for t in txt.replace(";", ",").split(",") if t.strip()]
+        return [s.value() for s in self.conc_spins]
 
     def _start_analysis(self):
         if not self.input_file or not os.path.exists(self.input_file):
             show_error(self, "Input required", "Select a CSV file first.")
             return
-        try:
-            concs = self._parse_concentrations()
-        except ValueError:
-            show_error(self, "Bad concentrations", "Concentrations must be numbers separated by commas.")
-            return
-        if concs and self.detected_points and len(concs) != len(self.detected_points):
-            show_error(self, "Count mismatch",
-                       f"{len(concs)} concentrations but {len(self.detected_points)} titration points.")
+        concs = self._parse_concentrations()
+        if not concs:
+            show_error(self, "No concentrations", "Load a CSV so the titration points appear, then set [L].")
             return
         if not self.output_dir:
             self._choose_output_dir()
