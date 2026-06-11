@@ -115,7 +115,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
     def __init__(self, parent=None, all_results: List[Dict] = None,
                  file_manager=None, initial_assignment: str = None,
-                 exponential_fit_data: dict = None):
+                 exponential_fit_data: dict = None, output_folder: str = None):
         """Initialize the multi-spectrum viewer dialog.
 
         Args:
@@ -138,6 +138,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         self.all_results = all_results or []
         self.file_manager = file_manager
+        self.output_folder = output_folder  # series_results folder, for saving corrections
         self._initial_assignment = initial_assignment  # Store for post-init use
         self._exponential_fit_data = exponential_fit_data  # T1/T2 fit from DynamiXs
 
@@ -168,6 +169,8 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.edit_mode = False
         self._edit_selected_peak = None  # dict: idx, assignment, x, y (peak picked for move)
         self._pending_corrections = {}   # (spectrum_idx, assignment) -> (new_x, new_y)
+        self._edited = set()             # (spectrum_idx, assignment) that have been re-fit
+        self._undo_snapshot = {}         # last re-fit's pre-change peaks, for Undo
 
         # Peak Mode axis locking (for comparing intensity/position across spectra)
         self.lock_z_scale_to_reference = True  # ON by default
@@ -705,11 +708,30 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.edit_mode_checkbox.toggled.connect(self._on_toggle_edit_mode)
         peak_layout.addWidget(self.edit_mode_checkbox)
 
+        edit_buttons = QHBoxLayout()
+        self.refit_button = QPushButton("↻ Re-fit corrected")
+        self.refit_button.setToolTip("Re-fit every corrected peak across all spectra, anchored to its position.")
+        self.refit_button.clicked.connect(self._on_refit_corrected)
+        edit_buttons.addWidget(self.refit_button)
+
+        self.undo_button = QPushButton("↶ Undo")
+        self.undo_button.setToolTip("Revert the last re-fit.")
+        self.undo_button.clicked.connect(self._on_undo_corrections)
+        edit_buttons.addWidget(self.undo_button)
+
+        self.save_corrected_button = QPushButton("💾 Save corrected")
+        self.save_corrected_button.setToolTip("Rewrite the series result CSVs with the corrected fits.")
+        self.save_corrected_button.clicked.connect(self._on_save_corrected)
+        edit_buttons.addWidget(self.save_corrected_button)
+        peak_layout.addLayout(edit_buttons)
+
         self.edit_status_label = QLabel("")
         self.edit_status_label.setWordWrap(True)
         self.edit_status_label.setStyleSheet(
             f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-style: italic;")
         peak_layout.addWidget(self.edit_status_label)
+
+        self._set_edit_buttons_enabled(False)
 
         peak_group.setLayout(peak_layout)
         right_layout.addWidget(peak_group, stretch=1)
@@ -2056,10 +2078,16 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
     # ===== Manual position edit (Overlay tab) =====
 
+    def _set_edit_buttons_enabled(self, enabled: bool):
+        for btn in ('refit_button', 'undo_button', 'save_corrected_button'):
+            if hasattr(self, btn):
+                getattr(self, btn).setEnabled(enabled)
+
     def _on_toggle_edit_mode(self, checked: bool):
         """Enter/leave manual position-edit mode on the overlay plot."""
         self.edit_mode = checked
         self._edit_selected_peak = None
+        self._set_edit_buttons_enabled(checked)
         if checked:
             # Markers must be visible to pick a peak.
             if not self.show_peaks_checkbox.isChecked():
@@ -2127,12 +2155,223 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self._pending_corrections[(spec_idx, assignment)] = (x_ppm, y_ppm)
         fitted_peaks = self._get_fitted_peaks(spec_idx)
         if 0 <= peak_idx < len(fitted_peaks):
-            peak = fitted_peaks[peak_idx]
-            # Update the keys the marker reads first so the change shows immediately.
-            peak['center_x'] = x_ppm
-            peak['center_y'] = y_ppm
-            peak['ppm_x'] = x_ppm
-            peak['ppm_y'] = y_ppm
+            self._set_peak_position(fitted_peaks[peak_idx], x_ppm, y_ppm)
+
+    @staticmethod
+    def _set_peak_position(peak, x_ppm, y_ppm):
+        """Set every position key a consumer might read so the change is consistent."""
+        peak['center_x'] = peak['ppm_x'] = peak['pos_f2'] = x_ppm
+        peak['center_y'] = peak['ppm_y'] = peak['pos_f1'] = y_ppm
+
+    @staticmethod
+    def _quality_from_r2(r2):
+        if r2 is None:
+            return 'Unknown'
+        if r2 >= 0.9:
+            return 'Excellent'
+        if r2 >= 0.8:
+            return 'Good'
+        if r2 >= 0.5:
+            return 'Fair'
+        return 'Poor'
+
+    # Per-step position freedom for the constrained re-fit: tight enough that the
+    # optimizer centers on the local max at the user's anchor but cannot reach a neighbor.
+    _EDIT_POS_MARGIN_F1 = 0.05   # 15N/13C (ppm)
+    _EDIT_POS_MARGIN_F2 = 0.01   # 1H (ppm)
+
+    def _refit_peak_in_spectrum(self, spec_idx, assignment, x_ppm, y_ppm):
+        """Re-fit one peak in one spectrum, anchored at (x_ppm, y_ppm) with a tight window.
+
+        Returns the new R² on success, or None on failure. Writes the result back
+        into the in-memory fitted peak.
+        """
+        import numpy as np
+        spec = self.spectra[spec_idx]
+        if not spec.get('loaded'):
+            if not self._load_spectrum_data(spec):
+                return None
+        integ = spec.get('integrator')
+        if integ is None or integ.nmr_data is None:
+            return None
+
+        # Equip the bare display integrator for fitting.
+        if getattr(integ, 'noise_level', None) is None:
+            try:
+                integ._estimate_noise_level()
+            except Exception:
+                pass
+        if not getattr(integ, 'gui_params', None):
+            integ.gui_params = {}
+        integ.gui_params.update({'use_ps2d_multi_peak': True,
+                                 'fix_positions': False, 'fix_linewidths': False})
+
+        xi = int(np.argmin(np.abs(integ.ppm_x_axis - x_ppm)))
+        yi = int(np.argmin(np.abs(integ.ppm_y_axis - y_ppm)))
+        peak_dict = {'x_ppm': x_ppm, 'y_ppm': y_ppm, 'pos_x': x_ppm, 'pos_y': y_ppm,
+                     'assignment': assignment, 'intensity': float(integ.nmr_data[yi, xi])}
+
+        integ.titration_pos_margin_f1 = self._EDIT_POS_MARGIN_F1
+        integ.titration_pos_margin_f2 = self._EDIT_POS_MARGIN_F2
+        try:
+            result = integ.fit_overlap_group_2d(
+                [peak_dict], assignment=assignment, peak_assignments=[assignment],
+                fix_positions=False, fix_linewidths=False)
+        except Exception as e:
+            logger.error(f"Refit failed for {assignment} in spectrum {spec_idx}: {e}")
+            return None
+        finally:
+            integ.titration_pos_margin_f1 = None
+            integ.titration_pos_margin_f2 = None
+
+        if not result or not result.get('success') or not result.get('peaks'):
+            return None
+        fp = result['peaks'][0]
+        r2 = result.get('r_squared')
+        self._write_back_fit(spec_idx, assignment, fp, r2)
+        return r2
+
+    def _write_back_fit(self, spec_idx, assignment, fp, r2):
+        """Update the in-memory fitted peak for (spectrum, assignment) from a fit result."""
+        for peak in self._get_fitted_peaks(spec_idx):
+            if peak.get('assignment', peak.get('Assignment', '')) == assignment:
+                self._set_peak_position(peak, fp.get('pos_f2'), fp.get('pos_f1'))
+                if r2 is not None:
+                    peak['r_squared'] = peak['R_squared'] = r2
+                    peak['quality'] = peak['Quality'] = self._quality_from_r2(r2)
+                for src, dst in (('height', 'height'), ('volume', 'volume'),
+                                 ('lw_gau_f2', 'lw_x'), ('lw_gau_f1', 'lw_y')):
+                    if src in fp:
+                        peak[dst] = fp[src]
+                return True
+        return False
+
+    def _on_refit_corrected(self):
+        """Re-fit every corrected peak across all spectra it appears in (tight window)."""
+        if not self._pending_corrections:
+            self.edit_status_label.setText("No pending corrections to re-fit.")
+            return
+        assignments = {a for (_s, a) in self._pending_corrections}
+        self._snapshot_for_undo(assignments)
+
+        done, failed = 0, 0
+        for assignment in assignments:
+            for spec_idx in range(len(self.spectra)):
+                if not any(p.get('assignment', p.get('Assignment', '')) == assignment
+                           for p in self._get_fitted_peaks(spec_idx)):
+                    continue
+                anchor = self._pending_corrections.get((spec_idx, assignment))
+                if anchor is None:
+                    cx, cy = self._peak_center(self._find_peak_obj(spec_idx, assignment))
+                    if cx is None:
+                        continue
+                    anchor = (cx, cy)
+                r2 = self._refit_peak_in_spectrum(spec_idx, assignment, anchor[0], anchor[1])
+                if r2 is None:
+                    failed += 1
+                else:
+                    done += 1
+                    self._edited.add((spec_idx, assignment))
+
+        self._pending_corrections.clear()
+        self._edit_selected_peak = None
+        self.edit_status_label.setText(
+            f"Re-fit {done} peak-fits ({failed} failed). Use 'Save corrected' to persist.")
+        self._update_plot()
+
+    def _find_peak_obj(self, spec_idx, assignment):
+        for peak in self._get_fitted_peaks(spec_idx):
+            if peak.get('assignment', peak.get('Assignment', '')) == assignment:
+                return peak
+        return None
+
+    def _snapshot_for_undo(self, assignments):
+        """Copy the peaks that are about to change so a single Undo can restore them."""
+        import copy
+        snap = {}
+        for spec_idx in range(len(self.spectra)):
+            for peak in self._get_fitted_peaks(spec_idx):
+                a = peak.get('assignment', peak.get('Assignment', ''))
+                if a in assignments:
+                    snap[(spec_idx, a)] = copy.deepcopy(peak)
+        self._undo_snapshot = snap
+
+    def _on_undo_corrections(self):
+        """Restore the peaks changed by the last re-fit."""
+        if not getattr(self, '_undo_snapshot', None):
+            self.edit_status_label.setText("Nothing to undo.")
+            return
+        for (spec_idx, assignment), saved in self._undo_snapshot.items():
+            peak = self._find_peak_obj(spec_idx, assignment)
+            if peak is not None:
+                peak.clear()
+                peak.update(saved)
+            self._edited.discard((spec_idx, assignment))
+        self._undo_snapshot = {}
+        self.edit_status_label.setText("Reverted last re-fit.")
+        self._update_plot()
+
+    def _on_save_corrected(self):
+        """Rewrite comprehensive_peak_tracking.csv with the re-fit (corrected) peaks."""
+        import os
+        import pandas as pd
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        if not self._edited:
+            self.edit_status_label.setText("No re-fit corrections to save.")
+            return
+
+        folder = self.output_folder
+        if not folder or not os.path.isdir(folder):
+            folder = QFileDialog.getExistingDirectory(self, "Select series_results folder")
+            if not folder:
+                return
+
+        tracking = os.path.join(folder, "comprehensive_peak_tracking.csv")
+        if not os.path.exists(tracking):
+            QMessageBox.warning(self, "Not found",
+                                f"comprehensive_peak_tracking.csv not found in:\n{folder}")
+            return
+
+        df = pd.read_csv(tracking)
+        # Point labels in column order (prefix before "_Position_X").
+        labels = [c[:-len("_Position_X")] for c in df.columns if c.endswith("_Position_X")]
+        if len(labels) != len(self.spectra):
+            QMessageBox.warning(
+                self, "Mismatch",
+                f"CSV has {len(labels)} points but viewer has {len(self.spectra)} spectra; "
+                "cannot map them safely.")
+            return
+
+        assign_col = df['Assignment'].astype(str)
+        saved, skipped = 0, 0
+        for (spec_idx, assignment) in sorted(self._edited):
+            label = labels[spec_idx]
+            peak = self._find_peak_obj(spec_idx, assignment)
+            if peak is None:
+                skipped += 1
+                continue
+            rows = df.index[assign_col == str(assignment)].tolist()
+            if not rows:
+                skipped += 1
+                continue
+            row = rows[0]
+            cx, cy = self._peak_center(peak)
+            for col, val in ((f"{label}_Position_X", cx), (f"{label}_Position_Y", cy),
+                             (f"{label}_R_Squared", peak.get('r_squared')),
+                             (f"{label}_Height", peak.get('height')),
+                             (f"{label}_Volume", peak.get('volume')),
+                             (f"{label}_LW_X", peak.get('lw_x')),
+                             (f"{label}_LW_Y", peak.get('lw_y')),
+                             (f"{label}_Quality", peak.get('quality'))):
+                if col in df.columns and val is not None:
+                    df.at[row, col] = val
+            saved += 1
+
+        df.to_csv(tracking, index=False)
+        self.edit_status_label.setText(
+            f"Saved {saved} corrected peak(s) to comprehensive_peak_tracking.csv"
+            + (f" ({skipped} unmatched)." if skipped else "."))
 
     def _plot_overlay_peak_markers(self):
         """Plot peak markers on overlay spectrum.
@@ -2218,6 +2457,21 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 if cx:
                     self.plot_widget.axes.scatter(
                         cx, cy, s=90, marker='x', c='magenta', linewidths=2, zorder=12)
+
+            # Mark peaks that have been re-fit in this spectrum (an "edited" badge).
+            if self.edit_mode and self._edited:
+                ex, ey = [], []
+                for (s, a) in self._edited:
+                    if s != spec_idx:
+                        continue
+                    gx, gy = self._peak_center(self._find_peak_obj(spec_idx, a))
+                    if gx is not None:
+                        ex.append(gx)
+                        ey.append(gy)
+                if ex:
+                    self.plot_widget.axes.scatter(
+                        ex, ey, s=160, marker='s', facecolors='none',
+                        edgecolors='limegreen', linewidths=2, zorder=11)
 
         except Exception as e:
             logger.error(f"Error plotting peak markers: {e}")

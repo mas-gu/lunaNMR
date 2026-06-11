@@ -1218,10 +1218,16 @@ class SeriesIntegrationDialog(BaseDialog):
         # Get file manager from main window
         file_manager = getattr(self.main_window, 'file_manager', None) if self.main_window else None
 
+        # Output folder (for saving manual position corrections back to the CSVs)
+        output_folder = None
+        if hasattr(self.batch_results, 'metadata'):
+            output_folder = self.batch_results.metadata.get('output_folder')
+
         dialog = MultiSpectrumViewerDialog(
             parent=self,
             all_results=all_results,
-            file_manager=file_manager
+            file_manager=file_manager,
+            output_folder=output_folder
         )
         dialog.show()
 

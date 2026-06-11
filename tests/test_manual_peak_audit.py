@@ -69,3 +69,69 @@ class TestTwoClickMove:
         dialog._on_toggle_edit_mode(True)
         dialog._on_edit_peak_click(5.0, 100.0)    # nowhere near a peak
         assert dialog._edit_selected_peak is None
+
+
+class TestRefitAndUndo:
+    """Orchestration of the constrained re-fit (the fit itself is stubbed)."""
+
+    @staticmethod
+    def _stub_refit(dialog):
+        # Replace the real fit with a deterministic write-back.
+        def fake(spec_idx, assignment, x, y):
+            peak = dialog._find_peak_obj(spec_idx, assignment)
+            dialog._set_peak_position(peak, x, y)
+            peak['r_squared'] = 0.95
+            peak['quality'] = 'Excellent'
+            return 0.95
+        dialog._refit_peak_in_spectrum = fake
+
+    def test_refit_marks_edited_and_clears_pending(self, dialog):
+        dialog.overlay_selected_spectrum_idx = 0
+        dialog._on_toggle_edit_mode(True)
+        dialog._pending_corrections[(0, 'R1')] = (8.40, 121.5)
+        self._stub_refit(dialog)
+        dialog._on_refit_corrected()
+        # R1 appears in both spectra, so both get re-fit (corrected anchor / current anchor).
+        assert (0, 'R1') in dialog._edited
+        assert (1, 'R1') in dialog._edited
+        assert dialog._pending_corrections == {}
+        assert dialog._find_peak_obj(0, 'R1')['r_squared'] == 0.95
+
+    def test_undo_restores_pre_refit_state(self, dialog):
+        dialog.overlay_selected_spectrum_idx = 0
+        dialog._on_toggle_edit_mode(True)
+        dialog._pending_corrections[(0, 'R1')] = (8.40, 121.5)
+        self._stub_refit(dialog)
+        dialog._on_refit_corrected()
+        assert dialog._find_peak_obj(0, 'R1').get('r_squared') == 0.95
+        dialog._on_undo_corrections()
+        # snapshot was taken before re-fit, so r_squared is gone again
+        assert 'r_squared' not in dialog._find_peak_obj(0, 'R1')
+        assert dialog._edited == set()
+
+
+class TestSaveCorrected:
+    def test_rewrites_tracking_csv(self, dialog, tmp_path):
+        import pandas as pd
+        # Minimal tracking CSV with two points "0" and "1" matching the 2 spectra.
+        cols = {'Peak_Number': [1], 'Assignment': ['R1'],
+                'Reference_X': [8.0], 'Reference_Y': [120.0]}
+        for label in ('0', '1'):
+            cols[f'{label}_Position_X'] = [0.0]
+            cols[f'{label}_Position_Y'] = [0.0]
+            cols[f'{label}_R_Squared'] = [0.0]
+        pd.DataFrame(cols).to_csv(tmp_path / "comprehensive_peak_tracking.csv", index=False)
+
+        dialog.output_folder = str(tmp_path)
+        dialog._edited = {(0, 'R1')}
+        # corrected in-memory peak for spectrum 0
+        peak = dialog._find_peak_obj(0, 'R1')
+        dialog._set_peak_position(peak, 8.40, 121.5)
+        peak['r_squared'] = 0.95
+
+        dialog._on_save_corrected()
+
+        out = pd.read_csv(tmp_path / "comprehensive_peak_tracking.csv")
+        assert out.loc[0, '0_Position_X'] == 8.40
+        assert out.loc[0, '0_Position_Y'] == 121.5
+        assert out.loc[0, '0_R_Squared'] == 0.95
