@@ -1,5 +1,5 @@
-# ABOUTME: Extracts delay values from NMR filenames for relaxation experiments
-# ABOUTME: Supports milliseconds (_50ms) and seconds (_1s) patterns, sorts by delay
+# ABOUTME: Extracts series x-axis values from NMR filenames for time-series and titrations
+# ABOUTME: Time mode reads _50ms/_1s; titration mode reads the _1o0/_0o5 suffix (o means .)
 
 import os
 import re
@@ -8,13 +8,25 @@ from typing import List, Optional, Tuple, Dict
 
 class DelayExtractor:
     """
-    Extract delay values from NMR filenames for relaxation experiments.
+    Extract per-spectrum x-axis values from NMR filenames for series experiments.
 
-    Supports common naming patterns like:
+    Two modes select what the trailing filename token means:
+
+    Time mode (default) — relaxation delays:
     - T1_50ms.ft   -> 50 ms
     - T2_100ms.ft  -> 100 ms
     - T1_1s.ft     -> 1000 ms (converted from seconds)
     - T1_2.5s.ft   -> 2500 ms (fractional seconds)
+
+    Titration mode — dimensionless titration points, with the filesystem-safe
+    'o'-for-'.' convention:
+    - sample_1o0.ft -> 1.0
+    - sample_0o5.ft -> 0.5
+    - sample_1.0.ft -> 1.0 (literal dot also accepted)
+    - sample_2.ft   -> 2.0 (bare integer)
+
+    The sorting / sequencing / column-naming machinery is value-agnostic and
+    shared between modes; only value extraction differs.
     """
 
     # Patterns to match delay values (case-insensitive)
@@ -24,8 +36,41 @@ class DelayExtractor:
         (r'_(\d+(?:\.\d+)?)s(?:\.|$)', 1000.0),    # _1s. or _1s (end of string)
     ]
 
+    # Titration suffix: trailing _<value> where value uses 'o' or '.' for the
+    # decimal point. An optional file extension may follow.
+    TITRATION_PATTERN = re.compile(r'_(\d+(?:[o.]\d+)?)(?:\.\w+)?$')
+
     # NMR file extensions to look for when scanning folders
     NMR_EXTENSIONS = {'.ft', '.ucsf', '.pipe', '.2rr', '.2ii'}
+
+    def __init__(self, mode: str = "time"):
+        if mode not in ("time", "titration"):
+            raise ValueError(f"mode must be 'time' or 'titration', got {mode!r}")
+        self.mode = mode
+
+    def extract_value(self, filename: str) -> Optional[float]:
+        """
+        Extract the series x-axis value for a filename according to the mode.
+
+        Time mode returns a delay in milliseconds; titration mode returns the
+        dimensionless titration point. Returns None if the filename has no
+        value parseable in the current mode.
+        """
+        if self.mode == "titration":
+            return self._extract_titration(filename)
+        return self.extract_delay_ms(filename)
+
+    def _extract_titration(self, filename: str) -> Optional[float]:
+        """Extract a dimensionless titration point from the _<value> suffix."""
+        basename = os.path.basename(filename)
+        match = self.TITRATION_PATTERN.search(basename)
+        if not match:
+            return None
+        token = match.group(1).replace('o', '.')
+        try:
+            return float(token)
+        except ValueError:
+            return None
 
     def extract_delay_ms(self, filename: str) -> Optional[float]:
         """
@@ -65,7 +110,7 @@ class DelayExtractor:
         files_with_delays = []
 
         for filename in files:
-            delay = self.extract_delay_ms(filename)
+            delay = self.extract_value(filename)
             if delay is not None:
                 files_with_delays.append((filename, delay))
 
@@ -101,7 +146,7 @@ class DelayExtractor:
                 if not os.path.isfile(full_path):
                     continue
 
-                delay = self.extract_delay_ms(filename)
+                delay = self.extract_value(filename)
                 if delay is not None:
                     files_with_delays.append((full_path, delay))
 
@@ -166,7 +211,7 @@ class DelayExtractor:
         # Extract delays
         files_with_delays = []
         for filename in files:
-            delay = self.extract_delay_ms(filename)
+            delay = self.extract_value(filename)
             if delay is not None:
                 # Get basename for sorting (handles full paths)
                 basename = os.path.basename(filename)
@@ -268,7 +313,7 @@ class DelayExtractor:
                 if not os.path.isfile(full_path):
                     continue
 
-                delay = self.extract_delay_ms(filename)
+                delay = self.extract_value(filename)
                 if delay is not None:
                     files_with_delays_and_idx.append((full_path, delay, idx))
 
