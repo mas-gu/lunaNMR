@@ -43,6 +43,44 @@ class TestDelayExtraction:
         assert extract_delay_from_spectrum_name("test") is None
 
 
+class TestTitrationExtraction:
+    """Titration points are read from the _<value> suffix via the o-for-dot convention."""
+
+    def test_o_convention_suffix(self):
+        from lunaNMR.gui.components.intensity_decay_widget import extract_titration_from_spectrum_name
+        assert extract_titration_from_spectrum_name("sample_1o0.ft") == 1.0
+        assert extract_titration_from_spectrum_name("sample_0o5.ft") == 0.5
+        assert extract_titration_from_spectrum_name("titr_0o25.ft") == 0.25
+        assert extract_titration_from_spectrum_name("sample_10o0") == 10.0
+
+    def test_non_titration_returns_none(self):
+        from lunaNMR.gui.components.intensity_decay_widget import extract_titration_from_spectrum_name
+        # No o-decimal token -> not a titration name (avoids hijacking index/time files)
+        assert extract_titration_from_spectrum_name("spectrum_001") is None
+        assert extract_titration_from_spectrum_name("T1_50ms.ft") is None
+        assert extract_titration_from_spectrum_name("reference") is None
+
+    def test_index_style_not_treated_as_titration(self):
+        """An integer index suffix must NOT be parsed as a titration point."""
+        from lunaNMR.gui.components.intensity_decay_widget import extract_titration_from_spectrum_name
+        assert extract_titration_from_spectrum_name("experiment_002.ft") is None
+
+    def test_collect_decay_data_titration_mode(self):
+        from lunaNMR.gui.components.intensity_decay_widget import collect_decay_data
+        spectra = [
+            {'name': 'titr_1o0.ft', 'fitted_peaks': [
+                {'assignment': 'A.2.ASP.H', 'volume': 1000000}
+            ]},
+            {'name': 'titr_0o5.ft', 'fitted_peaks': [
+                {'assignment': 'A.2.ASP.H', 'volume': 800000}
+            ]},
+        ]
+        x_values, volumes, indices, mode = collect_decay_data(spectra, 'A.2.ASP.H')
+        assert mode == 'titration'
+        assert x_values == [1.0, 0.5]
+        assert volumes == [1000000, 800000]
+
+
 class TestDecayDataGeneration:
     """Test generating decay plot data from spectra."""
 

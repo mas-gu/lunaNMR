@@ -78,6 +78,30 @@ def extract_delay_from_spectrum_name(spectrum_name: str) -> Optional[float]:
     return None
 
 
+def extract_titration_from_spectrum_name(spectrum_name: str) -> Optional[float]:
+    """
+    Extract a dimensionless titration point from a spectrum name.
+
+    Reads the trailing _<value> suffix using the filesystem-safe 'o'-for-'.'
+    convention (e.g. "sample_1o0.ft" -> 1.0, "titr_0o5" -> 0.5). Only the
+    o-decimal form is accepted so plain integer indices (e.g. "_001") are not
+    mistaken for titration points.
+
+    Returns:
+        Titration point, or None if the name has no o-decimal suffix.
+    """
+    if not spectrum_name:
+        return None
+
+    name = spectrum_name.rsplit('.', 1)[0] if '.' in spectrum_name else spectrum_name
+
+    match = re.search(r'_(\d+o\d+)$', name)
+    if match:
+        return float(match.group(1).replace('o', '.'))
+
+    return None
+
+
 def extract_index_from_spectrum_name(spectrum_name: str) -> Optional[int]:
     """
     Extract spectrum index from trailing 3+ digits in filename.
@@ -142,8 +166,9 @@ def collect_decay_data(
     Collect decay data (x-axis vs value) for a peak across all spectra.
 
     X-axis priority:
-    1. Delay mode: Extract delay from filename patterns (_50ms, _1s, etc.)
-    2. Index mode (fallback): Extract 3+ digit index from filename (_001.ft)
+    1. Titration mode: o-decimal suffix (_1o0, _0o5) -> dimensionless point
+    2. Delay mode: Extract delay from filename patterns (_50ms, _1s, etc.)
+    3. Index mode (fallback): Extract 3+ digit index from filename (_001.ft)
 
     Args:
         spectra: List of spectrum dicts with 'name' and 'fitted_peaks'
@@ -152,12 +177,37 @@ def collect_decay_data(
 
     Returns:
         Tuple of (x_values, values, spectrum_indices, mode)
-        - x_values: delays in ms (delay mode) or indices (index mode)
+        - x_values: titration points, delays in ms, or spectrum indices
         - values: peak values
         - spectrum_indices: original spectrum indices
-        - mode: 'delay' or 'index'
+        - mode: 'titration', 'delay', or 'index'
     """
-    # First pass: try delay extraction
+    # First pass: try titration extraction (unambiguous o-decimal suffix)
+    titration_x = []
+    values = []
+    indices = []
+
+    for idx, spec in enumerate(spectra):
+        point = extract_titration_from_spectrum_name(spec.get('name', ''))
+        if point is None:
+            continue
+
+        # Find peak in this spectrum
+        fitted_peaks = spec.get('fitted_peaks', [])
+        for peak in fitted_peaks:
+            peak_assignment = peak.get('assignment', peak.get('Assignment', ''))
+            if peak_assignment == assignment:
+                peak_value = _extract_peak_value(peak, value_type)
+                if peak_value is not None:
+                    titration_x.append(point)
+                    values.append(peak_value)
+                    indices.append(idx)
+                break
+
+    if titration_x:
+        return titration_x, values, indices, 'titration'
+
+    # Second pass: try delay extraction
     delays = []
     values = []
     indices = []
@@ -406,6 +456,8 @@ class IntensityDecayWidget(QWidget):
 
     def _get_x_axis_label(self) -> str:
         """Get X-axis label based on current mode."""
+        if self._x_mode == 'titration':
+            return "Titration point"
         if self._x_mode == 'delay':
             return f"Delay ({self._time_units})" if self._time_units else "Delay (ms)"
         else:
@@ -482,7 +534,7 @@ class IntensityDecayWidget(QWidget):
 
         # Title with assignment and value type
         if self._assignment:
-            x_label = "Delay" if self._x_mode == 'delay' else "Spectrum #"
+            x_label = {'titration': 'Titration', 'delay': 'Delay'}.get(self._x_mode, 'Spectrum #')
             self.title_label.setText(f"{self._get_y_axis_label()} vs {x_label}: {self._assignment}")
 
         # Format y-axis with scientific notation if needed

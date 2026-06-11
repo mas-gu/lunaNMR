@@ -196,7 +196,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
     def _initialize_spectra(self):
         """Initialize spectrum data from results, sorted by delay value."""
-        from lunaNMR.gui.components.intensity_decay_widget import extract_delay_from_spectrum_name
+        from lunaNMR.gui.components.intensity_decay_widget import (
+            extract_delay_from_spectrum_name,
+            extract_titration_from_spectrum_name,
+        )
 
         # First pass: collect all spectrum data
         unsorted_spectra = []
@@ -212,8 +215,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
             if fitted_peaks is None:
                 fitted_peaks = []
 
-            # Extract delay for sorting
-            delay_ms = extract_delay_from_spectrum_name(spectrum_name)
+            # Extract x-axis value for sorting (titration point or delay)
+            delay_ms = extract_titration_from_spectrum_name(spectrum_name)
+            if delay_ms is None:
+                delay_ms = extract_delay_from_spectrum_name(spectrum_name)
 
             unsorted_spectra.append({
                 'name': spectrum_name,
