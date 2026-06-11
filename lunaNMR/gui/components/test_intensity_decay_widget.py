@@ -53,9 +53,15 @@ class TestTitrationExtraction:
         assert extract_titration_from_spectrum_name("titr_0o25.ft") == 0.25
         assert extract_titration_from_spectrum_name("sample_10o0") == 10.0
 
+    def test_literal_dot_suffix(self):
+        """The literal-dot form must parse identically to the o form."""
+        from lunaNMR.gui.components.intensity_decay_widget import extract_titration_from_spectrum_name
+        assert extract_titration_from_spectrum_name("sample_1.0.ft") == 1.0
+        assert extract_titration_from_spectrum_name("sample_0.5.ft") == 0.5
+
     def test_non_titration_returns_none(self):
         from lunaNMR.gui.components.intensity_decay_widget import extract_titration_from_spectrum_name
-        # No o-decimal token -> not a titration name (avoids hijacking index/time files)
+        # No decimal-separated token -> not a titration name (avoids hijacking index/time files)
         assert extract_titration_from_spectrum_name("spectrum_001") is None
         assert extract_titration_from_spectrum_name("T1_50ms.ft") is None
         assert extract_titration_from_spectrum_name("reference") is None
@@ -64,6 +70,7 @@ class TestTitrationExtraction:
         """An integer index suffix must NOT be parsed as a titration point."""
         from lunaNMR.gui.components.intensity_decay_widget import extract_titration_from_spectrum_name
         assert extract_titration_from_spectrum_name("experiment_002.ft") is None
+        assert extract_titration_from_spectrum_name("sample_2.ft") is None
 
     def test_collect_decay_data_titration_mode(self):
         from lunaNMR.gui.components.intensity_decay_widget import collect_decay_data

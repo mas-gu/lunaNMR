@@ -35,7 +35,7 @@ class TestTitrationExtraction:
         ("sample_1o0.ft", 1.0),
         ("sample_0o5.ft", 0.5),
         ("sample_1.0.ft", 1.0),     # literal dot also accepted
-        ("sample_2.ft", 2.0),       # bare integer
+        ("sample_2o0.ft", 2.0),     # whole-number point written with the o separator
         ("sample_0o25.ft", 0.25),
         ("titr_10o0.ft", 10.0),
     ])
@@ -45,8 +45,14 @@ class TestTitrationExtraction:
     def test_titration_without_extension(self):
         assert DelayExtractor(mode="titration").extract_value("sample_0o5") == 0.5
 
-    def test_titration_no_suffix_returns_none(self):
-        assert DelayExtractor(mode="titration").extract_value("reference_spectrum.ft") is None
+    @pytest.mark.parametrize("name", [
+        "reference_spectrum.ft",   # no value suffix
+        "sample_2.ft",             # bare integer: needs a separator (2o0)
+        "experiment_002.ft",       # index-style file must not become a titration point
+        "ref_0.ft",
+    ])
+    def test_titration_requires_decimal_separator(self, name):
+        assert DelayExtractor(mode="titration").extract_value(name) is None
 
 
 class TestTitrationSequencing:
@@ -84,3 +90,31 @@ class TestTitrationSequencing:
         assert ext.get_column_name(50.0, 1) == "50"
         assert ext.get_column_name(100.0, 2) == "100_2"
         assert ext.get_column_name(12.5, 1) == "12.5"
+
+
+class TestParserConsistency:
+    """The DelayExtractor and decay-widget titration parsers must agree.
+
+    The CSV/column path uses DelayExtractor; the plot path uses the widget
+    function. They must accept exactly the same filename forms or points
+    appear in one but not the other.
+    """
+
+    @pytest.mark.parametrize("name", [
+        "sample_1o0.ft",
+        "sample_1.0.ft",
+        "sample_0o5.ft",
+        "sample_0o25.ft",
+        "titr_10o0.ft",
+        "sample_2.ft",          # bare integer: both reject
+        "experiment_002.ft",    # index: both reject
+        "reference.ft",
+        "T1_50ms.ft",           # time form: both reject as titration
+    ])
+    def test_both_parsers_agree(self, name):
+        from lunaNMR.gui.components.intensity_decay_widget import (
+            extract_titration_from_spectrum_name,
+        )
+        de = DelayExtractor(mode="titration").extract_value(name)
+        widget = extract_titration_from_spectrum_name(name)
+        assert de == widget, f"{name}: DelayExtractor={de} widget={widget}"

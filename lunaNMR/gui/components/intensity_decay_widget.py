@@ -83,19 +83,19 @@ def extract_titration_from_spectrum_name(spectrum_name: str) -> Optional[float]:
     Extract a dimensionless titration point from a spectrum name.
 
     Reads the trailing _<value> suffix using the filesystem-safe 'o'-for-'.'
-    convention (e.g. "sample_1o0.ft" -> 1.0, "titr_0o5" -> 0.5). Only the
-    o-decimal form is accepted so plain integer indices (e.g. "_001") are not
-    mistaken for titration points.
+    convention (e.g. "sample_1o0.ft" -> 1.0, "sample_1.0.ft" -> 1.0,
+    "titr_0o5" -> 0.5). A decimal separator ('o' or '.') is required, so plain
+    integer indices (e.g. "_001", "_2") are not mistaken for titration points.
 
     Returns:
-        Titration point, or None if the name has no o-decimal suffix.
+        Titration point, or None if the name has no decimal-separated suffix.
     """
     if not spectrum_name:
         return None
 
     name = spectrum_name.rsplit('.', 1)[0] if '.' in spectrum_name else spectrum_name
 
-    match = re.search(r'_(\d+o\d+)$', name)
+    match = re.search(r'_(\d+[o.]\d+)$', name)
     if match:
         return float(match.group(1).replace('o', '.'))
 

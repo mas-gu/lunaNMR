@@ -19,11 +19,12 @@ class DelayExtractor:
     - T1_2.5s.ft   -> 2500 ms (fractional seconds)
 
     Titration mode — dimensionless titration points, with the filesystem-safe
-    'o'-for-'.' convention:
+    'o'-for-'.' convention. A decimal separator ('o' or '.') is required, so
+    index-style names (sample_2.ft, scan_001.ft) are not mistaken for points:
     - sample_1o0.ft -> 1.0
     - sample_0o5.ft -> 0.5
     - sample_1.0.ft -> 1.0 (literal dot also accepted)
-    - sample_2.ft   -> 2.0 (bare integer)
+    - sample_2o0.ft -> 2.0 (whole-number point)
 
     The sorting / sequencing / column-naming machinery is value-agnostic and
     shared between modes; only value extraction differs.
@@ -37,8 +38,8 @@ class DelayExtractor:
     ]
 
     # Titration suffix: trailing _<value> where value uses 'o' or '.' for the
-    # decimal point. An optional file extension may follow.
-    TITRATION_PATTERN = re.compile(r'_(\d+(?:[o.]\d+)?)(?:\.\w+)?$')
+    # decimal point (separator required). An optional file extension may follow.
+    TITRATION_PATTERN = re.compile(r'_(\d+[o.]\d+)(?:\.\w+)?$')
 
     # NMR file extensions to look for when scanning folders
     NMR_EXTENSIONS = {'.ft', '.ucsf', '.pipe', '.2rr', '.2ii'}

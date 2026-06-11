@@ -883,6 +883,7 @@ class MultiSpectrumProcessor:
             BatchResults object with same data
         """
         batch_obj = BatchResults()
+        batch_obj.series_mode = getattr(self, 'series_mode', 'time')
 
         # Set metadata
         batch_obj.metadata['start_time'] = start_time
@@ -1827,6 +1828,7 @@ class BatchResults:
         }
         self.statistics = {}
         self.errors = []
+        self.series_mode = 'time'  # 'time' or 'titration' for filename value extraction
 
     def add_result(self, spectrum_name, result_data):
         """Add a single spectrum result"""
@@ -2007,23 +2009,16 @@ class BatchResults:
         extractor = DelayExtractor(mode=getattr(self, 'series_mode', 'time'))
         spectrum_names = tidy_df['spectrum_name'].unique()
 
-        # Build mapping: spectrum_name -> numeric delay column name
+        # Build mapping: spectrum_name -> numeric column name, using the same
+        # formatting/sequencing as build_column_mapping for round-trip consistency.
         delay_mapping = {}
-        delay_counts = {}  # Track duplicate delays
+        value_counts = {}  # Track duplicate values for sequence numbering
 
         for spec_name in spectrum_names:
-            delay_ms = extractor.extract_value(spec_name)
-            if delay_ms is not None:
-                # Format as integer if whole number, else with decimal
-                delay_str = str(int(delay_ms)) if delay_ms == int(delay_ms) else str(delay_ms)
-
-                # Handle duplicate delays (e.g., two spectra at 50ms)
-                if delay_str in delay_counts:
-                    delay_counts[delay_str] += 1
-                    delay_mapping[spec_name] = f"{delay_str}_{delay_counts[delay_str]}"
-                else:
-                    delay_counts[delay_str] = 1
-                    delay_mapping[spec_name] = delay_str
+            value = extractor.extract_value(spec_name)
+            if value is not None:
+                value_counts[value] = value_counts.get(value, 0) + 1
+                delay_mapping[spec_name] = extractor.get_column_name(value, value_counts[value])
             else:
                 # Fallback: use spectrum name as-is (may cause fitting issues)
                 delay_mapping[spec_name] = spec_name
