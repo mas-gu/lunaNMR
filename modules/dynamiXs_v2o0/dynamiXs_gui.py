@@ -129,6 +129,11 @@ class DynamiXsMainWindow(QMainWindow):
         self.methyl_t2_page = MethylT2FittingPage(self)
         self.stack.addWidget(self.methyl_t2_page)
 
+        # Kd / Titration page
+        from kd_titration_page import KdTitrationPage
+        self.kd_page = KdTitrationPage(self)
+        self.stack.addWidget(self.kd_page)
+
         # Spectral Density page
         self.spectral_page = SpectralDensityPage(self)
         self.stack.addWidget(self.spectral_page)
@@ -199,6 +204,15 @@ class DynamiXsMainWindow(QMainWindow):
         btn_methyl_t2.setFont(get_font(18, bold=True))
         options_layout.addWidget(btn_methyl_t2, alignment=Qt.AlignCenter)
 
+        # Kd / Titration button
+        btn_kd = create_primary_button(
+            "Kd / Titration Analysis",
+            clicked=self.show_kd_titration,
+            width=200
+        )
+        btn_kd.setFont(get_font(18, bold=True))
+        options_layout.addWidget(btn_kd, alignment=Qt.AlignCenter)
+
         # Spectral Density button
         btn_spectral = create_primary_button(
             "Spectral Density Analysis",
@@ -256,6 +270,10 @@ class DynamiXsMainWindow(QMainWindow):
     def show_methyl_t2_fitting(self):
         """Show methyl bi-exp T2 fitting page."""
         self.stack.setCurrentWidget(self.methyl_t2_page)
+
+    def show_kd_titration(self):
+        """Show Kd / titration analysis page."""
+        self.stack.setCurrentWidget(self.kd_page)
 
     def show_spectral_density(self):
         """Show spectral density analysis page."""

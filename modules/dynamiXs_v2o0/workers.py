@@ -324,6 +324,86 @@ class MethylT2FittingParams:
     series_name: str = ""
 
 
+@dataclass
+class KdTitrationFittingParams:
+    """Parameters for the Kd / titration binding fit (CSP and intensity ratio)."""
+    input_file: str = ""
+    output_dir: str = ""
+    output_prefix: str = "kd"
+    concentrations: Optional[list] = None   # one [L] per titration point (sorted order)
+    protein_conc: float = 50.0              # [P]0
+    alpha: float = 0.14                     # 15N -> 1H CSP scaling
+    observables: Optional[list] = None      # subset of ['csp', 'intensity']
+    intensity_value: str = "height"         # 'height' or 'volume'
+    n_bootstrap: int = 0
+    input_df: Optional[pd.DataFrame] = field(default=None, repr=False)
+    series_name: str = ""
+
+
+class KdTitrationFittingWorker(AnalysisWorker):
+    """Worker for the Kd titration fitter (dynamiXs_Kd.kd_fit)."""
+
+    def __init__(self, params: KdTitrationFittingParams, parent: Optional[QObject] = None):
+        super().__init__(parent)
+        self.params = params
+
+    def run(self):
+        import sys
+        temp_csv_path = None
+        try:
+            self.status.emit("Initializing Kd titration fit...")
+            self.emit_progress("Loading data...", 5)
+
+            kd_dir = os.path.join(os.path.dirname(__file__), "dynamiXs_Kd")
+            if kd_dir not in sys.path:
+                sys.path.insert(0, kd_dir)
+            import kd_fit
+
+            if self.params.input_df is not None:
+                fd, temp_csv_path = tempfile.mkstemp(suffix=".csv", prefix="dynamixs_kd_")
+                os.close(fd)
+                self.params.input_df.to_csv(temp_csv_path, index=False)
+                input_csv = temp_csv_path
+            elif self.params.input_file:
+                input_csv = self.params.input_file
+            else:
+                raise ValueError("No input data provided: need input_df or input_file")
+
+            self.emit_progress("Starting fit...", 10)
+            fit_params = {
+                "input_csv_file": input_csv,
+                "output_dir": self.params.output_dir,
+                "output_prefix": self.params.output_prefix,
+                "concentrations": self.params.concentrations,
+                "protein_conc": self.params.protein_conc,
+                "alpha": self.params.alpha,
+                "observables": self.params.observables or ["csp", "intensity"],
+                "intensity_value": self.params.intensity_value,
+                "n_bootstrap": self.params.n_bootstrap,
+            }
+
+            def progress_callback(completed, total, residue_name, message):
+                if self._cancelled:
+                    return
+                pct = int((completed / total) * 85) + 10
+                self.emit_progress(f"Fitting {residue_name} ({completed}/{total})", pct)
+
+            result = kd_fit.run_kd_analysis_with_params(fit_params, progress_callback=progress_callback)
+
+            if not self._cancelled:
+                self.emit_progress("Fitting complete!", 100)
+                result["analysis"] = "Kd_titration"
+                self.finished.emit(result)
+        except Exception as e:
+            self.emit_error(e)
+        finally:
+            if temp_csv_path and os.path.exists(temp_csv_path):
+                try:
+                    os.remove(temp_csv_path)
+                except OSError:
+                    pass
+
+
 class MethylT2FittingWorker(AnalysisWorker):
     """Worker for the methyl bi-exp T2 fitter.
 

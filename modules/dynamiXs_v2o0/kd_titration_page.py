@@ -1,0 +1,309 @@
+# ABOUTME: dynamiXs page for Kd / titration binding fits (CSP and intensity ratio).
+# ABOUTME: 1:1 quadratic isotherm, per-residue + global Kd; mirrors the methyl-T2 page.
+
+import os
+import sys
+from pathlib import Path
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QFrame, QHBoxLayout, QLabel, QFileDialog, QDoubleSpinBox, QSpinBox,
+    QComboBox, QLineEdit, QProgressBar, QPlainTextEdit,
+)
+
+from constants import (
+    FRAME_BG_COLOR, PRIMARY_TEXT, SECONDARY_TEXT,
+    SPACING_XS, SPACING_SM, FONT_SIZE_SMALL,
+)
+from gui_components import (
+    create_primary_button, create_secondary_button, create_label,
+    create_header_label, create_v_layout, create_h_layout,
+    get_font, show_info, show_error, show_warning, open_directory_dialog,
+)
+
+from dynamiXs_gui import BasePage, DropTargetLabel
+from workers import KdTitrationFittingParams, KdTitrationFittingWorker
+
+# Make the Kd analysis package importable (bare-name imports inside it).
+_KD_DIR = os.path.join(os.path.dirname(__file__), "dynamiXs_Kd")
+if _KD_DIR not in sys.path:
+    sys.path.insert(0, _KD_DIR)
+
+
+class KdTitrationPage(BasePage):
+    """Page for 1:1 Kd titration fitting from a LunaNMR series result."""
+
+    def __init__(self, main_window):
+        super().__init__(main_window, "Kd / Titration Analysis (CSP + intensity)")
+        self.input_file = None
+        self.output_dir = None
+        self.detected_points = []
+        self.last_json_folder = None
+        self.last_json_file = None
+        self._setup_content()
+
+    # ---------- UI ----------
+
+    def _setup_content(self):
+        layout = self.content_layout
+
+        desc = create_label(
+            "1:1 binding isotherm fit of a titration series.\n"
+            "    fraction_bound = ((P+L+Kd) − √((P+L+Kd)² − 4PL)) / (2P)\n"
+            "CSP = Δδ_max · fraction_bound;  Intensity = baseline + amp · fraction_bound.\n"
+            "Per-residue Kd and a global shared Kd are reported."
+        )
+        desc.setStyleSheet(f"color: {SECONDARY_TEXT};")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        # Input
+        sec = self._make_section("Titration input data (series_analysis_tidy.csv or comprehensive_peak_tracking.csv)")
+        body = sec.layout()
+        row = QHBoxLayout()
+        row.setSpacing(SPACING_SM)
+        self.file_drop = DropTargetLabel("kd", "Drop a series here, or browse for a CSV")
+        self.file_drop.setMinimumHeight(36)
+        self.file_drop.series_dropped.connect(self._on_series_dropped)
+        row.addWidget(self.file_drop, stretch=1)
+        row.addWidget(create_secondary_button("Browse CSV…", clicked=self._browse_input_file, width=130))
+        body.addLayout(row)
+        self.points_label = create_label("No file loaded.")
+        self.points_label.setStyleSheet(f"color: {SECONDARY_TEXT};")
+        self.points_label.setFont(get_font(FONT_SIZE_SMALL))
+        body.addWidget(self.points_label)
+        layout.addWidget(sec)
+
+        # Binding inputs
+        sec2 = self._make_section("Binding parameters")
+        b2 = sec2.layout()
+        self.conc_edit = QLineEdit()
+        self.conc_edit.setPlaceholderText("Ligand concentrations, comma-separated, one per titration point")
+        b2.addWidget(self._make_field_row("Ligand concentrations [L]", self.conc_edit, wide=True))
+        b2.addWidget(self._make_field_row("Protein concentration [P]₀",
+                                          self._make_float_spin("p0_spin", 0.001, 1e6, 50.0, decimals=3, step=10.0)))
+        b2.addWidget(self._make_field_row("CSP ¹⁵N scaling α",
+                                          self._make_float_spin("alpha_spin", 0.01, 1.0, 0.14, decimals=3, step=0.01)))
+        obs = QComboBox()
+        obs.addItems(["CSP + Intensity", "CSP only", "Intensity only"])
+        self.obs_combo = obs
+        b2.addWidget(self._make_field_row("Observable", obs))
+        iv = QComboBox()
+        iv.addItems(["height", "volume"])
+        self.intvalue_combo = iv
+        b2.addWidget(self._make_field_row("Intensity from", iv))
+        nb = QSpinBox()
+        nb.setRange(0, 100000)
+        nb.setValue(0)
+        nb.setSingleStep(100)
+        self.boot_spin = nb
+        b2.addWidget(self._make_field_row("Bootstrap iterations (0 = covariance errors)", nb))
+        layout.addWidget(sec2)
+
+        # Output
+        sec3 = self._make_section("Output")
+        b3 = sec3.layout()
+        orow = QHBoxLayout()
+        orow.setSpacing(SPACING_SM)
+        self.outdir_label = QLabel("No output directory selected")
+        self.outdir_label.setStyleSheet(
+            f"color: {SECONDARY_TEXT}; background-color: {FRAME_BG_COLOR}; padding: 4px 8px; border-radius: 4px;")
+        orow.addWidget(self.outdir_label, stretch=1)
+        orow.addWidget(create_secondary_button("Choose…", clicked=self._choose_output_dir, width=110))
+        b3.addLayout(orow)
+        layout.addWidget(sec3)
+
+        # Buttons
+        rrow = QHBoxLayout()
+        rrow.setSpacing(SPACING_SM)
+        self.run_btn = create_primary_button("Run Kd fit", clicked=self._start_analysis, width=180)
+        rrow.addWidget(self.run_btn)
+        self.viewer_btn = create_secondary_button("Open Kd Viewer", clicked=self._open_viewer, width=180)
+        self.viewer_btn.setEnabled(False)
+        rrow.addWidget(self.viewer_btn)
+        self.open_prev_btn = create_secondary_button("Open previous dataset…",
+                                                     clicked=self._open_previous_dataset, width=200)
+        rrow.addWidget(self.open_prev_btn)
+        rrow.addStretch()
+        layout.addLayout(rrow)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.hide()
+        layout.addWidget(self.progress_bar)
+
+        self.log_text = QPlainTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setMaximumBlockCount(500)
+        self.log_text.setMinimumHeight(120)
+        self.log_text.setStyleSheet(
+            f"QPlainTextEdit {{ color: {PRIMARY_TEXT}; background-color: {FRAME_BG_COLOR}; "
+            f"border-radius: 4px; padding: 4px; }}")
+        layout.addWidget(self.log_text, stretch=1)
+
+    # ---------- UI helpers ----------
+
+    def _make_section(self, title):
+        frame = QFrame()
+        frame.setStyleSheet(f"QFrame {{ background-color: {FRAME_BG_COLOR}; border-radius: 8px; }}")
+        body = create_v_layout(SPACING_XS, (SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM))
+        frame.setLayout(body)
+        body.addWidget(create_header_label(title, level=3))
+        return frame
+
+    def _make_field_row(self, label_text, widget, wide=False):
+        row = QFrame()
+        rl = create_h_layout(SPACING_SM)
+        row.setLayout(rl)
+        rl.addWidget(create_label(label_text), stretch=1)
+        widget.setMaximumWidth(360 if wide else 180)
+        rl.addWidget(widget)
+        return row
+
+    def _make_float_spin(self, attr, lo, hi, default, decimals=2, step=1.0):
+        spin = QDoubleSpinBox()
+        spin.setRange(lo, hi)
+        spin.setDecimals(decimals)
+        spin.setSingleStep(step)
+        spin.setValue(default)
+        setattr(self, attr, spin)
+        return spin
+
+    # ---------- input ----------
+
+    def _on_series_dropped(self, field_name, series_name, csv_path):
+        if csv_path and os.path.exists(csv_path):
+            self._set_input_file(csv_path)
+            self.file_drop.setText(f"Series '{series_name}'  →  {os.path.basename(csv_path)}")
+
+    def _browse_input_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select titration CSV",
+            self.main_window.current_dir if hasattr(self.main_window, "current_dir") else "",
+            "CSV files (*.csv);;All files (*)")
+        if path:
+            self._set_input_file(path)
+            self.file_drop.setText(os.path.basename(path))
+
+    def _set_input_file(self, path):
+        self.input_file = path
+        self._log(f"Input set: {path}")
+        try:
+            from kd_input import load_titration
+            points, residues = load_titration(path)
+            self.detected_points = points
+            self.points_label.setText(
+                f"Detected {len(points)} points: {', '.join(str(p) for p in points)}  "
+                f"({len(residues)} residues)")
+            if not self.conc_edit.text().strip():
+                self.conc_edit.setText(", ".join(str(p) for p in points))
+        except Exception as e:
+            self.points_label.setText(f"Could not read titration points: {e}")
+
+    def _choose_output_dir(self):
+        initial = self.output_dir or (os.path.dirname(self.input_file) if self.input_file else "")
+        folder = open_directory_dialog(self, "Select output directory", initial)
+        if folder:
+            self.output_dir = folder
+            self.outdir_label.setText(folder)
+
+    # ---------- run ----------
+
+    def _parse_concentrations(self):
+        txt = self.conc_edit.text().strip()
+        if not txt:
+            return None
+        return [float(t) for t in txt.replace(";", ",").split(",") if t.strip()]
+
+    def _start_analysis(self):
+        if not self.input_file or not os.path.exists(self.input_file):
+            show_error(self, "Input required", "Select a CSV file first.")
+            return
+        try:
+            concs = self._parse_concentrations()
+        except ValueError:
+            show_error(self, "Bad concentrations", "Concentrations must be numbers separated by commas.")
+            return
+        if concs and self.detected_points and len(concs) != len(self.detected_points):
+            show_error(self, "Count mismatch",
+                       f"{len(concs)} concentrations but {len(self.detected_points)} titration points.")
+            return
+        if not self.output_dir:
+            self._choose_output_dir()
+            if not self.output_dir:
+                return
+
+        idx = self.obs_combo.currentIndex()
+        observables = {0: ["csp", "intensity"], 1: ["csp"], 2: ["intensity"]}[idx]
+
+        params = KdTitrationFittingParams(
+            input_file=self.input_file,
+            output_dir=self.output_dir,
+            output_prefix="kd",
+            concentrations=concs,
+            protein_conc=float(self.p0_spin.value()),
+            alpha=float(self.alpha_spin.value()),
+            observables=observables,
+            intensity_value=self.intvalue_combo.currentText(),
+            n_bootstrap=int(self.boot_spin.value()),
+        )
+
+        self.progress_bar.setValue(0)
+        self.progress_bar.show()
+        self.run_btn.setEnabled(False)
+        self.viewer_btn.setEnabled(False)
+        self._log("Starting Kd fit...")
+
+        self.worker = KdTitrationFittingWorker(params)
+        self.worker.progress.connect(self._log)
+        self.worker.progress_value.connect(self.progress_bar.setValue)
+        self.worker.finished.connect(self._on_finished)
+        self.worker.error.connect(self._on_error)
+        self.worker.start()
+
+    def _on_finished(self, result):
+        self.run_btn.setEnabled(True)
+        self.progress_bar.setValue(100)
+        n = result.get("n_fitted", 0)
+        self.last_json_file = result.get("json_file")
+        self.last_json_folder = os.path.dirname(result.get("json_file") or "") or result.get("output_dir")
+        self._log(f"Fit complete: {n} residues -> {result.get('json_file')}")
+        if n:
+            self.viewer_btn.setEnabled(True)
+            show_info(self, "Fit complete", f"Fitted {n} residues. Open the viewer to inspect.")
+        else:
+            show_warning(self, "No fits succeeded", "All residues failed. Check the log.")
+
+    def _on_error(self, error_msg):
+        self.run_btn.setEnabled(True)
+        self._log(f"ERROR: {error_msg}")
+        show_error(self, "Fit failed", str(error_msg))
+
+    # ---------- viewer ----------
+
+    def _open_viewer(self):
+        if not self.last_json_file:
+            show_warning(self, "No results", "Run a fit first.")
+            return
+        try:
+            from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+            self._viewer = open_kd_titration_viewer(parent=self, json_file=self.last_json_file)
+        except Exception as e:
+            show_error(self, "Viewer error", f"Could not open viewer:\n{e}")
+
+    def _open_previous_dataset(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select *_kd_fit_data.json",
+            self.output_dir or "", "JSON files (*_kd_fit_data.json);;All files (*)")
+        if not path:
+            return
+        try:
+            from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+            self._viewer = open_kd_titration_viewer(parent=self, json_file=path)
+            self.last_json_file = path
+            self.viewer_btn.setEnabled(True)
+        except Exception as e:
+            show_error(self, "Viewer error", f"Could not open viewer:\n{e}")
+
+    def _log(self, msg):
+        self.log_text.appendPlainText(str(msg))
