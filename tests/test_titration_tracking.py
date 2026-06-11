@@ -11,57 +11,36 @@ from lunaNMR.processors.multi_spectrum_processor import (
 )
 
 
-class TestTitrationConfigWindows:
-    """Each nucleus carries an enlarged per-step search window for titration."""
-
-    @pytest.mark.parametrize("nucleus", ["15N", "13C"])
-    def test_titration_windows_exist_and_are_wider(self, nucleus):
-        cfg = PS2DConfig(nucleus)
-        # The titration per-step window must be wider than the relaxation window,
-        # so cascade detection can follow a moving peak across a titration step.
-        assert cfg.titration_search_window_f1 > cfg.search_window_f1
-        assert cfg.titration_search_window_f2 > cfg.search_window_f2
-
-
 class TestResolveTitrationTracking:
-    """The policy: titration forces cascade + drift-off + enlarged windows."""
+    """The policy: titration forces cascade propagation and disables the
+    absolute (free-state) drift clamp so peaks can accumulate position changes.
+
+    Note: the per-step movement is bounded by the fit's pos_margin, not by a
+    search window (cascade spectrum 2+ skips detection), so this policy
+    intentionally does NOT touch the search window.
+    """
 
     def test_titration_forces_cascade_and_drift_off(self):
-        cfg = PS2DConfig("15N")
-        mode, drift, win_x, win_y, overridden = resolve_titration_tracking(
+        mode, drift, overridden = resolve_titration_tracking(
             series_mode="titration",
             peak_source_mode="independent",   # user picked something else
             enable_drift_limit=True,          # user left it on
-            config=cfg,
         )
         assert mode == "cascade"
         assert drift is False
         assert overridden is True
 
-    def test_titration_window_axes_mapping(self):
-        # x = 1H (F2), y = 15N/13C (F1). Getting this backwards silently breaks tracking.
-        cfg = PS2DConfig("15N")
-        _, _, win_x, win_y, _ = resolve_titration_tracking(
-            "titration", "cascade", False, cfg)
-        assert win_x == cfg.titration_search_window_f2
-        assert win_y == cfg.titration_search_window_f1
-
     def test_time_mode_is_passthrough(self):
-        cfg = PS2DConfig("15N")
         result = resolve_titration_tracking(
             series_mode="time",
             peak_source_mode="cascade",
             enable_drift_limit=True,
-            config=cfg,
         )
-        assert result == ("cascade", True, None, None, False)
+        assert result == ("cascade", True, False)
 
     def test_time_mode_preserves_user_choices(self):
-        cfg = PS2DConfig("13C")
-        mode, drift, win_x, win_y, overridden = resolve_titration_tracking(
-            "time", "independent", False, cfg)
-        assert (mode, drift, win_x, win_y, overridden) == (
-            "independent", False, None, None, False)
+        result = resolve_titration_tracking("time", "independent", False)
+        assert result == ("independent", False, False)
 
 
 class TestProcessorWiring:
