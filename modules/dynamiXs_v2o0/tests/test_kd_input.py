@@ -104,3 +104,12 @@ class TestCspSeries:
         # R2 (non-mover) -> all ~0
         csp2 = csp_series(residues["R2"], alpha=0.14)
         assert max(csp2) == pytest.approx(0.0)
+
+    def test_undetected_position_zero_is_excluded(self):
+        from kd_input import csp_series
+        # point 2 undetected -> position 0.0 sentinel; must be NaN, not a huge CSP
+        residue = {'ppm_x': [8.0, 8.05, 0.0], 'ppm_y': [120.0, 120.3, 0.0]}
+        csp = csp_series(residue, alpha=0.14)
+        assert csp[0] == pytest.approx(0.0)
+        assert csp[1] > 0.0
+        assert np.isnan(csp[2])              # excluded, not ~7 ppm spurious CSP

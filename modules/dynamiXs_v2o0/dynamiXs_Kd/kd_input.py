@@ -113,9 +113,16 @@ def load_titration(csv_path):
 
 
 def csp_series(residue, alpha=0.14):
-    """Per-point CSP for one residue, relative to the first (reference) point."""
+    """Per-point CSP for one residue, relative to the first (reference) point.
+
+    Undetected points are recorded with position 0.0 (a sentinel, not a real ppm);
+    treat them as NaN so they are excluded from the fit instead of producing a
+    huge spurious CSP (0.0 vs the ~7/120 ppm reference).
+    """
     px = np.asarray(residue['ppm_x'], dtype=float)
     py = np.asarray(residue['ppm_y'], dtype=float)
+    px = np.where(px == 0.0, np.nan, px)
+    py = np.where(py == 0.0, np.nan, py)
     dH = px - px[0]
     dN = py - py[0]
     return list(compute_csp(dH, dN, alpha=alpha))
