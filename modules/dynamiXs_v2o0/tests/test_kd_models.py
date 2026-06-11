@@ -40,11 +40,13 @@ class TestObservables:
         L, P, Kd, dd_max = 20.0, 50.0, 10.0, 0.3
         assert csp_model(L, dd_max, Kd, P) == pytest.approx(dd_max * fraction_bound(L, P, Kd))
 
-    def test_intensity_decay_is_I0_exp(self):
-        # Matches the lab's KD scripts: I = I0 * exp(-L/Kd).
+    def test_intensity_decay_with_plateau(self):
+        # I = I_inf + (I0 - I_inf)*exp(-L/Kd): anchored at I0, levels off at I_inf.
         from kd_models import intensity_decay
-        assert intensity_decay(0.0, I0=2.0, Kd=10.0) == pytest.approx(2.0)         # anchored at I0
-        assert intensity_decay(10.0, I0=2.0, Kd=10.0) == pytest.approx(2.0 * np.exp(-1.0))
+        assert intensity_decay(0.0, I0=2.0, I_inf=0.3, Kd=10.0) == pytest.approx(2.0)
+        assert intensity_decay(1e6, I0=2.0, I_inf=0.3, Kd=10.0) == pytest.approx(0.3)  # plateau
+        assert intensity_decay(10.0, I0=2.0, I_inf=0.3, Kd=10.0) == pytest.approx(
+            0.3 + 1.7 * np.exp(-1.0))
 
 
 class TestComputeCsp:

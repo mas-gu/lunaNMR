@@ -32,16 +32,18 @@ def csp_model(L, dd_max, Kd, P):
     return dd_max * fraction_bound(L, P, Kd)
 
 
-def intensity_decay(L, I0, Kd):
-    """Intensity decay for a titration: I = I0 · exp(-L / Kd).
+def intensity_decay(L, I0, I_inf, Kd):
+    """Intensity decay for a titration with a plateau:
 
-    Matches the lab's KD scripts (fitmulti__KD_NMRRE.py: A·exp(-x/t2)). I0 is the
-    fitted reference intensity at L=0; Kd is the decay constant (the [L] where I
-    falls to I0/e). Fitting I0 anchors the curve to the data's first point instead
-    of forcing a binding isotherm onto an intensity-loss profile.
+        I = I_inf + (I0 - I_inf) · exp(-L / Kd)
+
+    Extends the lab's KD model (A·exp(-x/t2)) with a fitted floor I_inf so the
+    curve levels off at the residual intensity peaks keep at saturation instead of
+    being forced to zero. I0 = intensity at L=0, I_inf = plateau at high [L],
+    Kd = decay constant (the [L] where the decaying part falls to 1/e).
     """
     L = np.asarray(L, dtype=float)
-    out = I0 * np.exp(-L / Kd)
+    out = I_inf + (I0 - I_inf) * np.exp(-L / Kd)
     return out if out.ndim else float(out)
 
 

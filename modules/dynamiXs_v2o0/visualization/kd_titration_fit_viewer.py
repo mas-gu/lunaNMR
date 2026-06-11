@@ -132,7 +132,7 @@ class KdTitrationFitViewer(QMainWindow):
             yg = csp_model(Lg, fit["dd_max"], fit["Kd"], self.P0)
             ylab = "CSP (ppm)"
         else:
-            yg = intensity_decay(Lg, fit["I0"], fit["Kd"])
+            yg = intensity_decay(Lg, fit["I0"], fit["I_inf"], fit["Kd"])
             ylab = "Intensity ratio"
         ax.plot(Lg, yg, "r-", lw=2, label="fit")
         kd, kde = fit["Kd"], fit.get("Kd_err", float("nan"))

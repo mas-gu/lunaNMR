@@ -62,17 +62,20 @@ def fit_residue_intensity(L, obs, P0=None, kd_init=None, n_bootstrap=0):
         return {'success': False, 'reason': 'too few points'}
     kd0 = kd_init if kd_init else max(np.max(L) / 2.0, 1.0)
     i0 = max(float(y[0]), 1e-12)
+    inf0 = max(float(np.min(y)), 0.0)            # plateau ~ lowest observed point
+    hi = max(float(np.max(y)) * 2.0, 1.0)
     try:
         popt, pcov = curve_fit(
-            intensity_decay, L, y, p0=[i0, kd0],
-            bounds=([0, 1e-9], [np.inf, np.inf]), maxfev=20000)
+            intensity_decay, L, y, p0=[i0, inf0, kd0],
+            bounds=([0, 0, 1e-9], [hi, hi, np.inf]), maxfev=20000)
     except Exception as e:
         return {'success': False, 'reason': str(e)}
-    I0, kd = popt
+    I0, I_inf, kd = popt
     perr = np.sqrt(np.diag(pcov))
-    return {'success': True, 'Kd': float(kd), 'Kd_err': float(perr[1]),
+    return {'success': True, 'Kd': float(kd), 'Kd_err': float(perr[2]),
             'I0': float(I0), 'I0_err': float(perr[0]),
-            'r_squared': _r_squared(y, intensity_decay(L, I0, kd)),
+            'I_inf': float(I_inf), 'I_inf_err': float(perr[1]),
+            'r_squared': _r_squared(y, intensity_decay(L, I0, I_inf, kd)),
             'L': L.tolist(), 'obs': y.tolist()}
 
 

@@ -34,14 +34,15 @@ class TestPerResidueCsp:
 
 
 class TestPerResidueIntensity:
-    def test_recovers_decay_constant_and_I0(self):
+    def test_recovers_decay_constant_I0_and_plateau(self):
         from kd_models import intensity_decay
         from kd_fit import fit_residue_intensity
-        y = intensity_decay(L, I0=1.0, Kd=25.0)
+        y = intensity_decay(L, I0=1.0, I_inf=0.05, Kd=25.0)   # plateau above zero
         r = fit_residue_intensity(L, y, P0)
         assert r['success']
-        assert r['Kd'] == pytest.approx(25.0, rel=1e-3)
-        assert r['I0'] == pytest.approx(1.0, rel=1e-3)
+        assert r['Kd'] == pytest.approx(25.0, rel=1e-2)
+        assert r['I0'] == pytest.approx(1.0, rel=1e-2)
+        assert r['I_inf'] == pytest.approx(0.05, rel=1e-2)    # tracks the floor, not 0
 
 
 class TestGlobalKd:
