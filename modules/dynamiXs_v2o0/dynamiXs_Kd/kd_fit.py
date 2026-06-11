@@ -165,6 +165,18 @@ def run_kd_analysis_with_params(params, progress_callback=None):
     alpha = float(params.get('alpha', 0.14))
     observables = params.get('observables', ['csp', 'intensity'])
     n_boot = int(params.get('n_bootstrap', 0))
+
+    # Per-point intensity/volume scaling (e.g. correct a point acquired with a
+    # different number of scans). Applies ONLY to height/volume, not positions.
+    scales = params.get('intensity_scales')
+    if scales:
+        if len(scales) != len(points):
+            raise ValueError(f"{len(scales)} intensity scales but {len(points)} titration points")
+        for res in residues.values():
+            for key in ('height', 'volume'):
+                v = res.get(key)
+                if v is not None:
+                    res[key] = [vi * s for vi, s in zip(v, scales)]
     value = params.get('intensity_value', 'height')
 
     fits = []

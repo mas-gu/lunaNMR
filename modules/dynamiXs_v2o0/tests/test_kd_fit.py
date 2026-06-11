@@ -72,6 +72,49 @@ class TestGlobalKd:
         assert g['dd_max']['C'] == pytest.approx(0.45, rel=1e-3)
 
 
+class TestIntensityScaling:
+    def test_per_point_scale_affects_intensity_not_csp(self, tmp_path):
+        from kd_models import csp_model
+        from kd_fit import run_kd_analysis_with_params
+        import json
+        pts = [0.0, 10.0, 25.0, 60.0, 150.0]
+        ddH = csp_model(np.array(pts), 0.2, 20.0, P0)
+        rows = []
+        for p, d in zip(pts, ddH):
+            rows.append((str(p), 'R1', 8.0 + d, 120.0, 1000.0 - 5 * p, 2000.0))
+        df = pd.DataFrame(rows, columns=['spectrum_name', 'assignment',
+                                         'ppm_x', 'ppm_y', 'height', 'volume'])
+        csv = tmp_path / 'series_analysis_tidy.csv'
+        df.to_csv(csv, index=False)
+
+        def run(scales, out):
+            r = run_kd_analysis_with_params({
+                'input_csv_file': str(csv), 'output_dir': str(out), 'output_prefix': 'k',
+                'concentrations': pts, 'protein_conc': P0, 'alpha': 0.14,
+                'observables': ['csp', 'intensity'], 'intensity_scales': scales})
+            return json.loads(Path(r['json_file']).read_text())['fits'][0]
+
+        base = run(None, tmp_path / 'a')
+        scaled = run([2.0, 1.0, 1.0, 1.0, 1.0], tmp_path / 'b')   # double the reference point
+        # CSP identical (positions untouched)
+        assert scaled['csp']['Kd'] == pytest.approx(base['csp']['Kd'], rel=1e-6)
+        # intensity ratio changed: reference doubled -> ratios halved
+        assert scaled['intensity']['obs'][1] == pytest.approx(base['intensity']['obs'][1] / 2.0, rel=1e-6)
+
+    def test_scale_count_mismatch_raises(self, tmp_path):
+        from kd_models import csp_model
+        from kd_fit import run_kd_analysis_with_params
+        df = pd.DataFrame([(str(p), 'R1', 8.0, 120.0, 1000.0, 2000.0) for p in (0.0, 1.0, 2.0)],
+                          columns=['spectrum_name', 'assignment', 'ppm_x', 'ppm_y', 'height', 'volume'])
+        csv = tmp_path / 'series_analysis_tidy.csv'
+        df.to_csv(csv, index=False)
+        with pytest.raises(ValueError):
+            run_kd_analysis_with_params({
+                'input_csv_file': str(csv), 'output_dir': str(tmp_path), 'output_prefix': 'k',
+                'concentrations': [0.0, 1.0, 2.0], 'protein_conc': P0,
+                'observables': ['intensity'], 'intensity_scales': [1.0, 2.0]})  # only 2 scales
+
+
 class TestRunAnalysis:
     def test_end_to_end_writes_json(self, tmp_path):
         from kd_models import csp_model

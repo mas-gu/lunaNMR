@@ -87,9 +87,11 @@ class KdTitrationPage(BasePage):
         sec2 = self._make_section("Binding parameters")
         b2 = sec2.layout()
 
-        # Per-point ligand concentration mapping (populated when a CSV is loaded).
-        conc_hdr = create_label("Ligand concentration [L] for each titration point "
-                                "(load a CSV to populate; defaults to the point label):")
+        # Per-point ligand concentration + intensity scale (populated on CSV load).
+        conc_hdr = create_label(
+            "Per titration point: ligand concentration [L], and an optional intensity "
+            "scale (× height/volume only, e.g. ×2 or ×0.5 to correct a spectrum acquired "
+            "with a different number of scans). Positions/CSP are never scaled.")
         conc_hdr.setStyleSheet(f"color: {SECONDARY_TEXT};")
         conc_hdr.setWordWrap(True)
         b2.addWidget(conc_hdr)
@@ -98,6 +100,7 @@ class KdTitrationPage(BasePage):
         self.conc_form.setContentsMargins(SPACING_SM, 0, SPACING_SM, 0)
         b2.addWidget(self.conc_form_frame)
         self.conc_spins = []
+        self.scale_spins = []
 
         b2.addWidget(self._make_field_row("Protein concentration [P]₀",
                                           self._make_float_spin("p0_spin", 0.001, 1e6, 50.0, decimals=3, step=10.0)))
@@ -229,23 +232,40 @@ class KdTitrationPage(BasePage):
             self.points_label.setText(f"Could not read titration points: {e}")
 
     def _build_conc_rows(self, points):
-        """One labelled concentration field per titration point, prefilled with the
-        point label so the user maps [L] to each spectrum explicitly."""
+        """Per titration point: a concentration field (prefilled with the point
+        label) and an intensity-scale field (default 1.0)."""
         while self.conc_form.rowCount():
             self.conc_form.removeRow(0)
         self.conc_form.setVerticalSpacing(SPACING_XS)
         self.conc_spins = []
+        self.scale_spins = []
         for p in points:
-            spin = QDoubleSpinBox()
-            spin.setRange(0.0, 1e9)
-            spin.setDecimals(4)
-            spin.setSingleStep(1.0)
-            spin.setValue(float(p))
-            spin.setMinimumHeight(26)
-            spin.setMinimumWidth(140)
-            spin.setMaximumWidth(180)
-            self.conc_form.addRow(create_label(f"Titration point  {p}   →   [L]"), spin)
-            self.conc_spins.append(spin)
+            conc = QDoubleSpinBox()
+            conc.setRange(0.0, 1e9)
+            conc.setDecimals(4)
+            conc.setSingleStep(1.0)
+            conc.setValue(float(p))
+            conc.setMinimumHeight(26)
+            conc.setMaximumWidth(140)
+            scale = QDoubleSpinBox()
+            scale.setRange(1e-6, 1e9)
+            scale.setDecimals(3)
+            scale.setSingleStep(0.5)
+            scale.setValue(1.0)
+            scale.setMinimumHeight(26)
+            scale.setMaximumWidth(100)
+            cell = QWidget()
+            h = QHBoxLayout(cell)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(SPACING_SM)
+            h.addWidget(QLabel("[L]"))
+            h.addWidget(conc)
+            h.addWidget(QLabel("× int"))
+            h.addWidget(scale)
+            h.addStretch()
+            self.conc_form.addRow(create_label(f"Point  {p}"), cell)
+            self.conc_spins.append(conc)
+            self.scale_spins.append(scale)
         # Let the form take its natural (tall) height inside the page scroll area.
         self.conc_form_frame.setMinimumHeight(self.conc_form.sizeHint().height())
 
@@ -262,6 +282,13 @@ class KdTitrationPage(BasePage):
         if not self.conc_spins:
             return None
         return [s.value() for s in self.conc_spins]
+
+    def _parse_intensity_scales(self):
+        if not self.scale_spins:
+            return None
+        scales = [s.value() for s in self.scale_spins]
+        # only pass them through when the user actually changed something
+        return scales if any(abs(s - 1.0) > 1e-9 for s in scales) else None
 
     def _start_analysis(self):
         if not self.input_file or not os.path.exists(self.input_file):
@@ -284,6 +311,7 @@ class KdTitrationPage(BasePage):
             output_dir=self.output_dir,
             output_prefix="kd",
             concentrations=concs,
+            intensity_scales=self._parse_intensity_scales(),
             protein_conc=float(self.p0_spin.value()),
             alpha=float(self.alpha_spin.value()),
             observables=observables,
