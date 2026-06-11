@@ -69,3 +69,18 @@ class TestTitrationSequencing:
         mapping = DelayExtractor(mode="titration").build_column_mapping(files)
         cols = sorted(mapping.values())
         assert cols == ["0.5", "0.5_2"]
+
+    def test_two_decimal_titration_point_keeps_precision(self):
+        # 0o15 -> 0.15 must NOT be truncated to "0.1" in the column name,
+        # which would also collide with a real 0.1 point.
+        ext = DelayExtractor(mode="titration")
+        assert ext.get_column_name(0.15, 1) == "0.15"
+        mapping = ext.build_column_mapping(["x_0o15.ft", "x_0o1.ft"])
+        assert mapping["x_0o15.ft"] == "0.15"
+        assert mapping["x_0o1.ft"] == "0.1"
+
+    def test_time_mode_column_names_unchanged(self):
+        ext = DelayExtractor()  # time
+        assert ext.get_column_name(50.0, 1) == "50"
+        assert ext.get_column_name(100.0, 2) == "100_2"
+        assert ext.get_column_name(12.5, 1) == "12.5"

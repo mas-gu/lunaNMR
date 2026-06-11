@@ -240,17 +240,18 @@ class DelayExtractor:
         Subsequent occurrences append the sequence number (e.g., "50_2", "50_3").
 
         Args:
-            delay_ms: Delay value in milliseconds
+            delay_ms: Extracted value (delay in ms, or titration point)
             sequence: Sequence number (1 for first occurrence, 2 for second, etc.)
 
         Returns:
             Unique column name string
         """
-        # Format delay: integer if whole number, else one decimal place
+        # Format with minimal digits: whole numbers as ints ("50"), fractional
+        # values at full precision ("0.15") so titration points are not truncated.
         if delay_ms == int(delay_ms):
             delay_str = str(int(delay_ms))
         else:
-            delay_str = f"{delay_ms:.1f}"
+            delay_str = f"{delay_ms:g}"
 
         if sequence == 1:
             return delay_str
