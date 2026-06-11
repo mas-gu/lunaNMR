@@ -102,6 +102,12 @@ class PS2DConfig:
             'search_window_f1': 0.05,      # 15N search window (ppm)
             'search_window_f2': 0.02,      # 1H search window (ppm)
 
+            # Per-step search windows for titration series (peaks shift with
+            # ligand concentration). Enlarged so cascade detection can follow a
+            # moving peak from one titration point to the next. Tunable.
+            'titration_search_window_f1': 1.0,    # 15N per-step window (ppm)
+            'titration_search_window_f2': 0.10,   # 1H per-step window (ppm)
+
             # ================================================================
             # Position bounds (fitting movement limits)
             # ================================================================
@@ -187,6 +193,12 @@ class PS2DConfig:
             # Maximum distance from reference peak to search for detected peak
             'search_window_f1': 0.05,      # 13C search window (ppm)
             'search_window_f2': 0.02,      # 1H search window (ppm)
+
+            # Per-step search windows for titration series (peaks shift with
+            # ligand concentration). Enlarged so cascade detection can follow a
+            # moving peak from one titration point to the next. Tunable.
+            'titration_search_window_f1': 1.0,    # 13C per-step window (ppm)
+            'titration_search_window_f2': 0.10,   # 1H per-step window (ppm)
 
             # ================================================================
             # Position bounds (fitting movement limits)

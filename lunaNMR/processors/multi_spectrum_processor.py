@@ -20,6 +20,35 @@ from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
 from lunaNMR.utils.parameter_manager import NMRParameterManager
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
+
+def resolve_titration_tracking(series_mode, peak_source_mode, enable_drift_limit, config):
+    """Resolve peak-tracking settings for a series run.
+
+    Titration peaks shift position as ligand is added, so the relaxation defaults
+    (which clamp peaks to the free-state position and use a tight search window)
+    actively suppress tracking. In titration mode this forces cascade propagation
+    (the only mode that follows peaks spectrum-to-spectrum), disables the absolute
+    drift limit, and returns enlarged nucleus-adaptive per-step search windows.
+
+    Time mode is a pass-through that preserves the user's choices.
+
+    Returns:
+        (peak_source_mode, enable_drift_limit, search_window_x, search_window_y, overridden).
+        The search windows are None when no override applies (caller keeps GUI values).
+    """
+    if series_mode != "titration":
+        return peak_source_mode, enable_drift_limit, None, None, False
+
+    # x = 1H (F2), y = 15N/13C (F1)
+    return (
+        "cascade",
+        False,
+        config.titration_search_window_f2,
+        config.titration_search_window_f1,
+        True,
+    )
+
+
 class MultiSpectrumProcessor:
     """
     Completely independent multi-spectrum processor.
@@ -131,10 +160,22 @@ class MultiSpectrumProcessor:
         self.output_folder = output_folder
         self.progress_callback = progress_callback
         self.processing_active = True
+        self.series_mode = series_mode  # 'time' or 'titration' for value extraction
+
+        # Titration peaks shift position as ligand is added; the relaxation
+        # defaults suppress that. Force cascade propagation (the only mode that
+        # tracks peaks spectrum-to-spectrum) and flag drift-off + wider windows
+        # for the per-spectrum path below.
+        from lunaNMR.core.ps2d_config import get_ps2d_config
+        resolved_mode, _, _, _, self.titration_tracking = resolve_titration_tracking(
+            series_mode, peak_source_mode, True, get_ps2d_config())
+        if self.titration_tracking and peak_source_mode != resolved_mode:
+            log_info(f"Titration mode: forcing '{resolved_mode}' tracking (was '{peak_source_mode}')")
+        peak_source_mode = resolved_mode
+
         self.peak_source_mode = peak_source_mode  # Store for cascade mode
         self.previous_fitted_results = None  # Initialize cascade tracking
         self.extract_delays = extract_delays  # Store for output file generation
-        self.series_mode = series_mode  # 'time' or 'titration' for value extraction
         self.nmr_files = nmr_files  # Store for ML training data collection
         self.sn_from_gui_locked = sn_from_gui_locked  # Store locked threshold for series
         self.peak_list_contour_min = peak_list_contour_min  # Store for Peak List mode detection
@@ -516,6 +557,18 @@ class MultiSpectrumProcessor:
             # Flat structure
             param_manager.current_params = self.voigt_params.copy()
 
+        # Titration mode: enlarge the per-step search window (nucleus-adaptive)
+        # so cascade detection follows a moving peak from one point to the next.
+        if getattr(self, 'titration_tracking', False):
+            from lunaNMR.core.ps2d_config import get_ps2d_config
+            _, _, win_x, win_y, _ = resolve_titration_tracking(
+                'titration', self.peak_source_mode, False, get_ps2d_config())
+            param_manager.current_params['search_window_x'] = win_x
+            param_manager.current_params['search_window_y'] = win_y
+            if spectrum_number == 1:
+                log_info(f"Titration mode: search window enlarged to X=±{win_x} ppm, "
+                         f"Y=±{win_y} ppm; absolute drift limit disabled")
+
         # Create SingleSpectrumProcessor instance
         single_processor = SingleSpectrumProcessor(self.integrator, param_manager)
 
@@ -549,6 +602,11 @@ class MultiSpectrumProcessor:
             enable_cascade_drift_limit = self.voigt_params['processing_options'].get('enable_cascade_drift_limit', True)
         else:
             enable_cascade_drift_limit = self.voigt_params.get('enable_cascade_drift_limit', True)
+
+        # Titration peaks move on purpose; the absolute (free-state) drift clamp
+        # would pull them back. Disable it regardless of the GUI checkbox.
+        if getattr(self, 'titration_tracking', False):
+            enable_cascade_drift_limit = False
 
         # Only pass reference positions if cascade/independent mode AND drift limit enabled
         use_drift_limit = (self.peak_source_mode in ['cascade', 'independent'] and enable_cascade_drift_limit)
