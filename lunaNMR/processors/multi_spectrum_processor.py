@@ -102,6 +102,7 @@ class MultiSpectrumProcessor:
                           output_folder: str, peak_source_mode: str = 'reference',
                           progress_callback: Optional[callable] = None,
                           extract_delays: bool = False,
+                          series_mode: str = "time",
                           pre_detected_peaks: Optional[List[Dict]] = None,
                           sn_from_gui_locked: Optional[Dict] = None,
                           peak_list_contour_min: Optional[float] = None,
@@ -116,7 +117,8 @@ class MultiSpectrumProcessor:
             output_folder: Folder for output files
             peak_source_mode: 'reference', 'detected', or 'cascade'
             progress_callback: Optional callback for progress updates
-            extract_delays: If True, extract delay values from filenames and use as headers
+            extract_delays: If True, extract per-spectrum values from filenames and use as headers
+            series_mode: 'time' (read _50ms/_1s delays) or 'titration' (read _1o0/_0o5 points)
             pre_detected_peaks: Optional list of already-detected peaks from GUI (skips detection for spectrum 1)
             sn_from_gui_locked: Optional dict with {'absolute_threshold': float, 'contour_min': float}
                                If provided, all spectra use same absolute threshold (no rescaling)
@@ -132,6 +134,7 @@ class MultiSpectrumProcessor:
         self.peak_source_mode = peak_source_mode  # Store for cascade mode
         self.previous_fitted_results = None  # Initialize cascade tracking
         self.extract_delays = extract_delays  # Store for output file generation
+        self.series_mode = series_mode  # 'time' or 'titration' for value extraction
         self.nmr_files = nmr_files  # Store for ML training data collection
         self.sn_from_gui_locked = sn_from_gui_locked  # Store locked threshold for series
         self.peak_list_contour_min = peak_list_contour_min  # Store for Peak List mode detection
@@ -158,7 +161,7 @@ class MultiSpectrumProcessor:
         self.delay_mapping = {}
         if extract_delays:
             from lunaNMR.utils.delay_extractor import DelayExtractor
-            extractor = DelayExtractor()
+            extractor = DelayExtractor(mode=series_mode)
 
             # Get filenames
             filenames = [os.path.basename(f) for f in nmr_files]
@@ -2000,8 +2003,8 @@ class BatchResults:
         if tidy_df.empty:
             return pd.DataFrame(columns=['Assignment'])
 
-        # Extract delay values from spectrum names and create mapping
-        extractor = DelayExtractor()
+        # Extract values from spectrum names and create mapping
+        extractor = DelayExtractor(mode=getattr(self, 'series_mode', 'time'))
         spectrum_names = tidy_df['spectrum_name'].unique()
 
         # Build mapping: spectrum_name -> numeric delay column name
@@ -2009,7 +2012,7 @@ class BatchResults:
         delay_counts = {}  # Track duplicate delays
 
         for spec_name in spectrum_names:
-            delay_ms = extractor.extract_delay_ms(spec_name)
+            delay_ms = extractor.extract_value(spec_name)
             if delay_ms is not None:
                 # Format as integer if whole number, else with decimal
                 delay_str = str(int(delay_ms)) if delay_ms == int(delay_ms) else str(delay_ms)

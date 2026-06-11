@@ -13,7 +13,8 @@ import pandas as pd
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QRadioButton,
     QGroupBox, QListWidget, QListWidgetItem, QProgressBar,
-    QTextEdit, QButtonGroup, QMessageBox, QFileDialog, QCheckBox, QFrame
+    QTextEdit, QButtonGroup, QMessageBox, QFileDialog, QCheckBox, QFrame,
+    QComboBox
 )
 from PySide6.QtCore import Qt, Signal, QThread, QObject
 
@@ -56,7 +57,8 @@ class ProcessingWorker(QObject):
     error = Signal(str)
 
     def __init__(self, processor, nmr_files, reference_peaks, peak_source_mode, voigt_params,
-                 extract_delays: bool = False, pre_detected_peaks=None, sn_from_gui_locked=None,
+                 extract_delays: bool = False, series_mode: str = "time",
+                 pre_detected_peaks=None, sn_from_gui_locked=None,
                  peak_list_contour_min: float = None, lock_detection_threshold: bool = True):
         super().__init__()
         self.processor = processor
@@ -65,6 +67,7 @@ class ProcessingWorker(QObject):
         self.peak_source_mode = peak_source_mode
         self.voigt_params = voigt_params
         self.extract_delays = extract_delays
+        self.series_mode = series_mode
         self.pre_detected_peaks = pre_detected_peaks
         self.sn_from_gui_locked = sn_from_gui_locked
         self.peak_list_contour_min = peak_list_contour_min
@@ -128,6 +131,7 @@ class ProcessingWorker(QObject):
                 peak_source_mode=self.peak_source_mode,
                 progress_callback=progress_callback,
                 extract_delays=self.extract_delays,
+                series_mode=self.series_mode,
                 pre_detected_peaks=self.pre_detected_peaks,
                 sn_from_gui_locked=self.sn_from_gui_locked,
                 peak_list_contour_min=self.peak_list_contour_min,
@@ -337,17 +341,26 @@ class SeriesIntegrationDialog(BaseDialog):
         """)
         layout.addWidget(self.file_list)
 
-        # Bottom row with Extract delays checkbox and Browse button
+        # Bottom row with X-axis extraction mode and Browse button
         bottom_layout = QHBoxLayout()
 
-        # Extract delays checkbox (for relaxation experiments)
-        self.extract_delays_checkbox = QCheckBox("Extract delays from filenames")
-        self.extract_delays_checkbox.setToolTip(
-            "For relaxation experiments: extract delay values from filenames (e.g., T1_50ms.ft → 50)\n"
-            "and use as column headers in output. Improves compatibility with DynamiXs."
+        # X-axis value extracted from filenames: off / time series / titration
+        xaxis_label = QLabel("X-axis from filenames:")
+        xaxis_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {PRIMARY_TEXT};")
+        bottom_layout.addWidget(xaxis_label)
+
+        self.xaxis_mode_combo = QComboBox()
+        # (label, mode) — index 0 is off; modes match DelayExtractor(mode=...)
+        for text in ("Off (use filenames)", "Time series (ms/s)", "Titration point"):
+            self.xaxis_mode_combo.addItem(text)
+        self.xaxis_mode_combo.setToolTip(
+            "Off: use spectrum filenames as output column headers.\n"
+            "Time series: read _50ms / _1s delays and use as headers (DynamiXs-ready).\n"
+            "Titration point: read the _1o0 / _0o5 suffix (o means a decimal point)\n"
+            "and plot intensities directly against the titration value."
         )
-        self.extract_delays_checkbox.toggled.connect(self._on_extract_delays_toggled)
-        bottom_layout.addWidget(self.extract_delays_checkbox)
+        self.xaxis_mode_combo.currentIndexChanged.connect(self._on_xaxis_mode_changed)
+        bottom_layout.addWidget(self.xaxis_mode_combo)
 
         bottom_layout.addStretch()
 
@@ -635,44 +648,53 @@ class SeriesIntegrationDialog(BaseDialog):
 
         return sorted(files, key=natural_sort_key)
 
-    def _on_extract_delays_toggled(self, checked: bool):
-        """Handle extract delays checkbox toggle."""
-        if checked:
-            print("✓ Extract delays ENABLED - Will use delay values as column headers")
-        else:
-            print("○ Extract delays DISABLED - Will use spectrum filenames as headers")
+    def _xaxis_enabled(self) -> bool:
+        """True when an x-axis value (time or titration) is extracted from filenames."""
+        return self.xaxis_mode_combo.currentIndex() > 0
+
+    def _series_mode(self) -> str:
+        """Selected filename-value mode: 'time' or 'titration' (default 'time')."""
+        return "titration" if self.xaxis_mode_combo.currentIndex() == 2 else "time"
+
+    def _on_xaxis_mode_changed(self, index: int):
+        """Handle x-axis extraction mode change (off / time / titration)."""
+        if not self._xaxis_enabled():
             self.delay_info_label.setVisible(False)
 
         # Re-populate file list to show correct order
         self._refresh_file_list_display()
 
     def _update_delay_info(self):
-        """Update the delay info label based on current file list."""
-        if not self.extract_delays_checkbox.isChecked():
+        """Update the value-extraction info label based on current file list."""
+        if not self._xaxis_enabled():
             self.delay_info_label.setVisible(False)
             return
 
+        titration = self._series_mode() == "titration"
+        noun = "titration points" if titration else "delays"
+        pattern_hint = "_1o0 or _0o5" if titration else "_50ms or _1s"
+        unit = "" if titration else "ms"
+
         if not self.nmr_files:
-            self.delay_info_label.setText("No files to extract delays from")
+            self.delay_info_label.setText(f"No files to extract {noun} from")
             self.delay_info_label.setVisible(True)
             return
 
-        # Use delay extractor to get delay info
         from lunaNMR.utils.delay_extractor import DelayExtractor
-        extractor = DelayExtractor()
+        extractor = DelayExtractor(mode=self._series_mode())
 
-        files_with_delays = extractor.sort_files_by_delay(self.nmr_files)
+        files_with_values = extractor.sort_files_by_delay(self.nmr_files)
 
-        if not files_with_delays:
-            self.delay_info_label.setText("⚠ No delays found in filenames (expected pattern: _50ms or _1s)")
+        if not files_with_values:
+            self.delay_info_label.setText(f"⚠ No {noun} found in filenames (expected pattern: {pattern_hint})")
             self.delay_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: #FF6B6B; font-style: italic;")
         else:
-            delays = [d for _, d in files_with_delays]
-            missing = len(self.nmr_files) - len(files_with_delays)
+            values = [d for _, d in files_with_values]
+            missing = len(self.nmr_files) - len(files_with_values)
 
-            info_text = f"✓ Found {len(delays)} delays: {min(delays):.0f}ms - {max(delays):.0f}ms"
+            info_text = f"✓ Found {len(values)} {noun}: {min(values):g}{unit} - {max(values):g}{unit}"
             if missing > 0:
-                info_text += f" ({missing} files without delays)"
+                info_text += f" ({missing} files without {noun})"
 
             self.delay_info_label.setText(info_text)
             self.delay_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-style: italic;")
@@ -682,31 +704,32 @@ class SeriesIntegrationDialog(BaseDialog):
     def _refresh_file_list_display(self):
         """Refresh file list display with correct ordering.
 
-        When extract delays is enabled, files are sorted by delay value.
-        Otherwise, files are sorted alphabetically.
+        When x-axis extraction is enabled, files are sorted by their extracted
+        value (delay or titration point). Otherwise, files are sorted alphabetically.
         """
         if not self.nmr_files:
             return
 
         self.file_list.clear()
 
-        if self.extract_delays_checkbox.isChecked():
-            # Sort by delay value using delay extractor
-            from lunaNMR.utils.delay_extractor import DelayExtractor
-            extractor = DelayExtractor()
+        if self._xaxis_enabled():
+            titration = self._series_mode() == "titration"
+            unit = "" if titration else "ms"
 
-            # Get files sorted by delay with sequence numbers
+            from lunaNMR.utils.delay_extractor import DelayExtractor
+            extractor = DelayExtractor(mode=self._series_mode())
+
+            # Get files sorted by extracted value with sequence numbers
             files_with_sequence = extractor.sort_files_with_sequence(self.nmr_files)
 
             # Update nmr_files to be in sorted order
             self.nmr_files = [f for f, _, _ in files_with_sequence]
 
-            # Populate list with delay info
-            for filepath, delay_ms, sequence in files_with_sequence:
+            # Populate list with the extracted value
+            for filepath, value, sequence in files_with_sequence:
                 basename = os.path.basename(filepath)
-                # Show delay value next to filename
-                col_name = extractor.get_column_name(delay_ms, sequence)
-                display_text = f"{basename}  →  {col_name}ms"
+                col_name = extractor.get_column_name(value, sequence)
+                display_text = f"{basename}  →  {col_name}{unit}"
                 item = QListWidgetItem(display_text)
                 item.setData(Qt.UserRole, filepath)
                 self.file_list.addItem(item)
@@ -883,8 +906,9 @@ class SeriesIntegrationDialog(BaseDialog):
         # Get parameters
         voigt_params = self._get_voigt_params()
 
-        # Get extract delays option
-        extract_delays = self.extract_delays_checkbox.isChecked()
+        # Get x-axis extraction options (off / time / titration)
+        extract_delays = self._xaxis_enabled()
+        series_mode = self._series_mode()
 
         # Update UI
         self.start_btn.setEnabled(False)
@@ -907,7 +931,10 @@ class SeriesIntegrationDialog(BaseDialog):
         self._is_paused = False
         self.stats_label.setText("Starting...")
 
-        delay_msg = " (extract delays enabled)" if extract_delays else ""
+        if extract_delays:
+            delay_msg = f" ({series_mode} x-axis enabled)"
+        else:
+            delay_msg = ""
         self._log(f"Starting series integration: {len(self.nmr_files)} spectra, {len(reference_peaks)} peaks{delay_msg}")
 
         # Create worker and thread
@@ -915,6 +942,7 @@ class SeriesIntegrationDialog(BaseDialog):
         self.worker = ProcessingWorker(
             None, self.nmr_files, reference_peaks, peak_source_mode, voigt_params,
             extract_delays=extract_delays,
+            series_mode=series_mode,
             pre_detected_peaks=pre_detected_peaks,
             sn_from_gui_locked=sn_from_gui_locked,
             peak_list_contour_min=peak_list_contour_min,
@@ -1162,23 +1190,23 @@ class SeriesIntegrationDialog(BaseDialog):
 
                 all_results.append(result_copy)
 
-        # Sort results: by delay if extract_delays was enabled, otherwise by natural sort
-        if self.extract_delays_checkbox.isChecked():
-            # Sort by delay value, handling duplicates (e.g., "50", "50_2", "100")
+        # Sort results: by extracted value if enabled, otherwise by natural sort
+        if self._xaxis_enabled():
+            # Sort by extracted value, handling duplicates (e.g., "50", "50_2", "100")
             from lunaNMR.utils.delay_extractor import DelayExtractor
-            extractor = DelayExtractor()
+            extractor = DelayExtractor(mode=self._series_mode())
 
             def delay_sort_key(result):
                 name = result.get('spectrum_name', '')
-                # Parse delay from column name format (e.g., "50", "50_2")
+                # Parse value from column name format (e.g., "50", "50_2")
                 parsed = extractor.parse_column_name(str(name))
                 if parsed:
-                    delay, sequence = parsed
-                    return (delay, sequence, str(name))
-                # Try extracting from filename pattern
-                delay = extractor.extract_delay_ms(str(name))
-                if delay is not None:
-                    return (delay, 1, str(name))
+                    value, sequence = parsed
+                    return (value, sequence, str(name))
+                # Try extracting from filename pattern (mode-aware)
+                value = extractor.extract_value(str(name))
+                if value is not None:
+                    return (value, 1, str(name))
                 # Put unrecognized at the end
                 return (float('inf'), 0, str(name))
 
