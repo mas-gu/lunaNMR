@@ -405,6 +405,20 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         logger.debug(f"Selected initial assignment '{assignment}' (index {target_idx}) in Peak Mode")
 
+    def _peak_center(self, peak):
+        """Return (x_ppm, y_ppm) for a fitted peak, or (None, None) if unavailable.
+
+        x is F2 (1H), y is F1 (15N/13C). Tries the several position key
+        conventions used across the fit/JSON formats.
+        """
+        if not peak:
+            return None, None
+        cx = peak.get('center_x') or peak.get('peak_x') or peak.get('ppm_x') or peak.get('pos_f2')
+        cy = peak.get('center_y') or peak.get('peak_y') or peak.get('ppm_y') or peak.get('pos_f1')
+        if cx is None or cy is None:
+            return None, None
+        return _to_scalar(cx), _to_scalar(cy)
+
     def _get_fitted_peaks(self, spec_idx: int) -> List[Dict]:
         """Get fitted peaks for a spectrum.
 
@@ -2448,10 +2462,12 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         # Find the peak index in this spectrum's peak list
         fitted_peaks = self._get_fitted_peaks(spec_idx)
+        matched_peak = None
         for i, p in enumerate(fitted_peaks):
             p_assignment = p.get('assignment', p.get('Assignment', ''))
             if p_assignment == assignment:
                 self.selected_peak_index = i
+                matched_peak = p
                 break
 
         # Update intensity decay widget highlight
@@ -2467,13 +2483,20 @@ class MultiSpectrumViewerDialog(BaseDialog):
         else:
             self.voigt_3d_plotter.clear_fixed_z_limits()
 
-        # Apply reference x/y if locked (for position comparison across spectra)
+        # Apply locked x/y window if requested. Keep the reference window SIZE
+        # (consistent zoom) but re-center it on this spectrum's fitted peak, so a
+        # peak that shifts across a titration stays in frame instead of sliding
+        # out of a window pinned to the reference position.
         if self.lock_xy_to_reference and self.reference_x_min is not None:
+            half_x = (self.reference_x_max - self.reference_x_min) / 2.0
+            half_y = (self.reference_y_max - self.reference_y_min) / 2.0
+            cx, cy = self._peak_center(matched_peak)
+            if cx is None:
+                # No fitted position this spectrum: fall back to the reference window
+                cx = (self.reference_x_min + self.reference_x_max) / 2.0
+                cy = (self.reference_y_min + self.reference_y_max) / 2.0
             self.voigt_3d_plotter.set_fixed_xy_limits(
-                self.reference_x_min,
-                self.reference_x_max,
-                self.reference_y_min,
-                self.reference_y_max
+                cx - half_x, cx + half_x, cy - half_y, cy + half_y
             )
         else:
             self.voigt_3d_plotter.clear_fixed_xy_limits()
