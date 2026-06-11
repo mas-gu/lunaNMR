@@ -86,6 +86,37 @@ class TestTitrationWindow:
         assert self._proc(None)._titration_window(0.3, 0.05) == (0.3, 0.05)
 
 
+class TestCarryForwardSeed:
+    """A failed peak keeps its last-good position as the seed for the next spectrum."""
+
+    @staticmethod
+    def _proc():
+        return MultiSpectrumProcessor.__new__(MultiSpectrumProcessor)
+
+    def test_failed_peak_carries_prior_position(self):
+        prior = [{'assignment': 'A', 'success': True, 'ppm_x': 8.0}]
+        current = [{'assignment': 'A', 'success': False, 'ppm_x': 0.0}]
+        seed = self._proc()._carry_forward_seed(current, prior)
+        assert seed[0]['ppm_x'] == 8.0
+        assert seed[0]['success'] is True
+
+    def test_successful_peak_keeps_current(self):
+        prior = [{'assignment': 'A', 'success': True, 'ppm_x': 8.0}]
+        current = [{'assignment': 'A', 'success': True, 'ppm_x': 8.2}]
+        seed = self._proc()._carry_forward_seed(current, prior)
+        assert seed[0]['ppm_x'] == 8.2
+
+    def test_no_prior_returns_current(self):
+        current = [{'assignment': 'A', 'success': False, 'ppm_x': 0.0}]
+        assert self._proc()._carry_forward_seed(current, None) is current
+
+    def test_failed_with_no_prior_entry_kept_as_is(self):
+        prior = [{'assignment': 'B', 'success': True, 'ppm_x': 7.0}]
+        current = [{'assignment': 'A', 'success': False, 'ppm_x': 0.0}]
+        seed = self._proc()._carry_forward_seed(current, prior)
+        assert seed[0]['assignment'] == 'A' and seed[0]['success'] is False
+
+
 class TestProcessorWiring:
     """process_nmr_series applies the titration policy at setup."""
 

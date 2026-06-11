@@ -127,6 +127,35 @@ class MultiSpectrumProcessor:
         if 'gui_params' in self.voigt_params:
             self.collect_training_data = self.voigt_params['gui_params'].get('collect_training_data', False)
 
+    def _carry_forward_seed(self, current, prior):
+        """Build the cascade seed: keep each successful fit, but for a failed peak
+        reuse its last-good entry from the prior seed so its position survives a
+        transient failure. Falls through to the current entry if there is no prior.
+        """
+        if not prior:
+            return current
+        prior_by_assignment = {}
+        for r in prior:
+            a = r.get('assignment') if r else None
+            if a is not None:
+                prior_by_assignment[str(a)] = r
+        seed = []
+        carried = 0
+        for r in current:
+            if r and r.get('success', False):
+                seed.append(r)
+                continue
+            a = str(r.get('assignment')) if r else None
+            fallback = prior_by_assignment.get(a)
+            if fallback is not None:
+                seed.append(fallback)   # last-good position
+                carried += 1
+            else:
+                seed.append(r)
+        if carried:
+            log_info(f"Cascade: kept last-good position for {carried} failed peak(s)")
+        return seed
+
     def _titration_window(self, fallback_f1, fallback_f2):
         """Per-step tracking window = factor x reference-spectrum average linewidth.
 
@@ -778,8 +807,13 @@ class MultiSpectrumProcessor:
         success_rate = (successful_fits / total_peaks * 100) if total_peaks > 0 else 0
         log_progress(f"Spectrum {spectrum_number} complete: {successful_fits}/{total_peaks} successful ({success_rate:.1f}%)")
 
-        # Store fitted results for next spectrum (used by all modes now)
-        self.previous_fitted_results = fitted_results
+        # Store fitted results to seed the next spectrum (cascade). For peaks
+        # whose fit FAILED here, carry the last-good position forward instead of
+        # seeding from a collapsed position — otherwise one bad spectrum strands
+        # the peak for the rest of the series. Only the seed is affected; the
+        # reported results above keep the real (failed) values.
+        self.previous_fitted_results = self._carry_forward_seed(
+            fitted_results, self.previous_fitted_results)
 
         # Collect ML training data if enabled
         if self.collect_training_data and self.training_collector is not None:
