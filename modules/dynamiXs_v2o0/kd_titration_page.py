@@ -202,8 +202,19 @@ class KdTitrationPage(BasePage):
             from kd_input import load_titration
             points, residues = load_titration(path)
             self.detected_points = points
+            # CSP needs per-point positions; intensity matrices have none.
+            import math
+            has_positions = any(
+                any(not (isinstance(v, float) and math.isnan(v)) for v in r.get('ppm_x', []))
+                for r in residues.values())
+            note = "" if has_positions else "  —  intensity only (no positions → CSP unavailable)"
             self.points_label.setText(
-                f"Detected {len(points)} points  ({len(residues)} residues)")
+                f"Detected {len(points)} points  ({len(residues)} residues){note}")
+            if not has_positions:
+                self.obs_combo.setCurrentIndex(2)  # Intensity only
+            if not points:
+                self.points_label.setText(
+                    f"Detected 0 points — is this a titration series CSV? ({len(residues)} residues)")
             self._build_conc_rows(points)
         except Exception as e:
             self.points_label.setText(f"Could not read titration points: {e}")

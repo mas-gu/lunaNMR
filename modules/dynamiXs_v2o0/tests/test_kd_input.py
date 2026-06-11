@@ -75,6 +75,25 @@ class TestLoadTracking:
         assert pts2 == [0.0, 0.5, 1.0]
 
 
+class TestLoadIntensityMatrix:
+    def test_matrix_rows_residues_cols_points(self, tmp_path):
+        from kd_input import load_titration
+        # peak_intensity matrix: Peak_Number, Assignment, Reference_X/Y, then point cols
+        df = pd.DataFrame([
+            {'Peak_Number': 1, 'Assignment': 'R1', 'Reference_X': 8.0, 'Reference_Y': 120.0,
+             '0': 1000.0, '0.5': 700.0, '1': 400.0},
+            {'Peak_Number': 2, 'Assignment': 'R2', 'Reference_X': 7.0, 'Reference_Y': 118.0,
+             '0': 2000.0, '0.5': 2000.0, '1': 2000.0},
+        ])
+        p = tmp_path / "peak_intensity_matrix.csv"
+        df.to_csv(p, index=False)
+        points, residues = load_titration(str(p))
+        assert points == [0.0, 0.5, 1.0]
+        assert residues['R1']['height'] == [1000.0, 700.0, 400.0]
+        # no positions in a matrix -> NaN (CSP unavailable)
+        assert all(np.isnan(v) for v in residues['R1']['ppm_x'])
+
+
 class TestCspSeries:
     def test_csp_series_relative_to_first_point(self, tmp_path):
         from kd_input import load_titration_tidy, csp_series

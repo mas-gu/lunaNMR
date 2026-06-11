@@ -78,12 +78,38 @@ def load_titration_tracking(csv_path):
     return points, residues
 
 
+def load_intensity_matrix(csv_path):
+    """Load a peak_intensity/volume matrix: rows = residues, columns = point labels.
+
+    These files (peak_intensity_matrix.csv, peak_volume_matrix.csv,
+    peak_intensity_detected_matrix.csv) hold only intensities — no per-point
+    positions — so they support intensity Kd but not CSP.
+    """
+    df = pd.read_csv(csv_path)
+    point_cols = [c for c in df.columns if _to_point(c) is not None]
+    point_cols.sort(key=_to_point)
+    points = [_to_point(c) for c in point_cols]
+
+    residues = {}
+    for _, row in df.iterrows():
+        a = str(row.get('Assignment', '')).strip()
+        if not a or a.lower() in ('nan', 'dummy', ''):
+            continue
+        vals = [float(row[c]) if pd.notna(row[c]) else np.nan for c in point_cols]
+        nan = [np.nan] * len(points)
+        residues[a] = {'points': list(points), 'ppm_x': list(nan), 'ppm_y': list(nan),
+                       'height': vals, 'volume': list(vals)}
+    return points, residues
+
+
 def load_titration(csv_path):
-    """Auto-detect tidy vs tracking format and load it."""
-    head = pd.read_csv(csv_path, nrows=0)
-    if 'spectrum_name' in head.columns:
+    """Auto-detect input format (tidy / tracking / intensity matrix) and load it."""
+    cols = list(pd.read_csv(csv_path, nrows=0).columns)
+    if 'spectrum_name' in cols:
         return load_titration_tidy(csv_path)
-    return load_titration_tracking(csv_path)
+    if any(c.endswith('_Position_X') for c in cols):
+        return load_titration_tracking(csv_path)
+    return load_intensity_matrix(csv_path)
 
 
 def csp_series(residue, alpha=0.14):
