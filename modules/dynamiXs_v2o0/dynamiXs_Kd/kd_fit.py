@@ -206,6 +206,7 @@ def run_kd_analysis_with_params(params, progress_callback=None):
     data = {
         'metadata': {'analysis': 'Kd_titration', 'protein_conc': P0, 'alpha': alpha,
                      'concentrations': concs, 'points': points,
+                     'intensity_scales': list(scales) if scales else None,
                      'observables': observables, 'n_bootstrap': n_boot},
         'fits': fits, 'global': global_fit,
     }

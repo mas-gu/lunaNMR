@@ -264,6 +264,7 @@ class KdTitrationFitViewer(QMainWindow):
         if f is None:
             return
         obs = self._obs_key()
+        ok = False
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             ok = self._refit_residue(f, obs)
@@ -272,6 +273,11 @@ class KdTitrationFitViewer(QMainWindow):
                 self._refresh()
         finally:
             QApplication.restoreOverrideCursor()
+        if not ok:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Refit failed",
+                                "Could not refit — too few points left after exclusion "
+                                "(need at least 3), or the fit did not converge.")
 
     def _on_reset(self):
         f = self._current_residue()
