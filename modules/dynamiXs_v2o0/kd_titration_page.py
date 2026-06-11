@@ -7,8 +7,8 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QFileDialog, QDoubleSpinBox, QSpinBox,
-    QComboBox, QFormLayout, QProgressBar, QPlainTextEdit,
+    QFrame, QHBoxLayout, QVBoxLayout, QLabel, QFileDialog, QDoubleSpinBox, QSpinBox,
+    QComboBox, QFormLayout, QProgressBar, QPlainTextEdit, QScrollArea, QWidget,
 )
 
 from constants import (
@@ -45,7 +45,16 @@ class KdTitrationPage(BasePage):
     # ---------- UI ----------
 
     def _setup_content(self):
-        layout = self.content_layout
+        # Wrap everything in a scroll area so the page (7+ concentration rows + all
+        # parameters + log) is reachable without squishing on small windows.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+        layout.setSpacing(SPACING_SM)
+        scroll.setWidget(inner)
+        self.content_layout.addWidget(scroll)
 
         desc = create_label(
             "1:1 binding isotherm fit of a titration series.\n"
@@ -224,6 +233,7 @@ class KdTitrationPage(BasePage):
         point label so the user maps [L] to each spectrum explicitly."""
         while self.conc_form.rowCount():
             self.conc_form.removeRow(0)
+        self.conc_form.setVerticalSpacing(SPACING_XS)
         self.conc_spins = []
         for p in points:
             spin = QDoubleSpinBox()
@@ -231,9 +241,13 @@ class KdTitrationPage(BasePage):
             spin.setDecimals(4)
             spin.setSingleStep(1.0)
             spin.setValue(float(p))
-            spin.setMaximumWidth(160)
-            self.conc_form.addRow(create_label(f"Titration point  {p}"), spin)
+            spin.setMinimumHeight(26)
+            spin.setMinimumWidth(140)
+            spin.setMaximumWidth(180)
+            self.conc_form.addRow(create_label(f"Titration point  {p}   →   [L]"), spin)
             self.conc_spins.append(spin)
+        # Let the form take its natural (tall) height inside the page scroll area.
+        self.conc_form_frame.setMinimumHeight(self.conc_form.sizeHint().height())
 
     def _choose_output_dir(self):
         initial = self.output_dir or (os.path.dirname(self.input_file) if self.input_file else "")
