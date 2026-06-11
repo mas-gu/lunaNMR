@@ -119,10 +119,14 @@ class DynamiXsDialog(BaseDialog):
         self.plotting_page = PlottingPage(self)
         self.integrated_page = IntegratedAnalysisPage(self)
 
+        from methyl_t2_page import MethylT2FittingPage
+        self.methyl_t2_page = MethylT2FittingPage(self)
+
         self.stack.addWidget(self.t1t2_page)
         self.stack.addWidget(self.spectral_page)
         self.stack.addWidget(self.plotting_page)
         self.stack.addWidget(self.integrated_page)
+        self.stack.addWidget(self.methyl_t2_page)
 
         layout.addWidget(self.stack)
         self.setLayout(layout)
@@ -182,6 +186,15 @@ class DynamiXsDialog(BaseDialog):
         )
         btn_t1t2.setFont(get_font(18, bold=True))
         options_layout.addWidget(btn_t1t2, alignment=Qt.AlignCenter)
+
+        # T2 Methyl Fitting button (bi-exponential)
+        btn_methyl_t2 = create_primary_button(
+            "T2 Methyl Fitting Analysis",
+            clicked=self.show_methyl_t2_fitting,
+            width=200
+        )
+        btn_methyl_t2.setFont(get_font(18, bold=True))
+        options_layout.addWidget(btn_methyl_t2, alignment=Qt.AlignCenter)
 
         # Spectral Density button
         btn_spectral = create_primary_button(
@@ -247,6 +260,10 @@ class DynamiXsDialog(BaseDialog):
             self.current_analysis_name = name
 
         self.stack.setCurrentWidget(self.t1t2_page)
+
+    def show_methyl_t2_fitting(self):
+        """Show methyl bi-exp T2 fitting page."""
+        self.stack.setCurrentWidget(self.methyl_t2_page)
 
     def show_spectral_density(self):
         """Show spectral density analysis page."""

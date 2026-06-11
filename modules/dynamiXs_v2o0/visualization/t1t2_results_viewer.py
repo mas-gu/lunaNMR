@@ -77,7 +77,7 @@ class T1T2ResultsViewer(QMainWindow):
 
         self.setWindowTitle("T1/T2 Results Viewer")
         self.setMinimumSize(1200, 700)
-        self.setStyleSheet(f"background-color: {BG_COLOR};")
+        self.setStyleSheet(f"background-color: {BG_COLOR}; color: {PRIMARY_TEXT};")
 
         # Store parameters
         self.results_file = results_file

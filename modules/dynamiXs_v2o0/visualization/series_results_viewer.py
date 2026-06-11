@@ -92,7 +92,7 @@ class SeriesResultsViewer(QDialog):
         """Set up the dialog UI."""
         self.setWindowTitle(f"Series Integration Results - {self.experiment_type}")
         self.setMinimumSize(1200, 800)
-        self.setStyleSheet(f"background-color: {BG_COLOR};")
+        self.setStyleSheet(f"background-color: {BG_COLOR}; color: {PRIMARY_TEXT};")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)

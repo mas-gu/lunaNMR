@@ -71,7 +71,7 @@ class ResultsViewer(QMainWindow):
 
         self.setWindowTitle("Model-Free Results Viewer")
         self.setMinimumSize(1400, 900)
-        self.setStyleSheet(f"background-color: {BG_COLOR};")
+        self.setStyleSheet(f"background-color: {BG_COLOR}; color: {PRIMARY_TEXT};")
 
         # Store parameters
         self.results_file = results_file

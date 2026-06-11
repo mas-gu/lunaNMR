@@ -40,6 +40,12 @@ def main():
         # Create the application
         app = QApplication(sys.argv)
 
+        # Pin a light palette so QSS contrast holds under macOS Dark Mode.
+        # Inline child stylesheets that set background-color but not color fall
+        # back to the system palette text color, which is white in dark mode.
+        app.setStyle("Fusion")
+        app.setPalette(app.style().standardPalette())
+
         # Set application metadata
         app.setApplicationName("DynamiXs")
         app.setApplicationVersion("2.0")

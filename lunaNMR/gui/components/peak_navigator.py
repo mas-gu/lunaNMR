@@ -563,24 +563,20 @@ class PeakNavigator(QWidget):
             self.peak_added.emit(peak_data)
 
     def _save_peak_changes(self):
-        """Save detected peaks to file.
+        """Save the currently displayed peak list to file.
 
-        Export detected peaks to text file in standard peak list format.
-        Based on v0.9 gui_components.py:1564-1658 (save_peak_changes).
+        Exports the active peak list (reference or detected) to a text file
+        in standard peak list format.
         """
-        if self.selected_peak_type != "detected":
-            QMessageBox.information(
-                self,
-                "Nothing to Save",
-                "Only detected peaks can be saved."
-            )
-            return
+        peaks = self._get_current_peak_list()
+        is_reference = (self.selected_peak_type == "reference")
+        type_label = "Reference" if is_reference else "Detected"
 
-        if not self.detected_peaks:
+        if not peaks:
             QMessageBox.warning(
                 self,
                 "No Data",
-                "No detected peaks to save."
+                f"No {type_label.lower()} peaks to save."
             )
             return
 
@@ -591,7 +587,8 @@ class PeakNavigator(QWidget):
 
             # Generate default filename with timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_filename = f"detected_peaks_{timestamp}.txt"
+            prefix = "reference_peaks" if is_reference else "detected_peaks"
+            default_filename = f"{prefix}_{timestamp}.txt"
 
             # Try to get spectrum directory as default save location
             default_dir = ""
@@ -607,7 +604,7 @@ class PeakNavigator(QWidget):
             # Open file dialog for saving
             filename, _ = QFileDialog.getSaveFileName(
                 self,
-                "Export Detected Peak List",
+                f"Export {type_label} Peak List",
                 default_path,
                 "Text files (*.txt);;CSV files (*.csv);;All files (*.*)"
             )
@@ -617,7 +614,7 @@ class PeakNavigator(QWidget):
 
             # Prepare peak data for export
             peak_data = []
-            for i, peak in enumerate(self.detected_peaks):
+            for i, peak in enumerate(peaks):
                 assignment = peak[0]
                 x_coord = peak[1]
                 y_coord = peak[2]
@@ -665,11 +662,11 @@ class PeakNavigator(QWidget):
                         # No height available
                         f.write(f"{assignment}, {x:.6f}, {y:.6f}\n")
 
-            logger.info(f"Peak Navigator: Exported {len(peak_data)} peaks to {filename}")
+            logger.info(f"Peak Navigator: Exported {len(peak_data)} {type_label.lower()} peaks to {filename}")
             QMessageBox.information(
                 self,
                 "Export Successful",
-                f"Exported {len(peak_data)} detected peaks to:\n{filename}\n\n"
+                f"Exported {len(peak_data)} {type_label.lower()} peaks to:\n{filename}\n\n"
                 "This file can be loaded as a reference peak list in new projects."
             )
 
@@ -950,6 +947,37 @@ class PeakNavigator(QWidget):
         """Get currently active peak list."""
         return self.reference_peaks if self.selected_peak_type == "reference" else self.detected_peaks
 
+    def update_peak_position(self, peak_type: str, peak_id: Optional[int],
+                             assignment: Optional[str], new_x: float, new_y: float) -> bool:
+        """Update a cached peak's coordinates so saves reflect moves made in the plot.
+
+        Detected cache format: [assignment, x, y, height, peak_id, r_squared] — matched by peak_id.
+        Reference cache format: [assignment, x, y, height, r_squared] — matched by assignment
+        (reference_peaks carries no peak_id field).
+
+        Returns True if an entry was updated. Caller should refresh_peak_list() after.
+        """
+        if peak_type == "detected":
+            for entry in self.detected_peaks:
+                if peak_id is not None and len(entry) > 4 and entry[4] == peak_id:
+                    entry[1] = float(new_x)
+                    entry[2] = float(new_y)
+                    return True
+            if assignment is not None:
+                for entry in self.detected_peaks:
+                    if str(entry[0]) == str(assignment):
+                        entry[1] = float(new_x)
+                        entry[2] = float(new_y)
+                        return True
+        elif peak_type == "reference":
+            if assignment is not None:
+                for entry in self.reference_peaks:
+                    if str(entry[0]) == str(assignment):
+                        entry[1] = float(new_x)
+                        entry[2] = float(new_y)
+                        return True
+        return False
+
     def _add_quality_indicator(self, assignment: str, r_squared: Optional[float], r2_str: str) -> str:
         """Add quality indicator emoji to assignment based on R² thresholds.
 
@@ -1017,7 +1045,7 @@ class PeakNavigator(QWidget):
         self.edit_btn.setEnabled(is_detected and has_selection)
         self.delete_btn.setEnabled(is_detected and has_selection)
         self.add_btn.setEnabled(True)  # Always enabled - adds to reference peaks
-        self.save_btn.setEnabled(is_detected)
+        self.save_btn.setEnabled(len(self._get_current_peak_list()) > 0)
 
     def _update_navigation_button_states(self):
         """Update navigation button states based on available peaks."""

@@ -124,6 +124,11 @@ class DynamiXsMainWindow(QMainWindow):
         self.t1t2_page = T1T2FittingPage(self)
         self.stack.addWidget(self.t1t2_page)
 
+        # T2 Methyl bi-exp Fitting page
+        from methyl_t2_page import MethylT2FittingPage
+        self.methyl_t2_page = MethylT2FittingPage(self)
+        self.stack.addWidget(self.methyl_t2_page)
+
         # Spectral Density page
         self.spectral_page = SpectralDensityPage(self)
         self.stack.addWidget(self.spectral_page)
@@ -185,6 +190,15 @@ class DynamiXsMainWindow(QMainWindow):
         btn_t1t2.setFont(get_font(18, bold=True))
         options_layout.addWidget(btn_t1t2, alignment=Qt.AlignCenter)
 
+        # T2 Methyl Fitting button (bi-exponential)
+        btn_methyl_t2 = create_primary_button(
+            "T2 Methyl Fitting Analysis",
+            clicked=self.show_methyl_t2_fitting,
+            width=200
+        )
+        btn_methyl_t2.setFont(get_font(18, bold=True))
+        options_layout.addWidget(btn_methyl_t2, alignment=Qt.AlignCenter)
+
         # Spectral Density button
         btn_spectral = create_primary_button(
             "Spectral Density Analysis",
@@ -238,6 +252,10 @@ class DynamiXsMainWindow(QMainWindow):
     def show_t1t2_fitting(self):
         """Show T1/T2 fitting page."""
         self.stack.setCurrentWidget(self.t1t2_page)
+
+    def show_methyl_t2_fitting(self):
+        """Show methyl bi-exp T2 fitting page."""
+        self.stack.setCurrentWidget(self.methyl_t2_page)
 
     def show_spectral_density(self):
         """Show spectral density analysis page."""
@@ -1720,9 +1738,14 @@ class T1T2FittingPage(BasePage):
             # Also create a fit_results.txt format for compatibility with View Results
             results_txt_file = os.path.join(self.output_dir, "field1_T2_from_T1rho_fit_results.txt")
             with open(results_txt_file, 'w') as f:
-                f.write("Residue\tA\tT2\tA_err\tT2_err\tSuccess\n")
+                # T2-from-T1rho is a derived quantity, not a direct fit:
+                # no offset C is available, so emit NaN for C / C_err.
+                f.write("Residue\tA\tT2\tC\tA_err\tT2_err\tC_err\tSuccess\n")
                 for _, row in result.iterrows():
-                    f.write(f"{row['residue']}\t1.0\t{row['T2']:.3f}\t0.0\t{row['T2_err']:.3f}\tYes\n")
+                    f.write(
+                        f"{row['residue']}\t1.0\t{row['T2']:.3f}\tNaN\t"
+                        f"0.0\t{row['T2_err']:.3f}\tNaN\tYes\n"
+                    )
 
             # Store in session as T2 result (derived)
             t2_entry = {

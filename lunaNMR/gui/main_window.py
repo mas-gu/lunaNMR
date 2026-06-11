@@ -401,8 +401,8 @@ class LunaNMRMainWindow(BaseWindow):
         # Detection parameters from parameter_manager defaults
         self.noise_threshold = 3.0
         # Nucleus-adaptive search windows (from ps2d_config)
-        self.search_window_x = 0.02  # 1H dimension (ppm) - F2
-        self.search_window_y = 0.05  # 15N/13C dimension (ppm) - F1
+        self.search_window_x = 0.01  # 1H dimension (ppm) - F2
+        self.search_window_y = 0.01  # 15N/13C dimension (ppm) - F1
         self.detection_square_size = 3  # X-dimension/1H (pixels)
         self.detection_rectangle_y = 1  # Y-dimension/15N (pixels)
         self.detection_square_ppm_x = "0.000"  # Auto-calculated ppm conversion
@@ -464,7 +464,7 @@ class LunaNMRMainWindow(BaseWindow):
         # ===== Series Integration Parameters (Expert Mode) =====
         self.use_ps2d_linewidth_reuse = False  # Per-Peak Linewidth Reuse as initial guess (OFF by default)
         self.enable_cascade_drift_limit = True  # Enforce absolute drift limits in cascade mode (ON by default)
-        self.rerun_adaptive_per_spectrum = True  # Rerun PASS 1 + adaptive for each spectrum (ON by default)
+        self.rerun_adaptive_per_spectrum = False  # Rerun PASS 1 + adaptive for each spectrum (OFF by default)
         self.lock_cluster_assignments = True  # Lock clusters from reference in Independent mode (ON by default)
         self.lock_detection_threshold = True  # Lock detection threshold from spectrum 1 (ON by default)
 
@@ -4093,8 +4093,8 @@ class LunaNMRMainWindow(BaseWindow):
                 # Always zoom to the selected peak (v0o9 lines 7806-7808)
                 self.spectrum_plotter.set_zoom(
                     peak_x, peak_y,
-                    0.3,   # Tight X zoom (1H dimension)
-                    2.5    # Tight Y zoom (15N dimension)
+                    0.1,   # Tight X zoom (1H dimension)
+                    0.83   # Tight Y zoom (15N dimension)
                 )
 
                 # Context-aware: If Voigt tabs are active, show analysis (v0.9 line 7860-7863)
@@ -7523,8 +7523,12 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             # Refresh the main plot
             self.update_spectrum_plot()
 
-        # Update peak navigator
+        # Update peak navigator: sync its cached list so save-to-file picks up the move,
+        # then refresh the display.
         if hasattr(self, 'peak_navigator') and self.peak_navigator is not None:
+            self.peak_navigator.update_peak_position(
+                peak_type, peak_id, peak_info.get('assignment'), new_x, new_y
+            )
             self.peak_navigator.refresh_peak_list()
 
         logger.info("✅ Peak position updated successfully")
@@ -8279,6 +8283,12 @@ def main():
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
+
+    # Pin a light palette so QSS contrast holds under macOS Dark Mode.
+    # Inline child stylesheets that set background-color but not color fall
+    # back to the system palette text color, which is white in dark mode.
+    app.setStyle("Fusion")
+    app.setPalette(app.style().standardPalette())
 
     # Create and show main window
     window = LunaNMRMainWindow()

@@ -65,9 +65,9 @@ def parse_delay_column(col_name):
         return None
 
 
-def exp_decay(x, A, t2):
-    """Exponential decay function for T1/T2 relaxation fitting"""
-    return A * np.exp(-x / t2)
+def exp_decay(x, A, t2, C=0.0):
+    """Mono-exponential decay with baseline offset: I(t) = A * exp(-t/t2) + C."""
+    return A * np.exp(-x / t2) + C
 
 
 def bootstrap_errors(x, y, model, params, n_bootstrap=1000):
@@ -113,6 +113,7 @@ def bootstrap_errors(x, y, model, params, n_bootstrap=1000):
 
     a_values = []
     t2_values = []
+    c_values = []
 
     for _ in range(n_bootstrap):
         # Resample residuals WITH REPLACEMENT
@@ -126,7 +127,9 @@ def bootstrap_errors(x, y, model, params, n_bootstrap=1000):
         y_synthetic = np.maximum(y_synthetic, 1e-10)
 
         # Refit (unweighted)
-        params_boot = model.make_params(A=params['A'].value, t2=params['t2'].value)
+        params_boot = model.make_params(
+            A=params['A'].value, t2=params['t2'].value, C=params['C'].value
+        )
         params_boot['A'].min = 0
         params_boot['t2'].min = 0
 
@@ -135,6 +138,7 @@ def bootstrap_errors(x, y, model, params, n_bootstrap=1000):
             if res.success:
                 a_values.append(res.params['A'].value)
                 t2_values.append(res.params['t2'].value)
+                c_values.append(res.params['C'].value)
         except Exception:
             continue
 
@@ -143,33 +147,41 @@ def bootstrap_errors(x, y, model, params, n_bootstrap=1000):
         # Not enough successful fits, fall back to covariance estimate
         a_err = result.params['A'].stderr if result.params['A'].stderr else np.nan
         t2_err = result.params['t2'].stderr if result.params['t2'].stderr else np.nan
-        return a_err, t2_err
+        c_err = result.params['C'].stderr if result.params['C'].stderr else np.nan
+        return a_err, t2_err, c_err
 
-    return np.std(a_values), np.std(t2_values)
+    return np.std(a_values), np.std(t2_values), np.std(c_values)
 
 
 def fit_single_residue_parallel(args):
     """
     Wrapper function for parallel processing of single residue fitting.
 
+    Model: I(t) = A * exp(-t/t2) + C
+
     Parameters
     ----------
     args : tuple
-        (x, y, residue_name, initial_A, initial_t2, n_bootstrap, error_method, idx, total)
+        (x, y, residue_name, initial_A, initial_t2, initial_C,
+         n_bootstrap, error_method, idx, total)
 
     Returns
     -------
     dict : Fitting results with success flag
     """
-    x, y, residue_name, initial_A, initial_t2, n_bootstrap, error_method, idx, total = args
+    (x, y, residue_name, initial_A, initial_t2, initial_C,
+     n_bootstrap, error_method, idx, total) = args
 
     try:
         # Progress indicator
         if idx % 10 == 0:
             print(f"Processing residue {idx+1}/{total}: {residue_name}")
 
+        if initial_C is None:
+            initial_C = float(np.min(y))
+
         model = Model(exp_decay)
-        params = model.make_params(A=initial_A, t2=initial_t2)
+        params = model.make_params(A=initial_A, t2=initial_t2, C=initial_C)
         params['A'].min = 0
         params['t2'].min = 0
 
@@ -182,29 +194,35 @@ def fit_single_residue_parallel(args):
                 'residue': residue_name,
                 'A': np.nan,
                 't2': np.nan,
+                'C': np.nan,
                 'A_err': np.nan,
                 't2_err': np.nan,
+                'C_err': np.nan,
                 'success': False,
                 'idx': idx
             }
 
         a = result.params['A'].value
         t2 = result.params['t2'].value
+        c = result.params['C'].value
 
         # Error estimation based on selected method
         if error_method == 'bootstrap':
-            a_err, t2_err = bootstrap_errors(x, y, model, params, n_bootstrap)
+            a_err, t2_err, c_err = bootstrap_errors(x, y, model, params, n_bootstrap)
         else:
             # Analytical: use covariance matrix from lmfit
             a_err = result.params['A'].stderr if result.params['A'].stderr else np.nan
             t2_err = result.params['t2'].stderr if result.params['t2'].stderr else np.nan
+            c_err = result.params['C'].stderr if result.params['C'].stderr else np.nan
 
         return {
             'residue': residue_name,
             'A': a,
             't2': t2,
+            'C': c,
             'A_err': a_err,
             't2_err': t2_err,
+            'C_err': c_err,
             'x': x,
             'y': y,
             'result': result,
@@ -218,8 +236,10 @@ def fit_single_residue_parallel(args):
             'residue': residue_name,
             'A': np.nan,
             't2': np.nan,
+            'C': np.nan,
             'A_err': np.nan,
             't2_err': np.nan,
+            'C_err': np.nan,
             'success': False,
             'error': str(e),
             'idx': idx
@@ -275,10 +295,11 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
             a = result['A']
             t2 = result['t2']
             t2_err = result['t2_err']
+            c = result.get('C', 0.0)
 
             # Generate fit curve
             x_fit = np.linspace(0, max(x)*1.2, 50)
-            y_fit = a * np.exp(-x_fit / t2)
+            y_fit = a * np.exp(-x_fit / t2) + c
 
             ax = axes[idx]
             ax.plot(x, y, 'ko', lw=2, ms=8, label="Data")
@@ -320,14 +341,21 @@ def save_results(results_list, output_file, experiment_type="T1"):
         Type of experiment for headers
     """
     with open(output_file, "w") as f:
-        f.write(f"Residue\tA\t{experiment_type}\tA_err\t{experiment_type}_err\tSuccess\n")
+        f.write(
+            f"Residue\tA\t{experiment_type}\tC\tA_err\t{experiment_type}_err\tC_err\tSuccess\n"
+        )
         for result in results_list:
             success_flag = "Yes" if result.get('success', False) else "No"
             if result.get('success', False):
-                f.write(f"{result['residue']}\t{result['A']:.6e}\t{result['t2']:.6e}\t"
-                       f"{result['A_err']:.6e}\t{result['t2_err']:.6e}\t{success_flag}\n")
+                f.write(
+                    f"{result['residue']}\t{result['A']:.6e}\t{result['t2']:.6e}\t"
+                    f"{result['C']:.6e}\t{result['A_err']:.6e}\t"
+                    f"{result['t2_err']:.6e}\t{result['C_err']:.6e}\t{success_flag}\n"
+                )
             else:
-                f.write(f"{result['residue']}\tNaN\tNaN\tNaN\tNaN\t{success_flag}\n")
+                f.write(
+                    f"{result['residue']}\tNaN\tNaN\tNaN\tNaN\tNaN\tNaN\t{success_flag}\n"
+                )
 
 
 def save_fit_data_json(results_list, output_file, experiment_type, time_units,
@@ -366,15 +394,19 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
 
     fits_data = []
     for result in successful_results:
+        c = result.get('C', 0.0)
+        c_err = result.get('C_err', np.nan)
         # Calculate fit curve using fitted parameters
-        fit_intensity = result['A'] * np.exp(-fit_time_dense / result['t2'])
+        fit_intensity = result['A'] * np.exp(-fit_time_dense / result['t2']) + c
 
         fits_data.append({
             'residue': str(result['residue']),
             'A': float(result['A']),
             't2': float(result['t2']),
+            'C': float(c),
             'A_err': float(result['A_err']),
             't2_err': float(result['t2_err']),
+            'C_err': float(c_err),
             'intensities': [float(val) for val in result['y']],
             'fit_curve': {
                 'time': [float(t) for t in fit_time_dense],
@@ -697,7 +729,9 @@ def run_analysis_with_params(params, progress_callback=None):
     args_list = []
     for idx, residue in enumerate(residue_names):
         y = y_data[idx, :]
-        args_list.append((x, y, residue, initial_A, initial_t2, n_bootstrap, error_method, idx, total_residues))
+        # initial_C=None lets fit_single_residue_parallel use min(y) per-residue.
+        args_list.append((x, y, residue, initial_A, initial_t2, None,
+                          n_bootstrap, error_method, idx, total_residues))
 
     # Parallel fitting with progress reporting
     print(f"Starting parallel fitting with {n_processes} processes...")

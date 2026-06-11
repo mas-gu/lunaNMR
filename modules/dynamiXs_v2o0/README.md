@@ -11,13 +11,23 @@ A comprehensive graphical user interface for NMR relaxation data analysis built 
 - **Automatic plot generation** with customizable layouts
 - **Real-time progress monitoring** and results display
 
-### 2. Data Plotting Tools
+### 2. Methyl T2 Fitting (bi-exponential)
+- **Shared-amplitude bi-exp model** `I(t) = ½·A·[exp(-t/T2a) + exp(-t/T2b)]`
+- **Reparameterized internally** as `(A, T2_avg, ΔT2)` so T2_avg stays well-determined when bi-exp character is weak
+- **Identifiability flag** (`bi_exp_unidentifiable`) auto-detects mono-exp regime and the t2_b lower-bound; bound-active stderrs are reported as NaN, T2_avg / A errors stay meaningful
+- **Bound-respecting derived quantities**: t2_a, t2_b, η are derived from the (T2_avg, ΔT2) covariance via change of variables — the singular ΔT2 direction is correctly attributed instead of being smeared into both individual stderrs
+- **Per-residue viewer** with click-to-toggle outlier rejection and re-fit (fresh data-driven defaults — does not warm-start from the prior fit, which would otherwise trap the optimizer)
+- **Plot T2 vs Residue** summary view: single bar chart of T2_avg / ΔT2 / T2a / T2b / η across all residues, with a residue checklist (Include all / Exclude all / Exclude flagged) for excluding contaminating fits
+- **Open previous dataset** entry point loads any prior `*_methylT2_fit_data.json` folder into the viewer without re-running the fit
+- **CSV input format**: descriptive spectrum-name headers (e.g. `003_T2_ADDA_3ms`, `600_T1_0o3` with `o` as filesystem-safe `.`) are parsed for their embedded delays; bare numeric headers and `<num>_N` duplicate-measurement suffixes also supported
+
+### 3. Data Plotting Tools
 - **Dataset comparison** with difference plots and statistical analysis
 - **Dual field plotting** for multi-field NMR experiments  
 - **Interactive parameter selection** for flexible data visualization
 - **PDF output** with publication-ready formatting
 
-### 3. Cross-Platform Compatibility
+### 4. Cross-Platform Compatibility
 - **macOS, Windows, and Linux** support through PySide6 (Qt)
 - **Modern Qt-based interface** with LunaNMR styling
 - **User-friendly interface** requiring no scripting knowledge
@@ -189,10 +199,17 @@ dynamiXs_v2o0/
 │   └── main.qss              # Qt stylesheet
 ├── visualization/
 │   ├── results_viewer.py     # Model-free results viewer
-│   └── fit_viewer.py         # T1/T2 fit viewer
+│   ├── fit_viewer.py         # T1/T2 fit viewer
+│   └── methyl_t2_fit_viewer.py # Methyl bi-exp viewer (per-residue editor and
+│                                #   summary-only mode for "Plot T2 vs Residue")
+├── methyl_t2_page.py         # Methyl bi-exp T2 page (Run / Open viewer /
+│                              #   Plot T2 vs Residue / Open previous dataset)
 ├── dynamiXs_T1_T2/           # T1/T2 fitting modules
-│   ├── fit_Tx_NMRRE.py       # Single-core fitting
-│   └── fitmulti__Tx_NMRRE.py # Multi-core fitting
+│   ├── fit_Tx_NMRRE.py       # Single-core T1/T2 fitting (mono-exp)
+│   ├── fitmulti__Tx_NMRRE.py # Multi-core T1/T2 fitting
+│   ├── fit_methyl_T2.py      # Methyl shared-amp bi-exp fitter (A, T2_avg, ΔT2)
+│   └── refit.py              # Headless refit helpers (sidecar IO,
+│                              #   single-residue refit, TSV/JSON in-place update)
 ├── dynamiXs_integrated/      # Integrated analysis pipeline
 ├── dynamiXs_density_functions/ # Spectral density analysis
 ├── dynamiXs_cpmg/            # CPMG analysis modules

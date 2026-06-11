@@ -37,6 +37,13 @@ from gui_components import (
     get_font, show_info, show_error, show_warning
 )
 
+# Refit helpers (sidecar IO + surgical JSON/TSV updates)
+sys.path.insert(0, str(Path(__file__).parent.parent / "dynamiXs_T1_T2"))
+from refit import (
+    load_outliers, save_outliers,
+    refit_residue, update_json_fit_entry, update_tsv_row,
+)
+
 
 class FitViewer(QMainWindow):
     """
@@ -78,14 +85,23 @@ class FitViewer(QMainWindow):
 
         self.setWindowTitle("T1/T2 Fit Viewer")
         self.setMinimumSize(1400, 900)
-        self.setStyleSheet(f"background-color: {BG_COLOR};")
+        # Set both bg and color explicitly: a partial stylesheet (bg only) lets
+        # descendants fall through to the system palette for color, which on
+        # macOS Dark Mode resolves to white -> invisible labels.
+        self.setStyleSheet(f"background-color: {BG_COLOR}; color: {PRIMARY_TEXT};")
 
         # Data storage
         self.json_folders = json_folders or ([json_folder] if json_folder else [])
         self.json_folder = self.json_folders[0] if self.json_folders else None  # For UI display
         self.data = {}  # {field_name_type: json_data}
+        self.json_paths = {}  # {field_name_type: Path of source *_fit_data.json}
+        self.exclusions = {}  # {field_name_type: {residue: [time-index list]}}
         self.available_residues = []
         self.selected_residues = []
+
+        # Outlier-edit mode + pick registry (id(scatter) -> (data_key, residue, [orig_indices]))
+        self.edit_outliers = False
+        self._pick_registry = {}
 
         # UI state
         self.field_mode = "field1"
@@ -156,6 +172,7 @@ class FitViewer(QMainWindow):
         # Create canvas (stored as instance variable to prevent garbage collection)
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.canvas.mpl_connect('pick_event', self._on_pick)
         plot_layout.addWidget(self.canvas)
 
         # Toolbar (stored as instance variable to prevent garbage collection)
@@ -296,6 +313,36 @@ class FitViewer(QMainWindow):
 
         scroll_layout.addWidget(residue_section)
 
+        # === Outlier Editing ===
+        outlier_section = self._create_section_frame("Outlier Editing:")
+        outlier_layout = outlier_section.layout()
+
+        self.edit_outliers_checkbox = QCheckBox("Edit Outliers (click points to toggle)")
+        self.edit_outliers_checkbox.setFont(get_font(FONT_SIZE_BODY))
+        self.edit_outliers_checkbox.toggled.connect(self._toggle_edit_outliers)
+        outlier_layout.addWidget(self.edit_outliers_checkbox)
+
+        self.refit_btn = create_primary_button("Re-fit Residue",
+                                               clicked=self._on_refit_clicked)
+        self.refit_btn.setFixedWidth(280)
+        self.refit_btn.setToolTip(
+            "Re-fit the selected residue with currently-rejected points excluded.\n"
+            "Errors are estimated analytically (covariance matrix) for speed.\n"
+            "Updates JSON, TSV (if present), and in-memory data."
+        )
+        outlier_layout.addWidget(self.refit_btn)
+
+        self.reset_outliers_btn = create_secondary_button("Reset Residue",
+                                                          clicked=self._on_reset_clicked)
+        self.reset_outliers_btn.setFixedWidth(280)
+        self.reset_outliers_btn.setToolTip(
+            "Clear all rejected points for this residue and re-fit on full data\n"
+            "(analytical errors)."
+        )
+        outlier_layout.addWidget(self.reset_outliers_btn)
+
+        scroll_layout.addWidget(outlier_section)
+
         # === Action Buttons ===
         button_frame = QFrame()
         button_layout = QVBoxLayout(button_frame)
@@ -387,6 +434,8 @@ class FitViewer(QMainWindow):
                         file_key = filename.replace("_fit_data", "")
 
                         self.data[file_key] = data
+                        self.json_paths[file_key] = json_file
+                        self.exclusions[file_key] = load_outliers(json_file)
 
                         # Collect residues
                         for fit in data['fits']:
@@ -725,6 +774,7 @@ class FitViewer(QMainWindow):
         """Generate plots for selected residues"""
         self.figure.clear()
         self.axes = []
+        self._pick_registry = {}  # rebuilt on every redraw
 
         # Determine plot count
         plots = []
@@ -798,8 +848,10 @@ class FitViewer(QMainWindow):
         t_error = fit_data['t2_err']
 
         # Plot with zorder for proper layering
-        ax.plot(time_points, intensities, 'o', color='#2196F3', markersize=8,
-               label='Data', zorder=3)
+        self._plot_residue_points(
+            ax, data_key, residue, color='#2196F3', label='Data',
+            time_points=time_points, intensities=intensities,
+        )
         ax.plot(fit_time, fit_intensity, '-', color='#e63946', linewidth=2,
                label='Fit', zorder=2)
 
@@ -877,8 +929,11 @@ class FitViewer(QMainWindow):
             fit_time1 = fit1['fit_curve']['time']
             fit_intensity1 = fit1['fit_curve']['intensity']
 
-            ax.plot(time_points1, intensities1, 'o', color=color_field1, markersize=8,
-                   label=f"{metadata1['field_freq']} MHz data", zorder=3)
+            self._plot_residue_points(
+                ax, field1_key, residue, color=color_field1,
+                label=f"{metadata1['field_freq']} MHz data",
+                time_points=time_points1, intensities=intensities1,
+            )
             ax.plot(fit_time1, fit_intensity1, '-', color=color_field1, linewidth=2,
                    label=f"{metadata1['field_freq']} MHz fit", zorder=2)
 
@@ -893,8 +948,11 @@ class FitViewer(QMainWindow):
             fit_time2 = fit2['fit_curve']['time']
             fit_intensity2 = fit2['fit_curve']['intensity']
 
-            ax.plot(time_points2, intensities2, 'o', color=color_field2, markersize=8,
-                   label=f"{metadata2['field_freq']} MHz data", zorder=3)
+            self._plot_residue_points(
+                ax, field2_key, residue, color=color_field2,
+                label=f"{metadata2['field_freq']} MHz data",
+                time_points=time_points2, intensities=intensities2,
+            )
             ax.plot(fit_time2, fit_intensity2, '-', color=color_field2, linewidth=2,
                    label=f"{metadata2['field_freq']} MHz fit", zorder=2)
 
@@ -913,6 +971,159 @@ class FitViewer(QMainWindow):
         ax.set_title(f"Residue {residue} - {meas_type}", fontsize=12, fontweight='bold')
         ax.legend(loc='best', fontsize=9)
         ax.grid(True, alpha=0.3, linestyle='--', zorder=1)
+
+    # ========== Outlier editing: pick events, refit, reset ==========
+
+    def _plot_residue_points(self, ax, data_key, residue, color, label,
+                             time_points, intensities):
+        """Render data points as included circles + greyed X for excluded.
+
+        Registers each scatter in self._pick_registry so _on_pick can map a
+        scatter-relative index back to an original time-point index.
+        """
+        excluded = set(self.exclusions.get(data_key, {}).get(str(residue), []))
+        n = len(time_points)
+        inc_idx = [i for i in range(n) if i not in excluded]
+        exc_idx = [i for i in range(n) if i in excluded]
+        tp = np.asarray(time_points)
+        ints = np.asarray(intensities)
+
+        # Pickable only when edit mode is on, to avoid misclicks during pan/zoom.
+        picker_radius = 8 if self.edit_outliers else None
+
+        if inc_idx:
+            inc = ax.scatter(tp[inc_idx], ints[inc_idx],
+                             color=color, s=64, marker='o',
+                             label=label, zorder=3, picker=picker_radius)
+            self._pick_registry[id(inc)] = (data_key, str(residue), inc_idx)
+        if exc_idx:
+            exc = ax.scatter(tp[exc_idx], ints[exc_idx],
+                             color='#888888', s=64, marker='x', linewidths=2,
+                             label='Excluded', zorder=3, picker=picker_radius)
+            self._pick_registry[id(exc)] = (data_key, str(residue), exc_idx)
+
+    def _on_pick(self, event):
+        """Toggle exclusion for the picked data point(s) and persist sidecar."""
+        if not self.edit_outliers:
+            return
+        info = self._pick_registry.get(id(event.artist))
+        if info is None:
+            return
+        data_key, residue, idx_map = info
+        excl_for_key = self.exclusions.setdefault(data_key, {})
+        excl = excl_for_key.setdefault(residue, [])
+        for i in event.ind:
+            if 0 <= i < len(idx_map):
+                orig = idx_map[i]
+                if orig in excl:
+                    excl.remove(orig)
+                else:
+                    excl.append(orig)
+        # Empty list -> drop the residue entry to keep sidecar clean
+        if not excl:
+            del excl_for_key[residue]
+        json_path = self.json_paths.get(data_key)
+        if json_path is not None:
+            save_outliers(json_path, excl_for_key)
+        self._update_plots()
+
+    def _toggle_edit_outliers(self, checked):
+        self.edit_outliers = bool(checked)
+        self._update_plots()
+
+    def _currently_visible_data_keys(self):
+        """The (field, meas_type) data_keys actually shown on screen."""
+        fields = ["field1", "field2"] if self.field_mode == "overlay" else [self.field_mode]
+        keys = []
+        if self.t1_checkbox.isChecked():
+            keys.extend(f"{f}_T1" for f in fields)
+        if self.t2_checkbox.isChecked():
+            keys.extend(f"{f}_T2" for f in fields)
+        return [k for k in keys if k in self.data]
+
+    def _find_tsv_for(self, data_key):
+        """Best-effort: locate the *_fit_results.txt sibling of the json folder."""
+        json_path = self.json_paths.get(data_key)
+        if json_path is None:
+            return None
+        candidate = Path(json_path).parent.parent / f"{data_key}_fit_results.txt"
+        return candidate if candidate.exists() else None
+
+    def _refit_one(self, data_key, residue):
+        """Refit (data_key, residue) using current exclusions; persist to disk."""
+        excl = self.exclusions.get(data_key, {}).get(str(residue), [])
+        data_entry = self.data.get(data_key)
+        if not data_entry:
+            return None
+        metadata = data_entry["metadata"]
+        for fit in data_entry["fits"]:
+            if str(fit["residue"]) == str(residue):
+                new_entry = refit_residue(fit, metadata, excl)
+                fit.update(new_entry)
+                json_path = self.json_paths.get(data_key)
+                if json_path is not None:
+                    update_json_fit_entry(json_path, str(residue), new_entry)
+                tsv_path = self._find_tsv_for(data_key)
+                if tsv_path is not None:
+                    exp_type = data_key.split("_")[-1]
+                    try:
+                        update_tsv_row(tsv_path, str(residue), new_entry, exp_type)
+                    except KeyError:
+                        pass  # residue absent from TSV; skip silently
+                return new_entry
+        return None
+
+    def _on_refit_clicked(self):
+        residue = self.get_current_residue()
+        if not residue:
+            show_warning(self, "No residue selected", "Select a residue to re-fit.")
+            return
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import Qt
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            refitted = []
+            for data_key in self._currently_visible_data_keys():
+                if self._refit_one(data_key, residue) is not None:
+                    refitted.append(data_key)
+            if refitted:
+                self._update_plots()
+        finally:
+            QApplication.restoreOverrideCursor()
+        if refitted:
+            show_info(self, "Re-fit complete",
+                      f"Residue {residue} re-fitted in: {', '.join(refitted)}")
+        else:
+            show_warning(self, "Nothing to re-fit",
+                         f"No visible data found for residue {residue}.")
+
+    def _on_reset_clicked(self):
+        residue = self.get_current_residue()
+        if not residue:
+            show_warning(self, "No residue selected", "Select a residue to reset.")
+            return
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import Qt
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            reset = []
+            for data_key in self._currently_visible_data_keys():
+                excl_map = self.exclusions.get(data_key, {})
+                if str(residue) in excl_map:
+                    del excl_map[str(residue)]
+                    json_path = self.json_paths.get(data_key)
+                    if json_path is not None:
+                        save_outliers(json_path, excl_map)
+                if self._refit_one(data_key, residue) is not None:
+                    reset.append(data_key)
+            if reset:
+                self._update_plots()
+        finally:
+            QApplication.restoreOverrideCursor()
+        if reset:
+            show_info(self, "Reset complete",
+                      f"Exclusions cleared and residue {residue} re-fitted in: "
+                      f"{', '.join(reset)}")
 
     def _show_blank_state(self):
         """Show blank plot with instruction message"""

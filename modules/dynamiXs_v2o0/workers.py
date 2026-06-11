@@ -299,6 +299,110 @@ class T1T2FittingWorker(AnalysisWorker):
 
 
 # =============================================================================
+# METHYL T2 BI-EXP WORKER
+# =============================================================================
+
+@dataclass
+class MethylT2FittingParams:
+    """Parameters for the shared-amplitude methyl bi-exp T2 fitter.
+
+    Model: I(t) = 0.5 * A * (exp(-t/T2a) + exp(-t/T2b)).
+    Same data-source rules as T1T2FittingParams: input_df > input_file.
+    """
+    input_file: str = ""
+    output_dir: str = ""
+    results_prefix: str = ""
+    json_folder: str = ""
+    field_name: str = "field1"
+    field_freq: float = 0.0
+    initial_A: Optional[float] = None  # None -> data-driven default = span(y)
+    initial_t2_a: float = 100.0  # ms (slow component)
+    initial_t2_b: float = 20.0   # ms (fast component)
+    n_bootstrap: int = 1000
+    error_method: str = "analytical"
+    input_df: Optional[pd.DataFrame] = field(default=None, repr=False)
+    series_name: str = ""
+
+
+class MethylT2FittingWorker(AnalysisWorker):
+    """Worker for the methyl bi-exp T2 fitter.
+
+    Calls dynamiXs_T1_T2.fit_methyl_T2.run_methyl_t2_analysis_with_params on a
+    background thread, reporting per-residue progress.
+    """
+
+    def __init__(self, params: MethylT2FittingParams, parent: Optional[QObject] = None):
+        super().__init__(parent)
+        self.params = params
+
+    def run(self):
+        temp_csv_path = None
+        try:
+            self.status.emit("Initializing methyl T2 fit...")
+            self.emit_progress("Loading data...", 5)
+
+            from dynamiXs_T1_T2 import fit_methyl_T2 as fitting_module
+
+            if self.params.input_df is not None:
+                fd, temp_csv_path = tempfile.mkstemp(suffix=".csv", prefix="dynamixs_methyl_")
+                os.close(fd)
+                self.params.input_df.to_csv(temp_csv_path, index=False)
+                input_csv = temp_csv_path
+            elif self.params.input_file:
+                input_csv = self.params.input_file
+            else:
+                raise ValueError("No input data provided: need input_df or input_file")
+
+            self.emit_progress("Starting fit...", 10)
+
+            output_prefix = os.path.join(self.params.output_dir, self.params.results_prefix)
+            results_txt_file = f"{output_prefix}_fit_results.txt"
+
+            fit_params = {
+                "input_csv_file": input_csv,
+                "output_prefix": output_prefix,
+                "results_txt_file": results_txt_file,
+                "json_folder": self.params.json_folder,
+                "field_name": self.params.field_name,
+                "field_freq": self.params.field_freq,
+                "time_units": "ms",
+                "signal_units": "Intensity",
+                "initial_A": self.params.initial_A,
+                "initial_t2_a": self.params.initial_t2_a,
+                "initial_t2_b": self.params.initial_t2_b,
+                "n_bootstrap": self.params.n_bootstrap,
+                "error_method": self.params.error_method,
+            }
+
+            def progress_callback(completed, total, residue_name, message):
+                if self._cancelled:
+                    return
+                pct = int((completed / total) * 85) + 10
+                self.emit_progress(f"Fitting {residue_name} ({completed}/{total})", pct)
+
+            result = fitting_module.run_methyl_t2_analysis_with_params(
+                fit_params, progress_callback=progress_callback
+            )
+
+            if not self._cancelled:
+                self.emit_progress("Fitting complete!", 100)
+                result["field_name"] = self.params.field_name
+                result["experiment_type"] = "methylT2"
+                result["json_folder"] = self.params.json_folder
+                result["field_freq"] = self.params.field_freq
+                self.finished.emit(result)
+
+        except Exception as e:
+            self.emit_error(e)
+        finally:
+            if temp_csv_path and os.path.exists(temp_csv_path):
+                try:
+                    os.remove(temp_csv_path)
+                except OSError:
+                    pass
+
+
+# =============================================================================
 # SPECTRAL DENSITY WORKER
 # =============================================================================
 

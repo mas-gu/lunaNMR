@@ -124,8 +124,8 @@ def _parse_fit_results_file(results_file: str, param_name: str = 'T1') -> Dict[s
     Parse the tab-delimited fit results file.
 
     Expected format:
-        Residue\tA\tT1\tA_err\tT1_err\tSuccess
-        1.0\t2.244e+06\t7.875e+02\t6.488e+04\t5.824e+01\tYes
+        Residue\tA\tT1\tC\tA_err\tT1_err\tC_err\tSuccess
+        1.0\t2.244e+06\t7.875e+02\t1.5e+03\t6.488e+04\t5.824e+01\t2.1e+02\tYes
 
     Parameters
     ----------

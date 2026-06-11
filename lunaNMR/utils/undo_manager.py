@@ -198,19 +198,30 @@ class MovePeakCommand(QUndoCommand):
     def _set_position(self, x: float, y: float):
         """Set peak position in data structure."""
         integrator = self.main_window.integrator
+        assignment = None
 
         if self.peak_type == 'reference':
             if integrator.peak_list is not None and 'peak_id' in integrator.peak_list.columns:
                 mask = integrator.peak_list['peak_id'] == self.peak_id
                 integrator.peak_list.loc[mask, 'Position_X'] = x
                 integrator.peak_list.loc[mask, 'Position_Y'] = y
+                matched = integrator.peak_list.loc[mask]
+                if not matched.empty and 'Assignment' in matched.columns:
+                    assignment = str(matched.iloc[0]['Assignment'])
 
         elif self.peak_type == 'detected':
             for peak in integrator.fitted_peaks:
                 if peak.get('peak_id') == self.peak_id:
                     peak['ppm_x'] = x
                     peak['ppm_y'] = y
+                    assignment = peak.get('assignment') or peak.get('Assignment')
                     break
+
+        # Keep the navigator's cached list in sync so saves reflect moves.
+        nav = getattr(self.main_window, 'peak_navigator', None)
+        if nav is not None:
+            nav.update_peak_position(self.peak_type, self.peak_id, assignment, x, y)
+            nav.refresh_peak_list()
 
         self.main_window.update_spectrum_plot(preserve_zoom=True)
 
