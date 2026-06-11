@@ -42,7 +42,9 @@ def fit_residue_csp(L, csp, P0, kd_init=None, n_bootstrap=0):
     dd, kd = popt
     perr = np.sqrt(np.diag(pcov))
     if n_bootstrap:
-        dd_e, kd_e = _bootstrap_csp(L, y, P0, dd, kd, n_bootstrap)
+        bdd, bkd = _bootstrap_csp(L, y, P0, dd, kd, n_bootstrap)
+        dd_e = bdd if np.isfinite(bdd) else float(perr[0])   # fall back to covariance
+        kd_e = bkd if np.isfinite(bkd) else float(perr[1])
     else:
         dd_e, kd_e = float(perr[0]), float(perr[1])
     return {'success': True, 'Kd': float(kd), 'Kd_err': kd_e,
@@ -73,7 +75,10 @@ def fit_residue_intensity(L, obs, P0=None, kd_init=None, n_bootstrap=0):
     I0, I_inf, kd = popt
     perr = np.sqrt(np.diag(pcov))
     if n_bootstrap:
-        i0_e, inf_e, kd_e = _bootstrap_intensity(L, y, I0, I_inf, kd, hi, n_bootstrap)
+        bi0, binf, bkd = _bootstrap_intensity(L, y, I0, I_inf, kd, hi, n_bootstrap)
+        i0_e = bi0 if np.isfinite(bi0) else float(perr[0])    # fall back to covariance
+        inf_e = binf if np.isfinite(binf) else float(perr[1])
+        kd_e = bkd if np.isfinite(bkd) else float(perr[2])
     else:
         i0_e, inf_e, kd_e = float(perr[0]), float(perr[1]), float(perr[2])
     return {'success': True, 'Kd': float(kd), 'Kd_err': kd_e,
@@ -84,35 +89,41 @@ def fit_residue_intensity(L, obs, P0=None, kd_init=None, n_bootstrap=0):
 
 
 def _bootstrap_intensity(L, y, I0, I_inf, kd, hi, n):
-    yfit = intensity_decay(L, I0, I_inf, kd)
-    resid = y - yfit
-    i0s, infs, kds = [], [], []
-    for _ in range(n):
-        yb = yfit + np.random.choice(resid, size=len(resid), replace=True)
-        try:
-            popt, _ = curve_fit(intensity_decay, L, yb, p0=[I0, I_inf, kd],
-                                bounds=([0, 0, 1e-9], [hi, hi, np.inf]), maxfev=20000)
-            i0s.append(popt[0]); infs.append(popt[1]); kds.append(popt[2])
-        except Exception:
-            continue
-    sd = lambda a: float(np.std(a)) if a else np.nan
-    return sd(i0s), sd(infs), sd(kds)
+    try:
+        yfit = intensity_decay(L, I0, I_inf, kd)
+        resid = y - yfit
+        i0s, infs, kds = [], [], []
+        for _ in range(n):
+            yb = yfit + np.random.choice(resid, size=len(resid), replace=True)
+            try:
+                popt, _ = curve_fit(intensity_decay, L, yb, p0=[I0, I_inf, kd],
+                                    bounds=([0, 0, 1e-9], [hi, hi, np.inf]), maxfev=20000)
+                i0s.append(popt[0]); infs.append(popt[1]); kds.append(popt[2])
+            except Exception:
+                continue
+        sd = lambda a: float(np.std(a)) if a else np.nan
+        return sd(i0s), sd(infs), sd(kds)
+    except Exception:
+        return np.nan, np.nan, np.nan
 
 
 def _bootstrap_csp(L, y, P0, dd, kd, n):
-    yfit = csp_model(L, dd, kd, P0)
-    resid = y - yfit
-    dds, kds = [], []
-    for _ in range(n):
-        yb = yfit + np.random.choice(resid, size=len(resid), replace=True)
-        try:
-            popt, _ = curve_fit(lambda L, d, k: csp_model(L, d, k, P0), L, yb,
-                                p0=[dd, kd], bounds=([0, 0], [np.inf, np.inf]), maxfev=20000)
-            dds.append(popt[0]); kds.append(popt[1])
-        except Exception:
-            continue
-    return (float(np.std(dds)) if dds else np.nan,
-            float(np.std(kds)) if kds else np.nan)
+    try:
+        yfit = csp_model(L, dd, kd, P0)
+        resid = y - yfit
+        dds, kds = [], []
+        for _ in range(n):
+            yb = yfit + np.random.choice(resid, size=len(resid), replace=True)
+            try:
+                popt, _ = curve_fit(lambda L, d, k: csp_model(L, d, k, P0), L, yb,
+                                    p0=[dd, kd], bounds=([0, 0], [np.inf, np.inf]), maxfev=20000)
+                dds.append(popt[0]); kds.append(popt[1])
+            except Exception:
+                continue
+        return (float(np.std(dds)) if dds else np.nan,
+                float(np.std(kds)) if kds else np.nan)
+    except Exception:
+        return np.nan, np.nan
 
 
 def fit_global_kd_csp(residues, L, P0):
