@@ -163,6 +163,12 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.peak_spectrum_map = {}  # assignment -> list of spectrum indices
         self.selected_master_peak_idx = None  # Currently selected peak in Peak Mode
 
+        # Manual position-edit state (Overlay tab). Two-click model: middle-click a
+        # peak to select it, then middle-click the corrected position.
+        self.edit_mode = False
+        self._edit_selected_peak = None  # dict: idx, assignment, x, y (peak picked for move)
+        self._pending_corrections = {}   # (spectrum_idx, assignment) -> (new_x, new_y)
+
         # Peak Mode axis locking (for comparing intensity/position across spectra)
         self.lock_z_scale_to_reference = True  # ON by default
         self.reference_z_min = None  # Captured from first spectrum
@@ -690,6 +696,20 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.show_peaks_checkbox.setChecked(True)
         self.show_peaks_checkbox.toggled.connect(self._on_toggle_peak_markers)
         peak_layout.addWidget(self.show_peaks_checkbox)
+
+        self.edit_mode_checkbox = QCheckBox("✏️ Edit positions")
+        self.edit_mode_checkbox.setToolTip(
+            "Correct a peak that the tracker placed wrong. Select the spectrum, "
+            "then middle-click the peak to pick it and middle-click its true position."
+        )
+        self.edit_mode_checkbox.toggled.connect(self._on_toggle_edit_mode)
+        peak_layout.addWidget(self.edit_mode_checkbox)
+
+        self.edit_status_label = QLabel("")
+        self.edit_status_label.setWordWrap(True)
+        self.edit_status_label.setStyleSheet(
+            f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-style: italic;")
+        peak_layout.addWidget(self.edit_status_label)
 
         peak_group.setLayout(peak_layout)
         right_layout.addWidget(peak_group, stretch=1)
@@ -2034,6 +2054,86 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.overlay_show_peaks = checked
         self._update_plot()
 
+    # ===== Manual position edit (Overlay tab) =====
+
+    def _on_toggle_edit_mode(self, checked: bool):
+        """Enter/leave manual position-edit mode on the overlay plot."""
+        self.edit_mode = checked
+        self._edit_selected_peak = None
+        if checked:
+            # Markers must be visible to pick a peak.
+            if not self.show_peaks_checkbox.isChecked():
+                self.show_peaks_checkbox.setChecked(True)  # triggers replot
+            self._nav_handler.on_peak_select = self._on_edit_peak_click
+            spec_name = self.spectra[self.overlay_selected_spectrum_idx]['name'] \
+                if 0 <= self.overlay_selected_spectrum_idx < len(self.spectra) else "?"
+            self.edit_status_label.setText(
+                f"Editing {spec_name}: middle-click a peak to select it.")
+        else:
+            self._nav_handler.on_peak_select = None
+            self.edit_status_label.setText("")
+        self._update_plot()
+
+    def _on_edit_peak_click(self, x_ppm: float, y_ppm: float):
+        """Two-click move: first click picks the nearest peak, second sets its position."""
+        if not self.edit_mode:
+            return
+        spec_idx = self.overlay_selected_spectrum_idx
+        if spec_idx < 0 or spec_idx >= len(self.spectra):
+            return
+
+        if self._edit_selected_peak is None:
+            # First click: select the nearest peak in the active spectrum.
+            picked = self._find_nearest_overlay_peak(spec_idx, x_ppm, y_ppm)
+            if picked is None:
+                self.edit_status_label.setText("No peak near that click — try again.")
+                return
+            self._edit_selected_peak = picked
+            self.edit_status_label.setText(
+                f"Selected {picked['assignment']} (was {picked['x']:.3f}, {picked['y']:.2f}). "
+                f"Middle-click its true position.")
+            self._update_plot()
+        else:
+            # Second click: record the corrected position for this (spectrum, peak).
+            picked = self._edit_selected_peak
+            self._apply_overlay_correction(spec_idx, picked['idx'], picked['assignment'], x_ppm, y_ppm)
+            self.edit_status_label.setText(
+                f"Moved {picked['assignment']} → ({x_ppm:.3f}, {y_ppm:.2f}). "
+                f"(Refit not yet wired — Phase 2.)")
+            self._edit_selected_peak = None
+            self._update_plot()
+
+    def _find_nearest_overlay_peak(self, spec_idx: int, x_ppm: float, y_ppm: float):
+        """Nearest fitted peak (elliptically normalised) in a spectrum, or None if too far."""
+        fitted_peaks = self._get_fitted_peaks(spec_idx)
+        # Normalise 1H and 15N distances by typical radii so both axes count fairly.
+        rad_x, rad_y = 0.05, 0.5
+        best = None
+        best_d = 1.5  # max normalised pick distance
+        for i, peak in enumerate(fitted_peaks):
+            cx, cy = self._peak_center(peak)
+            if cx is None:
+                continue
+            d = (((cx - x_ppm) / rad_x) ** 2 + ((cy - y_ppm) / rad_y) ** 2) ** 0.5
+            if d < best_d:
+                best_d = d
+                best = {'idx': i,
+                        'assignment': peak.get('assignment', peak.get('Assignment', f'Peak_{i+1}')),
+                        'x': cx, 'y': cy}
+        return best
+
+    def _apply_overlay_correction(self, spec_idx, peak_idx, assignment, x_ppm, y_ppm):
+        """Record a corrected position and update the in-memory peak so the marker moves."""
+        self._pending_corrections[(spec_idx, assignment)] = (x_ppm, y_ppm)
+        fitted_peaks = self._get_fitted_peaks(spec_idx)
+        if 0 <= peak_idx < len(fitted_peaks):
+            peak = fitted_peaks[peak_idx]
+            # Update the keys the marker reads first so the change shows immediately.
+            peak['center_x'] = x_ppm
+            peak['center_y'] = y_ppm
+            peak['ppm_x'] = x_ppm
+            peak['ppm_y'] = y_ppm
+
     def _plot_overlay_peak_markers(self):
         """Plot peak markers on overlay spectrum.
 
@@ -2101,6 +2201,23 @@ class MultiSpectrumViewerDialog(BaseDialog):
                         )
 
                 logger.debug(f"Plotted {len(x_coords)} peak markers for spectrum {spec_idx}")
+
+            # Edit mode: ring the peak currently picked for moving.
+            if self.edit_mode and self._edit_selected_peak is not None:
+                sel = self._edit_selected_peak
+                self.plot_widget.axes.scatter(
+                    [sel['x']], [sel['y']], s=220, marker='o',
+                    facecolors='none', edgecolors='deepskyblue', linewidths=2.5,
+                    zorder=11
+                )
+
+            # Edit mode: mark positions that have a pending correction in this spectrum.
+            if self.edit_mode and self._pending_corrections:
+                cx = [xy[0] for (s, _a), xy in self._pending_corrections.items() if s == spec_idx]
+                cy = [xy[1] for (s, _a), xy in self._pending_corrections.items() if s == spec_idx]
+                if cx:
+                    self.plot_widget.axes.scatter(
+                        cx, cy, s=90, marker='x', c='magenta', linewidths=2, zorder=12)
 
         except Exception as e:
             logger.error(f"Error plotting peak markers: {e}")
