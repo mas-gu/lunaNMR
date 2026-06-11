@@ -349,6 +349,11 @@ class VoigtIntegrator(BaseIntegrator):
         self.search_window_x = 0.01  # Default X search window in ppm
         self.search_window_y = 0.05  # Default Y search window in ppm
 
+        # Per-step position freedom override for titration tracking (None = use
+        # the relaxation config defaults). Set by the series processor.
+        self.titration_pos_margin_f1 = None
+        self.titration_pos_margin_f2 = None
+
         # Integration parameters (for integrated detection-fitting mode)
         self.integration_parameters = {
             'enable_integrated_mode': False  # Disabled by default
@@ -2300,7 +2305,11 @@ class VoigtIntegrator(BaseIntegrator):
             spectrum_statistics=spectrum_stats,  # PASS1 learned statistics for bounds
             reference_positions=reference_positions,  # Cascade mode absolute drift limits
             peak_assignments=peak_assignments,  # Needed for reference_positions lookup
-            noise_level=spectrum_noise_level  # For weak peak detection (S/N < 5)
+            noise_level=spectrum_noise_level,  # For weak peak detection (S/N < 5)
+            # Titration tracking: wider per-step position freedom so the fit can
+            # follow a moving peak (None = relaxation config defaults).
+            pos_margin_f1=getattr(self, 'titration_pos_margin_f1', None),
+            pos_margin_f2=getattr(self, 'titration_pos_margin_f2', None)
         )
 
         # Denormalize fitted intensities AND derived quantities

@@ -109,6 +109,12 @@ class PS2DConfig:
             'pos_margin_f1': 0.02,         # 15N position movement limit (ppm)
             'pos_margin_f2': 0.01,        # 1H position movement limit (ppm)
 
+            # Per-step position freedom for titration tracking. Peaks shift with
+            # ligand, so the fit needs room to follow them from one point to the
+            # next (the relaxation pos_margin above is too tight). Tunable.
+            'titration_pos_margin_f1': 0.3,   # 15N per-step movement limit (ppm)
+            'titration_pos_margin_f2': 0.05,  # 1H per-step movement limit (ppm)
+
             # ================================================================
             # Maximum drift from reference (cascade mode absolute bounds)
             # ================================================================
@@ -194,6 +200,10 @@ class PS2DConfig:
             # Maximum distance peaks can move from initial position during fitting
             'pos_margin_f1': 0.01,        # 13C position movement limit (ppm)
             'pos_margin_f2': 0.01,        # 1H position movement limit (ppm)
+
+            # Per-step position freedom for titration tracking (see 15N notes).
+            'titration_pos_margin_f1': 0.3,   # 13C per-step movement limit (ppm)
+            'titration_pos_margin_f2': 0.05,  # 1H per-step movement limit (ppm)
 
             # ================================================================
             # Maximum drift from reference (cascade mode absolute bounds)

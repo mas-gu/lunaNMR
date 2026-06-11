@@ -537,7 +537,9 @@ class Ps2dMultiPeakFitter2D:
                           spectrum_statistics: Dict = None,
                           reference_positions: Dict = None,
                           peak_assignments: List[str] = None,
-                          noise_level: float = None) -> Dict:
+                          noise_level: float = None,
+                          pos_margin_f1: float = None,
+                          pos_margin_f2: float = None) -> Dict:
         """
         Fit multiple overlapping 2D Voigt peaks simultaneously
 
@@ -681,6 +683,12 @@ class Ps2dMultiPeakFitter2D:
         # Get nucleus-adaptive parameters from centralized config
         config = get_ps2d_config()
 
+        # Per-step position freedom. Titration tracking passes wider margins so
+        # the fit can follow a moving peak; otherwise use the config (relaxation)
+        # defaults.
+        eff_pos_margin_f1 = pos_margin_f1 if pos_margin_f1 is not None else config.pos_margin_f1
+        eff_pos_margin_f2 = pos_margin_f2 if pos_margin_f2 is not None else config.pos_margin_f2
+
         # ====================================================================
         # ADAPTIVE LINEWIDTH BOUNDS (PASS1 → PASS2 Learning)
         # ====================================================================
@@ -771,7 +779,7 @@ class Ps2dMultiPeakFitter2D:
             # FIXED 2025-10-13: lw_gau_f1 IS the Gaussian FWHM (not half-width)
             #fwhm_f1 = peak['lw_gau_f1']  # NEW: lw_gau IS the FWHM (no compensation needed)
             fwhm_f1 = 2.0 * peak['lw_gau_f1']  # OLD: Compensated for FWHM/2 storage bug
-            pos_f1_margin = max(0.04 * fwhm_f1, config.pos_margin_f1)  # Nucleus-adaptive minimum #GM max(1.5
+            pos_f1_margin = max(0.04 * fwhm_f1, eff_pos_margin_f1)  # Nucleus-adaptive minimum #GM max(1.5
             lower_bounds.append(peak['pos_f1'] - pos_f1_margin)
             upper_bounds.append(peak['pos_f1'] + pos_f1_margin)
 
@@ -784,7 +792,7 @@ class Ps2dMultiPeakFitter2D:
             # FIXED 2025-10-13: lw_gau_f2 IS the Gaussian FWHM (not half-width)
             #fwhm_f2 = peak['lw_gau_f2']  # NEW: lw_gau IS the FWHM (no compensation needed)
             fwhm_f2 = 2.0 * peak['lw_gau_f2']  # OLD: Compensated for FWHM/2 storage bug
-            pos_f2_margin = max(0.04 * fwhm_f2, config.pos_margin_f2)  # Nucleus-adaptive minimum #GM max(1.5
+            pos_f2_margin = max(0.04 * fwhm_f2, eff_pos_margin_f2)  # Nucleus-adaptive minimum #GM max(1.5
             lower_bounds.append(peak['pos_f2'] - pos_f2_margin)
             upper_bounds.append(peak['pos_f2'] + pos_f2_margin)
 

@@ -11,6 +11,24 @@ from lunaNMR.processors.multi_spectrum_processor import (
 )
 
 
+class TestTitrationPositionMargins:
+    """Titration mode widens the fit's per-step position freedom (pos_margin)."""
+
+    @pytest.mark.parametrize("nucleus", ["15N", "13C"])
+    def test_titration_pos_margin_is_wider(self, nucleus):
+        cfg = PS2DConfig(nucleus)
+        # Must exceed the relaxation pos_margin so the fit can follow a moving peak.
+        assert cfg.titration_pos_margin_f1 > cfg.pos_margin_f1
+        assert cfg.titration_pos_margin_f2 > cfg.pos_margin_f2
+
+    def test_integrator_defaults_to_no_override(self):
+        from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
+        integ = EnhancedVoigtIntegrator()
+        # None means the fitter falls back to the relaxation config defaults.
+        assert integ.titration_pos_margin_f1 is None
+        assert integ.titration_pos_margin_f2 is None
+
+
 class TestResolveTitrationTracking:
     """The policy: titration forces cascade propagation and disables the
     absolute (free-state) drift clamp so peaks can accumulate position changes.

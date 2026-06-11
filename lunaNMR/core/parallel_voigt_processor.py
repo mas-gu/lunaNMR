@@ -998,7 +998,8 @@ class ParallelVoigtProcessor:
         parent = getattr(self.original_fitter, 'parent', None)
         if parent:
             # Copy important integrator parameters
-            for param_name in ['fitting_parameters', 'gui_params', 'processing_mode', 'noise_threshold']:
+            for param_name in ['fitting_parameters', 'gui_params', 'processing_mode', 'noise_threshold',
+                               'titration_pos_margin_f1', 'titration_pos_margin_f2']:
                 if hasattr(parent, param_name):
                     params[param_name] = getattr(parent, param_name)
         

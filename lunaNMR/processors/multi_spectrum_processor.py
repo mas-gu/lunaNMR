@@ -647,6 +647,20 @@ class MultiSpectrumProcessor:
             else:
                 pre_learned_statistics = self.reference_spectrum_statistics
 
+        # Titration tracking: give the fit wider per-step position freedom so it
+        # can follow a moving peak (nucleus-adaptive; None = relaxation defaults).
+        if getattr(self, 'titration_tracking', False):
+            from lunaNMR.core.ps2d_config import get_ps2d_config
+            cfg = get_ps2d_config()
+            self.integrator.titration_pos_margin_f1 = cfg.titration_pos_margin_f1
+            self.integrator.titration_pos_margin_f2 = cfg.titration_pos_margin_f2
+            if spectrum_number == 1:
+                log_info(f"Titration mode: per-step position freedom widened to "
+                         f"F1=±{cfg.titration_pos_margin_f1} ppm, F2=±{cfg.titration_pos_margin_f2} ppm")
+        else:
+            self.integrator.titration_pos_margin_f1 = None
+            self.integrator.titration_pos_margin_f2 = None
+
         # This calls _sync_parameters_to_integrator() internally, ensuring proper parameter flow
         # CRITICAL: Use integrator.peak_list which now contains DETECTED positions (not reference_peaks)
         fitted_results, learned_statistics = single_processor.process_peak_list(
