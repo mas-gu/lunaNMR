@@ -1555,11 +1555,18 @@ class MultiSpectrumViewerDialog(BaseDialog):
         else:
             self.visible_spectra.discard(spectrum_name)
 
-        # Update spectrum data
-        for spec in self.spectra:
+        # Update spectrum data; remember the index of the spectrum just shown.
+        shown_idx = None
+        for i, spec in enumerate(self.spectra):
             if spec['name'] == spectrum_name:
                 spec['visible'] = visible
+                if visible:
+                    shown_idx = i
                 break
+
+        # Showing a spectrum focuses the Peak Navigator on it (user can still change).
+        if shown_idx is not None:
+            self._set_overlay_active_spectrum(shown_idx)
 
         logger.debug(f"Spectrum '{spectrum_name}' visibility: {visible}")
         self._update_plot()
@@ -2023,20 +2030,31 @@ class MultiSpectrumViewerDialog(BaseDialog):
     # ===== Overlay Tab Methods =====
 
     def _on_overlay_spectrum_selected(self, item: QListWidgetItem):
-        """Handle spectrum selection in overlay tab.
-
-        Loads peaks into the PeakNavigatorTable for the selected spectrum.
-        """
-        spec_idx = item.data(Qt.UserRole)
-        self.overlay_selected_spectrum_idx = spec_idx
-
-        # Load peaks into the table
-        fitted_peaks = self._get_fitted_peaks(spec_idx)
-        self.overlay_peak_table.load_peaks(fitted_peaks)
-
-        logger.debug(f"Selected spectrum {spec_idx} for overlay peak display")
-        # Refresh the plot to show peaks for newly selected spectrum
+        """Handle spectrum selection in overlay tab (right 'Select Spectrum' list)."""
+        self._set_overlay_active_spectrum(item.data(Qt.UserRole))
         self._update_plot()
+
+    def _set_overlay_active_spectrum(self, spec_idx: int):
+        """Point the Peak Navigator (and edit target) at a spectrum, syncing the list.
+
+        Used both when the user picks a spectrum and when one is shown, so the peak
+        list always matches the spectrum in focus. The user can still pick another.
+        """
+        if spec_idx is None or spec_idx < 0 or spec_idx >= len(self.spectra):
+            return
+        self.overlay_selected_spectrum_idx = spec_idx
+        self.overlay_peak_table.load_peaks(self._get_fitted_peaks(spec_idx))
+
+        # Keep the 'Select Spectrum' list highlight in sync (no itemClicked recursion).
+        if self.overlay_spectrum_list.currentRow() != spec_idx:
+            self.overlay_spectrum_list.blockSignals(True)
+            self.overlay_spectrum_list.setCurrentRow(spec_idx)
+            self.overlay_spectrum_list.blockSignals(False)
+
+        if self.edit_mode:
+            self.edit_status_label.setText(
+                f"Editing {self.spectra[spec_idx]['name']}: middle-click a peak to select it.")
+        logger.debug(f"Overlay active spectrum -> {spec_idx}")
 
     def _on_overlay_peak_selected_by_index(self, peak_idx: int):
         """Handle peak selection from overlay PeakNavigatorTable.

@@ -115,6 +115,21 @@ class TestRefitAndUndo:
         assert dialog._pending_corrections == {}
 
 
+class TestShowSyncsPeakNavigator:
+    """Showing a spectrum focuses the Peak Navigator on it (user can still change)."""
+
+    def test_visibility_show_sets_active_spectrum(self, dialog):
+        name = dialog.spectra[1]['name']
+        dialog._on_visibility_changed(name, True)
+        assert dialog.overlay_selected_spectrum_idx == 1
+        assert dialog.overlay_spectrum_list.currentRow() == 1
+
+    def test_hide_does_not_change_active(self, dialog):
+        dialog._set_overlay_active_spectrum(1)
+        dialog._on_visibility_changed(dialog.spectra[0]['name'], False)  # hide a spectrum
+        assert dialog.overlay_selected_spectrum_idx == 1  # unchanged
+
+
 class TestRefitHelpers:
     def test_learned_linewidths_medians(self, dialog):
         for p, lwx, lwy in zip(dialog._get_fitted_peaks(0), (0.02, 0.04), (0.1, 0.3)):
