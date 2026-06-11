@@ -110,11 +110,34 @@ class TestCarryForwardSeed:
         current = [{'assignment': 'A', 'success': False, 'ppm_x': 0.0}]
         assert self._proc()._carry_forward_seed(current, None) is current
 
-    def test_failed_with_no_prior_entry_kept_as_is(self):
+    def test_failed_with_mismatched_assignment_kept_as_is(self):
+        # Different assignments at the same index -> lists not aligned, don't carry.
         prior = [{'assignment': 'B', 'success': True, 'ppm_x': 7.0}]
         current = [{'assignment': 'A', 'success': False, 'ppm_x': 0.0}]
         seed = self._proc()._carry_forward_seed(current, prior)
         assert seed[0]['assignment'] == 'A' and seed[0]['success'] is False
+
+    def test_assignmentless_failure_carries_by_index(self):
+        # Real failures are {'success': False, 'error': ...} with NO assignment;
+        # they must still carry the prior position (matched by list position).
+        prior = [{'assignment': 'A', 'success': True, 'peak_x': 8.0, 'peak_y': 120.0}]
+        current = [{'success': False, 'error': 'fit blew up'}]
+        seed = self._proc()._carry_forward_seed(current, prior)
+        assert seed[0]['peak_x'] == 8.0 and seed[0]['success'] is True
+
+    def test_chained_failure_keeps_last_good(self):
+        # Good at n, fails at n+1 and n+2 -> seed stays at n's position, not reset.
+        proc = self._proc()
+        n = [{'assignment': 'A', 'success': True, 'peak_x': 8.0}]
+        seed1 = proc._carry_forward_seed([{'success': False}], n)       # n+1 fails
+        assert seed1[0]['peak_x'] == 8.0
+        seed2 = proc._carry_forward_seed([{'success': False}], seed1)   # n+2 fails
+        assert seed2[0]['peak_x'] == 8.0
+
+    def test_length_mismatch_falls_back(self):
+        prior = [{'success': True, 'peak_x': 8.0}, {'success': True, 'peak_x': 7.0}]
+        current = [{'success': False}]
+        assert self._proc()._carry_forward_seed(current, prior) is current
 
 
 class TestProcessorWiring:

@@ -130,31 +130,41 @@ class MultiSpectrumProcessor:
     def _carry_forward_seed(self, current, prior):
         """Build the cascade seed: keep each successful fit, but for a failed peak
         reuse its last-good entry from the prior seed so its position survives a
-        transient failure. Falls through to the current entry if there is no prior.
+        transient failure (n+5 fails -> seed stays at n+4, not back at the reference).
+
+        Matched by LIST POSITION, not 'assignment': a failed fit is often just
+        {'success': False, 'error': ...} with no assignment, so an assignment key
+        never matches and the peak would silently reset to the reference. The
+        results lists are peak-ordered and aligned, so the index is the reliable key.
         """
-        if not prior:
+        if not prior or len(prior) != len(current):
             return current
-        prior_by_assignment = {}
-        for r in prior:
-            a = r.get('assignment') if r else None
-            if a is not None:
-                prior_by_assignment[str(a)] = r
         seed = []
         carried = 0
-        for r in current:
+        for i, r in enumerate(current):
             if r and r.get('success', False):
                 seed.append(r)
                 continue
-            a = str(r.get('assignment')) if r else None
-            fallback = prior_by_assignment.get(a)
-            if fallback is not None:
-                seed.append(fallback)   # last-good position
+            p = prior[i]
+            if p is not None and self._same_peak(r, p):
+                seed.append(p)          # last-good position for this peak
                 carried += 1
             else:
                 seed.append(r)
         if carried:
             log_info(f"Cascade: kept last-good position for {carried} failed peak(s)")
         return seed
+
+    def _same_peak(self, a, b):
+        """True if two result dicts refer to the same peak, or identity is unknown.
+        Failed results often lack 'assignment', so we trust positional alignment
+        unless both carry assignments that disagree.
+        """
+        aa = a.get('assignment') if a else None
+        ba = b.get('assignment') if b else None
+        if aa is not None and ba is not None:
+            return str(aa) == str(ba)
+        return True
 
     def _titration_window(self, fallback_f1, fallback_f2):
         """Per-step tracking window = factor x reference-spectrum average linewidth.
