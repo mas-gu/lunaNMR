@@ -44,6 +44,16 @@ class TestPerResidueIntensity:
         assert r['I0'] == pytest.approx(1.0, rel=1e-2)
         assert r['I_inf'] == pytest.approx(0.05, rel=1e-2)    # tracks the floor, not 0
 
+    def test_bootstrap_gives_finite_errors(self):
+        from kd_models import intensity_decay
+        from kd_fit import fit_residue_intensity
+        y = intensity_decay(L, I0=1.0, I_inf=0.05, Kd=25.0) + np.array(
+            [0.02, -0.01, 0.0, 0.01, -0.02, 0.0, 0.01, -0.01])  # mild noise
+        r = fit_residue_intensity(L, y, n_bootstrap=200)
+        assert r['success']
+        assert np.isfinite(r['Kd_err']) and r['Kd_err'] > 0
+        assert np.isfinite(r['I0_err']) and np.isfinite(r['I_inf_err'])
+
 
 class TestGlobalKd:
     def test_shared_kd_across_residues(self):

@@ -72,11 +72,31 @@ def fit_residue_intensity(L, obs, P0=None, kd_init=None, n_bootstrap=0):
         return {'success': False, 'reason': str(e)}
     I0, I_inf, kd = popt
     perr = np.sqrt(np.diag(pcov))
-    return {'success': True, 'Kd': float(kd), 'Kd_err': float(perr[2]),
-            'I0': float(I0), 'I0_err': float(perr[0]),
-            'I_inf': float(I_inf), 'I_inf_err': float(perr[1]),
+    if n_bootstrap:
+        i0_e, inf_e, kd_e = _bootstrap_intensity(L, y, I0, I_inf, kd, hi, n_bootstrap)
+    else:
+        i0_e, inf_e, kd_e = float(perr[0]), float(perr[1]), float(perr[2])
+    return {'success': True, 'Kd': float(kd), 'Kd_err': kd_e,
+            'I0': float(I0), 'I0_err': i0_e,
+            'I_inf': float(I_inf), 'I_inf_err': inf_e,
             'r_squared': _r_squared(y, intensity_decay(L, I0, I_inf, kd)),
             'L': L.tolist(), 'obs': y.tolist()}
+
+
+def _bootstrap_intensity(L, y, I0, I_inf, kd, hi, n):
+    yfit = intensity_decay(L, I0, I_inf, kd)
+    resid = y - yfit
+    i0s, infs, kds = [], [], []
+    for _ in range(n):
+        yb = yfit + np.random.choice(resid, size=len(resid), replace=True)
+        try:
+            popt, _ = curve_fit(intensity_decay, L, yb, p0=[I0, I_inf, kd],
+                                bounds=([0, 0, 1e-9], [hi, hi, np.inf]), maxfev=20000)
+            i0s.append(popt[0]); infs.append(popt[1]); kds.append(popt[2])
+        except Exception:
+            continue
+    sd = lambda a: float(np.std(a)) if a else np.nan
+    return sd(i0s), sd(infs), sd(kds)
 
 
 def _bootstrap_csp(L, y, P0, dd, kd, n):
