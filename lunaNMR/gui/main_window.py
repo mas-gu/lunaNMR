@@ -4825,6 +4825,10 @@ class LunaNMRMainWindow(BaseWindow):
         dynamixs_action.triggered.connect(self.launch_dynamixs)
         modules_menu.addAction(dynamixs_action)
 
+        kd_titration_action = QAction("Kd / Titration Analysis", self)
+        kd_titration_action.triggered.connect(self.launch_kd_titration)
+        modules_menu.addAction(kd_titration_action)
+
         series_qc_action = QAction("Series QC Analysis", self)
         series_qc_action.triggered.connect(self.launch_series_qc)
         modules_menu.addAction(series_qc_action)
@@ -5709,6 +5713,18 @@ class LunaNMRMainWindow(BaseWindow):
         # Create and show new dialog
         self.dynamixs_dialog = DynamiXsDialog(parent=self, main_window=self)
         self.dynamixs_dialog.show()
+
+    def launch_kd_titration(self):
+        """Launch the Kd / Titration analysis module as an embedded dialog."""
+        from lunaNMR.gui.dialogs import KdTitrationDialog
+
+        if hasattr(self, 'kd_titration_dialog') and self.kd_titration_dialog and self.kd_titration_dialog.isVisible():
+            self.kd_titration_dialog.raise_()
+            self.kd_titration_dialog.activateWindow()
+            return
+
+        self.kd_titration_dialog = KdTitrationDialog(parent=self, main_window=self)
+        self.kd_titration_dialog.show()
 
     def launch_series_qc(self):
         """Launch Series QC Analysis dialog.
