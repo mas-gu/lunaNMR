@@ -72,6 +72,17 @@ class TestGlobalKd:
         assert g['dd_max']['C'] == pytest.approx(0.45, rel=1e-3)
 
 
+class TestJsonSafe:
+    def test_nan_inf_become_none(self):
+        from kd_fit import json_safe
+        out = json_safe({'a': float('nan'), 'b': [1.0, float('inf')], 'c': {'d': 2.0}})
+        assert out['a'] is None
+        assert out['b'] == [1.0, None]
+        assert out['c']['d'] == 2.0
+        import json
+        json.loads(json.dumps(out))   # round-trips as strict JSON (no bare NaN)
+
+
 class TestIntensityScaling:
     def test_per_point_scale_affects_intensity_not_csp(self, tmp_path):
         from kd_models import csp_model

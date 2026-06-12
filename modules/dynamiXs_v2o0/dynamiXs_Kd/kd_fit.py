@@ -13,6 +13,19 @@ from kd_input import load_titration, csp_series, intensity_ratio_series
 _MIN_POINTS = 3
 
 
+def json_safe(obj):
+    """Replace non-finite floats (NaN/inf) with None so output is valid JSON
+    (bare NaN tokens are rejected by JS/jq/strict parsers)."""
+    import math
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [json_safe(v) for v in obj]
+    return obj
+
+
 def _r_squared(y, yfit):
     ss_res = np.sum((y - yfit) ** 2)
     ss_tot = np.sum((y - np.mean(y)) ** 2)
@@ -128,8 +141,11 @@ def _bootstrap_csp(L, y, P0, dd, kd, n):
 
 def fit_global_kd_csp(residues, L, P0):
     """Joint CSP fit with one shared Kd and a per-residue Δδ_max."""
-    names = list(residues)
     L = np.asarray(L, dtype=float)
+    # drop residues with no usable points (all-NaN) so np.nanmax can't yield NaN
+    names = [n for n in residues if not np.all(np.isnan(np.asarray(residues[n], dtype=float)))]
+    if len(names) < 2:
+        return {'success': False, 'reason': 'fewer than 2 usable residues'}
     series = {n: np.asarray(residues[n], dtype=float) for n in names}
     dd0 = [max(float(np.nanmax(series[n])), 1e-6) for n in names]
     kd0 = max(float(np.nanmax(L)) / 2.0, 1.0)
@@ -215,7 +231,7 @@ def run_kd_analysis_with_params(params, progress_callback=None):
     prefix = params.get('output_prefix', 'kd')
     json_file = os.path.join(params['output_dir'], f"{prefix}_kd_fit_data.json")
     with open(json_file, 'w') as f:
-        json.dump(data, f, indent=2)
+        json.dump(json_safe(data), f, indent=2)
     results_file = os.path.join(params['output_dir'], f"{prefix}_kd_results.txt")
     _write_results_txt(results_file, fits, global_fit, observables)
 

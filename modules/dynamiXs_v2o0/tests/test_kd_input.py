@@ -105,6 +105,16 @@ class TestCspSeries:
         csp2 = csp_series(residues["R2"], alpha=0.14)
         assert max(csp2) == pytest.approx(0.0)
 
+    def test_intensity_ratio_bad_reference_is_nan(self):
+        from kd_input import intensity_ratio_series
+        import math
+        for ref in (0.0, float('nan'), -5.0):           # zero / missing / negative ref
+            r = intensity_ratio_series({'height': [ref, 100.0, 50.0]})
+            assert all(math.isnan(x) for x in r)        # excluded, not raw garbage
+        # valid reference -> normal ratio
+        r = intensity_ratio_series({'height': [200.0, 100.0, 50.0]})
+        assert r == [1.0, 0.5, 0.25]
+
     def test_undetected_position_zero_is_excluded(self):
         from kd_input import csp_series
         # point 2 undetected -> position 0.0 sentinel; must be NaN, not a huge CSP

@@ -20,7 +20,7 @@ _KD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dynamiXs_Kd"
 if _KD_DIR not in sys.path:
     sys.path.insert(0, _KD_DIR)
 from kd_models import csp_model, intensity_decay  # noqa: E402
-from kd_fit import fit_residue_csp, fit_residue_intensity  # noqa: E402
+from kd_fit import fit_residue_csp, fit_residue_intensity, json_safe  # noqa: E402
 
 
 class KdTitrationFitViewer(QMainWindow):
@@ -285,17 +285,23 @@ class KdTitrationFitViewer(QMainWindow):
             return
         obs = self._obs_key()
         self.excluded[obs].pop(f["residue"], None)
+        ok = False
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            self._refit_residue(f, obs)
+            ok = self._refit_residue(f, obs)
             self._save_json()
             self._refresh()
         finally:
             QApplication.restoreOverrideCursor()
+        if not ok:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Reset incomplete",
+                                "Exclusions were cleared but the all-points refit did "
+                                "not converge — parameters left unchanged.")
 
     def _save_json(self):
         if self.json_file:
-            Path(self.json_file).write_text(json.dumps(self.data, indent=2))
+            Path(self.json_file).write_text(json.dumps(json_safe(self.data), indent=2))
 
     def _export(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export figure", "", "PDF (*.pdf);;PNG (*.png)")

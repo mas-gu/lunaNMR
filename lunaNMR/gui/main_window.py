@@ -354,6 +354,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.dynamixs_state = None  # DynamiXs dialog parameters
         self.dynamixs_file_refs = None  # DynamiXs input file paths
         self.dynamixs_dialog = None  # Reference to open DynamiXs dialog
+        self.kd_titration_dialog = None  # Reference to open Kd/titration dialog
 
         # ===== Selection State =====
         self.selected_peak_info = None  # {type, index, peak_id, data}

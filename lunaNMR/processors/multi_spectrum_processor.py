@@ -137,7 +137,12 @@ class MultiSpectrumProcessor:
         never matches and the peak would silently reset to the reference. The
         results lists are peak-ordered and aligned, so the index is the reliable key.
         """
-        if not prior or len(prior) != len(current):
+        if not prior:
+            return current
+        if len(prior) != len(current):
+            log_warning(f"Cascade seed length mismatch ({len(prior)} prior vs "
+                        f"{len(current)} current) — cannot carry last-good positions "
+                        f"this step; peaks may reset to reference.")
             return current
         seed = []
         carried = 0
@@ -903,9 +908,12 @@ class MultiSpectrumProcessor:
                         })
                     continue
 
-                # Try to find in original reference peaks
+                # Try to find in original reference peaks. Compare as strings —
+                # assignments may be stored numerically (int/float) in
+                # reference_peaks while `assignment` here is a str, which would
+                # otherwise never match.
                 matching_ref = self.reference_peaks[
-                    self.reference_peaks['Assignment'] == assignment
+                    self.reference_peaks['Assignment'].astype(str) == str(assignment)
                 ]
 
                 if not matching_ref.empty:
@@ -915,6 +923,18 @@ class MultiSpectrumProcessor:
                         'Position_Y': matching_ref['Position_Y'].iloc[0],
                         'Height': matching_ref.get('Height', pd.Series([0])).iloc[0] if 'Height' in matching_ref.columns else 0,
                         'Intensity': matching_ref.get('Intensity', pd.Series([0])).iloc[0] if 'Intensity' in matching_ref.columns else 0
+                    })
+                else:
+                    # No reference match: still append a slot so this list stays
+                    # 1:1 with fitted_results. The cascade seed must not shrink, or
+                    # the next spectrum's peak_list (and _carry_forward_seed index
+                    # alignment) silently breaks. Position 0 marks it undetected.
+                    pos_x = result.get('peak_x', result.get('center_x', 0)) if result else 0
+                    pos_y = result.get('peak_y', result.get('center_y', 0)) if result else 0
+                    peak_data.append({
+                        'Assignment': assignment,
+                        'Position_X': pos_x, 'Position_Y': pos_y,
+                        'Height': 0, 'Intensity': 0
                     })
 
         if not peak_data:

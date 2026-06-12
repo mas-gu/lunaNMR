@@ -129,9 +129,14 @@ def csp_series(residue, alpha=0.14):
 
 
 def intensity_ratio_series(residue, value='height'):
-    """Per-point intensity normalised to the first (reference) point."""
+    """Per-point intensity normalised to the first (reference) point.
+
+    If the reference point is missing/non-positive (NaN, 0, or negative — peak not
+    detected or below noise at L=0) the ratio is undefined, so return all-NaN
+    (excluded from the fit) rather than raw unnormalised values.
+    """
     v = np.asarray(residue[value], dtype=float)
     ref = v[0]
-    if not ref:
-        return list(v)
+    if not np.isfinite(ref) or ref <= 0.0:
+        return [float('nan')] * len(v)
     return list(v / ref)

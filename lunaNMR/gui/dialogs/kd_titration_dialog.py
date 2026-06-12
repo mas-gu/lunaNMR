@@ -45,3 +45,12 @@ class KdTitrationDialog(BaseDialog):
     def show_main_menu(self):
         """BasePage back-button target: this module has one page, so close it."""
         self.close()
+
+    def closeEvent(self, event):
+        """Stop a running fit before the page is destroyed, so the worker thread
+        can't emit signals into already-deleted widgets (use-after-free)."""
+        worker = getattr(self.kd_page, 'worker', None)
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            worker.wait(5000)
+        super().closeEvent(event)

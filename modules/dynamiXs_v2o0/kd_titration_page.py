@@ -40,6 +40,7 @@ class KdTitrationPage(BasePage):
         self.detected_points = []
         self.last_json_folder = None
         self.last_json_file = None
+        self.worker = None
         self._setup_content()
 
     # ---------- UI ----------
@@ -208,11 +209,11 @@ class KdTitrationPage(BasePage):
             self.file_drop.setText(os.path.basename(path))
 
     def _set_input_file(self, path):
-        self.input_file = path
         self._log(f"Input set: {path}")
         try:
             from kd_input import load_titration
             points, residues = load_titration(path)
+            self.input_file = path        # only commit after a successful load
             self.detected_points = points
             # CSP needs per-point positions; intensity matrices have none.
             import math
@@ -332,9 +333,17 @@ class KdTitrationPage(BasePage):
         self.worker.error.connect(self._on_error)
         self.worker.start()
 
+    def _cleanup_worker(self):
+        if self.worker is not None:
+            self.worker.wait()
+            self.worker.deleteLater()
+            self.worker = None
+
     def _on_finished(self, result):
         self.run_btn.setEnabled(True)
         self.progress_bar.setValue(100)
+        self.progress_bar.hide()
+        self._cleanup_worker()
         n = result.get("n_fitted", 0)
         self.last_json_file = result.get("json_file")
         self.last_json_folder = os.path.dirname(result.get("json_file") or "") or result.get("output_dir")
@@ -347,6 +356,8 @@ class KdTitrationPage(BasePage):
 
     def _on_error(self, error_msg):
         self.run_btn.setEnabled(True)
+        self.progress_bar.hide()
+        self._cleanup_worker()
         self._log(f"ERROR: {error_msg}")
         show_error(self, "Fit failed", str(error_msg))
 
@@ -358,6 +369,9 @@ class KdTitrationPage(BasePage):
             return
         try:
             from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+            existing = getattr(self, "_viewer", None)
+            if existing is not None and existing.isVisible():
+                existing.close()
             self._viewer = open_kd_titration_viewer(parent=self, json_file=self.last_json_file)
         except Exception as e:
             show_error(self, "Viewer error", f"Could not open viewer:\n{e}")
