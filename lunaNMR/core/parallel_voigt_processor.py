@@ -1351,19 +1351,35 @@ class ParallelVoigtProcessor:
             peak_x = float(peak_row['Position_X'])
             peak_y = float(peak_row['Position_Y'])
             assignment = peak_row.get('Assignment', f'Peak_{i+1}')
-            
+
+            result = None
             try:
                 result = self.original_fitter.enhanced_peak_fitting(peak_x, peak_y, assignment)
                 if result:
                     result['processing_mode'] = 'sequential_fallback'
-                    results.append(result)
-                    
-                if progress_callback:
-                    progress = ((i + 1) / len(peak_list)) * 100
-                    progress_callback(progress, f"Sequential: {i+1}/{len(peak_list)}", assignment)
-                    
             except Exception as e:
                 log_error(f"Sequential fallback failed for peak {i+1}: {e}")
+                result = None
+
+            if result:
+                results.append(result)
+            else:
+                # Always append a placeholder so results stay 1:1 with peak_list —
+                # a shorter list breaks cascade index alignment downstream.
+                results.append({
+                    'assignment': assignment, 'peak_number': i + 1,
+                    'peak_x': peak_x, 'peak_y': peak_y,
+                    'center_x': peak_x, 'center_y': peak_y,
+                    'height': 0.0, 'volume': 0.0, 'amplitude': 0.0,
+                    'r_squared': 0.0, 'quality': 'Failed', 'fitting_quality': 'Failed',
+                    'success': False, 'fitted': False, 'method': 'none',
+                    'processing_mode': 'sequential_fallback',
+                    'failure_reason': 'Sequential fallback fit failed',
+                })
+
+            if progress_callback:
+                progress = ((i + 1) / len(peak_list)) * 100
+                progress_callback(progress, f"Sequential: {i+1}/{len(peak_list)}", assignment)
 
         return results
 

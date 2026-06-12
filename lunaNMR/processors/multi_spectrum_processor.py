@@ -440,7 +440,6 @@ class MultiSpectrumProcessor:
             except Exception as e:
                 log_error(f"Direct loading failed: {e}")
                 raise IOError(f"All loading methods failed for: {nmr_file}")
-##
 
 
         # VERIFICATION: Ensure NMR data is properly loaded
@@ -999,9 +998,9 @@ class MultiSpectrumProcessor:
         for col in tidy_df_formatted.columns:
             if not pd.api.types.is_numeric_dtype(tidy_df_formatted[col]):
                 continue
-            # Position columns get 3 decimal places
+            # Position columns get 4 decimals — CSP/titration needs full ppm precision
             if col in ['ppm_x', 'ppm_y']:
-                tidy_df_formatted[col] = tidy_df_formatted[col].apply(lambda x: f'{x:.3f}' if pd.notna(x) else '')
+                tidy_df_formatted[col] = tidy_df_formatted[col].apply(lambda x: f'{x:.4f}' if pd.notna(x) else '')
             # All other numeric columns get 1 decimal place
             else:
                 tidy_df_formatted[col] = tidy_df_formatted[col].apply(lambda x: f'{x:.1f}' if pd.notna(x) else '')
@@ -1054,30 +1053,6 @@ class MultiSpectrumProcessor:
             batch_obj.statistics = batch_results_dict['statistics']
 
         return batch_obj
-
-    def _create_comprehensive_output_files(self, batch_results: Dict[str, Any]):
-        """
-        Creates all output files, including the new tidy format.
-        (This is an update to the existing method).
-        """
-        if not os.path.exists(self.output_folder):
-            os.makedirs(self.output_folder)
-
-        # --- Existing code ---
-        tracking_df = self._create_peak_tracking_table(batch_results)
-        if not tracking_df.empty:
-            tracking_file = os.path.join(self.output_folder, "comprehensive_peak_tracking.csv")
-            # Format with 3 decimals for Reference_X/Y, 1 decimal for other columns
-            tracking_df_formatted = self._format_dataframe_for_csv(tracking_df)
-            tracking_df_formatted.to_csv(tracking_file, index=False)
-            self._create_intensity_matrix(tracking_df)
-            self._create_detection_matrix(tracking_df)
-            self._create_summary_statistics_file(batch_results)
-
-        # --- ADD THIS CALL ---
-        self._create_tidy_results_file(batch_results)
-
-## gm added
 
     def _convert_to_integration_format(self, fitted_results: List[Dict]) -> List[Dict]:
         """
@@ -1333,10 +1308,6 @@ class MultiSpectrumProcessor:
 
         return standardized_results
 
-##
-
-##
-
     def _initialize_comprehensive_batch_results(self, nmr_files: List[str],
                                               output_folder: str, peak_source_mode: str) -> Dict[str, Any]:
         """Initialize comprehensive batch results structure"""
@@ -1384,6 +1355,11 @@ class MultiSpectrumProcessor:
 
             # Create summary statistics file
             self._create_summary_statistics_file(batch_results)
+
+        # Tidy long-format CSV (one row per spectrum×peak) — consumed by DynamiXs,
+        # the Kd/titration module, and manual-audit save. Created unconditionally
+        # so it exists even when the tracking table is empty.
+        self._create_tidy_results_file(batch_results)
 
     def _create_peak_tracking_table(self, batch_results: Dict[str, Any]) -> pd.DataFrame:
         """Create comprehensive peak tracking table.
@@ -1479,8 +1455,9 @@ class MultiSpectrumProcessor:
     def _format_dataframe_for_csv(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Format dataframe columns with specific decimal places:
-        - Reference_X, LW_X: 4 decimal places (1H dimension)
-        - Reference_Y, LW_Y: 3 decimal places (15N dimension)
+        - Fitted positions (Position_X/Y, {pt}_Position_X/Y): 4 decimal places (CSP needs full ppm precision)
+        - LW_X: 4 decimal places (1H dimension)
+        - Reference_X, Reference_Y, LW_Y: 3 decimal places
         - R_Squared: 3 decimal places
         - Integer columns: preserved as integers (no decimal point)
         - All other numeric columns: 1 decimal place

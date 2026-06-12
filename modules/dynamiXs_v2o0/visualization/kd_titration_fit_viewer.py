@@ -62,7 +62,8 @@ class KdTitrationFitViewer(QMainWindow):
 
         right.addWidget(QLabel("View"))
         self.view_combo = QComboBox()
-        self.view_combo.addItems(["Per-residue curve", "Kd vs residue", "amplitude vs residue"])
+        self.view_combo.addItems(["Per-residue curve", "Kd vs residue",
+                                  "Δδmax (CSP) / I0 (int) vs residue"])
         self.view_combo.currentIndexChanged.connect(self._refresh)
         right.addWidget(self.view_combo)
 
@@ -120,7 +121,8 @@ class KdTitrationFitViewer(QMainWindow):
     def _update_global_label(self):
         g = self.data.get("global", {}).get("csp", {})
         self.global_label.setText(
-            f"Global shared Kd (CSP): {g['Kd']:.4g}  (n={g.get('n_residues','?')})"
+            f"Global shared Kd (CSP): {g['Kd']:.4g}  (n={g.get('n_residues','?')}, "
+            f"from initial fit — not updated by per-residue refits)"
             if g.get("success") else "Global Kd: n/a")
 
     def _obs_key(self):

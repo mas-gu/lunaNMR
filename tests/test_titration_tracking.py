@@ -86,6 +86,25 @@ class TestTitrationWindow:
         assert self._proc(None)._titration_window(0.3, 0.05) == (0.3, 0.05)
 
 
+class TestTidyResultsFile:
+    """series_analysis_tidy.csv must be created (it was silently dropped by a
+    duplicate _create_comprehensive_output_files that shadowed the tidy call)."""
+
+    def test_tidy_file_created_with_expected_columns_and_precision(self, tmp_path):
+        p = MultiSpectrumProcessor.__new__(MultiSpectrumProcessor)
+        p.output_folder = str(tmp_path)
+        batch = {'results': {'spec_1o0.ft': {'success': True, 'integration_results': [
+            {'assignment': 'R1', 'peak_number': 1, 'ppm_x': 8.1234, 'ppm_y': 120.456,
+             'height': 1000.0, 'volume': 2000.0, 'snr': 8.0, 'quality': 'Good', 'r_squared': 0.99},
+        ]}}}
+        p._create_tidy_results_file(batch)
+        f = tmp_path / 'series_analysis_tidy.csv'
+        assert f.exists()
+        df = pd.read_csv(f)
+        assert {'spectrum_name', 'assignment', 'ppm_x', 'ppm_y', 'height', 'volume'} <= set(df.columns)
+        assert df['ppm_x'].iloc[0] == 8.1234        # 4-decimal precision (CSP needs it)
+
+
 class TestCarryForwardSeed:
     """A failed peak keeps its last-good position as the seed for the next spectrum."""
 
