@@ -252,6 +252,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         for idx, spec in enumerate(unsorted_spectra):
             spec['color'] = self.default_colors[idx % len(self.default_colors)]
             spec['visible'] = (idx == 0)  # First spectrum visible by default
+            spec['show_peaks'] = True     # peak list ON when the spectrum is shown
             del spec['_delay_ms']  # Remove temporary key
             self.spectra.append(spec)
 
@@ -686,6 +687,25 @@ class MultiSpectrumViewerDialog(BaseDialog):
         spec_layout.addWidget(self.overlay_spectrum_list)
         spec_group.setLayout(spec_layout)
         right_layout.addWidget(spec_group)
+
+        # Per-spectrum peak-list toggles: one checkbox per spectrum (text in its
+        # color). A spectrum's peaks draw only when it is both visible and checked.
+        peaklist_group = QGroupBox("Peak lists (per spectrum)")
+        peaklist_group.setStyleSheet(self._get_group_style())
+        peaklist_outer = QVBoxLayout()
+        peaklist_scroll = QScrollArea()
+        peaklist_scroll.setWidgetResizable(True)
+        peaklist_scroll.setMaximumHeight(110)
+        self.peaklist_container = QWidget()
+        self.peaklist_layout = QVBoxLayout(self.peaklist_container)
+        self.peaklist_layout.setContentsMargins(2, 2, 2, 2)
+        self.peaklist_layout.setSpacing(1)
+        peaklist_scroll.setWidget(self.peaklist_container)
+        peaklist_outer.addWidget(peaklist_scroll)
+        peaklist_group.setLayout(peaklist_outer)
+        right_layout.addWidget(peaklist_group)
+        self.peak_toggle_checks = {}
+        self._build_peak_list_toggles()
 
         peak_group = QGroupBox("Peak Navigator")
         peak_group.setStyleSheet(self._get_group_style())
@@ -1562,6 +1582,14 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 spec['visible'] = visible
                 if visible:
                     shown_idx = i
+                    # Showing a spectrum auto-enables its peak list (user can turn it
+                    # off again in the "Peak lists" panel).
+                    spec['show_peaks'] = True
+                    cb = getattr(self, 'peak_toggle_checks', {}).get(i)
+                    if cb is not None:
+                        cb.blockSignals(True)
+                        cb.setChecked(True)
+                        cb.blockSignals(False)
                 break
 
         # Showing a spectrum focuses the Peak Navigator on it (user can still change).
@@ -2090,9 +2118,34 @@ class MultiSpectrumViewerDialog(BaseDialog):
             logger.error(f"Error zooming to peak: {e}")
 
     def _on_toggle_peak_markers(self, checked: bool):
-        """Toggle display of peak markers on overlay plot."""
+        """Master toggle: gates ALL per-spectrum peak lists on the overlay plot."""
         self.overlay_show_peaks = checked
         self._update_plot()
+
+    def _build_peak_list_toggles(self):
+        """One checkbox per spectrum (text in its color) to show/hide that
+        spectrum's fitted-peak list. Peaks draw only when the spectrum is both
+        visible and checked here (and the master toggle is on)."""
+        while self.peaklist_layout.count():
+            item = self.peaklist_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self.peak_toggle_checks = {}
+        for idx, spec in enumerate(self.spectra):
+            cb = QCheckBox(spec.get('name', f'Spectrum {idx + 1}'))
+            cb.setChecked(bool(spec.get('show_peaks', True)))
+            color = spec.get('color') or '#000000'
+            cb.setStyleSheet(f"QCheckBox {{ color: {color}; font-weight: bold; }}")
+            cb.toggled.connect(lambda checked, i=idx: self._on_peak_list_toggled(i, checked))
+            self.peaklist_layout.addWidget(cb)
+            self.peak_toggle_checks[idx] = cb
+        self.peaklist_layout.addStretch()
+
+    def _on_peak_list_toggled(self, spec_idx: int, checked: bool):
+        if 0 <= spec_idx < len(self.spectra):
+            self.spectra[spec_idx]['show_peaks'] = bool(checked)
+            self._update_plot()
 
     # ===== Manual position edit (Overlay tab) =====
 
@@ -2525,83 +2578,71 @@ class MultiSpectrumViewerDialog(BaseDialog):
         return updated
 
     def _plot_overlay_peak_markers(self):
-        """Plot peak markers on overlay spectrum.
-
-        Based on v0.9 multi_spectrum_viewer.py:764-817 (plot_peak_markers).
-        Shows peaks from the selected spectrum with quality-based coloring.
+        """Plot fitted-peak markers for every VISIBLE spectrum whose peak list is
+        enabled (spec['show_peaks']), each drawn in that spectrum's color so the
+        overlaid lists are distinguishable. The global 'Show Peak Markers' checkbox
+        gates all of them. Assignment labels are drawn only for the active spectrum
+        to avoid clutter when several lists overlay. Edit-mode overlays stay on the
+        active spectrum only.
         """
-        spec_idx = getattr(self, 'overlay_selected_spectrum_idx', 0)
+        active_idx = getattr(self, 'overlay_selected_spectrum_idx', 0)
+        for spec_idx, spec in enumerate(self.spectra):
+            if not spec.get('visible', False) or not spec.get('show_peaks', True):
+                continue
+            self._plot_one_spectrum_peaks(
+                spec_idx, spec.get('color') or 'yellow',
+                with_labels=(spec_idx == active_idx))
+        self._plot_edit_overlays(active_idx)
 
-        if spec_idx < 0 or spec_idx >= len(self.spectra):
-            return
-
+    def _plot_one_spectrum_peaks(self, spec_idx, color, with_labels):
+        """Scatter one spectrum's fitted peaks in `color`; label them only if asked."""
         fitted_peaks = self._get_fitted_peaks(spec_idx)
         if not fitted_peaks:
             return
-
         try:
-            x_coords = []
-            y_coords = []
-            labels = []
-            colors = []
-
-            # Extract peak coordinates and quality info
+            x_coords, y_coords, labels = [], [], []
             for peak in fitted_peaks:
-                # Try multiple possible keys for coordinates, using _to_scalar for JSON safety
                 x_ppm = _to_scalar(peak.get('center_x') or peak.get('peak_x') or peak.get('ppm_x') or
                         peak.get('pos_f2') or peak.get('Position_X') or 0)
                 y_ppm = _to_scalar(peak.get('center_y') or peak.get('peak_y') or peak.get('ppm_y') or
                         peak.get('pos_f1') or peak.get('Position_Y') or 0)
                 assignment = peak.get('assignment', peak.get('Assignment', ''))
-                quality = peak.get('quality', peak.get('fitting_quality', peak.get('Quality', 'Unknown')))
-
                 if x_ppm and y_ppm and x_ppm != 0 and y_ppm != 0:
                     x_coords.append(float(x_ppm))
                     y_coords.append(float(y_ppm))
                     labels.append(assignment)
 
-                    # Color code by quality (same as v0.9)
-                    if quality in ['Excellent', 'excellent']:
-                        colors.append('lime')
-                    elif quality in ['Good', 'good']:
-                        colors.append('green')
-                    elif quality in ['Fair', 'fair']:
-                        colors.append('orange')
-                    elif quality in ['Poor', 'poor']:
-                        colors.append('red')
-                    else:
-                        colors.append('yellow')  # Default for unknown
+            if not x_coords:
+                return
+            spec_name = self.spectra[spec_idx].get('name', f'Spectrum {spec_idx + 1}')
+            self.plot_widget.axes.scatter(
+                x_coords, y_coords, c=color, s=40, marker='o',
+                alpha=0.85, edgecolors='black', linewidths=1,
+                label=f'{spec_name} peaks', zorder=10)
 
-            # Plot peak markers
-            if x_coords and y_coords:
-                self.plot_widget.axes.scatter(
-                    x_coords, y_coords, c=colors, s=40, marker='o',
-                    alpha=0.8, edgecolors='black', linewidths=1,
-                    label='Peaks', zorder=10
-                )
-
-                # Add peak labels
+            if with_labels:
                 for x, y, label in zip(x_coords, y_coords, labels):
                     if label and label != 'Unknown':
                         self.plot_widget.axes.annotate(
                             label, (x, y), xytext=(5, 5),
                             textcoords='offset points', fontsize=7,
                             color='black', weight='bold',
-                            bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7)
-                        )
+                            bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
+        except Exception as e:
+            logger.error(f"Error plotting peak markers for spectrum {spec_idx}: {e}")
 
-                logger.debug(f"Plotted {len(x_coords)} peak markers for spectrum {spec_idx}")
-
-            # Edit mode: ring the peak currently picked for moving.
+    def _plot_edit_overlays(self, spec_idx):
+        """Draw the edit-mode overlays (picked peak ring, pending corrections,
+        re-fit badges) for the active spectrum only."""
+        try:
+            # ring the peak currently picked for moving
             if self.edit_mode and self._edit_selected_peak is not None:
                 sel = self._edit_selected_peak
                 self.plot_widget.axes.scatter(
                     [sel['x']], [sel['y']], s=220, marker='o',
-                    facecolors='none', edgecolors='deepskyblue', linewidths=2.5,
-                    zorder=11
-                )
+                    facecolors='none', edgecolors='deepskyblue', linewidths=2.5, zorder=11)
 
-            # Edit mode: mark positions that have a pending correction in this spectrum.
+            # positions with a pending correction in this spectrum
             if self.edit_mode and self._pending_corrections:
                 cx = [xy[0] for (s, _a), xy in self._pending_corrections.items() if s == spec_idx]
                 cy = [xy[1] for (s, _a), xy in self._pending_corrections.items() if s == spec_idx]
@@ -2609,7 +2650,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
                     self.plot_widget.axes.scatter(
                         cx, cy, s=90, marker='x', c='magenta', linewidths=2, zorder=12)
 
-            # Mark peaks that have been re-fit in this spectrum (an "edited" badge).
+            # peaks re-fit in this spectrum (edited badge)
             if self.edit_mode and self._edited:
                 ex, ey = [], []
                 for (s, a) in self._edited:
@@ -2623,9 +2664,8 @@ class MultiSpectrumViewerDialog(BaseDialog):
                     self.plot_widget.axes.scatter(
                         ex, ey, s=160, marker='s', facecolors='none',
                         edgecolors='limegreen', linewidths=2, zorder=11)
-
         except Exception as e:
-            logger.error(f"Error plotting peak markers: {e}")
+            logger.error(f"Error plotting edit overlays: {e}")
 
     # ===== Voigt Tab Peak Mode Methods =====
 
