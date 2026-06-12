@@ -1580,16 +1580,19 @@ class MultiSpectrumViewerDialog(BaseDialog):
         for i, spec in enumerate(self.spectra):
             if spec['name'] == spectrum_name:
                 spec['visible'] = visible
+                cb = getattr(self, 'peak_toggle_checks', {}).get(i)
                 if visible:
                     shown_idx = i
                     # Showing a spectrum auto-enables its peak list (user can turn it
                     # off again in the "Peak lists" panel).
                     spec['show_peaks'] = True
-                    cb = getattr(self, 'peak_toggle_checks', {}).get(i)
                     if cb is not None:
                         cb.blockSignals(True)
                         cb.setChecked(True)
                         cb.blockSignals(False)
+                # Peak-list checkbox is active only while its spectrum is shown.
+                if cb is not None:
+                    cb.setEnabled(visible)
                 break
 
         # Showing a spectrum focuses the Peak Navigator on it (user can still change).
@@ -2135,6 +2138,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         for idx, spec in enumerate(self.spectra):
             cb = QCheckBox(spec.get('name', f'Spectrum {idx + 1}'))
             cb.setChecked(bool(spec.get('show_peaks', True)))
+            cb.setEnabled(bool(spec.get('visible', False)))  # active only when shown
             color = spec.get('color') or '#000000'
             cb.setStyleSheet(f"QCheckBox {{ color: {color}; font-weight: bold; }}")
             cb.toggled.connect(lambda checked, i=idx: self._on_peak_list_toggled(i, checked))
@@ -2614,11 +2618,11 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
             if not x_coords:
                 return
-            spec_name = self.spectra[spec_idx].get('name', f'Spectrum {spec_idx + 1}')
+            # No legend label: the overlay legend is built from explicit handles
+            # (spectrum contour colors), which already identify each list's color.
             self.plot_widget.axes.scatter(
                 x_coords, y_coords, c=color, s=40, marker='o',
-                alpha=0.85, edgecolors='black', linewidths=1,
-                label=f'{spec_name} peaks', zorder=10)
+                alpha=0.85, edgecolors='black', linewidths=1, zorder=10)
 
             if with_labels:
                 for x, y, label in zip(x_coords, y_coords, labels):
