@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QVBoxLayout, QLabel, QFileDialog, QDoubleSpinBox, QSpinBox,
     QComboBox, QFormLayout, QProgressBar, QPlainTextEdit, QScrollArea, QWidget,
+    QListWidget, QListWidgetItem, QMessageBox,
 )
 
 from constants import (
@@ -21,7 +22,7 @@ from gui_components import (
     get_font, show_info, show_error, show_warning, open_directory_dialog,
 )
 
-from dynamiXs_gui import BasePage, DropTargetLabel
+from dynamiXs_gui import BasePage, DropTargetLabel, DraggableSeriesList
 from workers import KdTitrationFittingParams, KdTitrationFittingWorker
 
 # Make the Kd analysis package importable (bare-name imports inside it).
@@ -57,19 +58,26 @@ class KdTitrationPage(BasePage):
         scroll.setWidget(inner)
         self.content_layout.addWidget(scroll)
 
-        desc = create_label(
-            "1:1 binding isotherm fit of a titration series.\n"
-            "    fraction_bound = ((P+L+Kd) − √((P+L+Kd)² − 4PL)) / (2P)\n"
-            "CSP = Δδ_max · fraction_bound;  Intensity = baseline + amp · fraction_bound.\n"
-            "Per-residue Kd and a global shared Kd are reported."
-        )
-        desc.setStyleSheet(f"color: {SECONDARY_TEXT};")
-        desc.setWordWrap(True)
-        layout.addWidget(desc)
-
         # Input
         sec = self._make_section("Titration input data (series_analysis_tidy.csv or comprehensive_peak_tracking.csv)")
         body = sec.layout()
+
+        # Titration-mode series runs from this project — drag one onto the box below.
+        series_hdr = create_label("Titration-mode series runs — drag one onto the box below:")
+        series_hdr.setStyleSheet(f"color: {SECONDARY_TEXT};")
+        series_hdr.setFont(get_font(FONT_SIZE_SMALL))
+        body.addWidget(series_hdr)
+        self.series_list_widget = DraggableSeriesList()
+        self.series_list_widget.setMaximumHeight(110)
+        body.addWidget(self.series_list_widget)
+        self.no_series_label = create_label(
+            "No titration-mode series in this project — run a series in Titration mode, "
+            "or use Browse CSV…")
+        self.no_series_label.setStyleSheet(f"color: {SECONDARY_TEXT};")
+        self.no_series_label.setFont(get_font(FONT_SIZE_SMALL))
+        self.no_series_label.setWordWrap(True)
+        body.addWidget(self.no_series_label)
+
         row = QHBoxLayout()
         row.setSpacing(SPACING_SM)
         self.file_drop = DropTargetLabel("kd", "Drop a series here, or browse for a CSV")
@@ -83,6 +91,31 @@ class KdTitrationPage(BasePage):
         self.points_label.setFont(get_font(FONT_SIZE_SMALL))
         body.addWidget(self.points_label)
         layout.addWidget(sec)
+
+        # Saved Kd fits in this project — reopen / delete (management tool).
+        msec = self._make_section("Saved Kd fits in this project")
+        mbody = msec.layout()
+        self.saved_fits_list = QListWidget()
+        self.saved_fits_list.setMaximumHeight(110)
+        self.saved_fits_list.itemDoubleClicked.connect(
+            lambda _i: self._open_selected_saved_fit())
+        mbody.addWidget(self.saved_fits_list)
+        self.no_saved_fits_label = create_label(
+            "No saved Kd fits yet — run a fit; it is saved with the project automatically "
+            "(named after its series).")
+        self.no_saved_fits_label.setStyleSheet(f"color: {SECONDARY_TEXT};")
+        self.no_saved_fits_label.setFont(get_font(FONT_SIZE_SMALL))
+        self.no_saved_fits_label.setWordWrap(True)
+        mbody.addWidget(self.no_saved_fits_label)
+        mrow = QHBoxLayout()
+        mrow.setSpacing(SPACING_SM)
+        mrow.addWidget(create_secondary_button(
+            "Open selected fit", clicked=self._open_selected_saved_fit, width=160))
+        mrow.addWidget(create_secondary_button(
+            "Delete selected", clicked=self._delete_selected_saved_fit, width=140))
+        mrow.addStretch()
+        mbody.addLayout(mrow)
+        layout.addWidget(msec)
 
         # Binding inputs
         sec2 = self._make_section("Binding parameters")
@@ -167,6 +200,56 @@ class KdTitrationPage(BasePage):
             f"QPlainTextEdit {{ color: {PRIMARY_TEXT}; background-color: {FRAME_BG_COLOR}; "
             f"border-radius: 4px; padding: 4px; }}")
         layout.addWidget(self.log_text, stretch=1)
+
+        self._populate_series_list()
+        self._populate_saved_fits()
+
+    def showEvent(self, event):
+        # Refresh the lists each time the page is shown (a series may have been run,
+        # or a project with saved fits loaded, after the dialog was created).
+        super().showEvent(event)
+        self._populate_series_list()
+        self._populate_saved_fits()
+
+    # ---------- series picker (drag source) ----------
+
+    def _get_available_series(self):
+        """Titration-mode series runs in this project, as {'name', 'csv_path'} dicts.
+        Filters saved_series to series_mode == 'titration' (set when the series ran)."""
+        lunaNMR_main = self._lunanmr_main_window()
+        saved_series = getattr(lunaNMR_main, 'saved_series', {}) or {}
+        project_path = getattr(lunaNMR_main, 'current_project_path', None)
+        out = []
+        for name, br in saved_series.items():
+            if getattr(br, 'series_mode', 'time') != 'titration':
+                continue
+            csv_path = ""
+            meta = getattr(br, 'metadata', None) or {}
+            if meta.get('csv_path'):
+                csv_path = meta['csv_path']
+            elif meta.get('output_folder'):
+                csv_path = os.path.join(meta['output_folder'], "series_analysis_tidy.csv")
+            elif project_path:
+                csv_path = str(Path(project_path) / ".lunaNMR" / "series_results"
+                               / name / "series_analysis_tidy.csv")
+            out.append({'name': name, 'csv_path': csv_path})
+        return out
+
+    def _populate_series_list(self):
+        """Fill the draggable series list; show a hint when there are none."""
+        if not hasattr(self, 'series_list_widget'):
+            return
+        self.series_list_widget.clear()
+        series = self._get_available_series()
+        self.no_series_label.setVisible(not series)
+        self.series_list_widget.setVisible(bool(series))
+        for s in series:
+            item = QListWidgetItem(s['name'])
+            item.setData(Qt.UserRole, s['name'])
+            item.setData(Qt.UserRole + 1, s['csv_path'])
+            if s['csv_path']:
+                item.setToolTip(f"CSV: {s['csv_path']}")
+            self.series_list_widget.addItem(item)
 
     # ---------- UI helpers ----------
 
@@ -413,9 +496,11 @@ class KdTitrationPage(BasePage):
         mw = self.main_window
         return getattr(mw, 'main_window', None) or mw
 
-    def _store_current_analysis(self):
-        """Snapshot the current fit + params into main_window.kd_analyses, auto-named
-        from the input file. Returns the assigned name, or None if there is no fit."""
+    def _store_current_analysis(self, overwrite=False):
+        """Snapshot the current fit + params into main_window.kd_analyses, named after
+        the source series. overwrite=True upserts that name (auto-save on project save);
+        otherwise a new snapshot is suffixed on collision. Returns the name, or None if
+        there is no current fit."""
         if not self.last_json_file or not os.path.exists(self.last_json_file):
             return None
         import json
@@ -424,7 +509,7 @@ class KdTitrationPage(BasePage):
         if getattr(mw, 'kd_analyses', None) is None:
             mw.kd_analyses = {}
         base = os.path.splitext(os.path.basename(self.input_file))[0] if self.input_file else "analysis"
-        name = self._unique_analysis_name(base, mw.kd_analyses)
+        name = base if overwrite else self._unique_analysis_name(base, mw.kd_analyses)
         meta = self.get_session_state()
         meta['input_basename'] = os.path.basename(self.input_file) if self.input_file else None
         viewer = getattr(self, "_viewer", None)
@@ -440,13 +525,57 @@ class KdTitrationPage(BasePage):
         return name
 
     def _save_analysis_to_project(self):
-        name = self._store_current_analysis()
+        name = self._store_current_analysis()       # explicit snapshot (suffixed)
         if name is None:
             show_warning(self, "No results", "Run or open a fit first.")
             return
+        self._populate_saved_fits()
         self._log(f"Saved analysis '{name}' to project (save the project to persist).")
         show_info(self, "Saved to project",
                   f"Analysis '{name}' added. Save the project (File ▸ Save) to write it to disk.")
+
+    def ensure_current_saved(self):
+        """Auto-capture the fit currently on screen under its source-series name
+        (upsert), so saving the project always keeps the visible fit. No-op if none."""
+        return self._store_current_analysis(overwrite=True)
+
+    # ---------- saved-fits management (reopen / delete) ----------
+
+    def _populate_saved_fits(self):
+        """List the Kd fits saved in this project (main_window.kd_analyses)."""
+        if not hasattr(self, 'saved_fits_list'):
+            return
+        self.saved_fits_list.clear()
+        mw = self._lunanmr_main_window()
+        names = sorted((getattr(mw, 'kd_analyses', {}) or {}).keys())
+        self.no_saved_fits_label.setVisible(not names)
+        self.saved_fits_list.setVisible(bool(names))
+        for n in names:
+            self.saved_fits_list.addItem(n)
+
+    def _open_selected_saved_fit(self):
+        item = self.saved_fits_list.currentItem()
+        if item is None:
+            show_warning(self, "No fit selected", "Select a saved Kd fit to open.")
+            return
+        mw = self._lunanmr_main_window()
+        entry = (getattr(mw, 'kd_analyses', {}) or {}).get(item.text())
+        if entry is not None:
+            self.open_saved_analysis(entry)
+
+    def _delete_selected_saved_fit(self):
+        item = self.saved_fits_list.currentItem()
+        if item is None:
+            return
+        name = item.text()
+        if QMessageBox.question(
+                self, "Delete saved fit",
+                f"Remove the saved Kd fit '{name}' from this project?\n"
+                "(applies when you next save the project)") != QMessageBox.Yes:
+            return
+        mw = self._lunanmr_main_window()
+        (getattr(mw, 'kd_analyses', {}) or {}).pop(name, None)
+        self._populate_saved_fits()
 
     def open_saved_analysis(self, entry):
         """Load a saved analysis (from the project) back into the page + viewer:

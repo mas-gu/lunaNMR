@@ -1487,16 +1487,28 @@ class ProjectManager:
         The user adds analyses from the Kd page ("Save analysis to project");
         they are held on main_window.kd_analyses until the project is saved.
         """
+        # Auto-capture the fit currently on screen (upsert by series name) so saving
+        # the project always keeps the visible fit, not only ones explicitly saved.
+        dialog = getattr(self.main_window, 'kd_titration_dialog', None)
+        if dialog is not None and hasattr(dialog, 'ensure_current_saved'):
+            try:
+                dialog.ensure_current_saved()
+            except Exception as e:
+                logger.warning(f"Could not auto-capture current Kd fit: {e}")
+
         analyses = getattr(self.main_window, 'kd_analyses', None)
         if not isinstance(analyses, dict) or not analyses:
             return False
 
         analyses_dir = bundle_path / "kd" / "analyses"
         analyses_dir.mkdir(parents=True, exist_ok=True)
+        kept = set()
         for name, entry in analyses.items():
             if not isinstance(entry, dict):
                 continue
-            adir = analyses_dir / _safe_bundle_name(name)
+            safe = _safe_bundle_name(name)
+            kept.add(safe)
+            adir = analyses_dir / safe
             adir.mkdir(exist_ok=True)
             with open(adir / "fit_data.json", 'w') as f:
                 json.dump(entry.get('fit_data', {}), f, indent=2,
@@ -1505,7 +1517,13 @@ class ProjectManager:
                 json.dump(entry.get('meta', {}), f, indent=2,
                           default=self._json_serializer)
 
-        logger.info(f"Saved {len(analyses)} Kd analysis(es) to {analyses_dir}")
+        # Prune folders for analyses the user deleted from the session.
+        import shutil
+        for sub in analyses_dir.iterdir():
+            if sub.is_dir() and sub.name not in kept:
+                shutil.rmtree(sub, ignore_errors=True)
+
+        logger.info(f"Saved {len(kept)} Kd analysis(es) to {analyses_dir}")
         return True
 
     def _load_kd_state(self, bundle_path: Path) -> bool:

@@ -58,6 +58,13 @@ class KdTitrationDialog(BaseDialog):
     # State management (for project save/load)
     # -------------------------------------------------------------------------
 
+    def ensure_current_saved(self):
+        """Auto-capture the fit currently on screen into the project's saved Kd fits
+        (upsert by source-series name). Called by ProjectManager before a project save."""
+        if hasattr(self.kd_page, 'ensure_current_saved'):
+            return self.kd_page.ensure_current_saved()
+        return None
+
     def get_state(self) -> dict:
         """Collect Kd page state for project save."""
         return self.kd_page.get_session_state()

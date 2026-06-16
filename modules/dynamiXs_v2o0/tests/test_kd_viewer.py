@@ -144,3 +144,139 @@ def test_comparison_view_renders_with_point_selectors(app, tmp_path):
         assert len(v.figure.axes[0].patches) >= 1
     finally:
         v.deleteLater()
+
+
+def test_comparison_shows_missing_residue_as_grey_bar(app, tmp_path):
+    import json
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+    jf = _make_fit_json(tmp_path)
+    data = json.loads(Path(jf).read_text())
+    good = dict(data["fits"][0], residue="K14")     # has embedded series
+    bad = {"residue": "A17"}                          # no series -> missing
+    data["fits"] = [good, bad]
+    Path(jf).write_text(json.dumps(data))
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        v.view_combo.setCurrentIndex(3)               # "Ref vs point (bars)"
+        bars = v.figure.axes[0].patches
+        assert len(bars) == 2                          # both shown; missing one is grey
+        # the missing residue's bar is grey, the good one is not
+        colors = {tuple(round(c, 2) for c in b.get_facecolor()) for b in bars}
+        grey = tuple(round(c, 2) for c in __import__("matplotlib").colors.to_rgba("#d0d0d0"))
+        assert grey in colors
+    finally:
+        v.deleteLater()
+
+
+def test_exclude_residue_via_bar_click_persists_and_reloads(app, tmp_path):
+    import json
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+    jf = _make_fit_json(tmp_path)
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        v.view_combo.setCurrentIndex(3)          # "Ref vs point (bars)"
+        v._toggle_edit(True)                      # edit mode -> bars pickable
+        patch = v.figure.axes[0].patches[0]
+        resid = v._pick_registry[id(patch)][0]    # residue behind that bar
+
+        class _Evt:
+            pass
+        e = _Evt(); e.artist = patch; e.ind = [0]
+        v._on_pick(e)                             # click the bar -> exclude residue
+        assert resid in v.excluded_residues
+        assert resid in json.loads(Path(jf).read_text()).get("excluded_residues", [])
+
+        # reload restores the exclusion
+        v2 = open_kd_titration_viewer(parent=None, json_file=jf)
+        try:
+            assert resid in v2.excluded_residues
+        finally:
+            v2.deleteLater()
+
+        # clicking again un-excludes
+        v._toggle_edit(True)
+        patch2 = next(p for p in v.figure.axes[0].patches
+                      if v._pick_registry.get(id(p), (None,))[0] == resid)
+        e2 = _Evt(); e2.artist = patch2; e2.ind = [0]
+        v._on_pick(e2)
+        assert resid not in v.excluded_residues
+    finally:
+        v.deleteLater()
+
+
+def test_missing_grey_is_consistent_across_csp_and_intensity(app, tmp_path):
+    # A residue with valid positions but a vanished peak (zero intensity) must be
+    # treated as missing (grey) in BOTH CSP and Intensity, not just intensity.
+    import json
+    import matplotlib
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+    jf = _make_fit_json(tmp_path)
+    data = json.loads(Path(jf).read_text())
+    good = dict(data["fits"][0], residue="K14")
+    gone = {"residue": "A17", "series": {
+        "ppm_x": [8.0, 8.0, 8.0], "ppm_y": [120.0, 120.0, 120.0],
+        "height": [1000.0, 0.0, 0.0], "volume": [2000.0, 0.0, 0.0]}}
+    data["fits"] = [good, gone]
+    Path(jf).write_text(json.dumps(data))
+    grey = tuple(round(c, 2) for c in matplotlib.colors.to_rgba("#d0d0d0"))
+
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        v.view_combo.setCurrentIndex(3)
+        for obs_idx in (0, 1):                       # 0=CSP, 1=Intensity
+            v.obs_combo.setCurrentIndex(obs_idx)
+            cols = [tuple(round(c, 2) for c in b.get_facecolor())
+                    for b in v.figure.axes[0].patches]
+            assert grey in cols, f"missing residue not grey for obs index {obs_idx}"
+    finally:
+        v.deleteLater()
+
+
+def test_intensity_comparison_yaxis_is_zero_to_one(app, tmp_path):
+    # I/I₀ is a ratio → the intensity comparison y-axis stays 0..1 (not data-scaled),
+    # while CSP (ppm) auto-scales.
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+    jf = _make_fit_json(tmp_path)
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        v.view_combo.setCurrentIndex(3)
+        v.obs_combo.setCurrentIndex(1)            # Intensity
+        top = v.figure.axes[0].get_ylim()[1]
+        assert top == pytest.approx(1.0, abs=1e-9)
+        v.obs_combo.setCurrentIndex(0)            # CSP → auto-scaled (well below 1 ppm)
+        assert v.figure.axes[0].get_ylim()[1] < 0.5
+    finally:
+        v.deleteLater()
+
+
+def test_export_svg_keeps_editable_text(app, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+    jf = _make_fit_json(tmp_path)
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        out = tmp_path / "fig.svg"
+        monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                            lambda *a, **k: (str(out), "SVG — editable vector (*.svg)"))
+        v._export()
+        assert out.exists()
+        # text kept as <text> elements (editable in Illustrator), not outlined paths
+        assert "<text" in out.read_text()
+
+    finally:
+        v.deleteLater()
+
+
+def test_export_appends_extension_from_filter(app, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+    jf = _make_fit_json(tmp_path)
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        stem = str(tmp_path / "noext")           # user typed no extension
+        monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                            lambda *a, **k: (stem, "PDF — vector (*.pdf)"))
+        v._export()
+        assert (tmp_path / "noext.pdf").exists()
+    finally:
+        v.deleteLater()

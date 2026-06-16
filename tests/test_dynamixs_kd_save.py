@@ -376,3 +376,68 @@ def test_kd_load_skips_corrupt_analysis(tmp_path):
     pm = ProjectManager(mw)
     assert pm._load_kd_state(bundle) is True
     assert set(mw.kd_analyses) == {'good'}        # 'bad' skipped, not fatal
+
+
+def test_kd_series_picker_lists_only_titration_runs(app):
+    from kd_titration_page import KdTitrationPage
+    mw = _fake_main_window()
+    mw.saved_series = {
+        'titr_A': types.SimpleNamespace(
+            series_mode='titration',
+            metadata={'csv_path': '/x/titr_A/series_analysis_tidy.csv'}),
+        'relax_B': types.SimpleNamespace(
+            series_mode='time', metadata={'csv_path': '/x/relax_B/tidy.csv'}),
+        'legacy_C': types.SimpleNamespace(metadata={}),   # no series_mode -> 'time' -> excluded
+    }
+    mw.current_project_path = None
+    page = KdTitrationPage(mw)
+    got = page._get_available_series()
+    assert [s['name'] for s in got] == ['titr_A']
+    assert got[0]['csv_path'] == '/x/titr_A/series_analysis_tidy.csv'
+    # the picker widget shows the run; the "no series" hint is hidden
+    assert page.series_list_widget.count() == 1
+    assert page.no_series_label.isVisible() is False
+
+
+def test_kd_autosave_upserts_by_series_name(app, tmp_path):
+    # Auto-save uses the source-series name and OVERWRITES (no _2 duplicate) so
+    # re-saving the project keeps one fit per series.
+    from kd_titration_page import KdTitrationPage
+    page = KdTitrationPage(_fake_main_window())
+    page.input_file = str(tmp_path / "A1_assi.csv")
+    jf = tmp_path / "kd_fit_data.json"
+    jf.write_text('{"metadata": {}, "fits": []}')
+    page.last_json_file = str(jf)
+
+    assert page.ensure_current_saved() == "A1_assi"
+    assert page.ensure_current_saved() == "A1_assi"     # upsert, not A1_assi_2
+    assert list(page.main_window.kd_analyses) == ["A1_assi"]
+
+
+def test_kd_save_prunes_deleted_analyses(tmp_path):
+    mw = types.SimpleNamespace(kd_titration_dialog=None, kd_analyses={
+        'keep_me': {'fit_data': {}, 'meta': {}},
+        'delete_me': {'fit_data': {}, 'meta': {}}})
+    pm = ProjectManager(mw)
+    bundle = tmp_path / "proj.lunaNMR"
+    bundle.mkdir()
+    assert pm._save_kd_state(bundle) is True
+    adir = bundle / "kd" / "analyses"
+    assert {p.name for p in adir.iterdir()} == {'keep_me', 'delete_me'}
+
+    # user deletes one, re-saves → its folder is pruned
+    del mw.kd_analyses['delete_me']
+    assert pm._save_kd_state(bundle) is True
+    assert {p.name for p in adir.iterdir()} == {'keep_me'}
+
+
+def test_kd_page_lists_saved_fits_from_project(app):
+    from kd_titration_page import KdTitrationPage
+    mw = _fake_main_window()
+    mw.kd_analyses = {'B4_assi': {'fit_data': {}, 'meta': {}},
+                      'A1_assi': {'fit_data': {}, 'meta': {}}}
+    page = KdTitrationPage(mw)                           # populates on setup
+    shown = [page.saved_fits_list.item(i).text()
+             for i in range(page.saved_fits_list.count())]
+    assert shown == ['A1_assi', 'B4_assi']               # sorted
+    assert page.no_saved_fits_label.isVisible() is False

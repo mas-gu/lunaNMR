@@ -31,6 +31,20 @@ def _residue_sort_key(name):
     return (int(m.group()) if m else float('inf'), str(name))
 
 
+def _peak_present(series, k, value='height'):
+    """True if a residue's peak is genuinely present at point k: a detected position
+    (finite, non-zero sentinel) AND a real intensity (finite, > 0). Used so CSP and
+    intensity treat the same residues as missing (grey)."""
+    px = np.asarray(series.get('ppm_x', []), float)
+    py = np.asarray(series.get('ppm_y', []), float)
+    v = np.asarray(series.get(value, []), float)
+    if k < 0 or k >= min(len(px), len(py), len(v)):
+        return False
+    return (np.isfinite(px[k]) and px[k] != 0.0
+            and np.isfinite(py[k]) and py[k] != 0.0
+            and np.isfinite(v[k]) and v[k] > 0.0)
+
+
 def _pair_observable(series, i, j, obs, alpha=0.14, value='height'):
     """Observable for one residue between reference point i and point j.
 
@@ -72,6 +86,8 @@ class KdTitrationFitViewer(QMainWindow):
         self.edit_mode = False
         # excluded[obs][residue] = set of point indices (into that fit's L/obs)
         self.excluded = {"csp": {}, "intensity": {}}
+        # residues excluded wholesale (problematic values) — click a bar in edit mode
+        self.excluded_residues = set()
         self._pick_registry = {}
 
         central = QWidget()
@@ -162,6 +178,7 @@ class KdTitrationFitViewer(QMainWindow):
                 excl = f.get(obs, {}).get("excluded")
                 if excl:
                     self.excluded[obs][f["residue"]] = set(excl)
+        self.excluded_residues = set(self.data.get("excluded_residues", []))
         self._update_global_label()
         self._populate_point_combos()
         self.residue_list.clear()
@@ -236,31 +253,75 @@ class KdTitrationFitViewer(QMainWindow):
             ax.text(0.5, 0.5, "No titration points", ha="center", va="center",
                     transform=ax.transAxes)
             return
+        if not any(f.get("series") for f in self.fits):
+            ax.text(0.5, 0.5, "no embedded series — re-run the fit to enable this view",
+                    ha="center", va="center", transform=ax.transAxes)
+            return
         meta = self.data.get("metadata", {})
         alpha = float(meta.get("alpha", 0.14))
         value = meta.get("intensity_value", "height")
         names, vals = [], []
         for f in self.fits:
             series = f.get("series")
-            if not series:
-                continue
-            v = _pair_observable(series, i, j, obs, alpha=alpha, value=value)
-            if np.isfinite(v):
-                names.append(f["residue"])
-                vals.append(v)
-        if not names:
-            missing = ("no embedded series — re-run the fit to enable this view"
-                       if not any(f.get("series") for f in self.fits)
-                       else "no finite values for this point pair")
-            ax.text(0.5, 0.5, missing, ha="center", va="center", transform=ax.transAxes)
-            return
-        x = np.arange(len(names))
-        ax.bar(x, vals, color="seagreen" if obs == "csp" else "indianred")
-        ax.set_xticks(x)
-        ax.set_xticklabels(names, rotation=90, fontsize=6)
+            # "Missing" is the SAME for both observables: the peak must be present
+            # (detected position + a real intensity) at both the ref and compare point.
+            # Otherwise CSP greyed on bad positions while intensity greyed on bad
+            # intensity, so the same residue looked missing in one mode but not the other.
+            if (series and _peak_present(series, i, value)
+                    and _peak_present(series, j, value)):
+                v = _pair_observable(series, i, j, obs, alpha=alpha, value=value)
+            else:
+                v = float("nan")
+            names.append(f["residue"])
+            vals.append(v)
+        bar_color = "seagreen" if obs == "csp" else "indianred"
+        # I/I₀ is a ratio → fix the axis at 0–1; CSP is in ppm → auto-scale.
+        self._plot_residue_bars(ax, names, vals, bar_color,
+                                ymax=None if obs == "csp" else 1.0)
         ax.set_ylabel("CSP (ppm)" if obs == "csp" else "Intensity ratio I/I₀")
         sym = "CSP" if obs == "csp" else "I/I₀"
         ax.set_title(f"{sym}:  {labels[i]} → {labels[j]}  (ref → point)")
+
+    def _plot_residue_bars(self, ax, names, vals, color, errs=None, ymax=None):
+        """Bar chart of value-per-residue. Residues with no value (NaN — missing
+        assignment or failed fit) draw as a full-height grey bar so the gap is visible;
+        residues the user excluded (problematic values) draw hatched. In edit mode the
+        bars are pickable so a click toggles that residue's exclusion. `ymax` fixes the
+        y-axis top (e.g. 1.0 for an I/I₀ ratio); None auto-scales to the data."""
+        self._pick_registry = {}
+        finite = [v for v, n in zip(vals, names)
+                  if np.isfinite(v) and n not in self.excluded_residues]
+        data_max = max(finite) if finite else (max([v for v in vals if np.isfinite(v)],
+                                                    default=1.0))
+        # Honor a fixed top (ratio axis), expanding only if the data exceeds it.
+        if ymax is not None:
+            top = ymax if data_max <= ymax else data_max * 1.05
+        else:
+            top = data_max * 1.1
+        full = top                         # grey/missing bars span to the axis top
+        x = np.arange(len(names))
+        heights = [v if np.isfinite(v) else full for v in vals]
+        facecolors = []
+        for n, v in zip(names, vals):
+            if n in self.excluded_residues:
+                facecolors.append("#e08585")          # excluded → muted red (hatched below)
+            elif np.isfinite(v):
+                facecolors.append(color)
+            else:
+                facecolors.append("#d0d0d0")           # missing → grey full-height
+        bar_errs = ([e if np.isfinite(v) and n not in self.excluded_residues else 0.0
+                     for v, e, n in zip(vals, errs, names)] if errs is not None else None)
+        bars = ax.bar(x, heights, color=facecolors, yerr=bar_errs, capsize=2)
+        for n, patch in zip(names, bars):
+            if n in self.excluded_residues:
+                patch.set_hatch("//")
+            if self.edit_mode:
+                patch.set_picker(True)
+                self._pick_registry[id(patch)] = (n, "RESIDUE", None)
+        ax.set_xticks(x)
+        ax.set_xticklabels(names, rotation=90, fontsize=6)
+        ax.set_ylim(0, top)
+        return full
 
     def _plot_curve(self, ax):
         self._pick_registry = {}
@@ -309,22 +370,21 @@ class KdTitrationFitViewer(QMainWindow):
         names, vals, errs = [], [], []
         for f in self.fits:
             fit = f.get(obs, {})
-            if fit.get("success") and key in fit:
-                names.append(f["residue"])
-                vals.append(fit[key])
-                errs.append(fit.get(err_key) if isinstance(fit.get(err_key), (int, float)) else 0.0)
-        if not names:
+            ok = fit.get("success") and isinstance(fit.get(key), (int, float))
+            names.append(f["residue"])
+            vals.append(float(fit[key]) if ok else float("nan"))
+            e = fit.get(err_key)
+            errs.append(float(e) if ok and isinstance(e, (int, float)) else 0.0)
+        if not any(np.isfinite(v) for v in vals):
             ax.text(0.5, 0.5, f"No {obs} fits", ha="center", va="center", transform=ax.transAxes)
             return
-        x = np.arange(len(names))
-        ax.bar(x, vals, yerr=errs, color="steelblue", capsize=2)
+        # Missing/failed residues show as full-height grey bars (see _plot_residue_bars).
+        self._plot_residue_bars(ax, names, vals, "steelblue", errs=errs)
         if key == "Kd":
             g = self.data.get("global", {}).get("csp", {})
             if obs == "csp" and g.get("success"):
                 ax.axhline(g["Kd"], color="red", ls="--", label=f"global Kd={g['Kd']:.3g}")
                 ax.legend()
-        ax.set_xticks(x)
-        ax.set_xticklabels(names, rotation=90, fontsize=6)
         ax.set_ylabel(ylab)
         ax.set_title(f"{title}  ({obs})")
 
@@ -341,6 +401,16 @@ class KdTitrationFitViewer(QMainWindow):
         if info is None:
             return
         residue, obs, idx_map = info
+        if obs == "RESIDUE":
+            # Toggle whole-residue exclusion (problematic values) from a bar click.
+            if residue in self.excluded_residues:
+                self.excluded_residues.discard(residue)
+            else:
+                self.excluded_residues.add(residue)
+            self.data["excluded_residues"] = sorted(self.excluded_residues)
+            self._save_json()
+            self._refresh()
+            return
         excl = self.excluded[obs].setdefault(residue, set())
         for i in event.ind:
             if 0 <= i < len(idx_map):
@@ -420,8 +490,21 @@ class KdTitrationFitViewer(QMainWindow):
             Path(self.json_file).write_text(json.dumps(json_safe(self.data), indent=2))
 
     def _export(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export figure", "", "PDF (*.pdf);;PNG (*.png)")
-        if path:
+        path, selected = QFileDialog.getSaveFileName(
+            self, "Export figure", "",
+            "SVG — editable vector (*.svg);;PDF — vector (*.pdf);;PNG — raster (*.png)")
+        if not path:
+            return
+        # Ensure the filename has an extension matching the chosen filter.
+        ext = os.path.splitext(path)[1].lower()
+        if ext not in (".svg", ".pdf", ".png"):
+            ext = ".svg" if "svg" in selected else ".pdf" if "pdf" in selected else ".png"
+            path += ext
+        # Keep text editable in vector output so it can be edited in Illustrator:
+        # svg.fonttype='none' keeps labels as <text> (not outlined paths); pdf.fonttype=42
+        # embeds TrueType so glyphs stay selectable. rc_context avoids touching globals.
+        import matplotlib as mpl
+        with mpl.rc_context({"svg.fonttype": "none", "pdf.fonttype": 42}):
             self.figure.savefig(path, bbox_inches="tight", dpi=300)
 
 

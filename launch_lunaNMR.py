@@ -19,6 +19,13 @@ import matplotlib
 matplotlib.use("QtAgg", force=True)
 #print(f"🖼️ Matplotlib backend forced to: {matplotlib.get_backend()}")
 
+# Keep text EDITABLE in exported vector figures (so they can be tweaked in Illustrator
+# etc.): SVG keeps labels as <text> rather than outlined paths; PDF embeds TrueType so
+# glyphs stay selectable. Applies to every figure export app-wide, including the
+# matplotlib toolbar's save button in each viewer.
+matplotlib.rcParams["svg.fonttype"] = "none"
+matplotlib.rcParams["pdf.fonttype"] = 42
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 
