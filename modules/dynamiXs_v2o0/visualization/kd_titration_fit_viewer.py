@@ -3,6 +3,7 @@
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -19,8 +20,42 @@ from matplotlib.figure import Figure
 _KD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dynamiXs_Kd")
 if _KD_DIR not in sys.path:
     sys.path.insert(0, _KD_DIR)
-from kd_models import csp_model, intensity_decay  # noqa: E402
+from kd_models import csp_model, intensity_decay, compute_csp  # noqa: E402
 from kd_fit import fit_residue_csp, fit_residue_intensity, json_safe  # noqa: E402
+
+
+def _residue_sort_key(name):
+    """Order residues by sequence number, not amino-acid letter: 'K14' before
+    'A17'. Names without a number sort last, alphabetically among themselves."""
+    m = re.search(r'\d+', str(name))
+    return (int(m.group()) if m else float('inf'), str(name))
+
+
+def _pair_observable(series, i, j, obs, alpha=0.14, value='height'):
+    """Observable for one residue between reference point i and point j.
+
+    obs='csp'  -> CSP (ppm) from the position shift: sqrt(ΔδH² + (alpha·ΔδN)²).
+    obs='intensity' -> ratio v[j]/v[i] of the chosen value ('height'/'volume').
+    Returns NaN if an endpoint is missing — a 0.0 position is the undetected
+    sentinel, a non-positive reference intensity makes the ratio undefined
+    (same conventions as kd_input.csp_series / intensity_ratio_series).
+    """
+    if obs == 'csp':
+        px = np.asarray(series.get('ppm_x', []), float)
+        py = np.asarray(series.get('ppm_y', []), float)
+        if max(i, j) >= len(px) or max(i, j) >= len(py):
+            return float('nan')
+        xi, xj, yi, yj = px[i], px[j], py[i], py[j]
+        if 0.0 in (xi, xj, yi, yj) or not np.all(np.isfinite([xi, xj, yi, yj])):
+            return float('nan')
+        return float(compute_csp(xj - xi, yj - yi, alpha=alpha))
+    v = np.asarray(series.get(value, []), float)
+    if max(i, j) >= len(v):
+        return float('nan')
+    ref = v[i]
+    if not np.isfinite(ref) or ref <= 0.0:
+        return float('nan')
+    return float(v[j] / ref)
 
 
 class KdTitrationFitViewer(QMainWindow):
@@ -63,9 +98,25 @@ class KdTitrationFitViewer(QMainWindow):
         right.addWidget(QLabel("View"))
         self.view_combo = QComboBox()
         self.view_combo.addItems(["Per-residue curve", "Kd vs residue",
-                                  "Δδmax (CSP) / I0 (int) vs residue"])
+                                  "Δδmax (CSP) / I0 (int) vs residue",
+                                  "Ref vs point (bars)"])
         self.view_combo.currentIndexChanged.connect(self._refresh)
         right.addWidget(self.view_combo)
+
+        # Ref/compare point selectors — only shown for the "Ref vs point" view.
+        self.cmp_box = QWidget()
+        cmp_layout = QVBoxLayout(self.cmp_box)
+        cmp_layout.setContentsMargins(0, 0, 0, 0)
+        cmp_layout.addWidget(QLabel("Reference point"))
+        self.ref_point_combo = QComboBox()
+        self.ref_point_combo.currentIndexChanged.connect(self._refresh)
+        cmp_layout.addWidget(self.ref_point_combo)
+        cmp_layout.addWidget(QLabel("Compare point"))
+        self.cmp_point_combo = QComboBox()
+        self.cmp_point_combo.currentIndexChanged.connect(self._refresh)
+        cmp_layout.addWidget(self.cmp_point_combo)
+        right.addWidget(self.cmp_box)
+        self.cmp_box.setVisible(False)
 
         # Edit / refit controls (dynamiXs-style outlier rejection)
         self.edit_btn = QPushButton("Exclude points (click)")
@@ -101,7 +152,8 @@ class KdTitrationFitViewer(QMainWindow):
     def load(self, json_file):
         self.json_file = json_file
         self.data = json.loads(Path(json_file).read_text())
-        self.fits = self.data.get("fits", [])
+        self.fits = sorted(self.data.get("fits", []),
+                           key=lambda f: _residue_sort_key(f.get("residue", "")))
         self.P0 = float(self.data.get("metadata", {}).get("protein_conc", 50.0))
         # restore any saved exclusions
         self.excluded = {"csp": {}, "intensity": {}}
@@ -111,12 +163,34 @@ class KdTitrationFitViewer(QMainWindow):
                 if excl:
                     self.excluded[obs][f["residue"]] = set(excl)
         self._update_global_label()
+        self._populate_point_combos()
         self.residue_list.clear()
         for f in self.fits:
             self.residue_list.addItem(QListWidgetItem(f["residue"]))
         if self.fits:
             self.residue_list.setCurrentRow(0)
         self._refresh()
+
+    def _point_labels(self):
+        """Per-point labels for the comparison selectors — ligand concentrations
+        when available, else the raw point labels."""
+        meta = self.data.get("metadata", {})
+        pts = meta.get("concentrations") or meta.get("points") or []
+        return [f"{p:g}" if isinstance(p, (int, float)) else str(p) for p in pts]
+
+    def _populate_point_combos(self):
+        """Fill Ref/Compare selectors; default ref = point 0, compare = first
+        addition (the next point, lowest non-zero [L] since points are sorted)."""
+        labels = self._point_labels()
+        for combo in (self.ref_point_combo, self.cmp_point_combo):
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(labels)
+        if labels:
+            self.ref_point_combo.setCurrentIndex(0)
+            self.cmp_point_combo.setCurrentIndex(1 if len(labels) > 1 else 0)
+        for combo in (self.ref_point_combo, self.cmp_point_combo):
+            combo.blockSignals(False)
 
     def _update_global_label(self):
         g = self.data.get("global", {}).get("csp", {})
@@ -138,15 +212,55 @@ class KdTitrationFitViewer(QMainWindow):
         self.figure.clear()
         ax = self.figure.add_subplot(111)
         view = self.view_combo.currentIndex()
+        self.cmp_box.setVisible(view == 3)
         if view == 0:
             self._plot_curve(ax)
         elif view == 1:
             self._plot_summary(ax, "Kd", "Kd_err", "Kd vs residue", "Kd")
+        elif view == 3:
+            self._plot_comparison(ax)
         else:
             obs = self._obs_key()
             key = "dd_max" if obs == "csp" else "I0"
             self._plot_summary(ax, key, key + "_err", f"{key} vs residue", key)
         self.canvas.draw()
+
+    def _plot_comparison(self, ax):
+        """Observable (CSP or I/I₀) per residue between a chosen reference point
+        and a comparison point — computed from each residue's raw series."""
+        obs = self._obs_key()
+        i = self.ref_point_combo.currentIndex()
+        j = self.cmp_point_combo.currentIndex()
+        labels = self._point_labels()
+        if i < 0 or j < 0 or not labels:
+            ax.text(0.5, 0.5, "No titration points", ha="center", va="center",
+                    transform=ax.transAxes)
+            return
+        meta = self.data.get("metadata", {})
+        alpha = float(meta.get("alpha", 0.14))
+        value = meta.get("intensity_value", "height")
+        names, vals = [], []
+        for f in self.fits:
+            series = f.get("series")
+            if not series:
+                continue
+            v = _pair_observable(series, i, j, obs, alpha=alpha, value=value)
+            if np.isfinite(v):
+                names.append(f["residue"])
+                vals.append(v)
+        if not names:
+            missing = ("no embedded series — re-run the fit to enable this view"
+                       if not any(f.get("series") for f in self.fits)
+                       else "no finite values for this point pair")
+            ax.text(0.5, 0.5, missing, ha="center", va="center", transform=ax.transAxes)
+            return
+        x = np.arange(len(names))
+        ax.bar(x, vals, color="seagreen" if obs == "csp" else "indianred")
+        ax.set_xticks(x)
+        ax.set_xticklabels(names, rotation=90, fontsize=6)
+        ax.set_ylabel("CSP (ppm)" if obs == "csp" else "Intensity ratio I/I₀")
+        sym = "CSP" if obs == "csp" else "I/I₀"
+        ax.set_title(f"{sym}:  {labels[i]} → {labels[j]}  (ref → point)")
 
     def _plot_curve(self, ax):
         self._pick_registry = {}

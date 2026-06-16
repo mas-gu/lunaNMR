@@ -479,6 +479,7 @@ class DynamiXsDialog(BaseDialog):
             't1t2': self._get_t1t2_state(),
             'spectral': self._get_spectral_state(),
             'integrated': self._get_integrated_state(),
+            'methyl_t2': self._get_methyl_t2_state(),
         }
 
     def set_state(self, state: Dict[str, Any]):
@@ -504,6 +505,8 @@ class DynamiXsDialog(BaseDialog):
             self._set_spectral_state(state['spectral'])
         if 'integrated' in state:
             self._set_integrated_state(state['integrated'])
+        if 'methyl_t2' in state:
+            self._set_methyl_t2_state(state['methyl_t2'])
         if 'active_page' in state:
             self.stack.setCurrentIndex(state['active_page'])
 
@@ -517,6 +520,7 @@ class DynamiXsDialog(BaseDialog):
             't1t2': self._get_t1t2_file_refs(),
             'spectral': self._get_spectral_file_refs(),
             'integrated': self._get_integrated_file_refs(),
+            'methyl_t2': self._get_methyl_t2_file_refs(),
         }
 
     def set_file_refs(self, refs: Dict[str, Any]):
@@ -531,6 +535,41 @@ class DynamiXsDialog(BaseDialog):
             self._set_spectral_file_refs(refs['spectral'])
         if 'integrated' in refs:
             self._set_integrated_file_refs(refs['integrated'])
+        if 'methyl_t2' in refs:
+            self._set_methyl_t2_file_refs(refs['methyl_t2'])
+
+    # -------------------------------------------------------------------------
+    # Methyl T2 Page State Helpers
+    # -------------------------------------------------------------------------
+
+    def _get_methyl_t2_state(self) -> Dict[str, Any]:
+        """Extract state from Methyl T2 fitting page using session state API."""
+        page = self.methyl_t2_page
+        if hasattr(page, 'get_session_state'):
+            return page.get_session_state()
+        return {}
+
+    def _set_methyl_t2_state(self, state: Dict[str, Any]):
+        """Restore state to Methyl T2 fitting page using session state API."""
+        page = self.methyl_t2_page
+        if hasattr(page, 'restore_session_state'):
+            page.restore_session_state(state)
+
+    def _get_methyl_t2_file_refs(self) -> Dict[str, Any]:
+        """Extract file references from Methyl T2 fitting page."""
+        page = self.methyl_t2_page
+        refs = {}
+        if getattr(page, 'input_file', None):
+            refs['input_file'] = page.input_file
+        return refs
+
+    def _set_methyl_t2_file_refs(self, refs: Dict[str, Any]):
+        """Restore file references to Methyl T2 fitting page."""
+        page = self.methyl_t2_page
+        if 'input_file' in refs:
+            page.input_file = refs['input_file']
+            if hasattr(page, 'file_drop'):
+                page.file_drop.setText(os.path.basename(refs['input_file']))
 
     # -------------------------------------------------------------------------
     # T1/T2 Page State Helpers

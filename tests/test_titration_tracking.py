@@ -159,6 +159,50 @@ class TestCarryForwardSeed:
         assert self._proc()._carry_forward_seed(current, prior) is current
 
 
+class TestFailedFitFallback:
+    """A failed fit in cascade/titration mode reports the n-1 seed position and
+    the intensity sampled there, instead of collapsing to the reference position
+    with zero intensity. A weak-but-visible peak the optimizer can't localize
+    keeps the carried position and the value measured at it."""
+
+    @staticmethod
+    def _proc(mode):
+        from types import SimpleNamespace
+        p = MultiSpectrumProcessor.__new__(MultiSpectrumProcessor)
+        p.peak_source_mode = mode
+        # Reference (spectrum 1) position differs from the carried n-1 position.
+        p.reference_peaks = pd.DataFrame({'Assignment': ['A'],
+                                          'Position_X': [8.0], 'Position_Y': [120.0]})
+        # integrator.peak_list holds the n-1 seed position and the intensity
+        # sampled at that position in the current spectrum (index-aligned).
+        p.integrator = SimpleNamespace(peak_list=pd.DataFrame({
+            'Assignment': ['A'], 'Position_X': [8.3], 'Position_Y': [121.0],
+            'Height': [5000.0], 'Intensity': [5000.0]}))
+        return p
+
+    def test_cascade_assignmentless_failure_uses_nminus1(self):
+        # Real failures are {'success': False, 'error': ...} with NO assignment,
+        # so the seed must be found by list position, not assignment.
+        p = self._proc('cascade')
+        out = p._convert_to_integration_format([{'success': False, 'error': 'weak'}])
+        assert out[0]['ppm_x'] == 8.3        # n-1 seed, not reference 8.0
+        assert out[0]['ppm_y'] == 121.0
+        assert out[0]['height'] == 5000.0    # sampled value, not 0
+        assert out[0]['volume'] == 0.0       # no integral computed for a failed fit
+        assert out[0]['Position_X'] == 8.3   # legacy field too
+        assert out[0]['Height'] == 5000.0
+        # Assignment must come from the seed, not the synthetic 'Peak_N' — else the
+        # tidy/tracking output files the value away from residue A's series.
+        assert out[0]['assignment'] == 'A'
+        assert out[0]['Assignment'] == 'A'
+
+    def test_non_cascade_failure_keeps_reference_and_zero(self):
+        p = self._proc('reference')
+        out = p._convert_to_integration_format([{'assignment': 'A', 'success': False}])
+        assert out[0]['ppm_x'] == 8.0        # reference, unchanged behavior
+        assert out[0]['height'] == 0.0
+
+
 class TestProcessorWiring:
     """process_nmr_series applies the titration policy at setup."""
 

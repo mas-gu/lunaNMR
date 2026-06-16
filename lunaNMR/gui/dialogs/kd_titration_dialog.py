@@ -42,9 +42,44 @@ class KdTitrationDialog(BaseDialog):
         layout.addWidget(self.kd_page)
         self.setLayout(layout)
 
+        # Restore state saved from a previous session (set when the dialog closed
+        # or when a project was loaded).
+        if main_window is not None:
+            if getattr(main_window, 'kd_state', None):
+                self.set_state(main_window.kd_state)
+            if getattr(main_window, 'kd_file_refs', None):
+                self.set_file_refs(main_window.kd_file_refs)
+
     def show_main_menu(self):
         """BasePage back-button target: this module has one page, so close it."""
         self.close()
+
+    # -------------------------------------------------------------------------
+    # State management (for project save/load)
+    # -------------------------------------------------------------------------
+
+    def get_state(self) -> dict:
+        """Collect Kd page state for project save."""
+        return self.kd_page.get_session_state()
+
+    def set_state(self, state: dict):
+        """Restore Kd page state from project load."""
+        if state:
+            self.kd_page.restore_session_state(state)
+
+    def get_file_refs(self) -> dict:
+        """Collect Kd input file reference."""
+        refs = {}
+        if getattr(self.kd_page, 'input_file', None):
+            refs['input_file'] = self.kd_page.input_file
+        return refs
+
+    def set_file_refs(self, refs: dict):
+        """Restore Kd input file reference."""
+        if refs and 'input_file' in refs:
+            self.kd_page.input_file = refs['input_file']
+            if hasattr(self.kd_page, 'file_drop'):
+                self.kd_page.file_drop.setText(os.path.basename(refs['input_file']))
 
     def closeEvent(self, event):
         """Stop a running fit before the page is destroyed, so the worker thread
@@ -53,4 +88,8 @@ class KdTitrationDialog(BaseDialog):
         if worker is not None and worker.isRunning():
             worker.cancel()
             worker.wait(5000)
+        # Transfer state to the main window so a later project save can capture it.
+        if self.main_window is not None:
+            self.main_window.kd_state = self.get_state()
+            self.main_window.kd_file_refs = self.get_file_refs()
         super().closeEvent(event)

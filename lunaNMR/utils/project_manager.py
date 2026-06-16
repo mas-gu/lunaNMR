@@ -12,6 +12,14 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def _safe_bundle_name(name: str) -> str:
+    """A filesystem-safe folder name for a saved analysis: keep word chars,
+    dot and dash; collapse anything else to '_'. Never empty."""
+    import re
+    safe = re.sub(r'[^\w.\-]+', '_', str(name)).strip('._')
+    return safe or 'analysis'
+
+
 class ProjectManager:
     """Manages save/load of lunaNMR project bundles.
 
@@ -24,7 +32,7 @@ class ProjectManager:
     - dynamixs/: DynamiXs analysis state (if applicable)
     """
 
-    SCHEMA_VERSION = "1.0"
+    SCHEMA_VERSION = "1.1"
     PROJECT_EXTENSION = ".lunaNMR"
 
     # List of GUI parameters to serialize
@@ -98,11 +106,16 @@ class ProjectManager:
     # SAVE OPERATIONS
     # =========================================================================
 
-    def save_project(self, project_path: Path) -> Tuple[bool, Dict[str, Any]]:
+    def save_project(self, project_path: Path,
+                     embed_region_data: bool = False) -> Tuple[bool, Dict[str, Any]]:
         """Save complete project state to bundle directory.
 
         Args:
             project_path: Path ending with .lunaNMR
+            embed_region_data: When True, store each fit region's raw intensity
+                grid in the bundle so fit-detail plots open without the original
+                spectrum. When False (default), only the region bounds are stored
+                and intensity is re-sliced from the spectrum on load.
 
         Returns:
             Tuple of (success: bool, summary: Dict[str, Any])
@@ -140,7 +153,7 @@ class ProjectManager:
                     summary['saved_items'].append(f'Peak list ({peak_count} peaks)')
             process_events()
 
-            if self._save_fit_results(project_path):
+            if self._save_fit_results(project_path, embed_region_data):
                 summary['saved_items'].append('Fit results')
             process_events()
 
@@ -152,6 +165,10 @@ class ProjectManager:
             dynamixs_summary = self._save_dynamixs_state_with_summary(project_path)
             if dynamixs_summary:
                 summary['dynamixs'] = dynamixs_summary
+            process_events()
+
+            if self._save_kd_state(project_path):
+                summary['saved_items'].append('Kd titration')
             process_events()
 
             logger.info(f"Project saved to {project_path}")
@@ -246,16 +263,20 @@ class ProjectManager:
 
         return True
 
-    def _save_fit_results(self, bundle_path: Path) -> bool:
+    def _save_fit_results(self, bundle_path: Path,
+                          embed_region_data: bool = False) -> bool:
         """Save fit results, separating numpy arrays from scalars.
 
         Fit results from "Fit Spectrum" (PS2D) contain:
         - Scalar params: r_squared, amplitude, center_x/y, sigma_x/y, gamma_x/y, etc.
+        - Per-peak params: all_peaks (list of dicts)
         - Numpy arrays: region_2d (dict with arrays), fitted_2d_surface, individual_surfaces
 
-        Strategy:
-        - Scalars go in fits.json
-        - Arrays saved as .npz files in arrays/ subfolder
+        The surfaces and the region coordinate grids are reconstructable from the
+        per-peak params and the spectrum, so they are never stored. Each region's
+        bounds (indices into the full spectrum) are stored so the raw intensity can
+        be re-sliced on load. When embed_region_data is True, the raw intensity is
+        also stored so the project opens without the original spectrum.
         """
         if not self._has_fit_results():
             return True  # Nothing to save
@@ -271,6 +292,8 @@ class ProjectManager:
         if fit_results is None or len(fit_results) == 0:
             return True
 
+        integrator = getattr(self.main_window, 'integrator', None)
+
         # Serialize each fit result
         serialized_results = []
         for idx, fit_result in enumerate(fit_results):
@@ -278,7 +301,8 @@ class ProjectManager:
                 continue
 
             peak_id = f"peak_{idx:03d}"
-            serialized = self._serialize_fit_result(fit_result, peak_id, arrays_dir)
+            serialized = self._serialize_fit_result(
+                fit_result, peak_id, arrays_dir, embed_region_data, integrator)
             serialized_results.append(serialized)
 
         # Save scalars to JSON (compact format for faster saving)
@@ -289,41 +313,31 @@ class ProjectManager:
         logger.info(f"Saved {len(serialized_results)} fit results to {fit_dir}")
         return True
 
-    def _serialize_fit_result(self, fit_result: dict, peak_id: str,
-                              arrays_dir: Path) -> dict:
-        """Serialize single fit result, saving arrays separately.
+    def _serialize_fit_result(self, fit_result: dict, peak_id: str, arrays_dir: Path,
+                              embed_region_data: bool, integrator) -> dict:
+        """Serialize single fit result, dropping reconstructable arrays.
 
-        Returns dict with array paths instead of array data.
+        fitted_2d_surface and individual_surfaces are always dropped (rebuilt from
+        all_peaks on load). region_2d is replaced by region_bounds, plus an
+        intensity .npz when embed_region_data is True.
         """
         serialized = {}
 
-        # Keys that contain numpy arrays
-        ARRAY_KEYS = ['fitted_2d_surface', 'individual_surfaces']
-        REGION_2D_KEY = 'region_2d'
+        DROP_KEYS = ('fitted_2d_surface', 'individual_surfaces')
 
         for key, value in fit_result.items():
-            if key == REGION_2D_KEY and isinstance(value, dict):
-                # region_2d is a dict with numpy arrays inside
-                region_file = arrays_dir / f"{peak_id}_region_2d.npz"
-                self._save_region_2d(value, region_file)
-                serialized[key] = f"arrays/{peak_id}_region_2d.npz"
+            if key in DROP_KEYS:
+                # Reconstructed on load from all_peaks + region grid
+                continue
 
-            elif key == 'fitted_2d_surface' and isinstance(value, np.ndarray):
-                surface_file = arrays_dir / f"{peak_id}_fitted_surface.npz"
-                np.savez_compressed(surface_file, data=value)
-                serialized[key] = f"arrays/{peak_id}_fitted_surface.npz"
-
-            elif key == 'individual_surfaces' and isinstance(value, list):
-                # List of numpy arrays
-                if len(value) > 0 and isinstance(value[0], np.ndarray):
-                    surfaces_file = arrays_dir / f"{peak_id}_individual_surfaces.npz"
-                    # Save as dict with keys surface_0, surface_1, etc.
-                    arrays_dict = {f"surface_{i}": arr for i, arr in enumerate(value)}
-                    arrays_dict['count'] = np.array([len(value)])
-                    np.savez_compressed(surfaces_file, **arrays_dict)
-                    serialized[key] = f"arrays/{peak_id}_individual_surfaces.npz"
-                else:
-                    serialized[key] = []
+            elif key == 'region_2d' and isinstance(value, dict):
+                bounds = self._compute_region_bounds(value, integrator)
+                if bounds is not None:
+                    serialized['region_bounds'] = bounds
+                if embed_region_data:
+                    region_file = arrays_dir / f"{peak_id}_region_2d.npz"
+                    self._save_region_intensity(value, region_file)
+                    serialized['region_2d'] = f"arrays/{peak_id}_region_2d.npz"
 
             elif key == 'all_peaks' and isinstance(value, list):
                 # List of peak parameter dicts - serialize as-is (no arrays inside)
@@ -347,17 +361,36 @@ class ProjectManager:
 
         return serialized
 
-    def _save_region_2d(self, region_2d: dict, filepath: Path):
-        """Save region_2d dict containing numpy arrays."""
-        # region_2d contains: f1_ppm, f2_ppm, f1_grid, f2_grid, intensity
-        arrays_to_save = {}
-        for key, value in region_2d.items():
-            if isinstance(value, np.ndarray):
-                arrays_to_save[key] = value
-            else:
-                # Store scalars as 0-d arrays
-                arrays_to_save[key] = np.array(value)
+    def _compute_region_bounds(self, region_2d: dict, integrator):
+        """Compute [y0, y1, x0, x1] index bounds of a region in the full spectrum.
 
+        Returns None when the spectrum axes or region axes are unavailable.
+        """
+        if integrator is None:
+            return None
+        ppm_y = getattr(integrator, 'ppm_y_axis', None)
+        ppm_x = getattr(integrator, 'ppm_x_axis', None)
+        f1_ppm = region_2d.get('f1_ppm')
+        f2_ppm = region_2d.get('f2_ppm')
+        if ppm_y is None or ppm_x is None or f1_ppm is None or f2_ppm is None:
+            return None
+
+        f1_ppm = np.asarray(f1_ppm)
+        f2_ppm = np.asarray(f2_ppm)
+        if f1_ppm.size == 0 or f2_ppm.size == 0:
+            return None
+
+        y0 = int(np.argmin(np.abs(np.asarray(ppm_y) - f1_ppm[0])))
+        x0 = int(np.argmin(np.abs(np.asarray(ppm_x) - f2_ppm[0])))
+        return [y0, y0 + int(f1_ppm.size), x0, x0 + int(f2_ppm.size)]
+
+    def _save_region_intensity(self, region_2d: dict, filepath: Path):
+        """Save only the raw intensity grid and 1D axes of a region."""
+        arrays_to_save = {}
+        for key in ('intensity', 'f1_ppm', 'f2_ppm'):
+            value = region_2d.get(key)
+            if value is not None:
+                arrays_to_save[key] = np.asarray(value)
         np.savez_compressed(filepath, **arrays_to_save)
 
     # =========================================================================
@@ -411,6 +444,9 @@ class ProjectManager:
             dynamixs_summary = self._load_dynamixs_state_with_summary(project_path)
             if dynamixs_summary:
                 summary['dynamixs'] = dynamixs_summary
+
+            if self._load_kd_state(project_path):
+                summary['loaded_items'].append('Kd titration')
 
             logger.info(f"Project loaded from {project_path}")
             return True, missing_files, summary
@@ -555,37 +591,18 @@ class ProjectManager:
         return True
 
     def _deserialize_fit_result(self, serialized: dict, fit_dir: Path) -> dict:
-        """Reconstruct fit result, loading arrays from files."""
+        """Reconstruct fit result, loading embedded region intensity if present."""
         result = {}
 
         for key, value in serialized.items():
             if key == 'region_2d' and isinstance(value, str) and value.endswith('.npz'):
-                # Load region_2d from npz
+                # Load embedded region intensity from npz
                 npz_path = fit_dir / value
                 if npz_path.exists():
                     result[key] = self._load_region_2d(npz_path)
                 else:
                     logger.warning(f"Missing array file: {npz_path}")
                     result[key] = None
-
-            elif key == 'fitted_2d_surface' and isinstance(value, str) and value.endswith('.npz'):
-                # Load 2D surface array
-                npz_path = fit_dir / value
-                if npz_path.exists():
-                    with np.load(npz_path) as data:
-                        result[key] = data['data']
-                else:
-                    logger.warning(f"Missing array file: {npz_path}")
-                    result[key] = None
-
-            elif key == 'individual_surfaces' and isinstance(value, str) and value.endswith('.npz'):
-                # Load list of surface arrays
-                npz_path = fit_dir / value
-                if npz_path.exists():
-                    result[key] = self._load_individual_surfaces(npz_path)
-                else:
-                    logger.warning(f"Missing array file: {npz_path}")
-                    result[key] = []
 
             else:
                 # Regular value - use as-is
@@ -606,16 +623,73 @@ class ProjectManager:
                     region_2d[key] = arr
         return region_2d
 
-    def _load_individual_surfaces(self, npz_path: Path) -> list:
-        """Load list of surface arrays from npz file."""
-        surfaces = []
-        with np.load(npz_path) as data:
-            count = int(data['count'][0])
-            for i in range(count):
-                key = f"surface_{i}"
-                if key in data:
-                    surfaces.append(data[key])
-        return surfaces
+    def reconstruct_fit_arrays(self) -> None:
+        """Rebuild region grids and fit surfaces for loaded fit results.
+
+        Must run after the spectrum is loaded so off-mode regions can be
+        re-sliced. Results whose region cannot be resolved (no embedded data and
+        no spectrum) are left without surfaces; downstream plotting degrades
+        gracefully.
+        """
+        results = getattr(self.main_window, 'last_fitting_results', None)
+        integrator = getattr(self.main_window, 'integrator', None)
+        if not results or integrator is None:
+            return
+
+        for result in results:
+            if not isinstance(result, dict) or 'all_peaks' not in result:
+                continue
+            try:
+                region_2d = self._resolve_region_2d(result, integrator)
+                if region_2d is None:
+                    continue
+                surface, individual, baseline = integrator._reconstruct_2d_surface(
+                    region_2d, result['all_peaks'])
+            except Exception as e:
+                logger.warning(f"Could not reconstruct fit surface for "
+                               f"{result.get('assignment', '?')}: {e}")
+                continue
+            result['region_2d'] = region_2d
+            result['fitted_2d_surface'] = surface
+            result['individual_surfaces'] = individual
+            result.setdefault('baseline', baseline)
+
+    def _resolve_region_2d(self, result: dict, integrator):
+        """Return a region_2d dict with intensity and grids, or None."""
+        region = result.get('region_2d')
+        if isinstance(region, dict) and region.get('intensity') is not None \
+                and region.get('f1_ppm') is not None and region.get('f2_ppm') is not None:
+            return self._build_region_2d(region['f1_ppm'], region['f2_ppm'],
+                                         region['intensity'])
+
+        bounds = result.get('region_bounds')
+        if bounds is None or len(bounds) != 4:
+            return None
+        nmr_data = getattr(integrator, 'nmr_data', None)
+        ppm_y = getattr(integrator, 'ppm_y_axis', None)
+        ppm_x = getattr(integrator, 'ppm_x_axis', None)
+        if nmr_data is None or ppm_y is None or ppm_x is None:
+            return None
+
+        y0, y1, x0, x1 = bounds
+        intensity = nmr_data[y0:y1, x0:x1]
+        if intensity.size == 0:
+            return None
+        return self._build_region_2d(np.asarray(ppm_y)[y0:y1],
+                                     np.asarray(ppm_x)[x0:x1], intensity)
+
+    def _build_region_2d(self, f1_ppm, f2_ppm, intensity) -> dict:
+        """Assemble a region_2d dict, rebuilding the coordinate grids."""
+        f1_ppm = np.asarray(f1_ppm)
+        f2_ppm = np.asarray(f2_ppm)
+        f2_grid, f1_grid = np.meshgrid(f2_ppm, f1_ppm, indexing='xy')
+        return {
+            'f1_ppm': f1_ppm,
+            'f2_ppm': f2_ppm,
+            'f1_grid': f1_grid,
+            'f2_grid': f2_grid,
+            'intensity': np.asarray(intensity),
+        }
 
     # =========================================================================
     # UTILITY METHODS
@@ -1035,6 +1109,7 @@ class ProjectManager:
             't1t2_fitting': {},
             'spectral_density': {},
             'model_free': {},
+            'methyl_t2': {},
         }
 
         # Get current state (from dialog if open, otherwise from main_window)
@@ -1087,6 +1162,15 @@ class ProjectManager:
                     'json_folder': session_results.get('json_folder'),
                 }
 
+        # Methyl T2 Fitting
+        methyl_state = state.get('methyl_t2', {})
+        if methyl_state and methyl_state.get('last_results_file'):
+            summary['methyl_t2'] = {
+                'analysis_complete': True,
+                'output_dir': methyl_state.get('output_dir'),
+                'results_file': methyl_state.get('last_results_file'),
+            }
+
         # Remove empty entries
         summary = {k: v for k, v in summary.items() if v}
 
@@ -1125,6 +1209,9 @@ class ProjectManager:
         # Spectral Density page output_dir
         if 'spectral' in state and 'output_dir' in state.get('spectral', {}):
             output_dirs['spectral'] = state['spectral']['output_dir']
+        # Methyl T2 page output_dir
+        if 'methyl_t2' in state and 'output_dir' in state.get('methyl_t2', {}):
+            output_dirs['methyl_t2'] = state['methyl_t2']['output_dir']
 
         # Also check if DynamiXsDialog is open and get output dirs from it
         dialog = getattr(self.main_window, 'dynamixs_dialog', None)
@@ -1304,6 +1391,13 @@ class ProjectManager:
                     sr = state[page_name]['session_results']
                     if isinstance(sr, dict) and 'json_folder' in sr:
                         sr['json_folder'] = restored_json_folder
+                # Methyl T2 tracks its viewer/results paths at the top level
+                if page_name == 'methyl_t2':
+                    if restored_json_folder:
+                        state[page_name]['last_json_folder'] = restored_json_folder
+                    rf = state[page_name].get('last_results_file')
+                    if rf and (restore_dir / Path(rf).name).exists():
+                        state[page_name]['last_results_file'] = str(restore_dir / Path(rf).name)
 
         # Update main_window state
         if state:
@@ -1324,6 +1418,7 @@ class ProjectManager:
             't1t2_fitting': {},
             'spectral_density': {},
             'model_free': {},
+            'methyl_t2': {},
         }
 
         # Call the actual load method
@@ -1365,7 +1460,183 @@ class ProjectManager:
                     'output_dir': integrated_state.get('output_dir'),
                 }
 
+        # Methyl T2 Fitting
+        methyl_state = state.get('methyl_t2', {})
+        if methyl_state and methyl_state.get('last_results_file'):
+            summary['methyl_t2'] = {
+                'analysis_complete': True,
+                'output_dir': methyl_state.get('output_dir'),
+                'results_file': methyl_state.get('last_results_file'),
+            }
+
         # Remove empty entries
         summary = {k: v for k, v in summary.items() if v}
 
         return summary
+
+    # =========================================================================
+    # KD / TITRATION STATE SAVE/LOAD
+    # =========================================================================
+
+    def _save_kd_state(self, bundle_path: Path) -> bool:
+        """Save the named Kd analyses into the bundle.
+
+        Each analysis is self-contained under kd/analyses/<name>/:
+        - fit_data.json: the Kd fit JSON (raw per-point series + params + fits)
+        - meta.json: page parameters and comparison-view selections
+        The user adds analyses from the Kd page ("Save analysis to project");
+        they are held on main_window.kd_analyses until the project is saved.
+        """
+        analyses = getattr(self.main_window, 'kd_analyses', None)
+        if not isinstance(analyses, dict) or not analyses:
+            return False
+
+        analyses_dir = bundle_path / "kd" / "analyses"
+        analyses_dir.mkdir(parents=True, exist_ok=True)
+        for name, entry in analyses.items():
+            if not isinstance(entry, dict):
+                continue
+            adir = analyses_dir / _safe_bundle_name(name)
+            adir.mkdir(exist_ok=True)
+            with open(adir / "fit_data.json", 'w') as f:
+                json.dump(entry.get('fit_data', {}), f, indent=2,
+                          default=self._json_serializer)
+            with open(adir / "meta.json", 'w') as f:
+                json.dump(entry.get('meta', {}), f, indent=2,
+                          default=self._json_serializer)
+
+        logger.info(f"Saved {len(analyses)} Kd analysis(es) to {analyses_dir}")
+        return True
+
+    def _load_kd_state(self, bundle_path: Path) -> bool:
+        """Load the named Kd analyses from the bundle into main_window.kd_analyses.
+
+        Each entry's fit JSON is referenced by its bundled path (fit_data_path)
+        so the viewer opens the copy inside the project.
+        """
+        analyses_dir = bundle_path / "kd" / "analyses"
+        if not analyses_dir.is_dir():
+            return False
+
+        loaded = {}
+        for adir in sorted(analyses_dir.iterdir()):
+            fit_path = adir / "fit_data.json"
+            if not adir.is_dir() or not fit_path.exists():
+                continue
+            meta_path = adir / "meta.json"
+            try:
+                # Skip a corrupt analysis rather than aborting the whole project load.
+                fit_data = json.loads(fit_path.read_text())
+                meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+            except (ValueError, OSError) as e:
+                logger.warning(f"Skipping unreadable Kd analysis '{adir.name}': {e}")
+                continue
+            loaded[adir.name] = {
+                'fit_data': fit_data, 'meta': meta, 'fit_data_path': str(fit_path),
+            }
+        if not loaded:
+            return False
+
+        self.main_window.kd_analyses = loaded
+        logger.info(f"Loaded {len(loaded)} Kd analysis(es) from {analyses_dir}")
+        return True
+
+    # =========================================================================
+    # BUNDLE INVENTORY (project browser)
+    # =========================================================================
+
+    def _path_size(self, path: Path) -> int:
+        """Total size in bytes of a file or directory (recursive)."""
+        path = Path(path)
+        if path.is_file():
+            return path.stat().st_size
+        if path.is_dir():
+            return sum(p.stat().st_size for p in path.rglob('*') if p.is_file())
+        return 0
+
+    def inventory(self, project_path: Path) -> List[Dict[str, Any]]:
+        """Describe a bundle's contents grouped by category.
+
+        Returns a list of category dicts, each:
+            {id, label, size, items: [{id, label, paths, size, removable}]}
+        Only categories/items that exist on disk are included. `paths` are
+        bundle-relative strings; `removable` marks items the browser may delete.
+        """
+        project_path = Path(project_path)
+        categories: List[Dict[str, Any]] = []
+
+        def add(cat_id, label, specs):
+            items = []
+            for it_id, it_label, rel_paths, removable in specs:
+                present = [p for p in rel_paths if (project_path / p).exists()]
+                if not present:
+                    continue
+                size = sum(self._path_size(project_path / p) for p in present)
+                items.append({'id': it_id, 'label': it_label, 'paths': present,
+                              'size': size, 'removable': removable})
+            if items:
+                categories.append({'id': cat_id, 'label': label,
+                                   'size': sum(i['size'] for i in items),
+                                   'items': items})
+
+        add('manifest', 'Project manifest',
+            [('manifest', 'project.json', ['project.json'], False)])
+        add('gui_state', 'GUI state',
+            [('gui_state', 'gui_state.json', ['gui_state.json'], True)])
+        add('peak_list', 'Peak list',
+            [('peak_list', 'peak_list.csv', ['peak_list.csv'], True)])
+        add('fit_results', 'Fit results', [
+            ('fit_results/fits', 'Fit parameters (fits.json)',
+             ['fit_results/fits.json'], True),
+            ('fit_results/arrays', 'Embedded region data',
+             ['fit_results/arrays'], True),
+        ])
+        add('series_results', 'Series results',
+            [('series_results', 'All series results', ['series_results'], True)])
+
+        dynamixs_specs = [
+            ('dynamixs/state', 'Parameters (state)',
+             ['dynamixs/state.json', 'dynamixs/file_refs.json',
+              'dynamixs/analysis_meta.json'], True),
+        ]
+        results_root = project_path / 'dynamixs' / 'results'
+        if results_root.is_dir():
+            for sub in sorted(results_root.iterdir()):
+                if sub.is_dir():
+                    dynamixs_specs.append(
+                        (f'dynamixs/results/{sub.name}', f'{sub.name} results',
+                         [f'dynamixs/results/{sub.name}'], True))
+        add('dynamixs', 'DynamiXs', dynamixs_specs)
+
+        kd_specs = []
+        kd_analyses_root = project_path / 'kd' / 'analyses'
+        if kd_analyses_root.is_dir():
+            for sub in sorted(kd_analyses_root.iterdir()):
+                if sub.is_dir():
+                    kd_specs.append((f'kd/analyses/{sub.name}', sub.name,
+                                     [f'kd/analyses/{sub.name}'], True))
+        add('kd', 'Kd analyses', kd_specs)
+
+        return categories
+
+    def remove_bundle_paths(self, project_path: Path, rel_paths: List[str]) -> int:
+        """Delete bundle-relative paths; return bytes freed.
+
+        Raises ValueError if a path resolves outside the bundle or is the bundle
+        root itself (guards against deleting unintended files).
+        """
+        import shutil
+        project_path = Path(project_path).resolve()
+        freed = 0
+        for rel in rel_paths:
+            target = (project_path / rel).resolve()
+            if target == project_path or project_path not in target.parents:
+                raise ValueError(f"Refusing to delete path outside bundle: {rel}")
+            if not target.exists():
+                continue
+            freed += self._path_size(target)
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        return freed

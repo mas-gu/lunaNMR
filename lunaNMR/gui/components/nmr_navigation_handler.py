@@ -171,6 +171,9 @@ class NMRNavigationHandler:
         self._pan_start_y_data = None
         self._pan_start_xlim = None
         self._pan_start_ylim = None
+        # Pixel position of the left-press, to tell a click from a pan-drag on release.
+        self._pan_start_x_pixel = None
+        self._pan_start_y_pixel = None
 
         # Rectangle selection state (middle-click drag)
         self._rect_select_active = False
@@ -186,6 +189,9 @@ class NMRNavigationHandler:
         # Area selection callbacks (for rectangle selection)
         self.on_area_select: Optional[Callable[[float, float, float, float], None]] = None
         self.on_rect_drag: Optional[Callable[[float, float, float, float], None]] = None
+        # A left-click that didn't drag (press and release at ~the same pixel). Used
+        # for click-to-select / click-to-place editing; a left-drag still pans.
+        self.on_left_click: Optional[Callable[[float, float], None]] = None
         # Keyboard action callbacks
         self.on_escape: Optional[Callable[[], None]] = None
         self.on_delete: Optional[Callable[[], None]] = None
@@ -269,11 +275,14 @@ class NMRNavigationHandler:
                 self.on_peak_edit(event.xdata, event.ydata, modifiers)
             return
 
-        # No modifier: start pan operation
+        # No modifier: start pan operation. Whether this is a pan or a click is
+        # decided on release by how far the mouse moved (see _on_mouse_release).
         if event.xdata is not None and event.ydata is not None:
             self._pan_active = True
             self._pan_start_x_data = event.xdata
             self._pan_start_y_data = event.ydata
+            self._pan_start_x_pixel = event.x
+            self._pan_start_y_pixel = event.y
             # Store original limits to avoid drift
             self._pan_start_xlim = self._ax.get_xlim()
             self._pan_start_ylim = self._ax.get_ylim()
@@ -312,10 +321,17 @@ class NMRNavigationHandler:
             self._rect_start_y_pixel = None
             return
 
-        # Handle pan release (left-click)
+        # Handle pan release (left-click). If the mouse barely moved it was a click,
+        # not a pan, so fire on_left_click (click-to-select / click-to-place editing).
         if event.button == 1 and self._pan_active:
             self._pan_active = False
             self._canvas.setCursor(Qt.OpenHandCursor)
+            if (self.on_left_click is not None and event.xdata is not None
+                    and self._pan_start_x_pixel is not None and event.x is not None):
+                dx = abs(event.x - self._pan_start_x_pixel)
+                dy = abs(event.y - self._pan_start_y_pixel)
+                if dx < self.DRAG_THRESHOLD_PIXELS and dy < self.DRAG_THRESHOLD_PIXELS:
+                    self.on_left_click(event.xdata, event.ydata)
 
     def _on_mouse_motion(self, event):
         """Handle mouse motion event for panning and rectangle selection."""

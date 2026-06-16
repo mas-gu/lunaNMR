@@ -158,3 +158,30 @@ class TestRunAnalysis:
         r1 = next(f for f in data['fits'] if f['residue'] == 'R1')
         assert r1['csp']['Kd'] == pytest.approx(20.0, rel=1e-2)
         assert 'global' in data
+
+    def test_embeds_raw_series_per_residue(self, tmp_path):
+        # The comparison view (arbitrary reference point) and exact-reopen need the
+        # raw per-point positions/intensities, not just the point-0-relative obs.
+        from kd_models import csp_model
+        from kd_fit import run_kd_analysis_with_params
+        pts = [0.0, 10.0, 25.0, 60.0, 150.0]
+        ddH = csp_model(np.array(pts), 0.2, 20.0, P0)
+        rows = [(str(p), 'R1', 8.0 + d, 120.0 + i, 1000.0 - 3 * i, 2000.0 - 5 * i)
+                for i, (p, d) in enumerate(zip(pts, ddH))]
+        df = pd.DataFrame(rows, columns=['spectrum_name', 'assignment',
+                                         'ppm_x', 'ppm_y', 'height', 'volume'])
+        csv = tmp_path / 'series_analysis_tidy.csv'
+        df.to_csv(csv, index=False)
+        result = run_kd_analysis_with_params({
+            'input_csv_file': str(csv), 'output_dir': str(tmp_path),
+            'output_prefix': 'kd_test', 'concentrations': pts, 'protein_conc': P0,
+            'alpha': 0.14, 'observables': ['csp', 'intensity'], 'n_bootstrap': 0})
+        import json
+        data = json.loads(Path(result['json_file']).read_text())
+        r1 = next(f for f in data['fits'] if f['residue'] == 'R1')
+        s = r1['series']
+        assert len(s['ppm_x']) == len(pts) == len(s['ppm_y'])
+        assert len(s['height']) == len(pts) == len(s['volume'])
+        assert s['ppm_y'][0] == pytest.approx(120.0)
+        assert s['ppm_y'][-1] == pytest.approx(124.0)   # raw N positions preserved
+        assert s['height'][-1] == pytest.approx(1000.0 - 3 * 4)

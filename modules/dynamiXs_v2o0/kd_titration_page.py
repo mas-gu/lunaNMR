@@ -147,6 +147,10 @@ class KdTitrationPage(BasePage):
         self.open_prev_btn = create_secondary_button("Open previous dataset…",
                                                      clicked=self._open_previous_dataset, width=200)
         rrow.addWidget(self.open_prev_btn)
+        self.save_to_project_btn = create_secondary_button(
+            "Save analysis to project", clicked=self._save_analysis_to_project, width=200)
+        self.save_to_project_btn.setEnabled(False)
+        rrow.addWidget(self.save_to_project_btn)
         rrow.addStretch()
         layout.addLayout(rrow)
 
@@ -350,6 +354,7 @@ class KdTitrationPage(BasePage):
         self._log(f"Fit complete: {n} residues -> {result.get('json_file')}")
         if n:
             self.viewer_btn.setEnabled(True)
+            self.save_to_project_btn.setEnabled(True)
             show_info(self, "Fit complete", f"Fitted {n} residues. Open the viewer to inspect.")
         else:
             show_warning(self, "No fits succeeded", "All residues failed. Check the log.")
@@ -387,8 +392,146 @@ class KdTitrationPage(BasePage):
             self._viewer = open_kd_titration_viewer(parent=self, json_file=path)
             self.last_json_file = path
             self.viewer_btn.setEnabled(True)
+            self.save_to_project_btn.setEnabled(True)
         except Exception as e:
             show_error(self, "Viewer error", f"Could not open viewer:\n{e}")
+
+    def _unique_analysis_name(self, base, existing):
+        """A name not already in `existing`; suffix _2, _3, … on collision."""
+        base = base or "analysis"
+        if base not in existing:
+            return base
+        i = 2
+        while f"{base}_{i}" in existing:
+            i += 1
+        return f"{base}_{i}"
+
+    def _lunanmr_main_window(self):
+        """The real LunaNMR main window. In the app the page's main_window is the
+        hosting dialog, which holds the main window as .main_window (BasePage
+        convention); in isolation the main window is passed directly."""
+        mw = self.main_window
+        return getattr(mw, 'main_window', None) or mw
+
+    def _store_current_analysis(self):
+        """Snapshot the current fit + params into main_window.kd_analyses, auto-named
+        from the input file. Returns the assigned name, or None if there is no fit."""
+        if not self.last_json_file or not os.path.exists(self.last_json_file):
+            return None
+        import json
+        fit_data = json.loads(Path(self.last_json_file).read_text())
+        mw = self._lunanmr_main_window()
+        if getattr(mw, 'kd_analyses', None) is None:
+            mw.kd_analyses = {}
+        base = os.path.splitext(os.path.basename(self.input_file))[0] if self.input_file else "analysis"
+        name = self._unique_analysis_name(base, mw.kd_analyses)
+        meta = self.get_session_state()
+        meta['input_basename'] = os.path.basename(self.input_file) if self.input_file else None
+        viewer = getattr(self, "_viewer", None)
+        if viewer is not None and viewer.isVisible():
+            try:
+                meta['comparison'] = {
+                    'ref': viewer.ref_point_combo.currentIndex(),
+                    'cmp': viewer.cmp_point_combo.currentIndex(),
+                    'observable': viewer.obs_combo.currentIndex()}
+            except Exception:
+                pass
+        mw.kd_analyses[name] = {'fit_data': fit_data, 'meta': meta}
+        return name
+
+    def _save_analysis_to_project(self):
+        name = self._store_current_analysis()
+        if name is None:
+            show_warning(self, "No results", "Run or open a fit first.")
+            return
+        self._log(f"Saved analysis '{name}' to project (save the project to persist).")
+        show_info(self, "Saved to project",
+                  f"Analysis '{name}' added. Save the project (File ▸ Save) to write it to disk.")
+
+    def open_saved_analysis(self, entry):
+        """Load a saved analysis (from the project) back into the page + viewer:
+        restore its parameters, point the viewer at its fit JSON, and reapply the
+        comparison-view selections. Returns the viewer, or None on failure."""
+        if not isinstance(entry, dict):
+            return None
+        path = entry.get('fit_data_path')
+        if not path or not os.path.exists(path):
+            # in-memory only (saved this session, project not written yet)
+            import json, tempfile
+            tmp = tempfile.NamedTemporaryFile(
+                'w', suffix='_kd_fit_data.json', delete=False)
+            json.dump(entry.get('fit_data', {}), tmp)
+            tmp.close()
+            path = tmp.name
+        meta = entry.get('meta') or {}
+        if meta:
+            self.restore_session_state(meta)
+        self.last_json_file = path
+        self.viewer_btn.setEnabled(True)
+        self.save_to_project_btn.setEnabled(True)
+        from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+        existing = getattr(self, "_viewer", None)
+        if existing is not None and existing.isVisible():
+            existing.close()
+        self._viewer = open_kd_titration_viewer(parent=self, json_file=path)
+        cmp = meta.get('comparison')
+        if cmp and self._viewer is not None:
+            self._viewer.obs_combo.setCurrentIndex(int(cmp.get('observable', 0)))
+            self._viewer.view_combo.setCurrentIndex(3)        # "Ref vs point (bars)"
+            self._viewer.ref_point_combo.setCurrentIndex(int(cmp.get('ref', 0)))
+            self._viewer.cmp_point_combo.setCurrentIndex(int(cmp.get('cmp', 1)))
+        return self._viewer
+
+    # ---------- session state (project save/load) ----------
+
+    def get_session_state(self) -> dict:
+        """Serializable state for project save."""
+        return {
+            'input_file': self.input_file,
+            'output_dir': self.output_dir,
+            'detected_points': list(self.detected_points),
+            'concentrations': [s.value() for s in self.conc_spins],
+            'intensity_scales': [s.value() for s in self.scale_spins],
+            'p0': self.p0_spin.value(),
+            'alpha': self.alpha_spin.value(),
+            'observable': self.obs_combo.currentIndex(),
+            'intensity_value': self.intvalue_combo.currentText(),
+            'bootstrap_iter': self.boot_spin.value(),
+            'last_json_file': self.last_json_file,
+            'last_json_folder': self.last_json_folder,
+        }
+
+    def restore_session_state(self, state: dict):
+        """Restore state produced by get_session_state()."""
+        if not state:
+            return
+        self.input_file = state.get('input_file')
+        self.output_dir = state.get('output_dir')
+        self.detected_points = list(state.get('detected_points', []))
+        self.last_json_file = state.get('last_json_file')
+        self.last_json_folder = state.get('last_json_folder')
+
+        # Rebuild the per-point rows before restoring their values.
+        self._build_conc_rows(self.detected_points)
+        for spin, val in zip(self.conc_spins, state.get('concentrations', [])):
+            spin.setValue(val)
+        for spin, val in zip(self.scale_spins, state.get('intensity_scales', [])):
+            spin.setValue(val)
+
+        self.p0_spin.setValue(state.get('p0', 50.0))
+        self.alpha_spin.setValue(state.get('alpha', 0.14))
+        self.obs_combo.setCurrentIndex(state.get('observable', 0))
+        self.intvalue_combo.setCurrentText(state.get('intensity_value', 'height'))
+        self.boot_spin.setValue(state.get('bootstrap_iter', 0))
+
+        if self.input_file:
+            self.file_drop.setText(os.path.basename(self.input_file))
+            self.points_label.setText(
+                f"Detected {len(self.detected_points)} points")
+        if self.output_dir:
+            self.outdir_label.setText(self.output_dir)
+        if self.last_json_file:
+            self.viewer_btn.setEnabled(True)
 
     def _log(self, msg):
         self.log_text.appendPlainText(str(msg))

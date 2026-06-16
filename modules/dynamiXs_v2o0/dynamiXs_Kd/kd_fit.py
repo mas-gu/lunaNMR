@@ -201,6 +201,11 @@ def run_kd_analysis_with_params(params, progress_callback=None):
     n_fitted = 0
     for i, (name, res) in enumerate(sorted(residues.items())):
         entry = {'residue': name}
+        # Raw per-point series (positions + intensities, post-scaling), aligned to
+        # metadata 'points'. Lets the viewer compute CSP / I-ratio against ANY
+        # reference point and makes the JSON self-contained for exact reopen.
+        entry['series'] = {k: json_safe(res.get(k))
+                           for k in ('ppm_x', 'ppm_y', 'height', 'volume')}
         if 'csp' in observables:
             csp = csp_series(res, alpha=alpha)
             entry['csp'] = fit_residue_csp(L, csp, P0, n_bootstrap=n_boot)
@@ -223,6 +228,7 @@ def run_kd_analysis_with_params(params, progress_callback=None):
         'metadata': {'analysis': 'Kd_titration', 'protein_conc': P0, 'alpha': alpha,
                      'concentrations': concs, 'points': points,
                      'intensity_scales': list(scales) if scales else None,
+                     'intensity_value': value,
                      'observables': observables, 'n_bootstrap': n_boot},
         'fits': fits, 'global': global_fit,
     }

@@ -1054,6 +1054,44 @@ class MultiSpectrumProcessor:
 
         return batch_obj
 
+    def _failed_fit_fallback(self, index):
+        """Position + intensity for a peak whose fit failed in cascade tracking.
+
+        The peak was carried from spectrum n-1 and its intensity was sampled at
+        that position in the current spectrum (_sample_intensities_for_peak_list);
+        both live in integrator.peak_list, index-aligned with the results. A weak
+        peak the optimizer can't localize keeps its n-1 position and the value
+        measured there, instead of collapsing to the reference with zero intensity.
+        Matched by list position, not assignment: a failed fit usually has none.
+
+        Returns a dict of override fields, or None if no usable seed is available.
+        """
+        peak_list = getattr(getattr(self, 'integrator', None), 'peak_list', None)
+        if peak_list is None or index >= len(peak_list):
+            return None
+        row = peak_list.iloc[index]
+        pos_x = float(row.get('Position_X', 0) or 0)
+        pos_y = float(row.get('Position_Y', 0) or 0)
+        if pos_x == 0 and pos_y == 0:
+            return None
+        value = row.get('Height', row.get('Intensity', 0))
+        value = float(value) if pd.notna(value) else 0.0
+        # Height is the measured point value; Volume stays 0 because no integral was
+        # computed (a point sample is a height, not a volume — conflating them would
+        # spike volume-based series at the failed points).
+        out = {
+            'ppm_x': pos_x, 'ppm_y': pos_y, 'height': value, 'volume': 0.0,
+            'Position_X': pos_x, 'Position_Y': pos_y, 'Height': value, 'Volume': 0.0,
+        }
+        # Restore the assignment from the seed: a failed fit usually has none, so
+        # peak_data defaulted to a synthetic 'Peak_N' that the tidy/tracking output
+        # files by — stranding the value away from its residue's series.
+        seed_assignment = row.get('Assignment')
+        if pd.notna(seed_assignment) and str(seed_assignment) not in ('', 'Unknown'):
+            out['assignment'] = seed_assignment
+            out['Assignment'] = seed_assignment
+        return out
+
     def _convert_to_integration_format(self, fitted_results: List[Dict]) -> List[Dict]:
         """
         Convert detailed Voigt fitting results to the new standardized peak data format.
@@ -1303,6 +1341,15 @@ class MultiSpectrumProcessor:
                     peak_data['baseline'] = fit_result['baseline']
                 if 'all_peaks' in fit_result:
                     peak_data['all_peaks'] = fit_result['all_peaks']
+
+            elif self.peak_source_mode == 'cascade':
+                # Fit failed in cascade/titration tracking: report the n-1 seed
+                # position and the intensity sampled there, not the reference
+                # position with zero intensity (a weak peak the optimizer could
+                # not localize is still where spectrum n-1 left it).
+                fallback = self._failed_fit_fallback(i)
+                if fallback is not None:
+                    peak_data.update(fallback)
 
             standardized_results.append(peak_data)
 

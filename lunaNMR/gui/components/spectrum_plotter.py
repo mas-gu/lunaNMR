@@ -57,6 +57,7 @@ class SpectrumPlotter(MatplotlibWidget):
     peak_clicked = Signal(float, float)
     peak_edit_requested = Signal(float, float, object)  # x_ppm, y_ppm, Qt.KeyboardModifiers
     peak_select_requested = Signal(float, float)  # x_ppm, y_ppm - middle-click selection
+    peak_left_click_requested = Signal(float, float)  # x_ppm, y_ppm - left-click (no drag)
     area_select_requested = Signal(float, float, float, float)  # x1, y1, x2, y2 - rectangle selection
     escape_pressed = Signal()  # Escape key pressed
     delete_pressed = Signal()  # Delete/Backspace/Ctrl+D pressed
@@ -103,6 +104,7 @@ class SpectrumPlotter(MatplotlibWidget):
         self._nav_handler.attach(self)
         self._nav_handler.on_peak_edit = self._on_peak_edit_request
         self._nav_handler.on_peak_select = self._on_peak_select_request
+        self._nav_handler.on_left_click = self._on_left_click_request
         self._nav_handler.on_reset_zoom = self.reset_zoom
 
         # Selection highlight artist (for showing selected peak)
@@ -664,6 +666,10 @@ class SpectrumPlotter(MatplotlibWidget):
             y_ppm: Y coordinate in ppm
         """
         self.peak_select_requested.emit(x_ppm, y_ppm)
+
+    def _on_left_click_request(self, x_ppm: float, y_ppm: float):
+        """Handle a left-click that didn't drag (used for click-to-select/move editing)."""
+        self.peak_left_click_requested.emit(x_ppm, y_ppm)
 
     def show_selection_highlight(self, x_ppm: float, y_ppm: float):
         """

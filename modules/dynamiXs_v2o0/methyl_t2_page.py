@@ -391,6 +391,47 @@ class MethylT2FittingPage(BasePage):
         self._log(f"Opened previous dataset: {folder} "
                   f"({len(json_matches)} field(s) found)")
 
+    # ---------- session state (project save/load) ----------
+
+    def get_session_state(self) -> dict:
+        """Serializable state for project save."""
+        return {
+            'input_file': self.input_file,
+            'output_dir': self.output_dir,
+            'source_series_map': dict(self.source_series_map),
+            'last_json_folder': self.last_json_folder,
+            'last_results_file': self.last_results_file,
+            'initial_t2_a': self.t2a_spin.value(),
+            'initial_t2_b': self.t2b_spin.value(),
+            'field_freq': self.field_freq_spin.value(),
+            'bootstrap_iter': self.boot_spin.value(),
+            'error_method': self.error_combo.currentIndex(),
+        }
+
+    def restore_session_state(self, state: dict):
+        """Restore state produced by get_session_state()."""
+        if not state:
+            return
+        self.input_file = state.get('input_file')
+        self.output_dir = state.get('output_dir')
+        self.source_series_map = dict(state.get('source_series_map', {}))
+        self.last_json_folder = state.get('last_json_folder')
+        self.last_results_file = state.get('last_results_file')
+
+        self.t2a_spin.setValue(state.get('initial_t2_a', 100.0))
+        self.t2b_spin.setValue(state.get('initial_t2_b', 20.0))
+        self.field_freq_spin.setValue(state.get('field_freq', 600.0))
+        self.boot_spin.setValue(state.get('bootstrap_iter', 1000))
+        self.error_combo.setCurrentIndex(state.get('error_method', 0))
+
+        if self.input_file:
+            self.file_drop.setText(os.path.basename(self.input_file))
+        if self.output_dir:
+            self.outdir_label.setText(self.output_dir)
+        if self.last_json_folder:
+            self.viewer_btn.setEnabled(True)
+            self.summary_btn.setEnabled(True)
+
     # ---------- logging ----------
 
     def _log(self, msg: str):

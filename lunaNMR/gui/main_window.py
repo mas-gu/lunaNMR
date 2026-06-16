@@ -355,6 +355,8 @@ class LunaNMRMainWindow(BaseWindow):
         self.dynamixs_file_refs = None  # DynamiXs input file paths
         self.dynamixs_dialog = None  # Reference to open DynamiXs dialog
         self.kd_titration_dialog = None  # Reference to open Kd/titration dialog
+        self.kd_state = None  # Kd/titration dialog parameters
+        self.kd_file_refs = None  # Kd/titration input file paths
 
         # ===== Selection State =====
         self.selected_peak_info = None  # {type, index, peak_id, data}
@@ -487,7 +489,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.peak_deletion_mode = False
         self.peak_addition_mode = False
         self.click_tolerance = 0.15  # Click distance tolerance in ppm (v0o9 default)
-        self.edit_connection_id = None  # Matplotlib event connection ID
 
         # ===== 3D Voigt Analysis Control Variables (v0o9 line 1840-1848) =====
         self.show_exp_3d = True  # Show experimental data
@@ -1465,8 +1466,11 @@ class LunaNMRMainWindow(BaseWindow):
         layout.addLayout(button_layout)
 
         # ===== Peak Edition Toggle Button =====
-        self.peak_edit_toggle_button = QPushButton("Peak Edition ▼")
-        self.peak_edit_toggle_button.setToolTip("Show/hide peak edition controls")
+        self.peak_edit_toggle_button = QPushButton("✏ Edit peaks ▼")
+        self.peak_edit_toggle_button.setToolTip(
+            "Show peak-editing controls. In edit mode: left-click a peak to select it, "
+            "then left-click its true position to move it. Middle-click does the same "
+            "quick move any time, without edit mode.")
         self.peak_edit_toggle_button.setMinimumHeight(32)
         self.peak_edit_toggle_button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.peak_edit_toggle_button.clicked.connect(self.toggle_peak_edition)
@@ -3686,7 +3690,11 @@ class LunaNMRMainWindow(BaseWindow):
 
         # Connect peak edit signal (Shift+click = add, Ctrl+click = delete)
         self.spectrum_plotter.peak_edit_requested.connect(self._on_peak_edit_with_modifier)
-        # Connect peak select signal (middle-click = select for moving)
+        # Connect left-click (no drag): in edit mode, click a peak to select it then
+        # click its true position to move it (a left-drag still pans).
+        self.spectrum_plotter.peak_left_click_requested.connect(self._on_peak_left_click)
+        # Middle-click select->move works any time (no edit mode needed): a quick way
+        # to nudge a single peak. Two clicks: select nearest, then place.
         self.spectrum_plotter.peak_select_requested.connect(self._on_peak_select_for_move)
         # Connect area select signal (middle-click + drag = rectangle selection)
         self.spectrum_plotter.area_select_requested.connect(self._on_area_select)
@@ -4756,6 +4764,10 @@ class LunaNMRMainWindow(BaseWindow):
         save_project_as_action.triggered.connect(self.save_project_as)
         file_menu.addAction(save_project_as_action)
 
+        browse_project_action = QAction("Project Contents...", self)
+        browse_project_action.triggered.connect(self.open_project_browser)
+        file_menu.addAction(browse_project_action)
+
         file_menu.addSeparator()
 
         export_peak_list_action = QAction("Export Peak List...", self)
@@ -5726,6 +5738,20 @@ class LunaNMRMainWindow(BaseWindow):
 
         self.kd_titration_dialog = KdTitrationDialog(parent=self, main_window=self)
         self.kd_titration_dialog.show()
+
+    def open_kd_analysis(self, name):
+        """Open a saved Kd analysis (from the loaded project) in the Kd dialog.
+
+        Called by the Project Browser. Returns True if the analysis was found.
+        """
+        entry = (getattr(self, 'kd_analyses', None) or {}).get(name)
+        if entry is None:
+            return False
+        self.launch_kd_titration()
+        dialog = getattr(self, 'kd_titration_dialog', None)
+        if dialog is not None and hasattr(dialog, 'kd_page'):
+            dialog.kd_page.open_saved_analysis(entry)
+        return True
 
     def launch_series_qc(self):
         """Launch Series QC Analysis dialog.
@@ -6977,24 +7003,22 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         is_visible = self.peak_edition_widget.isVisible()
 
         if not is_visible:
-            # Enable edit mode
+            # Enable edit mode. Editing clicks arrive via the plotter's
+            # peak_left_click_requested signal (left-click, no drag); _on_peak_left_click
+            # gates on self.peak_edit_mode, so no raw canvas connection is needed.
             self.peak_edit_mode = True
-            self.edit_connection_id = self.spectrum_plotter.canvas.mpl_connect('button_press_event', self.on_peak_edit_click)
             self.spectrum_plotter.canvas.setCursor(Qt.CrossCursor)
 
             # Show editing controls
             self.peak_edition_widget.setVisible(True)
 
             # Update button text
-            self.peak_edit_toggle_button.setText("Peak Edition ▲")
+            self.peak_edit_toggle_button.setText("✏ Edit peaks ▲")
 
             logger.info("Peak editing mode enabled")
         else:
             # Disable edit mode
             self.peak_edit_mode = False
-            if self.edit_connection_id is not None:
-                self.spectrum_plotter.canvas.mpl_disconnect(self.edit_connection_id)
-                self.edit_connection_id = None
             self.spectrum_plotter.canvas.setCursor(Qt.ArrowCursor)
             self.selected_peak_info = None
             if hasattr(self, 'selected_peak_label'):
@@ -7004,7 +7028,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             self.peak_edition_widget.setVisible(False)
 
             # Update button text
-            self.peak_edit_toggle_button.setText("Peak Edition ▼")
+            self.peak_edit_toggle_button.setText("✏ Edit peaks ▼")
 
             logger.info("Peak editing mode disabled")
 
@@ -7122,22 +7146,45 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             else:
                 logger.warning(f"Ctrl+Click: No peak found near ({x_ppm:.4f}, {y_ppm:.4f})")
 
-    def _on_peak_select_for_move(self, x_ppm: float, y_ppm: float):
-        """Handle middle-click to select a peak for moving.
+    def _on_peak_left_click(self, x_ppm: float, y_ppm: float):
+        """Left-click (no drag) in edit mode: add / delete / two-click move, depending
+        on the active sub-mode. Outside edit mode this does nothing (a left-drag pans).
 
-        Middle-click selects the nearest peak and shows a visual highlight.
-        The next left-click will move the selected peak to that position.
-
-        Args:
-            x_ppm: X coordinate in ppm where clicked
-            y_ppm: Y coordinate in ppm where clicked
+        Two-click move: click 1 selects the nearest peak (highlight); click 2 moves it
+        there and deselects — the same mechanism as the overlay viewer.
         """
-        # Clear any multi-selection when doing single selection
+        if not self.peak_edit_mode:
+            return
+
+        # Addition mode: add a new peak at the click (highest priority).
+        if self.peak_addition_mode:
+            self.add_new_peak(x_ppm, y_ppm)
+            return
+
+        # Deletion mode: delete the nearest peak immediately.
+        if self.peak_deletion_mode:
+            peak_info = self.find_nearest_peak(x_ppm, y_ppm)
+            if peak_info:
+                self.delete_selected_peak(peak_info)
+            return
+
+        # Move mode (two clicks): edit-enabled peaks only.
+        self._select_or_move_peak(x_ppm, y_ppm, search_all=False)
+
+    def _on_peak_select_for_move(self, x_ppm: float, y_ppm: float):
+        """Middle-click select->move, available without entering edit mode. Two clicks:
+        select the nearest peak (any peak), then place it. A quick single-peak nudge."""
+        self._select_or_move_peak(x_ppm, y_ppm, search_all=True)
+
+    def _select_or_move_peak(self, x_ppm: float, y_ppm: float, search_all: bool):
+        """Two-click select->move state machine shared by the edit-mode left-click and
+        the always-on middle-click. search_all=True searches every peak (middle-click);
+        False restricts to edit-enabled peaks (edit-mode left-click)."""
         if self.selected_peaks_multi:
             self.clear_multi_selection()
 
-        # If we already have a selected peak, this click moves it
         if self.selected_peak_info is not None:
+            # Click 2: move the selected peak here, then deselect.
             self.move_selected_peak(x_ppm, y_ppm)
             self.selected_peak_info = None
             self.spectrum_plotter.clear_selection_highlight()
@@ -7145,16 +7192,15 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 self.selected_peak_label.setText("Peak moved! No peak selected")
             return
 
-        # Otherwise, select the nearest peak (search all peaks, not just edit-enabled ones)
-        peak_info = self.find_nearest_peak(x_ppm, y_ppm, check_edit_mode=False)
+        # Click 1: select the nearest peak.
+        peak_info = self.find_nearest_peak(x_ppm, y_ppm, check_edit_mode=not search_all)
         if peak_info:
             self.selected_peak_info = peak_info
             self.update_selected_peak_display()
-            # Show visual highlight on the selected peak
             self.spectrum_plotter.show_selection_highlight(peak_info['x'], peak_info['y'])
-            logger.info(f"Middle-click: Selected {peak_info['type']} peak '{peak_info['assignment']}' for moving")
+            logger.info(f"Selected {peak_info['type']} peak '{peak_info['assignment']}' for moving")
         else:
-            logger.warning(f"Middle-click: No peak found near ({x_ppm:.4f}, {y_ppm:.4f})")
+            logger.warning(f"No peak found near ({x_ppm:.4f}, {y_ppm:.4f})")
 
     # --- Rectangle/Area selection methods ---
 
@@ -7384,44 +7430,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         logger.info(f"Deleted {count} peaks")
         self.update_status(f"Deleted {count} peaks")
-
-    def on_peak_edit_click(self, event):
-        """Handle mouse clicks in peak edit mode (v0o9 line 5632)."""
-        if not self.peak_edit_mode or event.inaxes != self.spectrum_plotter.ax:
-            return
-
-        click_x, click_y = event.xdata, event.ydata
-
-        # Check if addition mode is enabled (highest priority)
-        if self.peak_addition_mode:
-            # Addition mode: add new peak at click position
-            self.add_new_peak(click_x, click_y)
-            return
-
-        # Check if deletion mode is enabled
-        if self.peak_deletion_mode:
-            # Deletion mode: find and delete peak immediately
-            peak_info = self.find_nearest_peak(click_x, click_y)
-            if peak_info:
-                self.delete_selected_peak(peak_info)
-            return
-
-        # Regular editing mode (move peaks)
-        if self.selected_peak_info is None:
-            # First click: select peak
-            peak_info = self.find_nearest_peak(click_x, click_y)
-            if peak_info:
-                self.selected_peak_info = peak_info
-                self.update_selected_peak_display()
-                # Show visual highlight on the selected peak
-                self.spectrum_plotter.show_selection_highlight(peak_info['x'], peak_info['y'])
-        else:
-            # Second click: move selected peak
-            self.move_selected_peak(click_x, click_y)
-            self.selected_peak_info = None
-            self.spectrum_plotter.clear_selection_highlight()
-            if hasattr(self, 'selected_peak_label'):
-                self.selected_peak_label.setText("Peak moved! No peak selected")
 
     def find_nearest_peak(self, click_x, click_y, check_edit_mode=True):
         """Find the nearest peak to click position (v0o9 line 5666).
@@ -7989,6 +7997,15 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         else:
             self._do_save_project(self.current_project_path)
 
+    def open_project_browser(self):
+        """Open the project-contents browser (defaults to the current project)."""
+        from lunaNMR.gui.dialogs.project_browser_dialog import ProjectBrowserDialog
+
+        dialog = ProjectBrowserDialog(
+            parent=self, main_window=self,
+            project_path=self.current_project_path)
+        dialog.show()
+
     def save_project_as(self):
         """Save project to a new location."""
         from PySide6.QtWidgets import QFileDialog
@@ -8018,8 +8035,23 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
     def _do_save_project(self, project_path: Path):
         """Actually save the project to the given path."""
-        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtWidgets import QProgressDialog, QMessageBox, QCheckBox
         from PySide6.QtCore import Qt
+
+        # Ask whether to embed raw fit-region data (off by default)
+        box = QMessageBox(self)
+        box.setWindowTitle("Save Project")
+        box.setIcon(QMessageBox.Question)
+        box.setText(f"Save project to:\n{project_path.name}")
+        embed_checkbox = QCheckBox(
+            "Embed raw fit-region data (larger file; opens without the original spectrum)")
+        embed_checkbox.setChecked(False)
+        box.setCheckBox(embed_checkbox)
+        box.setStandardButtons(QMessageBox.Save | QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Save)
+        if box.exec() != QMessageBox.Save:
+            return
+        embed_region_data = embed_checkbox.isChecked()
 
         # Show progress dialog to prevent "not responding" on Linux
         progress = QProgressDialog("Saving project...", None, 0, 0, self)
@@ -8032,7 +8064,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         QApplication.processEvents()  # Force show
 
         pm = self._get_project_manager()
-        success, summary = pm.save_project(project_path)
+        success, summary = pm.save_project(project_path, embed_region_data)
 
         progress.close()
 
@@ -8087,6 +8119,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             if 'model_free' in dynamixs:
                 lines.append("  • Model Free: Analysis complete")
 
+            if 'methyl_t2' in dynamixs:
+                lines.append("  • Methyl T2: Fit complete")
+
         if not dynamixs and len(summary.get('saved_items', [])) <= 2:
             lines.append("")
             lines.append("No analysis results to save.")
@@ -8130,6 +8165,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
             if 'model_free' in dynamixs:
                 lines.append("  • Model Free: Analysis complete")
+
+            if 'methyl_t2' in dynamixs:
+                lines.append("  • Methyl T2: Fit complete")
 
             lines.append("")
             lines.append("Open DynamiXs to view results.")
@@ -8182,6 +8220,13 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 self.load_nmr_file(self.current_nmr_file)
             except Exception as e:
                 logger.warning(f"Could not reload spectrum: {e}")
+
+        # Rebuild fit-region grids and surfaces now that the spectrum is loaded
+        if self.last_fitting_results:
+            try:
+                self._get_project_manager().reconstruct_fit_arrays()
+            except Exception as e:
+                logger.warning(f"Could not reconstruct fit arrays: {e}")
 
         # Update peak navigator with reference peaks and fit results
         if hasattr(self, 'peak_navigator'):
