@@ -86,8 +86,9 @@ class KdTitrationFitViewer(QMainWindow):
         self.edit_mode = False
         # excluded[obs][residue] = set of point indices (into that fit's L/obs)
         self.excluded = {"csp": {}, "intensity": {}}
-        # residues excluded wholesale (problematic values) — click a bar in edit mode
-        self.excluded_residues = set()
+        # residues excluded wholesale (problematic values) — click a bar in edit mode.
+        # Per-observable: excluding a residue in CSP must not exclude it in Intensity.
+        self.excluded_residues = {"csp": set(), "intensity": set()}
         self._pick_registry = {}
 
         central = QWidget()
@@ -178,7 +179,12 @@ class KdTitrationFitViewer(QMainWindow):
                 excl = f.get(obs, {}).get("excluded")
                 if excl:
                     self.excluded[obs][f["residue"]] = set(excl)
-        self.excluded_residues = set(self.data.get("excluded_residues", []))
+        er = self.data.get("excluded_residues", {})
+        if isinstance(er, dict):
+            self.excluded_residues = {"csp": set(er.get("csp", [])),
+                                      "intensity": set(er.get("intensity", []))}
+        else:  # legacy flat list → applied to both observables
+            self.excluded_residues = {"csp": set(er or []), "intensity": set(er or [])}
         self._update_global_label()
         self._populate_point_combos()
         self.residue_list.clear()
@@ -289,8 +295,9 @@ class KdTitrationFitViewer(QMainWindow):
         bars are pickable so a click toggles that residue's exclusion. `ymax` fixes the
         y-axis top (e.g. 1.0 for an I/I₀ ratio); None auto-scales to the data."""
         self._pick_registry = {}
+        excl = self.excluded_residues[self._obs_key()]   # per-observable exclusions
         finite = [v for v, n in zip(vals, names)
-                  if np.isfinite(v) and n not in self.excluded_residues]
+                  if np.isfinite(v) and n not in excl]
         data_max = max(finite) if finite else (max([v for v in vals if np.isfinite(v)],
                                                     default=1.0))
         # Honor a fixed top (ratio axis), expanding only if the data exceeds it.
@@ -303,17 +310,17 @@ class KdTitrationFitViewer(QMainWindow):
         heights = [v if np.isfinite(v) else full for v in vals]
         facecolors = []
         for n, v in zip(names, vals):
-            if n in self.excluded_residues:
+            if n in excl:
                 facecolors.append("#e08585")          # excluded → muted red (hatched below)
             elif np.isfinite(v):
                 facecolors.append(color)
             else:
                 facecolors.append("#d0d0d0")           # missing → grey full-height
-        bar_errs = ([e if np.isfinite(v) and n not in self.excluded_residues else 0.0
+        bar_errs = ([e if np.isfinite(v) and n not in excl else 0.0
                      for v, e, n in zip(vals, errs, names)] if errs is not None else None)
         bars = ax.bar(x, heights, color=facecolors, yerr=bar_errs, capsize=2)
         for n, patch in zip(names, bars):
-            if n in self.excluded_residues:
+            if n in excl:
                 patch.set_hatch("//")
             if self.edit_mode:
                 patch.set_picker(True)
@@ -402,12 +409,13 @@ class KdTitrationFitViewer(QMainWindow):
             return
         residue, obs, idx_map = info
         if obs == "RESIDUE":
-            # Toggle whole-residue exclusion (problematic values) from a bar click.
-            if residue in self.excluded_residues:
-                self.excluded_residues.discard(residue)
-            else:
-                self.excluded_residues.add(residue)
-            self.data["excluded_residues"] = sorted(self.excluded_residues)
+            # Toggle whole-residue exclusion for the CURRENT observable only — CSP and
+            # Intensity exclusions are independent.
+            cur = self._obs_key()
+            s = self.excluded_residues[cur]
+            s.discard(residue) if residue in s else s.add(residue)
+            self.data["excluded_residues"] = {
+                k: sorted(v) for k, v in self.excluded_residues.items()}
             self._save_json()
             self._refresh()
             return

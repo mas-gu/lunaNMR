@@ -123,3 +123,23 @@ class TestCspSeries:
         assert csp[0] == pytest.approx(0.0)
         assert csp[1] > 0.0
         assert np.isnan(csp[2])              # excluded, not ~7 ppm spurious CSP
+
+
+def test_tidy_collapses_duplicate_point_rows(tmp_path):
+    # A residue listed TWICE at the same titration point must not crash (it used to
+    # raise "float() ... not 'Series'"); the duplicates are averaged to one value.
+    from kd_input import load_titration_tidy
+    rows = [
+        ("0", "R1", 8.00, 120.0, 1000.0, 2000.0),
+        ("1", "R1", 8.10, 120.0,  500.0, 1000.0),
+        ("1", "R1", 8.20, 120.0,  700.0, 1000.0),   # duplicate point for R1
+    ]
+    df = pd.DataFrame(rows, columns=["spectrum_name", "assignment",
+                                     "ppm_x", "ppm_y", "height", "volume"])
+    csv = tmp_path / "series_analysis_tidy.csv"
+    df.to_csv(csv, index=False)
+    points, res = load_titration_tidy(str(csv))
+    assert points == [0.0, 1.0]
+    r1 = res["R1"]
+    assert all(isinstance(v, float) for v in r1["ppm_x"])   # scalars, no Series
+    assert r1["ppm_x"][1] == pytest.approx(8.15)            # mean of 8.10 & 8.20

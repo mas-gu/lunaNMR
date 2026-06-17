@@ -1609,8 +1609,14 @@ class ProjectManager:
             ('fit_results/arrays', 'Embedded region data',
              ['fit_results/arrays'], True),
         ])
-        add('series_results', 'Series results',
-            [('series_results', 'All series results', ['series_results'], True)])
+        series_specs = []
+        series_root = project_path / 'series_results'
+        if series_root.is_dir():
+            for sub in sorted(series_root.iterdir()):
+                if sub.is_dir():
+                    series_specs.append((f'series_results/{sub.name}', sub.name,
+                                         [f'series_results/{sub.name}'], True))
+        add('series_results', 'Series results', series_specs)
 
         dynamixs_specs = [
             ('dynamixs/state', 'Parameters (state)',

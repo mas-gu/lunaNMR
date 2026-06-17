@@ -126,3 +126,19 @@ def test_project_browser_dialog_populates_and_removes(tmp_path):
 
     assert not (bundle / "fit_results" / "arrays").exists()
     dlg.deleteLater()
+
+
+def test_series_results_listed_individually(tmp_path):
+    # Series results should list each series by name (like Kd analyses), so they can
+    # be removed individually — not one all-or-nothing "All series results" item.
+    bundle = tmp_path / "proj.lunaNMR"
+    for name in ("A1_HSPA1A", "B4_HSPA8"):
+        d = bundle / "series_results" / name
+        d.mkdir(parents=True)
+        (d / "series_analysis_tidy.csv").write_text("spectrum_name,assignment\n0,R1\n")
+    inv = _pm().inventory(bundle)
+    series = next(c for c in inv if c['id'] == 'series_results')
+    labels = {it['label'] for it in series['items']}
+    assert labels == {"A1_HSPA1A", "B4_HSPA8"}
+    assert all(it['removable'] for it in series['items'])
+    assert all(it['id'].startswith('series_results/') for it in series['items'])

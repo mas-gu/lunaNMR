@@ -441,3 +441,19 @@ def test_kd_page_lists_saved_fits_from_project(app):
              for i in range(page.saved_fits_list.count())]
     assert shown == ['A1_assi', 'B4_assi']               # sorted
     assert page.no_saved_fits_label.isVisible() is False
+
+
+def test_loading_input_autofills_output_dir(app, tmp_path):
+    import pandas as pd
+    from kd_titration_page import KdTitrationPage
+    sub = tmp_path / "series_results_X"
+    sub.mkdir()
+    csv = sub / "series_analysis_tidy.csv"
+    pd.DataFrame({"spectrum_name": ["0", "1"], "assignment": ["R1", "R1"],
+                  "ppm_x": [8.0, 8.1], "ppm_y": [120.0, 120.0],
+                  "height": [1000.0, 500.0], "volume": [2000.0, 1000.0]}).to_csv(csv, index=False)
+    page = KdTitrationPage(_fake_main_window())
+    page._set_input_file(str(csv))
+    assert page.input_file == str(csv)
+    assert page.output_dir == str(sub)          # auto-filled to the series folder
+    assert page.outdir_label.text() == str(sub)

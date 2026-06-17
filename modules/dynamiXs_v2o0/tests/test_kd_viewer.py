@@ -181,15 +181,17 @@ def test_exclude_residue_via_bar_click_persists_and_reloads(app, tmp_path):
 
         class _Evt:
             pass
+        v.obs_combo.setCurrentIndex(0)            # CSP
         e = _Evt(); e.artist = patch; e.ind = [0]
-        v._on_pick(e)                             # click the bar -> exclude residue
-        assert resid in v.excluded_residues
-        assert resid in json.loads(Path(jf).read_text()).get("excluded_residues", [])
+        v._on_pick(e)                             # click the bar -> exclude residue (CSP)
+        assert resid in v.excluded_residues["csp"]
+        saved = json.loads(Path(jf).read_text()).get("excluded_residues", {})
+        assert resid in saved["csp"]
 
         # reload restores the exclusion
         v2 = open_kd_titration_viewer(parent=None, json_file=jf)
         try:
-            assert resid in v2.excluded_residues
+            assert resid in v2.excluded_residues["csp"]
         finally:
             v2.deleteLater()
 
@@ -199,7 +201,29 @@ def test_exclude_residue_via_bar_click_persists_and_reloads(app, tmp_path):
                       if v._pick_registry.get(id(p), (None,))[0] == resid)
         e2 = _Evt(); e2.artist = patch2; e2.ind = [0]
         v._on_pick(e2)
-        assert resid not in v.excluded_residues
+        assert resid not in v.excluded_residues["csp"]
+    finally:
+        v.deleteLater()
+
+
+def test_residue_exclusion_is_independent_per_observable(app, tmp_path):
+    # Excluding a residue in CSP must NOT exclude it in Intensity, and vice versa.
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+    jf = _make_fit_json(tmp_path)
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        v.view_combo.setCurrentIndex(3)
+        v.obs_combo.setCurrentIndex(0)            # CSP
+        v._toggle_edit(True)
+        patch = v.figure.axes[0].patches[0]
+        resid = v._pick_registry[id(patch)][0]
+
+        class _Evt:
+            pass
+        e = _Evt(); e.artist = patch; e.ind = [0]
+        v._on_pick(e)                             # exclude in CSP
+        assert resid in v.excluded_residues["csp"]
+        assert resid not in v.excluded_residues["intensity"]   # independent
     finally:
         v.deleteLater()
 

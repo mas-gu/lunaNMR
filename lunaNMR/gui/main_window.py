@@ -5750,7 +5750,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.launch_kd_titration()
         dialog = getattr(self, 'kd_titration_dialog', None)
         if dialog is not None and hasattr(dialog, 'kd_page'):
-            dialog.kd_page.open_saved_analysis(entry)
+            dialog.kd_page.open_saved_analysis(entry, name=name)
         return True
 
     def launch_series_qc(self):

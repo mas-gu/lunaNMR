@@ -42,6 +42,11 @@ class KdTitrationPage(BasePage):
         self.last_json_folder = None
         self.last_json_file = None
         self.worker = None
+        # Series identity — every series writes the SAME generic filename
+        # (series_analysis_tidy.csv), so the saved-fit name must come from the series
+        # name (drag) or the series folder, not the file stem.
+        self.series_name = None            # set when a series is dropped
+        self._current_analysis_name = None  # set when a saved fit is opened (keeps its name)
         self._setup_content()
 
     # ---------- UI ----------
@@ -284,6 +289,7 @@ class KdTitrationPage(BasePage):
     def _on_series_dropped(self, field_name, series_name, csv_path):
         if csv_path and os.path.exists(csv_path):
             self._set_input_file(csv_path)
+            self.series_name = series_name        # identity for the saved-fit name
             self.file_drop.setText(f"Series '{series_name}'  →  {os.path.basename(csv_path)}")
 
     def _browse_input_file(self):
@@ -301,6 +307,12 @@ class KdTitrationPage(BasePage):
             from kd_input import load_titration
             points, residues = load_titration(path)
             self.input_file = path        # only commit after a successful load
+            # New input = new analysis identity (a drop re-sets series_name after this).
+            self.series_name = None
+            self._current_analysis_name = None
+            # Default the output to where the series data lives, so results land next to
+            # the fitted data without the user having to navigate (still overridable).
+            self._set_output_dir(os.path.dirname(path))
             self.detected_points = points
             # CSP needs per-point positions; intensity matrices have none.
             import math
@@ -317,6 +329,12 @@ class KdTitrationPage(BasePage):
                     f"Detected 0 points — is this a titration series CSV? ({len(residues)} residues)")
             self._build_conc_rows(points)
         except Exception as e:
+            # Don't leave the PREVIOUS series committed — otherwise a later "Run Kd fit"
+            # silently fits the old series ("shows previous series").
+            self.input_file = None
+            self.series_name = None
+            self._current_analysis_name = None
+            self.detected_points = []
             self.points_label.setText(f"Could not read titration points: {e}")
 
     def _build_conc_rows(self, points):
@@ -357,12 +375,15 @@ class KdTitrationPage(BasePage):
         # Let the form take its natural (tall) height inside the page scroll area.
         self.conc_form_frame.setMinimumHeight(self.conc_form.sizeHint().height())
 
+    def _set_output_dir(self, folder):
+        self.output_dir = folder
+        self.outdir_label.setText(folder or "No output directory selected")
+
     def _choose_output_dir(self):
         initial = self.output_dir or (os.path.dirname(self.input_file) if self.input_file else "")
         folder = open_directory_dialog(self, "Select output directory", initial)
         if folder:
-            self.output_dir = folder
-            self.outdir_label.setText(folder)
+            self._set_output_dir(folder)
 
     # ---------- run ----------
 
@@ -479,6 +500,30 @@ class KdTitrationPage(BasePage):
         except Exception as e:
             show_error(self, "Viewer error", f"Could not open viewer:\n{e}")
 
+    # Generic per-series output filenames — never use these as the saved-fit name.
+    _GENERIC_STEMS = ("series_analysis_tidy", "comprehensive_peak_tracking")
+
+    def _analysis_base_name(self):
+        """A meaningful identity for the saved fit: the opened fit's name (preserved on
+        re-save), else the dropped series name, else derived from the input path —
+        falling back to the SERIES FOLDER when the file is a generic series output
+        (e.g. .../series_results_ERDj6/series_analysis_tidy.csv -> 'ERDj6')."""
+        if self._current_analysis_name:
+            return self._current_analysis_name
+        if self.series_name:
+            return self.series_name
+        if not self.input_file:
+            return "analysis"
+        p = Path(self.input_file)
+        if p.stem in self._GENERIC_STEMS:
+            folder = p.parent.name
+            for pre in ("series_results_", "series_results"):
+                if folder.startswith(pre):
+                    folder = folder[len(pre):]
+                    break
+            return folder or p.stem
+        return p.stem
+
     def _unique_analysis_name(self, base, existing):
         """A name not already in `existing`; suffix _2, _3, … on collision."""
         base = base or "analysis"
@@ -508,7 +553,7 @@ class KdTitrationPage(BasePage):
         mw = self._lunanmr_main_window()
         if getattr(mw, 'kd_analyses', None) is None:
             mw.kd_analyses = {}
-        base = os.path.splitext(os.path.basename(self.input_file))[0] if self.input_file else "analysis"
+        base = self._analysis_base_name()
         name = base if overwrite else self._unique_analysis_name(base, mw.kd_analyses)
         meta = self.get_session_state()
         meta['input_basename'] = os.path.basename(self.input_file) if self.input_file else None
@@ -561,7 +606,7 @@ class KdTitrationPage(BasePage):
         mw = self._lunanmr_main_window()
         entry = (getattr(mw, 'kd_analyses', {}) or {}).get(item.text())
         if entry is not None:
-            self.open_saved_analysis(entry)
+            self.open_saved_analysis(entry, name=item.text())
 
     def _delete_selected_saved_fit(self):
         item = self.saved_fits_list.currentItem()
@@ -577,12 +622,14 @@ class KdTitrationPage(BasePage):
         (getattr(mw, 'kd_analyses', {}) or {}).pop(name, None)
         self._populate_saved_fits()
 
-    def open_saved_analysis(self, entry):
+    def open_saved_analysis(self, entry, name=None):
         """Load a saved analysis (from the project) back into the page + viewer:
         restore its parameters, point the viewer at its fit JSON, and reapply the
-        comparison-view selections. Returns the viewer, or None on failure."""
+        comparison-view selections. `name` is the analysis's key, remembered so a
+        re-save upserts the same entry. Returns the viewer, or None on failure."""
         if not isinstance(entry, dict):
             return None
+        self._current_analysis_name = name    # keep its name on re-save
         path = entry.get('fit_data_path')
         if not path or not os.path.exists(path):
             # in-memory only (saved this session, project not written yet)

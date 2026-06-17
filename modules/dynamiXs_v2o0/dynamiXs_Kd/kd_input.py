@@ -35,12 +35,14 @@ def load_titration_tidy(csv_path):
     cols = ['ppm_x', 'ppm_y', 'height', 'volume']
     residues = {}
     for assignment, g in df.groupby('assignment'):
-        by_pt = g.set_index('_pt')
         row = {'points': list(points)}
         for c in cols:
-            if c in by_pt.columns:
-                row[c] = [float(by_pt[c].get(p, np.nan)) if p in by_pt.index else np.nan
-                          for p in points]
+            if c in g.columns:
+                # Collapse any duplicate rows at the same point to one value (mean,
+                # skipping NaN). A residue listed twice at a point would otherwise make
+                # the per-point lookup return a Series and crash float().
+                per_pt = g.groupby('_pt')[c].mean()
+                row[c] = [float(per_pt.get(p, np.nan)) for p in points]
             else:
                 row[c] = [np.nan] * len(points)
         residues[str(assignment)] = row
