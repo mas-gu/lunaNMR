@@ -12,6 +12,8 @@
 
 LunaNMR is a professional-grade software suite for Nuclear Magnetic Resonance (NMR) peak detection, Voigt profile fitting, and comprehensive analysis, now extended with binding-affinity (Kd / titration) fitting and protein dynamics analysis (T₁/T₂, methyl T₂, spectral density, and CPMG). A major focus of this release is **automation** — from automatic peak detection and overlap-aware multi-peak fitting through to end-to-end batch processing of large multi-spectrum datasets with minimal manual intervention.
 
+🌐 **[Visit the LunaNMR landing page →](https://mas-gu.github.io/lunaNMR/)**
+
 ---
 
 ## Screenshots
