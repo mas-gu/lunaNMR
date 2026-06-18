@@ -539,6 +539,72 @@ class DynamiXsDialog(BaseDialog):
             self._set_methyl_t2_file_refs(refs['methyl_t2'])
 
     # -------------------------------------------------------------------------
+    # Named analyses (project save/reopen, parity with the Kd module)
+    # -------------------------------------------------------------------------
+
+    _ANALYSIS_TYPE_LABELS = {
+        't1t2': 'T1T2', 'methyl_t2': 'methylT2',
+        'spectral': 'spectralDensity', 'integrated': 'modelFree',
+    }
+
+    def _active_page_key(self) -> Optional[str]:
+        """Key of the page the user is currently on (a result page), or None."""
+        w = self.stack.currentWidget()
+        return {self.t1t2_page: 't1t2', self.spectral_page: 'spectral',
+                self.integrated_page: 'integrated',
+                self.methyl_t2_page: 'methyl_t2'}.get(w)
+
+    @staticmethod
+    def _page_has_results(state: Dict[str, Any], page: Optional[str]) -> bool:
+        """Whether the given page's state holds a completed run worth saving."""
+        ps = (state.get(page) or {}) if page else {}
+        if page == 't1t2':
+            return bool(ps.get('fitted_experiments') or ps.get('output_dir'))
+        if page == 'methyl_t2':
+            return bool(ps.get('last_results_file'))
+        if page in ('spectral', 'integrated'):
+            sr = ps.get('session_results') or {}
+            return bool(sr.get('analysis_complete') or ps.get('output_dir'))
+        return False
+
+    def _analysis_save_name(self, state: Dict[str, Any]) -> Optional[str]:
+        """Name for the active run: <source_series>_<type> (e.g. HSPA1A_T1T2), or None
+        if the active page has no completed results to save."""
+        page = self._active_page_key()
+        if not self._page_has_results(state, page):
+            return None
+        meta = state.get('analysis_metadata') or {}
+        series = str(meta.get('source_series') or '').strip()
+        type_label = self._ANALYSIS_TYPE_LABELS.get(page, page)
+        base = f"{series}_{type_label}" if series else (self.current_analysis_name or type_label)
+        return base.strip('_ ') or type_label
+
+    def ensure_current_saved(self):
+        """Auto-capture the active page's current run into the project's saved DynamiXs
+        analyses (upsert by <series>_<type>). No-op if the active page has no results."""
+        state = self.get_state()
+        name = self._analysis_save_name(state)
+        if not name:
+            return None
+        mw = self.main_window
+        if getattr(mw, 'dynamixs_analyses', None) is None:
+            mw.dynamixs_analyses = {}
+        mw.dynamixs_analyses[name] = {'state': state, 'file_refs': self.get_file_refs()}
+        return name
+
+    def open_analysis(self, entry: Dict[str, Any], name: Optional[str] = None):
+        """Reopen a saved DynamiXs analysis: restore its state (which switches to its
+        page and repoints result paths) and its file references."""
+        if not isinstance(entry, dict):
+            return
+        self.set_state(entry.get('state') or {})
+        refs = entry.get('file_refs')
+        if refs:
+            self.set_file_refs(refs)
+        if name:
+            self.current_analysis_name = name
+
+    # -------------------------------------------------------------------------
     # Methyl T2 Page State Helpers
     # -------------------------------------------------------------------------
 

@@ -19,15 +19,14 @@ def _pm():
 def _make_bundle(tmp_path):
     bundle = tmp_path / "proj.lunaNMR"
     (bundle / "fit_results" / "arrays").mkdir(parents=True)
-    (bundle / "dynamixs" / "results" / "methyl_t2").mkdir(parents=True)
+    (bundle / "dynamixs" / "analyses" / "HSPA1A_t1t2").mkdir(parents=True)
     (bundle / "kd" / "analyses" / "A1_assi").mkdir(parents=True)
 
     (bundle / "project.json").write_text('{"schema_version": "1.1"}')
     (bundle / "gui_state.json").write_text('{"a": 1}')
     (bundle / "fit_results" / "fits.json").write_text('[]')
     (bundle / "fit_results" / "arrays" / "peak_000_region_2d.npz").write_bytes(b"x" * 5000)
-    (bundle / "dynamixs" / "state.json").write_text('{}')
-    (bundle / "dynamixs" / "results" / "methyl_t2" / "r.csv").write_text("a,b\n")
+    (bundle / "dynamixs" / "analyses" / "HSPA1A_t1t2" / "state.json").write_text("{}")
     (bundle / "kd" / "analyses" / "A1_assi" / "fit_data.json").write_text("{}")
     (bundle / "kd" / "analyses" / "A1_assi" / "meta.json").write_text("{}")
     return bundle
@@ -61,11 +60,12 @@ def test_inventory_sizes_and_embedded_region_flag(tmp_path):
     assert _item(inv, 'manifest', 'manifest')['removable'] is False
 
 
-def test_inventory_lists_dynamixs_result_subdirs(tmp_path):
+def test_inventory_lists_dynamixs_analyses(tmp_path):
     bundle = _make_bundle(tmp_path)
     inv = _pm().inventory(bundle)
-    item_ids = {i['id'] for i in _cat(inv, 'dynamixs')['items']}
-    assert 'dynamixs/results/methyl_t2' in item_ids
+    items = _cat(inv, 'dynamixs')['items']
+    assert {i['id'] for i in items} == {'dynamixs/analyses/HSPA1A_t1t2'}
+    assert all(i['removable'] for i in items)
 
 
 def test_remove_bundle_paths_deletes_and_reports_size(tmp_path):

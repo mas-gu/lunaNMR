@@ -1,8 +1,7 @@
 # LunaNMR v1.0
-⚠️ Caution
-LunaNMR is an internal research tool developed for use by Guillaume Mas only. If that's not you, please do not use this software.
 
-This project is experimental and under active development. Expect instability, breaking API changes, incomplete features, and limited documentation. No support or warranty is provided. Use at your own risk
+> ⚠️ **Warning**
+> This project is experimental and under active development. Expect instability, breaking API changes, incomplete features, and limited documentation. No support or warranty is provided. Use at your own risk.
 
 
 **Advanced NMR Peak Analysis and Integration Suite**
@@ -11,7 +10,7 @@ This project is experimental and under active development. Expect instability, b
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/your-username/lunaNMR)
 
-LunaNMR is a professional-grade software suite for Nuclear Magnetic Resonance (NMR) peak detection, Voigt profile fitting, and comprehensive analysis.
+LunaNMR is a professional-grade software suite for Nuclear Magnetic Resonance (NMR) peak detection, Voigt profile fitting, and comprehensive analysis, now extended with binding-affinity (Kd / titration) fitting and protein dynamics analysis (T₁/T₂, methyl T₂, spectral density, and CPMG). A major focus of this release is **automation** — from automatic peak detection and overlap-aware multi-peak fitting through to end-to-end batch processing of large multi-spectrum datasets with minimal manual intervention.
 
 ---
 
@@ -51,6 +50,12 @@ LunaNMR is a professional-grade software suite for Nuclear Magnetic Resonance (N
 - **Series Analysis**: T₁, T₂, and hetNOE relaxation studies with exponential fitting
 - **Multi-Spectrum Processing**: Temperature, pH, and titration series analysis
 - **Batch Processing**: Automated analysis of large datasets with parallel processing
+
+###  **Automation**
+- **Automatic Peak Detection**: Network-based clustering and prominence analysis with no manual seeding required
+- **Overlap-Aware Fitting**: Automatic routing of closely-spaced peaks to 2D simultaneous multi-peak deconvolution
+- **End-to-End Batch Pipelines**: CLI-driven processing of full multi-spectrum series, from detection to fitted results
+- **Hands-Off Series Workflows**: Automated peak tracking, fitting, and output generation across titration, relaxation, and dynamics series
 
 ###  **User-Friendly Interface**
 - **Unified Launcher**: Application selector for LunaNMR and DynamiXs modules

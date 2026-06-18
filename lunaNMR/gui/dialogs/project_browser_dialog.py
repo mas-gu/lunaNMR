@@ -67,7 +67,7 @@ class ProjectBrowserDialog(BaseDialog):
         btn_row = QHBoxLayout()
         self.total_label = QLabel("Total: —")
         btn_row.addWidget(self.total_label, stretch=1)
-        self.open_analysis_btn = QPushButton("Open Kd analysis")
+        self.open_analysis_btn = QPushButton("Open analysis")
         self.open_analysis_btn.setEnabled(False)
         self.open_analysis_btn.clicked.connect(self._on_open_analysis)
         btn_row.addWidget(self.open_analysis_btn)
@@ -135,19 +135,28 @@ class ProjectBrowserDialog(BaseDialog):
         data = self._selected_data()
         self.remove_btn.setEnabled(bool(data and data.get('removable') and data.get('paths')))
 
-    def _is_kd_analysis(self, data):
-        return bool(data and str(data.get('id') or '').startswith('kd/analyses/'))
+    def _openable_kind(self, data):
+        """'kd' / 'dynamixs' if the selected item is a reopenable saved analysis, else None."""
+        item_id = str((data or {}).get('id') or '')
+        if item_id.startswith('kd/analyses/'):
+            return 'kd'
+        if item_id.startswith('dynamixs/analyses/'):
+            return 'dynamixs'
+        return None
 
     def _update_open_enabled(self):
-        can_open = self._is_kd_analysis(self._selected_data()) and self.main_window is not None
+        can_open = self._openable_kind(self._selected_data()) is not None and self.main_window is not None
         self.open_analysis_btn.setEnabled(can_open)
 
     def _on_open_analysis(self):
         data = self._selected_data()
-        if not self._is_kd_analysis(data) or self.main_window is None:
+        kind = self._openable_kind(data)
+        if kind is None or self.main_window is None:
             return
+        opener = (self.main_window.open_kd_analysis if kind == 'kd'
+                  else self.main_window.open_dynamixs_analysis)
         try:
-            opened = self.main_window.open_kd_analysis(data['label'])
+            opened = opener(data['label'])
         except Exception as e:
             QMessageBox.critical(self, "Open failed", str(e))
             return

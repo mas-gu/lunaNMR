@@ -1034,70 +1034,102 @@ class ProjectManager:
     # =========================================================================
 
     def _save_dynamixs_state(self, bundle_path: Path) -> bool:
-        """Save DynamiXs dialog state, file references, and result files.
+        """Save the named DynamiXs analyses into the bundle (new layout).
 
-        DynamiXs state is stored in:
-        - dynamixs/state.json: Parameter values for all pages
-        - dynamixs/file_refs.json: File paths for input/output
-        - dynamixs/results/: Copied result files (CSV, TXT)
-        - dynamixs/results_manifest.json: Mapping of original paths to bundled files
+        Each analysis is dynamixs/analyses/<name>/{state.json, file_refs.json,
+        results/<page>/…}. The open dialog auto-captures its current run via
+        ensure_current_saved() (upsert by <series>_<type>); removed analyses are pruned.
+        Replaces the old single dynamixs/state.json + dynamixs/results layout.
         """
-
-        # IMPORTANT: If DynamiXsDialog is currently open, get fresh state from it
-        # (state is only transferred to main_window when dialog closes)
         dialog = getattr(self.main_window, 'dynamixs_dialog', None)
-        if dialog is not None and hasattr(dialog, 'get_state'):
+        if dialog is not None and hasattr(dialog, 'ensure_current_saved'):
             try:
-                state = dialog.get_state()
-                file_refs = dialog.get_file_refs()
-                # Also update main_window so it's in sync
-                self.main_window.dynamixs_state = state
-                self.main_window.dynamixs_file_refs = file_refs
-                logger.info("Captured DynamiXs state from open dialog")
+                dialog.ensure_current_saved()
             except Exception as e:
-                logger.warning(f"Could not get state from open DynamiXsDialog: {e}")
-                state = getattr(self.main_window, 'dynamixs_state', None)
-                file_refs = getattr(self.main_window, 'dynamixs_file_refs', None)
-        else:
-            state = getattr(self.main_window, 'dynamixs_state', None)
-            file_refs = getattr(self.main_window, 'dynamixs_file_refs', None)
+                logger.warning(f"Could not auto-capture current DynamiXs analysis: {e}")
 
-        # Handle mock objects from testing
-        if state is not None and not isinstance(state, dict):
-            state = None
-        if file_refs is not None and not isinstance(file_refs, dict):
-            file_refs = None
+        analyses = getattr(self.main_window, 'dynamixs_analyses', None)
+        if not isinstance(analyses, dict) or not analyses:
+            return False
 
-        if not state and not file_refs:
-            return True  # Nothing to save
-
-        # Create dynamixs directory
-        dynamixs_dir = bundle_path / "dynamixs"
-        dynamixs_dir.mkdir(exist_ok=True)
-
-        # Save state
-        if state:
-            state_file = dynamixs_dir / "state.json"
-            with open(state_file, 'w') as f:
+        analyses_dir = bundle_path / "dynamixs" / "analyses"
+        analyses_dir.mkdir(parents=True, exist_ok=True)
+        kept = set()
+        for name, entry in analyses.items():
+            if not isinstance(entry, dict):
+                continue
+            safe = _safe_bundle_name(name)
+            kept.add(safe)
+            adir = analyses_dir / safe
+            adir.mkdir(exist_ok=True)
+            state = entry.get('state') or {}
+            with open(adir / "state.json", 'w') as f:
                 json.dump(state, f, indent=2, default=self._json_serializer)
+            with open(adir / "file_refs.json", 'w') as f:
+                json.dump(entry.get('file_refs') or {}, f, indent=2,
+                          default=self._json_serializer)
+            self._copy_dynamixs_results(state, adir / "results")
 
-            # Save analysis metadata separately for easy access
-            if 'analysis_metadata' in state and state['analysis_metadata']:
-                meta_file = dynamixs_dir / "analysis_meta.json"
-                with open(meta_file, 'w') as f:
-                    json.dump(state['analysis_metadata'], f, indent=2, default=self._json_serializer)
+        import shutil
+        for sub in analyses_dir.iterdir():
+            if sub.is_dir() and sub.name not in kept:
+                shutil.rmtree(sub, ignore_errors=True)
 
-        # Save file references
-        if file_refs:
-            refs_file = dynamixs_dir / "file_refs.json"
-            with open(refs_file, 'w') as f:
-                json.dump(file_refs, f, indent=2, default=self._json_serializer)
-
-        # Copy result files from output directories
-        self._save_dynamixs_results(dynamixs_dir, state)
-
-        logger.info(f"Saved DynamiXs state to {dynamixs_dir}")
+        logger.info(f"Saved {len(kept)} DynamiXs analysis(es) to {analyses_dir}")
         return True
+
+    def _copy_dynamixs_results(self, state, dest_results_dir) -> None:
+        """Copy one analysis's result files into dest_results_dir/<page>/, using ONLY the
+        per-page output_dir in `state` (no live-dialog merge)."""
+        import shutil, glob
+        if not isinstance(state, dict):
+            return
+        patterns = ['_fit_results', '_basic', '_detailed', '_results', '_T2_from_T1rho',
+                    '_spectral_density', '_series_tidy', '_data', '_intensities',
+                    'hetNOE_ratios', '_methylT2', '_methyl_t2']
+        dest = Path(dest_results_dir)
+        for page in ('integrated', 't1t2', 'spectral', 'methyl_t2'):
+            page_state = state.get(page) or {}
+            out = page_state.get('output_dir')
+            if not out or not Path(out).is_dir():
+                continue
+            files = (glob.glob(str(Path(out) / "*.csv")) + glob.glob(str(Path(out) / "*.txt"))
+                     + glob.glob(str(Path(out) / "*.json")))
+            files = [f for f in files if any(p in Path(f).name for p in patterns)]
+            json_dirs = [d for d in glob.glob(str(Path(out) / "json*")) if Path(d).is_dir()]
+            if not files and not json_dirs:
+                continue
+            page_dir = dest / page
+            page_dir.mkdir(parents=True, exist_ok=True)
+            for src in files:
+                shutil.copy2(src, page_dir / Path(src).name)
+            for jd in json_dirs:
+                dst = page_dir / Path(jd).name
+                if dst.exists():
+                    shutil.rmtree(dst)
+                shutil.copytree(jd, dst)
+
+    def _repoint_dynamixs_results(self, state, results_dir) -> None:
+        """Point each page's output_dir (+ methyl viewer paths) at the bundled results."""
+        if not isinstance(state, dict):
+            return
+        results_dir = Path(results_dir)
+        for page in ('integrated', 't1t2', 'spectral', 'methyl_t2'):
+            page_dir = results_dir / page
+            ps = state.get(page)
+            if not page_dir.is_dir() or not isinstance(ps, dict):
+                continue
+            ps['output_dir'] = str(page_dir)
+            json_dirs = [d for d in page_dir.glob("json*") if d.is_dir()]
+            if page == 'methyl_t2':
+                if json_dirs:
+                    ps['last_json_folder'] = str(json_dirs[0])
+                rf = ps.get('last_results_file')
+                if rf and (page_dir / Path(rf).name).exists():
+                    ps['last_results_file'] = str(page_dir / Path(rf).name)
+            sr = ps.get('session_results')
+            if isinstance(sr, dict) and json_dirs:
+                sr['json_folder'] = str(json_dirs[0])
 
     def _save_dynamixs_state_with_summary(self, bundle_path: Path) -> Dict[str, Any]:
         """Save DynamiXs state and return a summary of what was saved.
@@ -1105,374 +1137,46 @@ class ProjectManager:
         Returns:
             Dict with summary information about what was saved.
         """
-        summary = {
-            't1t2_fitting': {},
-            'spectral_density': {},
-            'model_free': {},
-            'methyl_t2': {},
-        }
-
-        # Get current state (from dialog if open, otherwise from main_window)
-        dialog = getattr(self.main_window, 'dynamixs_dialog', None)
-        if dialog is not None and hasattr(dialog, 'get_state'):
-            try:
-                state = dialog.get_state()
-            except Exception:
-                state = getattr(self.main_window, 'dynamixs_state', None)
-        else:
-            state = getattr(self.main_window, 'dynamixs_state', None)
-
-        if not state:
-            return {}
-
-        # Call the actual save method
+        # Persist the named analyses (auto-captures the open dialog's current run) and
+        # report the saved analysis names for the save popup.
         self._save_dynamixs_state(bundle_path)
-
-        # Extract summary from state
-        # T1/T2 Fitting
-        t1t2_state = state.get('t1t2', {})
-        if t1t2_state:
-            session_results = t1t2_state.get('session_results', {})
-            fitted_experiments = t1t2_state.get('fitted_experiments', [])
-            if fitted_experiments:
-                summary['t1t2_fitting'] = {
-                    'fitted_experiments': fitted_experiments,
-                    'output_dir': t1t2_state.get('output_dir'),
-                }
-
-        # Spectral Density
-        spectral_state = state.get('spectral', {})
-        if spectral_state:
-            session_results = spectral_state.get('session_results', {})
-            if session_results and session_results.get('analysis_complete'):
-                summary['spectral_density'] = {
-                    'analysis_complete': True,
-                    'output_dir': session_results.get('output_dir'),
-                    'results_file': session_results.get('results_file'),
-                }
-
-        # Model Free (Integrated Analysis)
-        integrated_state = state.get('integrated', {})
-        if integrated_state:
-            session_results = integrated_state.get('session_results', {})
-            if session_results and session_results.get('analysis_complete'):
-                summary['model_free'] = {
-                    'analysis_complete': True,
-                    'output_dir': session_results.get('output_dir'),
-                    'json_folder': session_results.get('json_folder'),
-                }
-
-        # Methyl T2 Fitting
-        methyl_state = state.get('methyl_t2', {})
-        if methyl_state and methyl_state.get('last_results_file'):
-            summary['methyl_t2'] = {
-                'analysis_complete': True,
-                'output_dir': methyl_state.get('output_dir'),
-                'results_file': methyl_state.get('last_results_file'),
-            }
-
-        # Remove empty entries
-        summary = {k: v for k, v in summary.items() if v}
-
-        return summary
-
-    def _save_dynamixs_results(self, dynamixs_dir: Path, state: dict) -> bool:
-        """Copy DynamiXs result files into the project bundle.
-
-        Args:
-            dynamixs_dir: Path to dynamixs/ folder in bundle
-            state: DynamiXs state dict containing output_dir paths
-        """
-        import shutil
-        import glob
-
-        if not state:
-            return True
-
-        results_dir = dynamixs_dir / "results"
-        results_manifest = {}
-
-        # Patterns that identify DynamiXs result files
-        result_patterns = [
-            '_fit_results', '_basic', '_detailed', '_results',
-            '_T2_from_T1rho', '_spectral_density', '_series_tidy',
-            '_data', '_intensities', 'hetNOE_ratios'
-        ]
-
-        # Collect output directories from state
-        output_dirs = {}
-        if 'integrated' in state and 'output_dir' in state['integrated']:
-            output_dirs['integrated'] = state['integrated']['output_dir']
-        # T1T2 page uses input file directory or explicit output_dir
-        if 't1t2' in state and 'output_dir' in state.get('t1t2', {}):
-            output_dirs['t1t2'] = state['t1t2']['output_dir']
-        # Spectral Density page output_dir
-        if 'spectral' in state and 'output_dir' in state.get('spectral', {}):
-            output_dirs['spectral'] = state['spectral']['output_dir']
-        # Methyl T2 page output_dir
-        if 'methyl_t2' in state and 'output_dir' in state.get('methyl_t2', {}):
-            output_dirs['methyl_t2'] = state['methyl_t2']['output_dir']
-
-        # Also check if DynamiXsDialog is open and get output dirs from it
-        dialog = getattr(self.main_window, 'dynamixs_dialog', None)
-        if dialog and hasattr(dialog, 'get_output_directories'):
-            try:
-                dialog_dirs = dialog.get_output_directories()
-                output_dirs.update(dialog_dirs)
-            except Exception:
-                pass  # Dialog may not be fully initialized
-
-        # Copy result files from each output directory
-        for page_name, output_dir in output_dirs.items():
-            if not output_dir or not Path(output_dir).is_dir():
-                continue
-
-            # Find result files
-            all_files = []
-            all_files.extend(glob.glob(str(Path(output_dir) / "*.csv")))
-            all_files.extend(glob.glob(str(Path(output_dir) / "*.txt")))
-
-            # Filter to only result files
-            result_files = [f for f in all_files
-                           if any(p in Path(f).name for p in result_patterns)]
-
-            if result_files:
-                # Create results directory
-                results_dir.mkdir(exist_ok=True)
-                page_results_dir = results_dir / page_name
-                page_results_dir.mkdir(exist_ok=True)
-
-                # Copy each file
-                page_manifest = {}
-                for src_path in result_files:
-                    src = Path(src_path)
-                    dst = page_results_dir / src.name
-                    shutil.copy2(src, dst)
-                    page_manifest[src.name] = str(src_path)
-
-                results_manifest[page_name] = {
-                    'original_dir': output_dir,
-                    'files': page_manifest
-                }
-
-            # Copy JSON folders (contain T1/T2 fit data for FitViewer)
-            json_folders = glob.glob(str(Path(output_dir) / "json*"))
-            for json_src in json_folders:
-                json_src_path = Path(json_src)
-                if json_src_path.is_dir():
-                    results_dir.mkdir(exist_ok=True)
-                    page_results_dir = results_dir / page_name
-                    page_results_dir.mkdir(exist_ok=True)
-                    json_dst = page_results_dir / json_src_path.name
-                    if json_dst.exists():
-                        shutil.rmtree(json_dst)
-                    shutil.copytree(json_src_path, json_dst)
-                    # Track in manifest
-                    if page_name not in results_manifest:
-                        results_manifest[page_name] = {
-                            'original_dir': output_dir,
-                            'files': {}
-                        }
-                    results_manifest[page_name]['json_folder'] = {
-                        'original': str(json_src_path),
-                        'bundled': str(json_dst)
-                    }
-
-        # Save manifest
-        if results_manifest:
-            manifest_file = dynamixs_dir / "results_manifest.json"
-            with open(manifest_file, 'w') as f:
-                json.dump(results_manifest, f, indent=2)
-
-        return True
+        analyses = getattr(self.main_window, 'dynamixs_analyses', None) or {}
+        return {'analyses': sorted(analyses)} if analyses else {}
 
     def _load_dynamixs_state(self, bundle_path: Path) -> bool:
-        """Load DynamiXs state, file references, and restore result files.
+        """Load the named DynamiXs analyses into main_window.dynamixs_analyses (new
+        layout). Each analysis's per-page result paths are repointed to the bundled
+        copies. A corrupt analysis is skipped, not fatal."""
+        analyses_dir = bundle_path / "dynamixs" / "analyses"
+        if not analyses_dir.is_dir():
+            return False
 
-        Restores state to main_window.dynamixs_state and main_window.dynamixs_file_refs.
-        Result files are copied from bundle to a restored location.
-        When DynamiXsDialog is opened, it reads from these attributes.
-        """
-        dynamixs_dir = bundle_path / "dynamixs"
-
-        if not dynamixs_dir.exists():
-            return True  # No DynamiXs state to load
-
-        # Load state
-        state_file = dynamixs_dir / "state.json"
-        if state_file.exists():
-            with open(state_file, 'r') as f:
-                self.main_window.dynamixs_state = json.load(f)
-
-        # Load analysis metadata (may have been edited separately)
-        meta_file = dynamixs_dir / "analysis_meta.json"
-        if meta_file.exists():
-            with open(meta_file, 'r') as f:
-                metadata = json.load(f)
-                # Merge into state (metadata file takes precedence if edited)
-                if hasattr(self.main_window, 'dynamixs_state') and self.main_window.dynamixs_state:
-                    self.main_window.dynamixs_state['analysis_metadata'] = metadata
-                    if 'analysis_name' in metadata:
-                        self.main_window.dynamixs_state['analysis_name'] = metadata['analysis_name']
-
-        # Load file references
-        refs_file = dynamixs_dir / "file_refs.json"
-        if refs_file.exists():
-            with open(refs_file, 'r') as f:
-                self.main_window.dynamixs_file_refs = json.load(f)
-
-        # Restore result files
-        self._load_dynamixs_results(bundle_path)
-
-        logger.info(f"Loaded DynamiXs state from {dynamixs_dir}")
-        return True
-
-    def _load_dynamixs_results(self, bundle_path: Path) -> bool:
-        """Restore DynamiXs result files from bundle.
-
-        Result files are copied to a 'dynamixs_results' folder next to the project.
-        The state is updated to point to the new location.
-        """
-        import shutil
-
-        dynamixs_dir = bundle_path / "dynamixs"
-        results_dir = dynamixs_dir / "results"
-        manifest_file = dynamixs_dir / "results_manifest.json"
-
-        if not results_dir.exists() or not manifest_file.exists():
-            return True  # No results to restore
-
-        # Load manifest
-        with open(manifest_file, 'r') as f:
-            manifest = json.load(f)
-
-        # Create restore directory next to the project bundle
-        restore_base = bundle_path.parent / f"{bundle_path.stem}_dynamixs_results"
-
-        # Copy result files and update state
-        state = getattr(self.main_window, 'dynamixs_state', {}) or {}
-
-        for page_name, page_data in manifest.items():
-            page_results_dir = results_dir / page_name
-            if not page_results_dir.exists():
+        loaded = {}
+        for adir in sorted(analyses_dir.iterdir()):
+            sf = adir / "state.json"
+            if not adir.is_dir() or not sf.exists():
                 continue
+            try:
+                state = json.loads(sf.read_text())
+                rf = adir / "file_refs.json"
+                file_refs = json.loads(rf.read_text()) if rf.exists() else {}
+            except (ValueError, OSError) as e:
+                logger.warning(f"Skipping unreadable DynamiXs analysis '{adir.name}': {e}")
+                continue
+            self._repoint_dynamixs_results(state, adir / "results")
+            loaded[adir.name] = {'state': state, 'file_refs': file_refs}
+        if not loaded:
+            return False
 
-            # Create restore directory for this page
-            restore_dir = restore_base / page_name
-            restore_dir.mkdir(parents=True, exist_ok=True)
-
-            # Copy CSV/TXT files
-            for filename in page_data.get('files', {}).keys():
-                src = page_results_dir / filename
-                dst = restore_dir / filename
-                if src.exists():
-                    shutil.copy2(src, dst)
-
-            # Copy JSON folders (T1/T2 fit data)
-            json_info = page_data.get('json_folder')
-            restored_json_folder = None
-            if json_info and 'bundled' in json_info:
-                bundled_json = Path(json_info['bundled'])
-                # The bundled path is absolute from save time, recalculate relative to current bundle
-                json_folder_name = bundled_json.name
-                src_json = page_results_dir / json_folder_name
-                if src_json.exists():
-                    dst_json = restore_dir / json_folder_name
-                    if dst_json.exists():
-                        shutil.rmtree(dst_json)
-                    shutil.copytree(src_json, dst_json)
-                    restored_json_folder = str(dst_json)
-
-            # Update state to point to restored location
-            if page_name in state:
-                state[page_name]['output_dir'] = str(restore_dir)
-                # Update session_results json_folder if present
-                if 'session_results' in state[page_name] and restored_json_folder:
-                    sr = state[page_name]['session_results']
-                    if isinstance(sr, dict) and 'json_folder' in sr:
-                        sr['json_folder'] = restored_json_folder
-                # Methyl T2 tracks its viewer/results paths at the top level
-                if page_name == 'methyl_t2':
-                    if restored_json_folder:
-                        state[page_name]['last_json_folder'] = restored_json_folder
-                    rf = state[page_name].get('last_results_file')
-                    if rf and (restore_dir / Path(rf).name).exists():
-                        state[page_name]['last_results_file'] = str(restore_dir / Path(rf).name)
-
-        # Update main_window state
-        if state:
-            self.main_window.dynamixs_state = state
-
-        # Store the restore base path for reference
-        self.main_window.dynamixs_results_dir = str(restore_base)
-
+        self.main_window.dynamixs_analyses = loaded
+        logger.info(f"Loaded {len(loaded)} DynamiXs analysis(es) from {analyses_dir}")
         return True
 
     def _load_dynamixs_state_with_summary(self, bundle_path: Path) -> Dict[str, Any]:
-        """Load DynamiXs state and return a summary of what was loaded.
-
-        Returns:
-            Dict with summary information about what was loaded.
-        """
-        summary = {
-            't1t2_fitting': {},
-            'spectral_density': {},
-            'model_free': {},
-            'methyl_t2': {},
-        }
-
-        # Call the actual load method
+        """Load the named DynamiXs analyses; report their names for the load popup."""
         self._load_dynamixs_state(bundle_path)
-
-        # Get loaded state
-        state = getattr(self.main_window, 'dynamixs_state', None)
-        if not state:
-            return {}
-
-        # Extract summary from state
-        # T1/T2 Fitting
-        t1t2_state = state.get('t1t2', {})
-        if t1t2_state:
-            fitted_experiments = t1t2_state.get('fitted_experiments', [])
-            if fitted_experiments:
-                summary['t1t2_fitting'] = {
-                    'fitted_experiments': fitted_experiments,
-                    'output_dir': t1t2_state.get('output_dir'),
-                }
-
-        # Spectral Density
-        spectral_state = state.get('spectral', {})
-        if spectral_state:
-            session_results = spectral_state.get('session_results', {})
-            if session_results and session_results.get('analysis_complete'):
-                summary['spectral_density'] = {
-                    'analysis_complete': True,
-                    'output_dir': spectral_state.get('output_dir'),
-                }
-
-        # Model Free (Integrated Analysis)
-        integrated_state = state.get('integrated', {})
-        if integrated_state:
-            session_results = integrated_state.get('session_results', {})
-            if session_results and session_results.get('analysis_complete'):
-                summary['model_free'] = {
-                    'analysis_complete': True,
-                    'output_dir': integrated_state.get('output_dir'),
-                }
-
-        # Methyl T2 Fitting
-        methyl_state = state.get('methyl_t2', {})
-        if methyl_state and methyl_state.get('last_results_file'):
-            summary['methyl_t2'] = {
-                'analysis_complete': True,
-                'output_dir': methyl_state.get('output_dir'),
-                'results_file': methyl_state.get('last_results_file'),
-            }
-
-        # Remove empty entries
-        summary = {k: v for k, v in summary.items() if v}
-
-        return summary
+        analyses = getattr(self.main_window, 'dynamixs_analyses', None) or {}
+        return {'analyses': sorted(analyses)} if analyses else {}
 
     # =========================================================================
     # KD / TITRATION STATE SAVE/LOAD
@@ -1618,19 +1322,14 @@ class ProjectManager:
                                          [f'series_results/{sub.name}'], True))
         add('series_results', 'Series results', series_specs)
 
-        dynamixs_specs = [
-            ('dynamixs/state', 'Parameters (state)',
-             ['dynamixs/state.json', 'dynamixs/file_refs.json',
-              'dynamixs/analysis_meta.json'], True),
-        ]
-        results_root = project_path / 'dynamixs' / 'results'
-        if results_root.is_dir():
-            for sub in sorted(results_root.iterdir()):
+        dynamixs_specs = []
+        dynamixs_analyses_root = project_path / 'dynamixs' / 'analyses'
+        if dynamixs_analyses_root.is_dir():
+            for sub in sorted(dynamixs_analyses_root.iterdir()):
                 if sub.is_dir():
-                    dynamixs_specs.append(
-                        (f'dynamixs/results/{sub.name}', f'{sub.name} results',
-                         [f'dynamixs/results/{sub.name}'], True))
-        add('dynamixs', 'DynamiXs', dynamixs_specs)
+                    dynamixs_specs.append((f'dynamixs/analyses/{sub.name}', sub.name,
+                                           [f'dynamixs/analyses/{sub.name}'], True))
+        add('dynamixs', 'DynamiXs analyses', dynamixs_specs)
 
         kd_specs = []
         kd_analyses_root = project_path / 'kd' / 'analyses'

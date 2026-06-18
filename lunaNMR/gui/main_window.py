@@ -354,6 +354,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.dynamixs_state = None  # DynamiXs dialog parameters
         self.dynamixs_file_refs = None  # DynamiXs input file paths
         self.dynamixs_dialog = None  # Reference to open DynamiXs dialog
+        self.dynamixs_analyses = None  # name -> {state, file_refs} saved DynamiXs runs
         self.kd_titration_dialog = None  # Reference to open Kd/titration dialog
         self.kd_state = None  # Kd/titration dialog parameters
         self.kd_file_refs = None  # Kd/titration input file paths
@@ -5726,6 +5727,19 @@ class LunaNMRMainWindow(BaseWindow):
         # Create and show new dialog
         self.dynamixs_dialog = DynamiXsDialog(parent=self, main_window=self)
         self.dynamixs_dialog.show()
+
+    def open_dynamixs_analysis(self, name):
+        """Open a saved DynamiXs analysis (from the loaded project) in the DynamiXs
+        dialog. Called by the Project Browser. Returns True if the analysis was found.
+        """
+        entry = (getattr(self, 'dynamixs_analyses', None) or {}).get(name)
+        if entry is None:
+            return False
+        self.launch_dynamixs()
+        dialog = getattr(self, 'dynamixs_dialog', None)
+        if dialog is not None and hasattr(dialog, 'open_analysis'):
+            dialog.open_analysis(entry, name=name)
+        return True
 
     def launch_kd_titration(self):
         """Launch the Kd / Titration analysis module as an embedded dialog."""

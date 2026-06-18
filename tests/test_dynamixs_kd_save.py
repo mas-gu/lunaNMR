@@ -178,32 +178,50 @@ def test_kd_dialog_state_roundtrip_and_close_transfer(app):
     dlg.deleteLater()
 
 
-def test_methyl_t2_results_bundled_and_repointed(tmp_path):
+def test_dynamixs_analyses_roundtrip_bundles_and_repoints_results(tmp_path):
+    # A methyl-T2 run (results in its output_dir) is saved under
+    # dynamixs/analyses/<name>/results/methyl_t2/, and load repoints into the bundle.
     out_dir = tmp_path / "methyl_out"
     (out_dir / "json").mkdir(parents=True)
     (out_dir / "field1_methylT2_results.csv").write_text("residue,t2a\nA,100\n")
     (out_dir / "json" / "A_methylT2_fit_data.json").write_text("{}")
-
     state = {'methyl_t2': {
         'output_dir': str(out_dir),
         'last_json_folder': str(out_dir / "json"),
         'last_results_file': str(out_dir / "field1_methylT2_results.csv"),
     }}
-    mw = types.SimpleNamespace(dynamixs_dialog=None, dynamixs_state=state)
+    mw = types.SimpleNamespace(dynamixs_dialog=None, dynamixs_analyses={
+        'HSPA8_methylT2': {'state': state, 'file_refs': {}}})
     pm = ProjectManager(mw)
     bundle = tmp_path / "proj.lunaNMR"
-    (bundle / "dynamixs").mkdir(parents=True)
+    bundle.mkdir()
+    assert pm._save_dynamixs_state(bundle) is True
+    adir = bundle / "dynamixs" / "analyses" / "HSPA8_methylT2"
+    assert (adir / "results" / "methyl_t2" / "field1_methylT2_results.csv").exists()
+    assert (adir / "results" / "methyl_t2" / "json").is_dir()
 
-    pm._save_dynamixs_results(bundle / "dynamixs", state)
-    assert (bundle / "dynamixs" / "results" / "methyl_t2"
-            / "field1_methylT2_results.csv").exists()
-    assert (bundle / "dynamixs" / "results" / "methyl_t2" / "json").is_dir()
+    mw2 = types.SimpleNamespace(dynamixs_dialog=None, dynamixs_analyses=None)
+    pm2 = ProjectManager(mw2)
+    assert pm2._load_dynamixs_state(bundle) is True
+    loaded = mw2.dynamixs_analyses['HSPA8_methylT2']['state']['methyl_t2']
+    assert str(out_dir) not in loaded['last_json_folder']      # repointed into the bundle
+    assert Path(loaded['last_json_folder']).is_dir()
+    assert Path(loaded['output_dir']) == adir / "results" / "methyl_t2"
 
-    # Load must repoint the viewer folder into the restored (bundled) copy.
-    pm._load_dynamixs_results(bundle)
-    repointed = mw.dynamixs_state['methyl_t2']['last_json_folder']
-    assert str(out_dir) not in repointed
-    assert Path(repointed).is_dir()
+
+def test_dynamixs_save_prunes_removed_analyses(tmp_path):
+    mw = types.SimpleNamespace(dynamixs_dialog=None, dynamixs_analyses={
+        'keep': {'state': {}, 'file_refs': {}},
+        'drop': {'state': {}, 'file_refs': {}}})
+    pm = ProjectManager(mw)
+    bundle = tmp_path / "proj.lunaNMR"
+    bundle.mkdir()
+    assert pm._save_dynamixs_state(bundle) is True
+    adir = bundle / "dynamixs" / "analyses"
+    assert {p.name for p in adir.iterdir()} == {'keep', 'drop'}
+    del mw.dynamixs_analyses['drop']
+    pm._save_dynamixs_state(bundle)
+    assert {p.name for p in adir.iterdir()} == {'keep'}
 
 
 def test_kd_fit_json_bundled_and_repointed(tmp_path):
@@ -235,28 +253,17 @@ def test_load_kd_state_absent_is_noop(tmp_path):
     assert mw.kd_analyses is None
 
 
-def test_methyl_t2_appears_in_dynamixs_summary(tmp_path):
-    dynamixs_state = {
-        'methyl_t2': {
-            'last_results_file': '/data/out/field1_methylT2_results.csv',
-            'output_dir': None,
-        },
-    }
-    mw = types.SimpleNamespace(dynamixs_dialog=None,
-                               dynamixs_state=dynamixs_state, dynamixs_file_refs=None)
+def test_dynamixs_summary_reports_analysis_names(tmp_path):
+    mw = types.SimpleNamespace(dynamixs_dialog=None, dynamixs_analyses={
+        'HSPA1A_t1t2': {'state': {}, 'file_refs': {}}})
     pm = ProjectManager(mw)
     bundle = tmp_path / "proj.lunaNMR"
     bundle.mkdir()
+    assert pm._save_dynamixs_state_with_summary(bundle) == {'analyses': ['HSPA1A_t1t2']}
 
-    summary = pm._save_dynamixs_state_with_summary(bundle)
-    assert 'methyl_t2' in summary
-    assert summary['methyl_t2']['analysis_complete'] is True
-
-    mw2 = types.SimpleNamespace(dynamixs_dialog=None,
-                                dynamixs_state=None, dynamixs_file_refs=None)
+    mw2 = types.SimpleNamespace(dynamixs_dialog=None, dynamixs_analyses=None)
     pm2 = ProjectManager(mw2)
-    load_summary = pm2._load_dynamixs_state_with_summary(bundle)
-    assert 'methyl_t2' in load_summary
+    assert pm2._load_dynamixs_state_with_summary(bundle) == {'analyses': ['HSPA1A_t1t2']}
 
 
 def test_page_store_analysis_autonames_and_stores(app, tmp_path):
@@ -457,3 +464,39 @@ def test_loading_input_autofills_output_dir(app, tmp_path):
     assert page.input_file == str(csv)
     assert page.output_dir == str(sub)          # auto-filled to the series folder
     assert page.outdir_label.text() == str(sub)
+
+
+def test_dynamixs_dialog_autosaves_active_run_by_series_and_type(app, tmp_path):
+    from lunaNMR.gui.dialogs.dynamixs_dialog import DynamiXsDialog
+    mw = types.SimpleNamespace(current_nmr_folder=None, dynamixs_state=None,
+                               dynamixs_file_refs=None, dynamixs_dialog=None,
+                               dynamixs_analyses=None)
+    dlg = DynamiXsDialog(parent=None, main_window=mw)
+    try:
+        # On the methyl-T2 page with a completed run + a known source series.
+        dlg.stack.setCurrentWidget(dlg.methyl_t2_page)
+        dlg.set_source_series("HSPA8")
+        dlg.methyl_t2_page.output_dir = str(tmp_path)
+        dlg.methyl_t2_page.last_results_file = str(tmp_path / "field1_methylT2_results.csv")
+
+        name = dlg.ensure_current_saved()
+        assert name == "HSPA8_methylT2"                     # <series>_<type>
+        assert "HSPA8_methylT2" in mw.dynamixs_analyses
+        # re-capture upserts (no duplicate)
+        assert dlg.ensure_current_saved() == "HSPA8_methylT2"
+        assert list(mw.dynamixs_analyses) == ["HSPA8_methylT2"]
+    finally:
+        dlg.deleteLater()
+
+
+def test_dynamixs_no_results_not_saved(app, tmp_path):
+    from lunaNMR.gui.dialogs.dynamixs_dialog import DynamiXsDialog
+    mw = types.SimpleNamespace(current_nmr_folder=None, dynamixs_state=None,
+                               dynamixs_file_refs=None, dynamixs_dialog=None,
+                               dynamixs_analyses=None)
+    dlg = DynamiXsDialog(parent=None, main_window=mw)
+    try:
+        dlg.stack.setCurrentWidget(dlg.methyl_t2_page)       # no run done
+        assert dlg.ensure_current_saved() is None
+    finally:
+        dlg.deleteLater()
