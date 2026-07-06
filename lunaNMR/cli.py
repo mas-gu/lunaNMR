@@ -12,7 +12,9 @@ Each subcommand imports its own dependencies lazily so that unrelated subcommand
 """
 
 import argparse
+import glob
 import os
+import re
 import sys
 
 
@@ -113,6 +115,102 @@ def _run_dynamixs_methyl(args):
     return 0
 
 
+def _natural_key(text):
+    """Sort key that orders embedded numbers numerically (s_2 before s_10)."""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', text)]
+
+
+def _discover_spectra(spectra):
+    """Resolve --spectra (a folder or a glob) to a naturally-sorted list of spectrum files."""
+    if os.path.isdir(spectra):
+        files = []
+        for ext in ('ft', 'ft2', 'fid'):
+            files.extend(glob.glob(os.path.join(spectra, f'*.{ext}')))
+    else:
+        files = glob.glob(spectra)
+    return sorted(files, key=lambda f: _natural_key(os.path.basename(f)))
+
+
+def _default_series_params():
+    """Default series/voigt parameters, mirroring the GUI's getattr fallbacks.
+
+    The GUI assembles this nested dict from the main window with these same defaults
+    (gui/dialogs/series_integration_dialog.py::_get_voigt_parameters); a headless run
+    just uses the defaults directly.
+    """
+    return {
+        'detection_params': {
+            'search_window_x': 0.08,
+            'search_window_y': 0.8,
+            'noise_threshold': 3.0,
+        },
+        'gui_params': {
+            'fix_positions': False,
+            'fix_linewidths': False,
+            'use_parallel_processing': False,
+            'use_centroid_refinement': True,
+            'centroid_window_x_ppm': 0.02,
+            'centroid_window_y_ppm': 1.0,
+            'centroid_noise_multiplier': 2.0,
+            'use_ps2d_multi_peak': True,
+            'use_ps2d_linewidth_reuse': False,
+            'collect_training_data': False,
+            'height_threshold': 0.1,
+            'distance_factor': 2.0,
+            'prominence_threshold': 0.05,
+            'smoothing_sigma': 1.0,
+            'max_peaks_fit': 50,
+            'max_optimization_iterations': 50,
+        },
+        'fitting_params': {
+            'min_r_squared': 0.5,
+            'max_iterations': 1000,
+            'fitting_window_x': 0.2,
+            'fitting_window_y': 2.0,
+        },
+        'processing_options': {
+            'use_parallel_processing': False,
+            'use_global_optimization': False,
+            'enable_cascade_drift_limit': True,
+            'rerun_adaptive_per_spectrum': False,
+            'lock_cluster_assignments': False,
+            'use_original_reference_for_detection': False,
+        },
+    }
+
+
+def _run_series(args):
+    """Wrap MultiSpectrumProcessor.process_nmr_series for a headless series/titration run."""
+    import matplotlib
+    matplotlib.use('Agg')  # headless guard before any plotting-capable import
+    from lunaNMR.processors.multi_spectrum_processor import MultiSpectrumProcessor
+    from lunaNMR.utils.file_manager import NMRFileManager
+
+    nmr_files = _discover_spectra(args.spectra)
+    if not nmr_files:
+        print(f"No spectrum files (.ft/.ft2/.fid) found in {args.spectra}", file=sys.stderr)
+        return 1
+    reference_peaks = NMRFileManager().load_peak_list(args.peaks)
+    if reference_peaks is None or reference_peaks.empty:
+        print(f"Failed to load peak list: {args.peaks}", file=sys.stderr)
+        return 1
+
+    os.makedirs(args.out, exist_ok=True)
+    print(f"Processing {len(nmr_files)} spectra ({args.mode} mode, {args.peak_source} peaks)...")
+    processor = MultiSpectrumProcessor(_default_series_params())
+    result = processor.process_nmr_series(
+        nmr_files, reference_peaks, args.out,
+        peak_source_mode=args.peak_source, series_mode=args.mode, extract_delays=True,
+    )
+    if getattr(result, 'errors', None):
+        for err in result.errors:
+            print(f"  error: {err}", file=sys.stderr)
+    output_folder = result.metadata.get('output_folder', args.out)
+    print(f"Series analysis complete: {len(getattr(result, 'results', {}) or {})} spectra processed")
+    print(f"  Output: {output_folder}")
+    return 0
+
+
 def _run_batch(batch_argv):
     """Delegate to the existing batch CLI, passing through all of its flags."""
     from lunaNMR.batch_processing.cli_interface import CLIInterface
@@ -146,6 +244,17 @@ def build_parser():
     kd.add_argument('--intensity-scale', type=_float_list, default=None,
                     help='Comma-separated per-point height/volume scale factors')
     kd.set_defaults(func=_run_kd)
+
+    series = sub.add_parser('series', help='Process a multi-spectrum series/titration')
+    series.add_argument('--spectra', required=True, help='Folder or glob of spectrum files (.ft/.ft2/.fid)')
+    series.add_argument('--peaks', required=True, help='Reference peak-list file (Assignment, Position_X, Position_Y)')
+    series.add_argument('--out', required=True, help='Output folder for the series_results CSVs')
+    series.add_argument('--mode', choices=['time', 'titration'], default='time',
+                        help='Series type: time (relaxation) or titration (default: time)')
+    series.add_argument('--peak-source', choices=['reference', 'cascade', 'detected', 'independent'],
+                        default='reference', dest='peak_source',
+                        help='Peak position source across spectra (default: reference)')
+    series.set_defaults(func=_run_series)
 
     dx = sub.add_parser('dynamixs', help='Relaxation fitting: T1/T2 and methyl-T2')
     dx_sub = dx.add_subparsers(dest='dynamixs_command', metavar='<kind>')

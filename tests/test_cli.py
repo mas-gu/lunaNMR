@@ -2,6 +2,7 @@
 # ABOUTME: Also guards that importing the lunaNMR package is headless-safe (no nmrglue crash).
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -144,6 +145,46 @@ class TestDynamixsMethyl:
     def test_dynamixs_requires_subcommand(self):
         from lunaNMR.cli import main
         assert main(["dynamixs"]) != 0
+
+
+class TestSeriesHelpers:
+    def test_default_series_params_has_nested_structure(self):
+        from lunaNMR.cli import _default_series_params
+        p = _default_series_params()
+        assert set(p) >= {'detection_params', 'gui_params', 'fitting_params', 'processing_options'}
+        assert p['gui_params']['use_ps2d_multi_peak'] is True
+        assert p['fitting_params']['min_r_squared'] == 0.5
+
+    def test_discover_spectra_natural_sort(self, tmp_path):
+        from lunaNMR.cli import _discover_spectra
+        for name in ("s_10.ft", "s_2.ft", "s_1.ft", "notes.txt"):
+            (tmp_path / name).write_text("x")
+        found = _discover_spectra(str(tmp_path))
+        assert [os.path.basename(f) for f in found] == ["s_1.ft", "s_2.ft", "s_10.ft"]
+
+
+class TestSeriesSubcommand:
+    def test_series_requires_peaks(self, tmp_path):
+        from lunaNMR.cli import main
+        with pytest.raises(SystemExit) as exc:
+            main(["series", "--spectra", str(tmp_path), "--out", str(tmp_path / "o")])
+        assert exc.value.code != 0
+
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
+    def test_series_end_to_end_writes_tidy_csv(self, tmp_path):
+        from lunaNMR.cli import main
+        data = REPO_ROOT / "data_example" / "2DHSQC"
+        spectra = sorted(data.glob("600_T1_0o*.ft"))
+        peaks = data / "600_assi.txt"
+        if len(spectra) < 2 or not peaks.exists():
+            pytest.skip("data_example/2DHSQC spectra not available")
+        out = tmp_path / "series_out"
+        code = main(["series", "--spectra", str(data), "--peaks", str(peaks),
+                     "--out", str(out), "--mode", "time", "--peak-source", "reference"])
+        assert code == 0
+        tidy = out / "series_analysis_tidy.csv"
+        assert tidy.exists()
+        assert pd.read_csv(tidy).shape[0] > 0
 
 
 class TestDispatch:
