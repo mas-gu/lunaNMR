@@ -1,0 +1,110 @@
+# ABOUTME: Tests the unified `python -m lunaNMR` CLI dispatcher and its kd subcommand.
+# ABOUTME: Also guards that importing the lunaNMR package is headless-safe (no nmrglue crash).
+
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+_KD_DIR = REPO_ROOT / "modules" / "dynamiXs_v2o0" / "dynamiXs_Kd"
+sys.path.insert(0, str(_KD_DIR))
+
+P0 = 50.0
+
+
+def _write_tidy_csv(tmp_path):
+    """Synthetic titration tidy CSV: one mover with a known Kd, 5 points."""
+    from kd_models import csp_model
+    pts = [0.0, 10.0, 25.0, 60.0, 150.0]
+    ddH = csp_model(np.array(pts), 0.2, 20.0, P0)   # inject Kd=20, dd_max=0.2
+    rows = [(str(p), 'R1', 8.0 + d, 120.0, 1000.0, 2000.0) for p, d in zip(pts, ddH)]
+    df = pd.DataFrame(rows, columns=['spectrum_name', 'assignment',
+                                     'ppm_x', 'ppm_y', 'height', 'volume'])
+    csv = tmp_path / 'series_analysis_tidy.csv'
+    df.to_csv(csv, index=False)
+    return csv
+
+
+class TestPackageImportIsHeadless:
+    def test_import_lunanmr_is_lazy_and_headless(self):
+        # `import lunaNMR` must succeed without pulling in the GUI/core stack, so
+        # `python -m lunaNMR` is headless (no PySide6/QApplication, no nmrglue needed).
+        import subprocess
+        code = (
+            "import sys, lunaNMR; "
+            "assert lunaNMR.__version__; "
+            "assert 'PySide6' not in sys.modules, 'GUI imported eagerly'; "
+            "assert 'lunaNMR.core.core_integrator' not in sys.modules, 'core imported eagerly'"
+        )
+        r = subprocess.run([sys.executable, "-c", code], cwd=str(REPO_ROOT),
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+
+    def test_lazy_attribute_access_still_works(self):
+        # PEP 562 lazy access: the exported names must still resolve on demand.
+        import subprocess
+        code = "import lunaNMR; assert lunaNMR.EnhancedVoigtIntegrator is not None"
+        r = subprocess.run([sys.executable, "-c", code], cwd=str(REPO_ROOT),
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+
+
+class TestKdSubcommand:
+    def test_kd_end_to_end_writes_json_and_recovers_kd(self, tmp_path):
+        from lunaNMR.cli import main
+        csv = _write_tidy_csv(tmp_path)
+        out = tmp_path / "kdout"
+        code = main(["kd", "--input", str(csv), "--out", str(out),
+                     "--p0", "50", "--observable", "csp"])
+        assert code == 0
+        json_file = out / "kd_kd_fit_data.json"
+        assert json_file.exists()
+        data = json.loads(json_file.read_text())
+        r1 = next(f for f in data['fits'] if f['residue'] == 'R1')
+        assert r1['csp']['Kd'] == pytest.approx(20.0, rel=1e-2)
+
+    def test_kd_missing_required_flag_errors(self, tmp_path):
+        from lunaNMR.cli import main
+        # --out and --p0 are required; argparse should exit non-zero.
+        with pytest.raises(SystemExit) as exc:
+            main(["kd", "--input", "nope.csv"])
+        assert exc.value.code != 0
+
+
+class TestBatchDelegation:
+    def test_batch_is_intercepted_and_argv_forwarded(self, monkeypatch):
+        # `batch` must be routed to the batch CLI with its own args untouched,
+        # before the top-level argparse can choke on flags like -h.
+        from lunaNMR import cli
+        captured = {}
+
+        def spy(argv):
+            captured['argv'] = argv
+            return 0
+
+        monkeypatch.setattr(cli, "_run_batch", spy)
+        code = cli.main(["batch", "--preset", "1H", "myfolder"])
+        assert code == 0
+        assert captured['argv'] == ["--preset", "1H", "myfolder"]
+
+
+class TestDispatch:
+    def test_help_exits_zero(self):
+        from lunaNMR.cli import main
+        with pytest.raises(SystemExit) as exc:
+            main(["--help"])
+        assert exc.value.code == 0
+
+    def test_no_subcommand_returns_nonzero(self):
+        from lunaNMR.cli import main
+        assert main([]) != 0
+
+    def test_unknown_subcommand_errors(self):
+        from lunaNMR.cli import main
+        with pytest.raises(SystemExit) as exc:
+            main(["bogus"])
+        assert exc.value.code != 0
