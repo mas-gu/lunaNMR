@@ -4,8 +4,12 @@
 """Command-line interface for lunaNMR.
 
 Subcommands:
-  kd      Fit binding affinity (Kd) from a titration series (CSP / intensity).
-  batch   Batch peak detection + Voigt/PS2D fitting over a folder of spectra.
+  kd        Fit binding affinity (Kd) from a titration series (CSP / intensity).
+  series    Process a multi-spectrum series / titration.
+  dynamixs  T1/T2 and methyl-T2 relaxation fitting.
+  export    Render figures / reports from a fit JSON (headless).
+  project   Inspect / prune a .lunaNMR project bundle.
+  batch     Batch peak detection + Voigt/PS2D fitting over a folder of spectra.
 
 Each subcommand imports its own dependencies lazily so that unrelated subcommands
 (and ``import lunaNMR``) stay headless — no Qt, no display required for ``kd``.
@@ -191,8 +195,8 @@ def _run_series(args):
         print(f"No spectrum files (.ft/.ft2/.fid) found in {args.spectra}", file=sys.stderr)
         return 1
     reference_peaks = NMRFileManager().load_peak_list(args.peaks)
-    if reference_peaks is None or reference_peaks.empty:
-        print(f"Failed to load peak list: {args.peaks}", file=sys.stderr)
+    if reference_peaks.empty:
+        print(f"Peak list is empty: {args.peaks}", file=sys.stderr)
         return 1
 
     os.makedirs(args.out, exist_ok=True)
@@ -460,7 +464,13 @@ def main(argv=None):
     if not getattr(args, 'command', None):
         parser.print_help(sys.stderr)
         return 2
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        # Expected bad-input failures from the wrapped engines: report cleanly
+        # instead of dumping a traceback. Programming errors still propagate.
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == '__main__':

@@ -271,6 +271,28 @@ class TestExportKd:
         assert main(["export"]) != 0
 
 
+class TestErrorHandling:
+    def test_kd_missing_input_file_returns_clean_error(self, tmp_path, capsys):
+        from lunaNMR.cli import main
+        code = main(["kd", "--input", str(tmp_path / "nope.csv"),
+                     "--out", str(tmp_path / "o"), "--p0", "50"])
+        assert code == 1
+        assert capsys.readouterr().err.strip() != ""
+
+    def test_series_missing_peaks_file_returns_clean_error(self, tmp_path):
+        from lunaNMR.cli import main
+        (tmp_path / "spec.ft").write_bytes(b"\x00")  # a file so discovery passes
+        code = main(["series", "--spectra", str(tmp_path),
+                     "--peaks", str(tmp_path / "nope.txt"), "--out", str(tmp_path / "o")])
+        assert code == 1
+
+    def test_dynamixs_missing_input_returns_clean_error(self, tmp_path):
+        from lunaNMR.cli import main
+        code = main(["dynamixs", "methyl-t2", "--input", str(tmp_path / "nope.csv"),
+                     "--out", str(tmp_path / "o")])
+        assert code == 1
+
+
 class TestDispatch:
     def test_help_exits_zero(self):
         from lunaNMR.cli import main
