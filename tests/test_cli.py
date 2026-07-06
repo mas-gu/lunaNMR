@@ -170,7 +170,10 @@ class TestSeriesSubcommand:
             main(["series", "--spectra", str(tmp_path), "--out", str(tmp_path / "o")])
         assert exc.value.code != 0
 
+    # Running the real PS2D fitter headlessly emits benign core-engine warnings
+    # (numba object-mode fallback / cache) unrelated to the CLI under test.
     @pytest.mark.filterwarnings("ignore::RuntimeWarning")
+    @pytest.mark.filterwarnings("ignore::numba.core.errors.NumbaWarning")
     def test_series_end_to_end_writes_tidy_csv(self, tmp_path):
         from lunaNMR.cli import main
         data = REPO_ROOT / "data_example" / "2DHSQC"
@@ -230,6 +233,42 @@ class TestProjectSubcommand:
     def test_project_requires_subcommand(self):
         from lunaNMR.cli import main
         assert main(["project"]) != 0
+
+
+class TestExportKd:
+    def _make_kd_json(self, tmp_path, observable="csp"):
+        from lunaNMR.cli import main
+        csv = _write_tidy_csv(tmp_path)
+        kdout = tmp_path / "kd"
+        assert main(["kd", "--input", str(csv), "--out", str(kdout),
+                     "--p0", "50", "--observable", observable]) == 0
+        return kdout / "kd_kd_fit_data.json"
+
+    def test_export_writes_figures_and_summary(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs)]) == 0
+        assert (figs / "summary.csv").exists()
+        assert len(list((figs / "csp").glob("*.png"))) >= 1
+
+    def test_export_summary_only_skips_figures(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs2"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
+                     "--summary-only"]) == 0
+        assert (figs / "summary.csv").exists()
+        assert not (figs / "csp").exists()
+
+    def test_export_missing_json_errors(self, tmp_path):
+        from lunaNMR.cli import main
+        assert main(["export", "kd", "--json", str(tmp_path / "no.json"),
+                     "--out", str(tmp_path / "f")]) != 0
+
+    def test_export_requires_subcommand(self):
+        from lunaNMR.cli import main
+        assert main(["export"]) != 0
 
 
 class TestDispatch:

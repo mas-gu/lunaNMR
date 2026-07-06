@@ -257,6 +257,86 @@ def _run_project_remove(args):
     return 0
 
 
+def _safe_name(text):
+    """Filesystem-safe version of a residue label."""
+    return re.sub(r'[^\w.+-]+', '_', str(text))
+
+
+def _run_export_kd(args):
+    """Render CSP / intensity fit figures + a summary from a self-contained kd fit JSON."""
+    import json
+    import csv
+    if not os.path.isfile(args.json):
+        print(f"Fit JSON not found: {args.json}", file=sys.stderr)
+        return 1
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import numpy as np
+    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
+    from kd_models import csp_model, intensity_decay
+
+    with open(args.json) as fh:
+        data = json.load(fh)
+    fits = data.get('fits', [])
+    P0 = data.get('metadata', {}).get('protein_conc')
+    observables = args.observable or [o for o in ('csp', 'intensity')
+                                      if any(f.get(o) for f in fits)]
+    os.makedirs(args.out, exist_ok=True)
+
+    summary_rows = []
+    n_figs = 0
+    for f in fits:
+        residue = f.get('residue', 'peak')
+        for obs in observables:
+            fit = f.get(obs)
+            if not fit or not fit.get('success'):
+                continue
+            summary_rows.append({
+                'residue': residue, 'observable': obs,
+                'Kd': fit.get('Kd'), 'Kd_err': fit.get('Kd_err'),
+                'r_squared': fit.get('r_squared'),
+            })
+            if args.summary_only:
+                continue
+            L = np.asarray(fit['L'], dtype=float)
+            y = np.asarray(fit['obs'], dtype=float)
+            good = np.isfinite(L) & np.isfinite(y)
+            if good.sum() < 2:
+                continue
+            Ld = np.linspace(float(L[good].min()), float(L[good].max()), 200)
+            if obs == 'csp':
+                yc = csp_model(Ld, fit['dd_max'], fit['Kd'], P0)
+                ylabel = 'CSP (ppm)'
+            else:
+                yc = intensity_decay(Ld, fit['I0'], fit['I_inf'], fit['Kd'])
+                ylabel = 'I / I(0)' if max(y[good]) <= 1.5 else 'Intensity'
+            fig, ax = plt.subplots(figsize=(4, 3))
+            ax.plot(L[good], y[good], 'o', color='#1f77b4', label='observed')
+            ax.plot(Ld, yc, '-', color='#d62728',
+                    label=f"Kd={fit['Kd']:.2g}, R²={fit.get('r_squared', float('nan')):.3f}")
+            ax.set_xlabel('[ligand]')
+            ax.set_ylabel(ylabel)
+            ax.set_title(f"{residue} ({obs})")
+            ax.legend(fontsize=7)
+            fig.tight_layout()
+            obs_dir = os.path.join(args.out, obs)
+            os.makedirs(obs_dir, exist_ok=True)
+            fig.savefig(os.path.join(obs_dir, f"{_safe_name(residue)}.png"), dpi=120)
+            plt.close(fig)
+            n_figs += 1
+
+    summary_path = os.path.join(args.out, 'summary.csv')
+    with open(summary_path, 'w', newline='') as fh:
+        writer = csv.DictWriter(fh, fieldnames=['residue', 'observable', 'Kd', 'Kd_err', 'r_squared'])
+        writer.writeheader()
+        writer.writerows(summary_rows)
+
+    print(f"Exported {len(summary_rows)} fit(s), {n_figs} figure(s)")
+    print(f"  Summary: {summary_path}")
+    return 0
+
+
 def _run_batch(batch_argv):
     """Delegate to the existing batch CLI, passing through all of its flags."""
     from lunaNMR.batch_processing.cli_interface import CLIInterface
@@ -316,6 +396,18 @@ def build_parser():
     methyl.set_defaults(func=_run_dynamixs_methyl)
 
     dx.set_defaults(func=lambda a: (dx.print_help(sys.stderr) or 2))
+
+    export = sub.add_parser('export', help='Render figures / reports from a fit JSON (headless)')
+    export_sub = export.add_subparsers(dest='export_command', metavar='<kind>')
+    ex_kd = export_sub.add_parser('kd', help='CSP / intensity fit figures + summary from a kd fit JSON')
+    ex_kd.add_argument('--json', required=True, help='kd fit JSON (…_kd_fit_data.json)')
+    ex_kd.add_argument('--out', required=True, help='Output directory for figures + summary.csv')
+    ex_kd.add_argument('--observable', type=_str_list, default=None,
+                       help='Comma-separated observables to render (default: those present)')
+    ex_kd.add_argument('--summary-only', action='store_true', dest='summary_only',
+                       help='Write only summary.csv, no figures')
+    ex_kd.set_defaults(func=_run_export_kd)
+    export.set_defaults(func=lambda a: (export.print_help(sys.stderr) or 2))
 
     proj = sub.add_parser('project', help='Inspect / prune a .lunaNMR project bundle')
     proj_sub = proj.add_subparsers(dest='project_command', metavar='<action>')
