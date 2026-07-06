@@ -124,11 +124,15 @@ def _natural_key(text):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', text)]
 
 
-def _discover_spectra(spectra):
-    """Resolve --spectra (a folder or a glob) to a naturally-sorted list of spectrum files."""
+def _discover_spectra(spectra, extensions=('ft', 'ser', 'ft2', 'ft3', 'pipe', 'ucsf')):
+    """Resolve --spectra (a folder or a glob) to a naturally-sorted list of spectrum files.
+
+    `extensions` defaults to NMRFileManager.supported_nmr_formats (passed explicitly by
+    the series handler) so discovery never diverges from what the loader accepts.
+    """
     if os.path.isdir(spectra):
         files = []
-        for ext in ('ft', 'ft2', 'fid'):
+        for ext in extensions:
             files.extend(glob.glob(os.path.join(spectra, f'*.{ext}')))
     else:
         files = glob.glob(spectra)
@@ -190,11 +194,12 @@ def _run_series(args):
     from lunaNMR.processors.multi_spectrum_processor import MultiSpectrumProcessor
     from lunaNMR.utils.file_manager import NMRFileManager
 
-    nmr_files = _discover_spectra(args.spectra)
+    file_manager = NMRFileManager()
+    nmr_files = _discover_spectra(args.spectra, file_manager.supported_nmr_formats)
     if not nmr_files:
-        print(f"No spectrum files (.ft/.ft2/.fid) found in {args.spectra}", file=sys.stderr)
+        print(f"No spectrum files found in {args.spectra}", file=sys.stderr)
         return 1
-    reference_peaks = NMRFileManager().load_peak_list(args.peaks)
+    reference_peaks = file_manager.load_peak_list(args.peaks)
     if reference_peaks.empty:
         print(f"Peak list is empty: {args.peaks}", file=sys.stderr)
         return 1
@@ -209,8 +214,16 @@ def _run_series(args):
     if getattr(result, 'errors', None):
         for err in result.errors:
             print(f"  error: {err}", file=sys.stderr)
+    # process_nmr_series reports failure by returning a result with no successful
+    # spectra (or an empty result on a top-level exception), never by raising.
+    results = getattr(result, 'results', None) or {}
+    n_success = result.metadata.get('successful_spectra', 0)
+    if not n_success:
+        print("Series produced no successful fits (all spectra failed or none loaded)",
+              file=sys.stderr)
+        return 1
     output_folder = result.metadata.get('output_folder', args.out)
-    print(f"Series analysis complete: {len(getattr(result, 'results', {}) or {})} spectra processed")
+    print(f"Series analysis complete: {n_success}/{len(results)} spectra fitted")
     print(f"  Output: {output_folder}")
     return 0
 
@@ -443,8 +456,8 @@ def _add_relaxation_flags(p):
                    help='Spectrometer field frequency in MHz (default: 600)')
     p.add_argument('--error-method', choices=['analytical', 'bootstrap'], default='analytical',
                    dest='error_method', help='Error estimation method (default: analytical)')
-    p.add_argument('--bootstrap', type=int, default=0,
-                   help='Bootstrap iterations when --error-method bootstrap (default: 0)')
+    p.add_argument('--bootstrap', type=int, default=1000,
+                   help='Bootstrap iterations when --error-method bootstrap (default: 1000)')
 
 
 def _version():
@@ -466,9 +479,10 @@ def main(argv=None):
         return 2
     try:
         return args.func(args)
-    except (FileNotFoundError, ValueError, RuntimeError) as exc:
-        # Expected bad-input failures from the wrapped engines: report cleanly
-        # instead of dumping a traceback. Programming errors still propagate.
+    except (FileNotFoundError, ValueError, RuntimeError, KeyError) as exc:
+        # Expected bad-input failures from the wrapped engines (missing file, bad
+        # concentrations, malformed CSV/JSON missing an expected column/key): report
+        # cleanly instead of dumping a traceback.
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

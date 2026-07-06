@@ -53,6 +53,23 @@ class TestPackageImportIsHeadless:
                            capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
 
+    def test_submodule_access_after_bare_import(self):
+        # `import lunaNMR` then `lunaNMR.core` / `lunaNMR.utils` must still resolve,
+        # as it did when __init__ imported them eagerly.
+        import subprocess
+        code = "import lunaNMR; assert lunaNMR.utils is not None; assert lunaNMR.core is not None"
+        r = subprocess.run([sys.executable, "-c", code], cwd=str(REPO_ROOT),
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+
+    def test_unknown_attribute_raises_attributeerror(self):
+        # A missing/unavailable name must surface as AttributeError (so hasattr works),
+        # not ModuleNotFoundError from a lazy import.
+        import lunaNMR
+        with pytest.raises(AttributeError):
+            lunaNMR.DefinitelyNotARealAttribute
+        assert hasattr(lunaNMR, "AlsoNotReal") is False
+
 
 class TestKdSubcommand:
     def test_kd_end_to_end_writes_json_and_recovers_kd(self, tmp_path):
@@ -115,9 +132,9 @@ class TestDynamixsT1T2:
         json_file = out / "field1_T2_fit_data.json"
         assert json_file.exists()
         data = json.loads(json_file.read_text())
-        # JSON embeds per-residue fits; recovered T2 must be near the injected tau.
-        text = json.dumps(data)
-        assert "R1" in text
+        # Recovered T2 must be near the injected tau (80 ms).
+        r1 = next(f for f in data['fits'] if f['residue'] == 'R1')
+        assert r1['t2'] == pytest.approx(80.0, rel=0.05)
 
 
 class TestDynamixsMethyl:
@@ -140,7 +157,12 @@ class TestDynamixsMethyl:
         code = main(["dynamixs", "methyl-t2", "--input", str(csv), "--out", str(out),
                      "--field-name", "field1", "--field-freq", "600", "--bootstrap", "0"])
         assert code == 0
-        assert (out / "field1_methylT2_fit_data.json").exists()
+        json_file = out / "field1_methylT2_fit_data.json"
+        assert json_file.exists()
+        # Recovered slow/fast components must be near the injected bi-exp (80/15 ms).
+        r = next(f for f in json.loads(json_file.read_text())['fits'] if f['residue'] == '27_cg1_D')
+        assert r['t2_a'] == pytest.approx(80.0, rel=0.05)
+        assert r['t2_b'] == pytest.approx(15.0, rel=0.1)
 
     def test_dynamixs_requires_subcommand(self):
         from lunaNMR.cli import main
@@ -162,6 +184,25 @@ class TestSeriesHelpers:
         found = _discover_spectra(str(tmp_path))
         assert [os.path.basename(f) for f in found] == ["s_1.ft", "s_2.ft", "s_10.ft"]
 
+    def test_discover_spectra_matches_loader_formats(self, tmp_path):
+        # Discovery must track NMRFileManager.supported_nmr_formats: include ucsf/pipe/ft3,
+        # exclude fid (which the loader rejects).
+        from lunaNMR.cli import _discover_spectra
+        for name in ("a.ucsf", "b.pipe", "c.ft2", "d.ft3", "junk.fid"):
+            (tmp_path / name).write_text("x")
+        found = {os.path.basename(f) for f in _discover_spectra(str(tmp_path))}
+        assert {"a.ucsf", "b.pipe", "c.ft2", "d.ft3"} <= found
+        assert "junk.fid" not in found
+
+
+class TestRelaxationFlags:
+    def test_bootstrap_default_is_usable(self):
+        # --error-method bootstrap without --bootstrap must not silently run 0 iterations.
+        from lunaNMR.cli import build_parser
+        args = build_parser().parse_args(
+            ["dynamixs", "t1t2", "--input", "x", "--out", "y", "--exp", "T2"])
+        assert args.bootstrap >= 1000
+
 
 class TestSeriesSubcommand:
     def test_series_requires_peaks(self, tmp_path):
@@ -169,6 +210,17 @@ class TestSeriesSubcommand:
         with pytest.raises(SystemExit) as exc:
             main(["series", "--spectra", str(tmp_path), "--out", str(tmp_path / "o")])
         assert exc.value.code != 0
+
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
+    def test_series_returns_nonzero_when_no_spectra_processed(self, tmp_path):
+        from lunaNMR.cli import main
+        peaks = REPO_ROOT / "data_example" / "2DHSQC" / "600_assi.txt"
+        if not peaks.exists():
+            pytest.skip("data_example peak list not available")
+        (tmp_path / "bad.ft").write_bytes(b"not a real spectrum")
+        code = main(["series", "--spectra", str(tmp_path), "--peaks", str(peaks),
+                     "--out", str(tmp_path / "o")])
+        assert code == 1
 
     # Running the real PS2D fitter headlessly emits benign core-engine warnings
     # (numba object-mode fallback / cache) unrelated to the CLI under test.
@@ -290,6 +342,29 @@ class TestErrorHandling:
         from lunaNMR.cli import main
         code = main(["dynamixs", "methyl-t2", "--input", str(tmp_path / "nope.csv"),
                      "--out", str(tmp_path / "o")])
+        assert code == 1
+
+    def test_kd_malformed_csv_returns_clean_error(self, tmp_path):
+        from lunaNMR.cli import main
+        # tidy layout (has spectrum_name) but the assignment column is misnamed →
+        # the loader raises KeyError on groupby('assignment').
+        df = pd.DataFrame({"spectrum_name": ["0", "1"], "wrong": ["R1", "R1"],
+                           "ppm_x": [8.0, 8.1]})
+        csv = tmp_path / "bad.csv"
+        df.to_csv(csv, index=False)
+        code = main(["kd", "--input", str(csv), "--out", str(tmp_path / "o"), "--p0", "50"])
+        assert code == 1
+
+    def test_export_kd_malformed_fit_returns_clean_error(self, tmp_path):
+        from lunaNMR.cli import main
+        # A fit marked success but missing dd_max must not crash with a raw KeyError.
+        j = tmp_path / "f.json"
+        j.write_text(json.dumps({
+            "metadata": {"protein_conc": 50.0},
+            "fits": [{"residue": "R1",
+                      "csp": {"success": True, "Kd": 20.0, "L": [0, 1, 2], "obs": [0, 0.1, 0.2]}}],
+        }))
+        code = main(["export", "kd", "--json", str(j), "--out", str(tmp_path / "o")])
         assert code == 1
 
 

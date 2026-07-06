@@ -28,8 +28,7 @@ _modules_path = os.path.join(os.path.dirname(__file__), '..', 'modules')
 if _modules_path not in sys.path:
     sys.path.append(_modules_path)
 
-# Public name -> owning module. Leading '.' means a lunaNMR subpackage; otherwise a
-# top-level module reachable via the dynamiXs path appended above.
+# Public name -> owning lunaNMR subpackage module (leading '.').
 _LAZY_EXPORTS = {
     'LunaNMRMainWindow': '.gui.main_window',
     'main': '.gui.main_window',
@@ -42,20 +41,27 @@ _LAZY_EXPORTS = {
     'ConfigurationManager': '.utils.config_manager',
     'NMRFileManager': '.utils.file_manager',
     'NMRParameterManager': '.utils.parameter_manager',
-    'DynamiXsGUI': 'dynamiXs',
-    'run_dynamixs': 'dynamiXs',
 }
 
 
 def __getattr__(name):
     module_path = _LAZY_EXPORTS.get(name)
-    if module_path is None:
+    if module_path is not None:
+        try:
+            module = importlib.import_module(module_path, __name__)
+            value = getattr(module, name)
+        except ImportError as exc:
+            # An optional dependency (e.g. PySide6) is absent: surface the name as
+            # simply unavailable so hasattr() works, as the old eager try/except did.
+            raise AttributeError(f"{name!r} is unavailable: {exc}") from exc
+        globals()[name] = value  # cache so subsequent access skips __getattr__
+        return value
+    # Otherwise treat `name` as a submodule so `lunaNMR.core`, `lunaNMR.utils`, etc.
+    # resolve after a bare `import lunaNMR` (the old eager imports bound these).
+    try:
+        return importlib.import_module(f'.{name}', __name__)
+    except ImportError:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    package = __name__ if module_path.startswith('.') else None
-    module = importlib.import_module(module_path, package)
-    value = getattr(module, name)
-    globals()[name] = value  # cache so subsequent access skips __getattr__
-    return value
 
 
 def __dir__():
