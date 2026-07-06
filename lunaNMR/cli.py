@@ -211,6 +211,52 @@ def _run_series(args):
     return 0
 
 
+def _human_size(n):
+    """Format a byte count as a short human-readable string."""
+    size = float(n)
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if size < 1024 or unit == 'GB':
+            return f"{size:.0f} {unit}" if unit == 'B' else f"{size:.1f} {unit}"
+        size /= 1024
+
+
+def _project_manager():
+    """A headless ProjectManager: inventory/remove only touch the filesystem, so a
+    duck-typed session object suffices (no Qt main window needed)."""
+    import types
+    from lunaNMR.utils.project_manager import ProjectManager
+    return ProjectManager(types.SimpleNamespace())
+
+
+def _run_project_inventory(args):
+    if not os.path.isdir(args.bundle):
+        print(f"Not a project bundle: {args.bundle}", file=sys.stderr)
+        return 1
+    categories = _project_manager().inventory(args.bundle)
+    if not categories:
+        print("(empty bundle — no recognized categories)")
+        return 0
+    for cat in categories:
+        print(f"{cat['label']}  [{_human_size(cat['size'])}]")
+        for item in cat['items']:
+            lock = '' if item['removable'] else '  (protected)'
+            print(f"  - {item['label']}  [{_human_size(item['size'])}]{lock}")
+    return 0
+
+
+def _run_project_remove(args):
+    if not os.path.isdir(args.bundle):
+        print(f"Not a project bundle: {args.bundle}", file=sys.stderr)
+        return 1
+    try:
+        freed = _project_manager().remove_bundle_paths(args.bundle, args.paths)
+    except ValueError as exc:
+        print(f"Refused: {exc}", file=sys.stderr)
+        return 1
+    print(f"Removed {len(args.paths)} path(s), freed {_human_size(freed)}")
+    return 0
+
+
 def _run_batch(batch_argv):
     """Delegate to the existing batch CLI, passing through all of its flags."""
     from lunaNMR.batch_processing.cli_interface import CLIInterface
@@ -270,6 +316,17 @@ def build_parser():
     methyl.set_defaults(func=_run_dynamixs_methyl)
 
     dx.set_defaults(func=lambda a: (dx.print_help(sys.stderr) or 2))
+
+    proj = sub.add_parser('project', help='Inspect / prune a .lunaNMR project bundle')
+    proj_sub = proj.add_subparsers(dest='project_command', metavar='<action>')
+    inv = proj_sub.add_parser('inventory', help='List a bundle\'s contents by category')
+    inv.add_argument('bundle', help='Path to a .lunaNMR bundle directory')
+    inv.set_defaults(func=_run_project_inventory)
+    rm = proj_sub.add_parser('remove', help='Delete bundle-relative paths from a bundle')
+    rm.add_argument('bundle', help='Path to a .lunaNMR bundle directory')
+    rm.add_argument('paths', nargs='+', help='Bundle-relative path(s) to delete')
+    rm.set_defaults(func=_run_project_remove)
+    proj.set_defaults(func=lambda a: (proj.print_help(sys.stderr) or 2))
 
     # `batch` is intercepted in main() before argparse so the batch CLI owns all of its
     # own flags (including -h). This entry exists only so it appears in the top-level help.

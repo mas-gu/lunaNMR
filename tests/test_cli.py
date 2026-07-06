@@ -187,6 +187,51 @@ class TestSeriesSubcommand:
         assert pd.read_csv(tidy).shape[0] > 0
 
 
+def _make_bundle(tmp_path):
+    bundle = tmp_path / "proj.lunaNMR"
+    (bundle / "fit_results" / "arrays").mkdir(parents=True)
+    (bundle / "kd" / "analyses" / "A1_assi").mkdir(parents=True)
+    (bundle / "project.json").write_text('{"schema_version": "1.1"}')
+    (bundle / "fit_results" / "fits.json").write_text('[]')
+    (bundle / "fit_results" / "arrays" / "peak_000.npz").write_bytes(b"x" * 5000)
+    (bundle / "kd" / "analyses" / "A1_assi" / "fit_data.json").write_text("{}")
+    return bundle
+
+
+class TestProjectSubcommand:
+    def test_inventory_lists_categories(self, tmp_path, capsys):
+        from lunaNMR.cli import main
+        bundle = _make_bundle(tmp_path)
+        code = main(["project", "inventory", str(bundle)])
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "Fit results" in out and "Kd analyses" in out
+
+    def test_inventory_missing_bundle_errors(self, tmp_path):
+        from lunaNMR.cli import main
+        assert main(["project", "inventory", str(tmp_path / "nope.lunaNMR")]) != 0
+
+    def test_remove_deletes_path(self, tmp_path):
+        from lunaNMR.cli import main
+        bundle = _make_bundle(tmp_path)
+        code = main(["project", "remove", str(bundle), "fit_results/arrays"])
+        assert code == 0
+        assert not (bundle / "fit_results" / "arrays").exists()
+        assert (bundle / "fit_results" / "fits.json").exists()
+
+    def test_remove_rejects_escape(self, tmp_path):
+        from lunaNMR.cli import main
+        bundle = _make_bundle(tmp_path)
+        sibling = tmp_path / "secret.txt"
+        sibling.write_text("keep")
+        assert main(["project", "remove", str(bundle), "../secret.txt"]) != 0
+        assert sibling.exists()
+
+    def test_project_requires_subcommand(self):
+        from lunaNMR.cli import main
+        assert main(["project"]) != 0
+
+
 class TestDispatch:
     def test_help_exits_zero(self):
         from lunaNMR.cli import main
