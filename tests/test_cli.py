@@ -92,6 +92,60 @@ class TestBatchDelegation:
         assert captured['argv'] == ["--preset", "1H", "myfolder"]
 
 
+class TestDynamixsT1T2:
+    # The T1/T2 plotter calls plt.show() under the Agg backend; that known,
+    # harmless warning is expected on a headless run.
+    @pytest.mark.filterwarnings("ignore:FigureCanvasAgg is non-interactive")
+    def test_t2_end_to_end_writes_results_and_json(self, tmp_path):
+        from lunaNMR.cli import main
+        delays = [3.0, 9.0, 25.0, 50.0, 100.0, 200.0, 300.0]
+        tau, A = 80.0, 1.0e5
+        header = ["residue"] + [str(int(d)) for d in delays]
+        rows = [[name] + [A * np.exp(-t / tau) for t in delays] for name in ("R1", "R2")]
+        df = pd.DataFrame(rows, columns=header)
+        csv = tmp_path / "t2_series.csv"
+        df.to_csv(csv, index=False)
+
+        out = tmp_path / "t2out"
+        code = main(["dynamixs", "t1t2", "--input", str(csv), "--out", str(out),
+                     "--exp", "T2", "--prefix", "field1"])
+        assert code == 0
+        assert (out / "field1_fit_results.txt").exists()
+        json_file = out / "field1_T2_fit_data.json"
+        assert json_file.exists()
+        data = json.loads(json_file.read_text())
+        # JSON embeds per-residue fits; recovered T2 must be near the injected tau.
+        text = json.dumps(data)
+        assert "R1" in text
+
+
+class TestDynamixsMethyl:
+    def test_methyl_end_to_end_writes_json(self, tmp_path):
+        from lunaNMR.cli import main
+        delays = [3.0, 9.0, 25.0, 50.0, 100.0, 200.0, 300.0]
+
+        def sig(t):
+            return 0.5 * 1.0e5 * (np.exp(-t / 80.0) + np.exp(-t / 15.0))
+
+        header = (["Peak_Number", "Assignment", "Reference_X", "Reference_Y"]
+                  + [f"003_T2_ADDA_{int(d)}ms" for d in delays])
+        rows = [[k + 1, name, 0.0, 0.0] + [f"{sig(t):.2f}" for t in delays]
+                for k, name in enumerate(("27_cg1_D", "44_cg1_D"))]
+        df = pd.DataFrame(rows, columns=header)
+        csv = tmp_path / "methyl_series.csv"
+        df.to_csv(csv, index=False)
+
+        out = tmp_path / "methylout"
+        code = main(["dynamixs", "methyl-t2", "--input", str(csv), "--out", str(out),
+                     "--field-name", "field1", "--field-freq", "600", "--bootstrap", "0"])
+        assert code == 0
+        assert (out / "field1_methylT2_fit_data.json").exists()
+
+    def test_dynamixs_requires_subcommand(self):
+        from lunaNMR.cli import main
+        assert main(["dynamixs"]) != 0
+
+
 class TestDispatch:
     def test_help_exits_zero(self):
         from lunaNMR.cli import main

@@ -26,15 +26,22 @@ def _str_list(text):
     return [x.strip() for x in text.split(',') if x.strip() != '']
 
 
+def _add_modules_path(*parts):
+    """Put a dynamiXs module directory on sys.path so its top-level modules import.
+
+    The dynamiXs fitters live in modules/ (sibling of the lunaNMR package) and use
+    bare sibling imports (e.g. `from kd_models import ...`), so their directory must
+    be importable directly. Mirrors modules/dynamiXs_v2o0/workers.py.
+    """
+    path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'modules', *parts))
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    return path
+
+
 def _run_kd(args):
     """Wrap dynamiXs_Kd.kd_fit.run_kd_analysis_with_params for the CLI."""
-    # kd_fit uses top-level sibling imports (from kd_models import ...), so its
-    # directory must be on sys.path (mirrors modules/dynamiXs_v2o0/workers.py).
-    kd_dir = os.path.join(os.path.dirname(__file__), '..', 'modules',
-                          'dynamiXs_v2o0', 'dynamiXs_Kd')
-    kd_dir = os.path.abspath(kd_dir)
-    if kd_dir not in sys.path:
-        sys.path.insert(0, kd_dir)
+    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
     import kd_fit
 
     params = {
@@ -56,6 +63,53 @@ def _run_kd(args):
     print(f"Kd analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted")
     print(f"  JSON:    {result['json_file']}")
     print(f"  Results: {result['results_file']}")
+    return 0
+
+
+def _run_dynamixs_t1t2(args):
+    """Wrap dynamiXs_T1_T2.fit_Tx_NMRRE.run_analysis_with_params (T1/T2 relaxation)."""
+    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
+    from fit_Tx_NMRRE import run_analysis_with_params
+    os.makedirs(args.out, exist_ok=True)
+    params = {
+        'input_csv_file': args.input,
+        'output_prefix': os.path.join(args.out, args.prefix),
+        'results_txt_file': os.path.join(args.out, f"{args.prefix}_fit_results.txt"),
+        'experiment_type': args.exp,
+        'error_method': args.error_method,
+        'n_bootstrap': args.bootstrap,
+        'field_name': args.field_name,
+        'field_freq': args.field_freq,
+        'json_folder': None if args.no_json else args.out,
+    }
+    result = run_analysis_with_params(params)
+    print(f"{args.exp} analysis complete: {result['n_fitted']} residues fitted, "
+          f"mean {args.exp} = {result['mean_t2']:.2f} ms")
+    print(f"  Results: {result['results_file']}")
+    if result.get('json_file'):
+        print(f"  JSON:    {result['json_file']}")
+    return 0
+
+
+def _run_dynamixs_methyl(args):
+    """Wrap dynamiXs_T1_T2.fit_methyl_T2.run_methyl_t2_analysis_with_params (bi-exp methyl T2)."""
+    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
+    from fit_methyl_T2 import run_methyl_t2_analysis_with_params
+    os.makedirs(args.out, exist_ok=True)
+    params = {
+        'input_csv_file': args.input,
+        'output_prefix': os.path.join(args.out, args.prefix),
+        'results_txt_file': os.path.join(args.out, f"{args.prefix}_fit_results.txt"),
+        'json_folder': args.out,
+        'field_name': args.field_name,
+        'field_freq': args.field_freq,
+        'error_method': args.error_method,
+        'n_bootstrap': args.bootstrap,
+    }
+    result = run_methyl_t2_analysis_with_params(params)
+    print(f"Methyl T2 analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted")
+    print(f"  Results: {result['results_file']}")
+    print(f"  JSON:    {result['json_file']}")
     return 0
 
 
@@ -93,12 +147,42 @@ def build_parser():
                     help='Comma-separated per-point height/volume scale factors')
     kd.set_defaults(func=_run_kd)
 
+    dx = sub.add_parser('dynamixs', help='Relaxation fitting: T1/T2 and methyl-T2')
+    dx_sub = dx.add_subparsers(dest='dynamixs_command', metavar='<kind>')
+
+    t1t2 = dx_sub.add_parser('t1t2', help='Mono-exponential T1 or T2 relaxation fit')
+    _add_relaxation_flags(t1t2)
+    t1t2.add_argument('--exp', choices=['T1', 'T2'], required=True, help='Experiment type')
+    t1t2.add_argument('--no-json', action='store_true', help='Skip writing the JSON fit data')
+    t1t2.set_defaults(func=_run_dynamixs_t1t2)
+
+    methyl = dx_sub.add_parser('methyl-t2', help='Bi-exponential (Tugarinov-Kay) methyl T2 fit')
+    _add_relaxation_flags(methyl)
+    methyl.set_defaults(func=_run_dynamixs_methyl)
+
+    dx.set_defaults(func=lambda a: (dx.print_help(sys.stderr) or 2))
+
     # `batch` is intercepted in main() before argparse so the batch CLI owns all of its
     # own flags (including -h). This entry exists only so it appears in the top-level help.
     sub.add_parser('batch', add_help=False,
                    help='Batch detect + Voigt/PS2D fit over a folder (pass -h for its flags)')
 
     return parser
+
+
+def _add_relaxation_flags(p):
+    """Shared flags for the dynamixs t1t2 / methyl-t2 subcommands."""
+    p.add_argument('--input', required=True, help='Relaxation series CSV (LunaNMR or DynamiXs format)')
+    p.add_argument('--out', required=True, help='Output directory for results + JSON')
+    p.add_argument('--prefix', default='field1', help='Output filename prefix (default: field1)')
+    p.add_argument('--field-name', default='field1', dest='field_name',
+                   help='Field label used in the JSON filename (default: field1)')
+    p.add_argument('--field-freq', type=float, default=600.0, dest='field_freq',
+                   help='Spectrometer field frequency in MHz (default: 600)')
+    p.add_argument('--error-method', choices=['analytical', 'bootstrap'], default='analytical',
+                   dest='error_method', help='Error estimation method (default: analytical)')
+    p.add_argument('--bootstrap', type=int, default=0,
+                   help='Bootstrap iterations when --error-method bootstrap (default: 0)')
 
 
 def _version():
