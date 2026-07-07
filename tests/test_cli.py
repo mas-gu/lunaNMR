@@ -368,6 +368,72 @@ class TestErrorHandling:
         assert code == 1
 
 
+class TestPackaging:
+    def test_pyproject_declares_console_script(self):
+        import tomllib
+        cfg = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+        assert cfg["project"]["name"] == "lunaNMR"
+        assert cfg["project"]["scripts"]["lunanmr"] == "lunaNMR.cli:main"
+
+
+class TestSeriesParallel:
+    def test_default_params_parallel_toggle(self):
+        from lunaNMR.cli import _default_series_params
+        on = _default_series_params(parallel=True)
+        assert on['gui_params']['use_parallel_processing'] is True
+        assert on['processing_options']['use_parallel_processing'] is True
+        assert _default_series_params()['gui_params']['use_parallel_processing'] is False
+
+    def test_series_accepts_parallel_flag(self):
+        from lunaNMR.cli import build_parser
+        args = build_parser().parse_args(
+            ["series", "--spectra", "x", "--peaks", "p", "--out", "o", "--parallel"])
+        assert args.parallel is True
+
+
+class TestOutputFormat:
+    def test_kd_format_json_is_clean_stdout(self, tmp_path, capsys):
+        from lunaNMR.cli import main
+        csv = _write_tidy_csv(tmp_path)
+        code = main(["kd", "--input", str(csv), "--out", str(tmp_path / "o"),
+                     "--p0", "50", "--observable", "csp", "--format", "json"])
+        assert code == 0
+        # Entire stdout must be valid JSON — engine chatter goes to stderr.
+        data = json.loads(capsys.readouterr().out)
+        assert data["command"] == "kd"
+        assert data["n_fitted"] >= 1
+        assert data["json_file"].endswith(".json")
+
+
+class TestDryRun:
+    def test_kd_dry_run_validates_without_running(self, tmp_path):
+        from lunaNMR.cli import main
+        csv = _write_tidy_csv(tmp_path)
+        out = tmp_path / "o"
+        code = main(["kd", "--input", str(csv), "--out", str(out), "--p0", "50", "--dry-run"])
+        assert code == 0
+        assert not (out / "kd_kd_fit_data.json").exists()  # nothing was executed
+
+    def test_kd_dry_run_missing_input_returns_1(self, tmp_path):
+        from lunaNMR.cli import main
+        code = main(["kd", "--input", str(tmp_path / "nope.csv"),
+                     "--out", str(tmp_path / "o"), "--p0", "50", "--dry-run"])
+        assert code == 1
+
+    def test_dry_run_json_plan(self, tmp_path):
+        from lunaNMR.cli import main
+        csv = _write_tidy_csv(tmp_path)
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = main(["kd", "--input", str(csv), "--out", str(tmp_path / "o"),
+                         "--p0", "50", "--dry-run", "--format", "json"])
+        assert code == 0
+        data = json.loads(buf.getvalue())
+        assert data["dry_run"] is True
+
+
 class TestDispatch:
     def test_help_exits_zero(self):
         from lunaNMR.cli import main

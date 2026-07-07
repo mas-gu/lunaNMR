@@ -32,6 +32,67 @@ def _str_list(text):
     return [x.strip() for x in text.split(',') if x.strip() != '']
 
 
+def _emit(args, summary, *human_lines):
+    """Print the run summary: a single JSON object under --format json, else human lines."""
+    import json
+    if getattr(args, 'format', 'text') == 'json':
+        print(json.dumps(summary))
+    else:
+        for line in human_lines:
+            print(line)
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def _engine_stdout(args):
+    """Under --format json, send all engine chatter to stderr so the CLI's own stdout
+    carries only the JSON summary.
+
+    Redirects at both levels: the Python `sys.stdout` (so parent prints and pytest's
+    capsys are covered) and the underlying fd 1 via os.dup2 (so worker processes spawned
+    by the parallel processor, which inherit fd 1, also write to stderr rather than
+    leaking onto stdout).
+    """
+    if getattr(args, 'format', 'text') != 'json':
+        yield
+        return
+    sys.stdout.flush()
+    saved_fd = os.dup(1)
+    os.dup2(2, 1)
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            yield
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved_fd, 1)
+        os.close(saved_fd)
+
+
+def _dry_run(args, inputs, planned):
+    """Validate that required input paths exist and report the plan without running.
+
+    `inputs` is a list of (label, path); `planned` a dict of planned outputs. Returns 0
+    if every input exists, else 1.
+    """
+    missing = [p for _, p in inputs if not os.path.exists(p)]
+    summary = {
+        'command': getattr(args, 'command', None),
+        'dry_run': True,
+        'inputs': {label: path for label, path in inputs},
+        'planned_outputs': planned,
+        'missing_inputs': missing,
+    }
+    human = [f"[dry-run] {summary['command']}"]
+    for label, path in inputs:
+        human.append(f"  input  {label}: {path} [{'OK' if os.path.exists(path) else 'MISSING'}]")
+    for key, val in planned.items():
+        human.append(f"  output {key}: {val}")
+    _emit(args, summary, *human)
+    return 1 if missing else 0
+
+
 def _add_modules_path(*parts):
     """Put a dynamiXs module directory on sys.path so its top-level modules import.
 
@@ -47,6 +108,8 @@ def _add_modules_path(*parts):
 
 def _run_kd(args):
     """Wrap dynamiXs_Kd.kd_fit.run_kd_analysis_with_params for the CLI."""
+    if args.dry_run:
+        return _dry_run(args, [('input', args.input)], {'output_dir': args.out})
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
     import kd_fit
 
@@ -65,15 +128,22 @@ def _run_kd(args):
     if args.intensity_scale is not None:
         params['intensity_scales'] = args.intensity_scale
 
-    result = kd_fit.run_kd_analysis_with_params(params)
-    print(f"Kd analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted")
-    print(f"  JSON:    {result['json_file']}")
-    print(f"  Results: {result['results_file']}")
+    with _engine_stdout(args):
+        result = kd_fit.run_kd_analysis_with_params(params)
+    _emit(args,
+          {'command': 'kd', 'n_fitted': result['n_fitted'], 'n_total': result['n_total'],
+           'json_file': result['json_file'], 'results_file': result['results_file']},
+          f"Kd analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted",
+          f"  JSON:    {result['json_file']}",
+          f"  Results: {result['results_file']}")
     return 0
 
 
 def _run_dynamixs_t1t2(args):
     """Wrap dynamiXs_T1_T2.fit_Tx_NMRRE.run_analysis_with_params (T1/T2 relaxation)."""
+    if args.dry_run:
+        return _dry_run(args, [('input', args.input)],
+                        {'output_dir': args.out, 'experiment': args.exp})
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
     from fit_Tx_NMRRE import run_analysis_with_params
     os.makedirs(args.out, exist_ok=True)
@@ -88,17 +158,25 @@ def _run_dynamixs_t1t2(args):
         'field_freq': args.field_freq,
         'json_folder': None if args.no_json else args.out,
     }
-    result = run_analysis_with_params(params)
-    print(f"{args.exp} analysis complete: {result['n_fitted']} residues fitted, "
-          f"mean {args.exp} = {result['mean_t2']:.2f} ms")
-    print(f"  Results: {result['results_file']}")
+    with _engine_stdout(args):
+        result = run_analysis_with_params(params)
+    human = [f"{args.exp} analysis complete: {result['n_fitted']} residues fitted, "
+             f"mean {args.exp} = {result['mean_t2']:.2f} ms",
+             f"  Results: {result['results_file']}"]
     if result.get('json_file'):
-        print(f"  JSON:    {result['json_file']}")
+        human.append(f"  JSON:    {result['json_file']}")
+    _emit(args,
+          {'command': 'dynamixs t1t2', 'experiment': args.exp, 'n_fitted': result['n_fitted'],
+           'mean_t2': result['mean_t2'], 'results_file': result['results_file'],
+           'json_file': result.get('json_file')},
+          *human)
     return 0
 
 
 def _run_dynamixs_methyl(args):
     """Wrap dynamiXs_T1_T2.fit_methyl_T2.run_methyl_t2_analysis_with_params (bi-exp methyl T2)."""
+    if args.dry_run:
+        return _dry_run(args, [('input', args.input)], {'output_dir': args.out})
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
     from fit_methyl_T2 import run_methyl_t2_analysis_with_params
     os.makedirs(args.out, exist_ok=True)
@@ -112,10 +190,15 @@ def _run_dynamixs_methyl(args):
         'error_method': args.error_method,
         'n_bootstrap': args.bootstrap,
     }
-    result = run_methyl_t2_analysis_with_params(params)
-    print(f"Methyl T2 analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted")
-    print(f"  Results: {result['results_file']}")
-    print(f"  JSON:    {result['json_file']}")
+    with _engine_stdout(args):
+        result = run_methyl_t2_analysis_with_params(params)
+    _emit(args,
+          {'command': 'dynamixs methyl-t2', 'n_fitted': result['n_fitted'],
+           'n_total': result['n_total'], 'results_file': result['results_file'],
+           'json_file': result['json_file']},
+          f"Methyl T2 analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted",
+          f"  Results: {result['results_file']}",
+          f"  JSON:    {result['json_file']}")
     return 0
 
 
@@ -139,12 +222,12 @@ def _discover_spectra(spectra, extensions=('ft', 'ser', 'ft2', 'ft3', 'pipe', 'u
     return sorted(files, key=lambda f: _natural_key(os.path.basename(f)))
 
 
-def _default_series_params():
+def _default_series_params(parallel=False):
     """Default series/voigt parameters, mirroring the GUI's getattr fallbacks.
 
     The GUI assembles this nested dict from the main window with these same defaults
     (gui/dialogs/series_integration_dialog.py::_get_voigt_parameters); a headless run
-    just uses the defaults directly.
+    just uses the defaults directly. `parallel` enables the two-pass parallel processor.
     """
     return {
         'detection_params': {
@@ -155,7 +238,7 @@ def _default_series_params():
         'gui_params': {
             'fix_positions': False,
             'fix_linewidths': False,
-            'use_parallel_processing': False,
+            'use_parallel_processing': parallel,
             'use_centroid_refinement': True,
             'centroid_window_x_ppm': 0.02,
             'centroid_window_y_ppm': 1.0,
@@ -177,7 +260,7 @@ def _default_series_params():
             'fitting_window_y': 2.0,
         },
         'processing_options': {
-            'use_parallel_processing': False,
+            'use_parallel_processing': parallel,
             'use_global_optimization': False,
             'enable_cascade_drift_limit': True,
             'rerun_adaptive_per_spectrum': False,
@@ -196,6 +279,22 @@ def _run_series(args):
 
     file_manager = NMRFileManager()
     nmr_files = _discover_spectra(args.spectra, file_manager.supported_nmr_formats)
+
+    if args.dry_run:
+        peaks_ok = os.path.exists(args.peaks)
+        missing = ([] if nmr_files else ['spectra']) + ([] if peaks_ok else [args.peaks])
+        _emit(args,
+              {'command': 'series', 'dry_run': True, 'spectra_found': len(nmr_files),
+               'peaks': args.peaks, 'peaks_exists': peaks_ok, 'mode': args.mode,
+               'peak_source': args.peak_source, 'parallel': args.parallel,
+               'output_dir': args.out, 'missing_inputs': missing},
+              "[dry-run] series",
+              f"  spectra found: {len(nmr_files)}",
+              f"  peaks: {args.peaks} [{'OK' if peaks_ok else 'MISSING'}]",
+              f"  mode={args.mode} peak-source={args.peak_source} parallel={args.parallel}",
+              f"  output: {args.out}")
+        return 0 if not missing else 1
+
     if not nmr_files:
         print(f"No spectrum files found in {args.spectra}", file=sys.stderr)
         return 1
@@ -205,12 +304,14 @@ def _run_series(args):
         return 1
 
     os.makedirs(args.out, exist_ok=True)
-    print(f"Processing {len(nmr_files)} spectra ({args.mode} mode, {args.peak_source} peaks)...")
-    processor = MultiSpectrumProcessor(_default_series_params())
-    result = processor.process_nmr_series(
-        nmr_files, reference_peaks, args.out,
-        peak_source_mode=args.peak_source, series_mode=args.mode, extract_delays=True,
-    )
+    print(f"Processing {len(nmr_files)} spectra ({args.mode} mode, {args.peak_source} peaks)...",
+          file=sys.stderr)
+    processor = MultiSpectrumProcessor(_default_series_params(parallel=args.parallel))
+    with _engine_stdout(args):
+        result = processor.process_nmr_series(
+            nmr_files, reference_peaks, args.out,
+            peak_source_mode=args.peak_source, series_mode=args.mode, extract_delays=True,
+        )
     if getattr(result, 'errors', None):
         for err in result.errors:
             print(f"  error: {err}", file=sys.stderr)
@@ -223,8 +324,11 @@ def _run_series(args):
               file=sys.stderr)
         return 1
     output_folder = result.metadata.get('output_folder', args.out)
-    print(f"Series analysis complete: {n_success}/{len(results)} spectra fitted")
-    print(f"  Output: {output_folder}")
+    _emit(args,
+          {'command': 'series', 'spectra_fitted': n_success, 'spectra_total': len(results),
+           'output_folder': output_folder, 'parallel': args.parallel},
+          f"Series analysis complete: {n_success}/{len(results)} spectra fitted",
+          f"  Output: {output_folder}")
     return 0
 
 
@@ -283,6 +387,8 @@ def _run_export_kd(args):
     """Render CSP / intensity fit figures + a summary from a self-contained kd fit JSON."""
     import json
     import csv
+    if args.dry_run:
+        return _dry_run(args, [('json', args.json)], {'output_dir': args.out})
     if not os.path.isfile(args.json):
         print(f"Fit JSON not found: {args.json}", file=sys.stderr)
         return 1
@@ -349,8 +455,11 @@ def _run_export_kd(args):
         writer.writeheader()
         writer.writerows(summary_rows)
 
-    print(f"Exported {len(summary_rows)} fit(s), {n_figs} figure(s)")
-    print(f"  Summary: {summary_path}")
+    _emit(args,
+          {'command': 'export kd', 'n_fits': len(summary_rows), 'n_figures': n_figs,
+           'summary_csv': summary_path},
+          f"Exported {len(summary_rows)} fit(s), {n_figs} figure(s)",
+          f"  Summary: {summary_path}")
     return 0
 
 
@@ -368,7 +477,15 @@ def build_parser():
     parser.add_argument('--version', action='version', version=f'lunaNMR {_version()}')
     sub = parser.add_subparsers(dest='command', metavar='<subcommand>')
 
-    kd = sub.add_parser('kd', help='Fit Kd from a titration series (CSP / intensity)')
+    # Shared flags for the analysis subcommands: output format + input validation.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument('--format', choices=['text', 'json'], default='text',
+                        help='Run-summary output format (default: text)')
+    common.add_argument('--dry-run', action='store_true', dest='dry_run',
+                        help='Validate inputs and print the plan without running')
+
+    kd = sub.add_parser('kd', parents=[common],
+                        help='Fit Kd from a titration series (CSP / intensity)')
     kd.add_argument('--input', required=True,
                     help='Titration CSV (tidy / comprehensive_peak_tracking / intensity matrix)')
     kd.add_argument('--out', required=True, help='Output directory for the fit JSON + results')
@@ -388,8 +505,9 @@ def build_parser():
                     help='Comma-separated per-point height/volume scale factors')
     kd.set_defaults(func=_run_kd)
 
-    series = sub.add_parser('series', help='Process a multi-spectrum series/titration')
-    series.add_argument('--spectra', required=True, help='Folder or glob of spectrum files (.ft/.ft2/.fid)')
+    series = sub.add_parser('series', parents=[common],
+                            help='Process a multi-spectrum series/titration')
+    series.add_argument('--spectra', required=True, help='Folder or glob of spectrum files')
     series.add_argument('--peaks', required=True, help='Reference peak-list file (Assignment, Position_X, Position_Y)')
     series.add_argument('--out', required=True, help='Output folder for the series_results CSVs')
     series.add_argument('--mode', choices=['time', 'titration'], default='time',
@@ -397,18 +515,22 @@ def build_parser():
     series.add_argument('--peak-source', choices=['reference', 'cascade', 'detected', 'independent'],
                         default='reference', dest='peak_source',
                         help='Peak position source across spectra (default: reference)')
+    series.add_argument('--parallel', action='store_true',
+                        help='Use the two-pass parallel processor (~2.7x faster)')
     series.set_defaults(func=_run_series)
 
     dx = sub.add_parser('dynamixs', help='Relaxation fitting: T1/T2 and methyl-T2')
     dx_sub = dx.add_subparsers(dest='dynamixs_command', metavar='<kind>')
 
-    t1t2 = dx_sub.add_parser('t1t2', help='Mono-exponential T1 or T2 relaxation fit')
+    t1t2 = dx_sub.add_parser('t1t2', parents=[common],
+                             help='Mono-exponential T1 or T2 relaxation fit')
     _add_relaxation_flags(t1t2)
     t1t2.add_argument('--exp', choices=['T1', 'T2'], required=True, help='Experiment type')
     t1t2.add_argument('--no-json', action='store_true', help='Skip writing the JSON fit data')
     t1t2.set_defaults(func=_run_dynamixs_t1t2)
 
-    methyl = dx_sub.add_parser('methyl-t2', help='Bi-exponential (Tugarinov-Kay) methyl T2 fit')
+    methyl = dx_sub.add_parser('methyl-t2', parents=[common],
+                               help='Bi-exponential (Tugarinov-Kay) methyl T2 fit')
     _add_relaxation_flags(methyl)
     methyl.set_defaults(func=_run_dynamixs_methyl)
 
@@ -416,7 +538,8 @@ def build_parser():
 
     export = sub.add_parser('export', help='Render figures / reports from a fit JSON (headless)')
     export_sub = export.add_subparsers(dest='export_command', metavar='<kind>')
-    ex_kd = export_sub.add_parser('kd', help='CSP / intensity fit figures + summary from a kd fit JSON')
+    ex_kd = export_sub.add_parser('kd', parents=[common],
+                                  help='CSP / intensity fit figures + summary from a kd fit JSON')
     ex_kd.add_argument('--json', required=True, help='kd fit JSON (…_kd_fit_data.json)')
     ex_kd.add_argument('--out', required=True, help='Output directory for figures + summary.csv')
     ex_kd.add_argument('--observable', type=_str_list, default=None,

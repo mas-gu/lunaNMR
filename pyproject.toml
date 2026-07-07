@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lunaNMR"
+version = "1.0.0"
+description = "Advanced NMR peak analysis and integration suite (PySide6/Qt)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Guillaume Mas" }]
+dependencies = [
+    "numpy>=1.20.0",
+    "pandas>=1.3.0",
+    "matplotlib>=3.5.0",
+    "scipy>=1.7.0",
+    "scikit-learn>=1.0.0",
+    "networkx>=2.5",
+    "nmrglue>=0.9.0",
+    "PySide6>=6.6.0",
+    "numba>=0.57.0",
+]
+
+[project.optional-dependencies]
+cnn = ["torch>=2.0.0", "torchvision>=0.15.0"]
+
+[project.scripts]
+lunanmr = "lunaNMR.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["lunaNMR*"]
