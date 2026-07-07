@@ -1,6 +1,8 @@
 # ABOUTME: Reads the LunaNMR series tidy CSV into per-residue titration observables.
 # ABOUTME: Positions (for CSP) and intensities (for ratio), aligned to sorted points.
 
+import re
+
 import numpy as np
 import pandas as pd
 
@@ -8,11 +10,25 @@ from kd_models import compute_csp
 
 
 def _to_point(label):
-    """Parse a spectrum_name/point label to a float, or None if non-numeric."""
+    """Parse a spectrum_name/point label to a float order key, or None.
+
+    Accepts bare numbers ('0.0', '10o5' -> 0.0, 10.5) and real spectrum names,
+    from which the trailing numeric token is taken as the point index
+    (e.g. '03_2D_NR_ATP_ref_noCa_001' -> 1.0). Actual concentrations come from the
+    caller's --conc; the point value only needs to order and count the points.
+    """
+    s = str(label).strip()
     try:
-        return float(str(label).replace('o', '.'))
+        return float(s.replace('o', '.'))
     except (ValueError, TypeError):
-        return None
+        pass
+    match = re.search(r'(\d+(?:[o.]\d+)?)(?:_\d+)?$', s)
+    if match:
+        try:
+            return float(match.group(1).replace('o', '.'))
+        except ValueError:
+            return None
+    return None
 
 
 def load_titration_tidy(csv_path):

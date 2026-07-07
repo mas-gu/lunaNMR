@@ -143,3 +143,29 @@ def test_tidy_collapses_duplicate_point_rows(tmp_path):
     r1 = res["R1"]
     assert all(isinstance(v, float) for v in r1["ppm_x"])   # scalars, no Series
     assert r1["ppm_x"][1] == pytest.approx(8.15)            # mean of 8.10 & 8.20
+
+
+class TestDescriptiveLabels:
+    def test_to_point_parses_descriptive_spectrum_labels(self):
+        from kd_input import _to_point
+        assert _to_point("0.0") == 0.0
+        assert _to_point("10o5") == 10.5
+        # Real spectrum names: trailing sequence number is the point index.
+        assert _to_point("03_2D_NR_ATP_ref_noCa_001") == 1.0
+        assert _to_point("03_2D_NR_ATP_ref_noCa_002") == 2.0
+        assert _to_point("no_number_here") is None
+
+    def test_load_tracking_reads_descriptive_labels(self, tmp_path):
+        from kd_input import load_titration
+        labels = ["03_ATP_001", "03_ATP_002", "03_ATP_003"]
+        cols = {"Assignment": ["R1", "R2"]}
+        for i, lbl in enumerate(labels):
+            cols[f"{lbl}_Position_X"] = [8.0 + 0.01 * i, 9.0]
+            cols[f"{lbl}_Position_Y"] = [120.0, 125.0]
+            cols[f"{lbl}_Height"] = [1000.0 - 100 * i, 500.0]
+            cols[f"{lbl}_Volume"] = [2000.0, 1000.0]
+        csv = tmp_path / "comprehensive_peak_tracking.csv"
+        pd.DataFrame(cols).to_csv(csv, index=False)
+        points, residues = load_titration(str(csv))
+        assert points == [1.0, 2.0, 3.0]
+        assert set(residues) == {"R1", "R2"}
