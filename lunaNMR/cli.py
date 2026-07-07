@@ -385,6 +385,16 @@ def _safe_name(text):
     return re.sub(r'[^\w.+-]+', '_', str(text))
 
 
+def _draw_kd_panel(ax, panel):
+    """Draw one residue's observed points + fitted binding curve into an axis."""
+    ax.plot(panel['L'], panel['y'], 'o', color='#1f77b4', ms=4)
+    ax.plot(panel['Ld'], panel['yc'], '-', color='#d62728', lw=1.2)
+    ax.set_title(f"{panel['residue']}  Kd={panel['kd']:.2g}  R²={panel['r2']:.2f}", fontsize=8)
+    ax.set_xlabel('[ligand]', fontsize=7)
+    ax.set_ylabel(panel['ylabel'], fontsize=7)
+    ax.tick_params(labelsize=6)
+
+
 def _run_export_kd(args):
     """Render CSP / intensity fit figures + a summary from a self-contained kd fit JSON."""
     import json
@@ -409,8 +419,9 @@ def _run_export_kd(args):
                                       if any(f.get(o) for f in fits)]
     os.makedirs(args.out, exist_ok=True)
 
+    # Collect each residue's fit into per-observable panel lists (+ the summary rows).
     summary_rows = []
-    n_figs = 0
+    panels = {obs: [] for obs in observables}
     for f in fits:
         residue = f.get('residue', 'peak')
         for obs in observables:
@@ -422,8 +433,6 @@ def _run_export_kd(args):
                 'Kd': fit.get('Kd'), 'Kd_err': fit.get('Kd_err'),
                 'r_squared': fit.get('r_squared'),
             })
-            if args.summary_only:
-                continue
             L = np.asarray(fit['L'], dtype=float)
             y = np.asarray(fit['obs'], dtype=float)
             good = np.isfinite(L) & np.isfinite(y)
@@ -435,21 +444,10 @@ def _run_export_kd(args):
                 ylabel = 'CSP (ppm)'
             else:
                 yc = intensity_decay(Ld, fit['I0'], fit['I_inf'], fit['Kd'])
-                ylabel = 'I / I(0)' if max(y[good]) <= 1.5 else 'Intensity'
-            fig, ax = plt.subplots(figsize=(4, 3))
-            ax.plot(L[good], y[good], 'o', color='#1f77b4', label='observed')
-            ax.plot(Ld, yc, '-', color='#d62728',
-                    label=f"Kd={fit['Kd']:.2g}, R²={fit.get('r_squared', float('nan')):.3f}")
-            ax.set_xlabel('[ligand]')
-            ax.set_ylabel(ylabel)
-            ax.set_title(f"{residue} ({obs})")
-            ax.legend(fontsize=7)
-            fig.tight_layout()
-            obs_dir = os.path.join(args.out, obs)
-            os.makedirs(obs_dir, exist_ok=True)
-            fig.savefig(os.path.join(obs_dir, f"{_safe_name(residue)}.png"), dpi=120)
-            plt.close(fig)
-            n_figs += 1
+                ylabel = 'I / I(0)' if float(np.max(y[good])) <= 1.5 else 'Intensity'
+            panels[obs].append({'residue': residue, 'L': L[good], 'y': y[good],
+                                'Ld': Ld, 'yc': yc, 'ylabel': ylabel,
+                                'kd': fit['Kd'], 'r2': fit.get('r_squared', float('nan'))})
 
     summary_path = os.path.join(args.out, 'summary.csv')
     with open(summary_path, 'w', newline='') as fh:
@@ -457,11 +455,48 @@ def _run_export_kd(args):
         writer.writeheader()
         writer.writerows(summary_rows)
 
+    outputs = []
+    if not args.summary_only:
+        cols = min(4, max(1, args.per_page))
+        rows = max(1, -(-args.per_page // cols))  # ceil
+        for obs in observables:
+            plist = panels[obs]
+            if not plist:
+                continue
+            if args.fig_format == 'png':
+                obs_dir = os.path.join(args.out, obs)
+                os.makedirs(obs_dir, exist_ok=True)
+                for p in plist:
+                    fig, ax = plt.subplots(figsize=(4, 3))
+                    _draw_kd_panel(ax, p)
+                    fig.tight_layout()
+                    fig.savefig(os.path.join(obs_dir, f"{_safe_name(p['residue'])}.png"), dpi=120)
+                    plt.close(fig)
+                outputs.append(obs_dir)
+            else:
+                from matplotlib.backends.backend_pdf import PdfPages
+                pdf_path = os.path.join(args.out, f"{obs}_fits.pdf")
+                with PdfPages(pdf_path) as pdf:
+                    for start in range(0, len(plist), args.per_page):
+                        page = plist[start:start + args.per_page]
+                        fig, axes = plt.subplots(rows, cols, figsize=(cols * 4, rows * 3))
+                        axes = np.atleast_1d(axes).flatten()
+                        for ax, p in zip(axes, page):
+                            _draw_kd_panel(ax, p)
+                        for ax in axes[len(page):]:
+                            ax.axis('off')
+                        fig.suptitle(f"{obs.upper()} binding fits", fontsize=12)
+                        fig.tight_layout(rect=[0, 0, 1, 0.98])
+                        pdf.savefig(fig)
+                        plt.close(fig)
+                outputs.append(pdf_path)
+
     _emit(args,
-          {'command': 'export kd', 'n_fits': len(summary_rows), 'n_figures': n_figs,
-           'summary_csv': summary_path},
-          f"Exported {len(summary_rows)} fit(s), {n_figs} figure(s)",
-          f"  Summary: {summary_path}")
+          {'command': 'export kd', 'n_fits': len(summary_rows),
+           'summary_csv': summary_path, 'figures': outputs},
+          f"Exported {len(summary_rows)} fit(s)",
+          f"  Summary: {summary_path}",
+          *[f"  Figures: {o}" for o in outputs])
     return 0
 
 
@@ -546,6 +581,10 @@ def build_parser():
     ex_kd.add_argument('--out', required=True, help='Output directory for figures + summary.csv')
     ex_kd.add_argument('--observable', type=_str_list, default=None,
                        help='Comma-separated observables to render (default: those present)')
+    ex_kd.add_argument('--fig-format', choices=['pdf', 'png'], default='pdf', dest='fig_format',
+                       help='pdf: one multi-page grid per observable; png: one file per residue (default: pdf)')
+    ex_kd.add_argument('--per-page', type=int, default=20, dest='per_page',
+                       help='Panels per PDF page (default: 20 = 5x4, like T1/T2)')
     ex_kd.add_argument('--summary-only', action='store_true', dest='summary_only',
                        help='Write only summary.csv, no figures')
     ex_kd.set_defaults(func=_run_export_kd)

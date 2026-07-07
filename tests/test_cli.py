@@ -323,13 +323,24 @@ class TestExportKd:
                      "--p0", "50", "--observable", observable]) == 0
         return kdout / "kd_kd_fit_data.json"
 
-    def test_export_writes_figures_and_summary(self, tmp_path):
+    def test_export_writes_pdf_and_summary_by_default(self, tmp_path):
         from lunaNMR.cli import main
         jf = self._make_kd_json(tmp_path, "csp")
         figs = tmp_path / "figs"
         assert main(["export", "kd", "--json", str(jf), "--out", str(figs)]) == 0
         assert (figs / "summary.csv").exists()
+        pdf = figs / "csp_fits.pdf"
+        assert pdf.exists() and pdf.stat().st_size > 0
+        assert not (figs / "csp").exists()          # no per-residue PNG dir in pdf mode
+
+    def test_export_png_format_writes_per_residue(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs_png"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
+                     "--fig-format", "png"]) == 0
         assert len(list((figs / "csp").glob("*.png"))) >= 1
+        assert not (figs / "csp_fits.pdf").exists()
 
     def test_export_summary_only_skips_figures(self, tmp_path):
         from lunaNMR.cli import main
