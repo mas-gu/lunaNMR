@@ -24,34 +24,10 @@ import json
 import re
 from pathlib import Path
 
-
-def parse_delay_column(col_name):
-    """
-    Parse a delay column header to extract the delay value in ms.
-
-    Handles formats:
-    - Simple numbers: "300" -> 300.0
-    - Duplicate markers: "300_2" -> 300.0 (sequence number ignored)
-    - Fractional: "50.5" or "50.5_2" -> 50.5
-
-    Args:
-        col_name: Column header string
-
-    Returns:
-        Delay value as float, or None if not parseable
-    """
-    col_str = str(col_name).strip()
-
-    # Pattern: number (with optional decimal) optionally followed by _N
-    match = re.match(r'^(\d+(?:\.\d+)?)(?:_\d+)?$', col_str)
-    if match:
-        return float(match.group(1))
-
-    # Fallback: try direct float conversion
-    try:
-        return float(col_str)
-    except ValueError:
-        return None
+try:
+    from delay_parser import parse_delay_column
+except ImportError:  # imported as dynamiXs_T1_T2.fit_Tx_NMRRE (parent dir on path)
+    from dynamiXs_T1_T2.delay_parser import parse_delay_column
 
 
 def exp_decay(x, A, t2, C=0.0):
@@ -450,13 +426,9 @@ def main():
         print(f"Detected LunaNMR Fit Series format (columns: {detected_lunaNMR_cols})")
         delay_start_idx = 0
         for i, col in enumerate(header_row):
-            if col not in lunaNMR_columns:
-                try:
-                    float(col)
-                    delay_start_idx = i
-                    break
-                except ValueError:
-                    continue
+            if col not in lunaNMR_columns and parse_delay_column(col) is not None:
+                delay_start_idx = i
+                break
         assignment_idx = header_row.index('Assignment') if 'Assignment' in header_row else 1
         print(f"  Using 'Assignment' column (index {assignment_idx}) for residue names")
         print(f"  Delay columns start at index {delay_start_idx}")
@@ -583,13 +555,9 @@ def run_analysis_with_params(params, progress_callback=None):
         print(f"Detected LunaNMR Fit Series format (columns: {detected_lunaNMR_cols})")
         delay_start_idx = 0
         for i, col in enumerate(header_row):
-            if col not in lunaNMR_columns:
-                try:
-                    float(col)
-                    delay_start_idx = i
-                    break
-                except ValueError:
-                    continue
+            if col not in lunaNMR_columns and parse_delay_column(col) is not None:
+                delay_start_idx = i
+                break
         assignment_idx = header_row.index('Assignment') if 'Assignment' in header_row else 1
         print(f"  Using 'Assignment' column (index {assignment_idx}) for residue names")
         print(f"  Delay columns start at index {delay_start_idx}")

@@ -168,6 +168,32 @@ class TestDynamixsMethyl:
         from lunaNMR.cli import main
         assert main(["dynamixs"]) != 0
 
+    @pytest.mark.filterwarnings("ignore:FigureCanvasAgg is non-interactive")
+    def test_t1t2_reads_lunanmr_matrix_with_o_decimal_headers(self, tmp_path):
+        # peak_intensity_matrix.csv from a series run has metadata columns plus
+        # delay columns labelled like '600_T1_0o0' and dummy_XXX rows. The T1/T2
+        # loader must parse the 'o'-decimal headers and drop the dummy rows.
+        from lunaNMR.cli import main
+        delays = [0.0, 0.1, 0.2, 0.4, 0.8, 1.0, 1.5, 2.0]
+        labels = [f"600_T1_{str(d).replace('.', 'o')}" for d in delays]
+        A, tau = 1.0e6, 0.5
+        header = ["Peak_Number", "Assignment", "Reference_X", "Reference_Y"] + labels
+        rows = [
+            [1, "3.0", 8.3, 128.3] + [A * np.exp(-t / tau) for t in delays],
+            [2, "4.0", 8.6, 122.8] + [A * np.exp(-t / tau) for t in delays],
+            [3, "dummy_001", 0.0, 0.0] + [0.0] * len(delays),
+        ]
+        csv = tmp_path / "peak_intensity_matrix.csv"
+        pd.DataFrame(rows, columns=header).to_csv(csv, index=False)
+
+        out = tmp_path / "t1out"
+        code = main(["dynamixs", "t1t2", "--input", str(csv), "--out", str(out), "--exp", "T1"])
+        assert code == 0
+        data = json.loads((out / "field1_T1_fit_data.json").read_text())
+        residues = {f["residue"] for f in data["fits"]}
+        assert residues == {"3.0", "4.0"}          # dummy row excluded
+        assert all(np.isfinite(f["t2"]) and f["t2"] > 0 for f in data["fits"])
+
 
 class TestSeriesHelpers:
     def test_default_series_params_has_nested_structure(self):
