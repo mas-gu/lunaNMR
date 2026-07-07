@@ -667,14 +667,9 @@ def run_analysis_with_params(params, progress_callback=None):
         # Find where the numeric delay columns start
         delay_start_idx = 0
         for i, col in enumerate(header_row):
-            if col not in lunaNMR_columns:
-                # Check if this looks like a numeric delay value
-                try:
-                    float(col)
-                    delay_start_idx = i
-                    break
-                except ValueError:
-                    continue
+            if col not in lunaNMR_columns and parse_delay_column(col) is not None:
+                delay_start_idx = i
+                break
 
         # Find the Assignment column index for residue names
         assignment_idx = header_row.index('Assignment') if 'Assignment' in header_row else 1

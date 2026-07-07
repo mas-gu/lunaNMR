@@ -431,7 +431,7 @@ class IntegratedAnalysisPipeline:
             self.log_progress(f"  Analyzing single-field data ({self.params.field1_freq_mhz} MHz)")
 
             analyzer = AnalysisClass(
-                field_freq=self.params.field1_freq_mhz,
+                spectrometer_frequency=self.params.field1_freq_mhz,
                 rNH=rNH_meters,
                 csaN=csaN_units
             )
@@ -450,8 +450,8 @@ class IntegratedAnalysisPipeline:
             plots_pdf = f"{output_prefix}_spectral_density_plots.pdf"
 
             results_df.to_csv(basic_csv, index=False)
-            analyzer.save_results(results_df, detailed_csv)
-            analyzer.plot_results(results_df, save_plots=True, plot_filename=plots_pdf)
+            analyzer.save_detailed_results(results_df, detailed_csv)
+            analyzer.plot_results(results_df, save_plots=True)
 
             self.log_progress(f"  ✓ Single-field analysis completed: {len(results_df)} residues")
             self.log_progress(f"  ✓ Results saved to: {basic_csv}")

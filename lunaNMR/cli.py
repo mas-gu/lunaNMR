@@ -103,6 +103,12 @@ def _add_modules_path(*parts):
     path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'modules', *parts))
     if path not in sys.path:
         sys.path.insert(0, path)
+    # Also expose on PYTHONPATH so multiprocessing-spawn children (macOS default) and
+    # subprocesses can import these sibling modules — the density analyzers fan out to a
+    # Pool whose workers re-import the module by name.
+    existing = os.environ.get('PYTHONPATH', '')
+    if path not in existing.split(os.pathsep):
+        os.environ['PYTHONPATH'] = path + (os.pathsep + existing if existing else '')
     return path
 
 

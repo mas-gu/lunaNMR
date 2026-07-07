@@ -520,6 +520,39 @@ class TestDynamixsDensity:
         assert (df["S2"].between(0, 1.05)).all()   # order parameters are physical
 
 
+class TestDynamixsModelfree:
+    N = 12   # pipeline requires >= 10 residues
+
+    def _matrix(self, path, delays, tau):
+        header = ["Peak_Number", "Assignment", "Reference_X", "Reference_Y"] + [str(d) for d in delays]
+        rows = [[i + 1, f"R{i + 1}", 8.0, 120.0] + [1e5 * np.exp(-t / tau) for t in delays]
+                for i in range(self.N)]
+        pd.DataFrame(rows, columns=header).to_csv(path, index=False)
+
+    def _noe(self, path, value):
+        path.write_text("".join(f"R{i + 1},{value}\n" for i in range(self.N)))
+
+    def test_single_field_modelfree_end_to_end(self, tmp_path):
+        from lunaNMR.cli import main
+        delays = [10, 30, 60, 100, 150]           # ms
+        self._matrix(tmp_path / "t1.csv", delays, 800.0)   # T1 ~800 ms
+        self._matrix(tmp_path / "t2.csv", delays, 100.0)   # T2 ~100 ms
+        self._noe(tmp_path / "sat.csv", 800)
+        self._noe(tmp_path / "unsat.csv", 1000)
+        out = tmp_path / "mf"
+        code = main(["dynamixs", "modelfree",
+                     "--f1-t1", str(tmp_path / "t1.csv"), "--f1-t2", str(tmp_path / "t2.csv"),
+                     "--f1-noe-sat", str(tmp_path / "sat.csv"),
+                     "--f1-noe-unsat", str(tmp_path / "unsat.csv"),
+                     "--field1-freq", "600", "--method", "single_087", "--out", str(out)])
+        assert code == 0
+        import glob
+        basic = glob.glob(str(out / "*basic*.csv"))
+        assert basic, "no spectral-density output written"
+        df = pd.read_csv(basic[0])
+        assert "S2" in df.columns and len(df) >= 1
+
+
 class TestDispatch:
     def test_help_exits_zero(self):
         from lunaNMR.cli import main
