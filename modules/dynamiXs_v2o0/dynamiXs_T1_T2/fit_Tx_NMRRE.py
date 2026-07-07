@@ -30,6 +30,20 @@ except ImportError:  # imported as dynamiXs_T1_T2.fit_Tx_NMRRE (parent dir on pa
     from dynamiXs_T1_T2.delay_parser import parse_delay_column
 
 
+# A fitted time constant beyond this multiple of the longest delay means the decay
+# is not measurable in the sampled window (flat / no-signal / bad peak) — the value
+# is meaningless, so the residue is flagged unreliable and left out of the summary.
+DEGENERATE_T2_OVER_TMAX = 100.0
+
+
+def _is_reliable_t2(t2, t2_err, x):
+    """True when a fitted time constant is measurable within the delay window."""
+    if not np.isfinite(t2):
+        return False
+    x_max = float(np.max(x)) if np.size(x) else 0.0
+    return x_max <= 0 or t2 <= DEGENERATE_T2_OVER_TMAX * x_max
+
+
 def exp_decay(x, A, t2, C=0.0):
     """Mono-exponential decay with baseline offset: I(t) = A * exp(-t/t2) + C."""
     return A * np.exp(-x / t2) + C
@@ -150,8 +164,6 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
     -------
     dict : Fitting results
     """
-    print(f"Fitting residue: {residue_name}")
-
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
 
@@ -188,6 +200,12 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
         t2_err = result.params['t2'].stderr if result.params['t2'].stderr else np.nan
         c_err = result.params['C'].stderr if result.params['C'].stderr else np.nan
 
+    success = _is_reliable_t2(t2, t2_err, x)
+    if success:
+        print(f"Fitting residue: {residue_name}  ->  {t2:.4g}")
+    else:
+        print(f"Fitting residue: {residue_name}  ->  unreliable (no decay in window), excluded")
+
     return {
         'residue': residue_name,
         'A': a,
@@ -198,7 +216,8 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
         'C_err': c_err,
         'x': x,
         'y': y,
-        'result': result
+        'result': result,
+        'success': success
     }
 
 
@@ -649,15 +668,22 @@ def run_analysis_with_params(params, progress_callback=None):
             field_freq=params.get('field_freq', 600.0)
         )
 
-    # Summary statistics
-    t2_values = [r['t2'] for r in results_list]
-    t2_errors = [r['t2_err'] for r in results_list]
+    # Summary statistics over reliable residues only (degenerate/no-decay excluded)
+    reliable = [r for r in results_list if r.get('success', True)]
+    n_excluded = len(results_list) - len(reliable)
+    t2_values = [r['t2'] for r in reliable]
+    t2_errors = [r['t2_err'] for r in reliable]
 
     print(f"\n{experiment_type} Analysis Summary:")
-    print(f"  Number of residues fitted: {len(results_list)}")
-    print(f"  {experiment_type} range: {min(t2_values):.2f} to {max(t2_values):.2f} {time_units}")
-    print(f"  Mean {experiment_type}: {np.mean(t2_values):.2f} ± {np.std(t2_values):.2f} {time_units}")
-    print(f"  Mean fitting error: {np.mean(t2_errors):.2f} {time_units}")
+    print(f"  Number of residues fitted: {len(reliable)}")
+    if n_excluded:
+        print(f"  Excluded (no measurable decay): {n_excluded}")
+    if t2_values:
+        print(f"  {experiment_type} range: {min(t2_values):.2f} to {max(t2_values):.2f} {time_units}")
+        print(f"  Mean {experiment_type}: {np.mean(t2_values):.2f} ± {np.std(t2_values):.2f} {time_units}")
+        print(f"  Mean fitting error: {np.nanmean(t2_errors):.2f} {time_units}")
+    else:
+        print("  No residues with a measurable decay.")
     print(f"  Results saved to: {results_txt_file}")
     print(f"  Plots saved with prefix: {output_prefix}")
     if json_file:
@@ -667,14 +693,15 @@ def run_analysis_with_params(params, progress_callback=None):
 
     # Return results summary
     return {
-        'n_fitted': len(results_list),
+        'n_fitted': len(reliable),
+        'n_excluded': n_excluded,
         'results_file': results_txt_file,
         'plots_prefix': output_prefix,
         'json_file': json_file,
-        't2_range': (min(t2_values), max(t2_values)),
-        'mean_t2': np.mean(t2_values),
-        'std_t2': np.std(t2_values),
-        'mean_error': np.mean(t2_errors)
+        't2_range': (min(t2_values), max(t2_values)) if t2_values else (np.nan, np.nan),
+        'mean_t2': np.mean(t2_values) if t2_values else np.nan,
+        'std_t2': np.std(t2_values) if t2_values else np.nan,
+        'mean_error': np.nanmean(t2_errors) if t2_errors else np.nan
     }
 
 

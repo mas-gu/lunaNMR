@@ -202,6 +202,11 @@ def fit_single_residue_parallel(args):
             t2_err = result.params['t2'].stderr if result.params['t2'].stderr else np.nan
             c_err = result.params['C'].stderr if result.params['C'].stderr else np.nan
 
+        # A fit whose t2 exceeds 100x the longest delay has no measurable decay
+        # in the window (flat / no-signal / bad peak) -> unreliable, excluded.
+        x_max = float(np.max(x)) if np.size(x) else 0.0
+        reliable = bool(np.isfinite(t2)) and (x_max <= 0 or t2 <= 100.0 * x_max)
+
         return {
             'residue': residue_name,
             'A': a,
@@ -213,7 +218,7 @@ def fit_single_residue_parallel(args):
             'x': x,
             'y': y,
             'result': result,
-            'success': True,
+            'success': reliable,
             'idx': idx
         }
 

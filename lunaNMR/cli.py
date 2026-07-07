@@ -579,8 +579,8 @@ def _add_relaxation_flags(p):
                    help='Field label used in the JSON filename (default: field1)')
     p.add_argument('--field-freq', type=float, default=600.0, dest='field_freq',
                    help='Spectrometer field frequency in MHz (default: 600)')
-    p.add_argument('--time-units', choices=['ms', 's', 'us'], default='ms', dest='time_units',
-                   help='Units of the delay values (labels output; does not rescale). Default: ms')
+    p.add_argument('--time-units', choices=['ms', 's', 'us'], default='s', dest='time_units',
+                   help='Units of the delay values (labels output; does not rescale). Default: s')
     p.add_argument('--error-method', choices=['analytical', 'bootstrap'], default='analytical',
                    dest='error_method', help='Error estimation method (default: analytical)')
     p.add_argument('--bootstrap', type=int, default=1000,
