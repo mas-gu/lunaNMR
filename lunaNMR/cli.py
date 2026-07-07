@@ -652,10 +652,10 @@ def main(argv=None):
         return 2
     try:
         return args.func(args)
-    except (FileNotFoundError, ValueError, RuntimeError, KeyError) as exc:
+    except (FileNotFoundError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         # Expected bad-input failures from the wrapped engines (missing file, bad
-        # concentrations, malformed CSV/JSON missing an expected column/key): report
-        # cleanly instead of dumping a traceback.
+        # concentrations, malformed CSV/JSON missing an expected column/key, an
+        # unparseable delay label): report cleanly instead of dumping a traceback.
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

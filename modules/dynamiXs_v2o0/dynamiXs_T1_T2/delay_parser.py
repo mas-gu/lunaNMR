@@ -25,10 +25,10 @@ def parse_delay_column(col_name):
         return float(bare.group(1))
 
     # Descriptive name: take the trailing numeric token (with optional unit and
-    # optional duplicate-measurement suffix). 'o' stands in for '.' to keep
-    # column headers filesystem-safe.
+    # duplicate-measurement suffix, either '_2'-style or a trailing letter like
+    # '0o0b'). 'o' stands in for '.' to keep column headers filesystem-safe.
     tail = re.search(
-        r"(?:^|_)(\d+(?:[o.]\d+)?)(ms|s|us)?(?:_\d+)?$",
+        r"(?:^|_)(\d+(?:[o.]\d+)?)(ms|s|us)?[a-z]?(?:_\d+)?$",
         col_str,
         flags=re.IGNORECASE,
     )
