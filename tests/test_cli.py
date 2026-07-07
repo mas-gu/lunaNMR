@@ -342,6 +342,15 @@ class TestExportKd:
         assert len(list((figs / "csp").glob("*.png"))) >= 1
         assert not (figs / "csp_fits.pdf").exists()
 
+    def test_export_both_formats(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs_both"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
+                     "--fig-format", "pdf,png"]) == 0
+        assert (figs / "csp_fits.pdf").exists()
+        assert len(list((figs / "csp").glob("*.png"))) >= 1
+
     def test_export_summary_only_skips_figures(self, tmp_path):
         from lunaNMR.cli import main
         jf = self._make_kd_json(tmp_path, "csp")

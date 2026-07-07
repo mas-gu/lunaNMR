@@ -455,6 +455,12 @@ def _run_export_kd(args):
         writer.writeheader()
         writer.writerows(summary_rows)
 
+    unknown = [fmt for fmt in args.fig_format if fmt not in ('pdf', 'png')]
+    if unknown:
+        print(f"Unknown --fig-format value(s): {','.join(unknown)} (use pdf and/or png)",
+              file=sys.stderr)
+        return 1
+
     outputs = []
     if not args.summary_only:
         cols = min(4, max(1, args.per_page))
@@ -463,7 +469,7 @@ def _run_export_kd(args):
             plist = panels[obs]
             if not plist:
                 continue
-            if args.fig_format == 'png':
+            if 'png' in args.fig_format:
                 obs_dir = os.path.join(args.out, obs)
                 os.makedirs(obs_dir, exist_ok=True)
                 for p in plist:
@@ -473,7 +479,7 @@ def _run_export_kd(args):
                     fig.savefig(os.path.join(obs_dir, f"{_safe_name(p['residue'])}.png"), dpi=120)
                     plt.close(fig)
                 outputs.append(obs_dir)
-            else:
+            if 'pdf' in args.fig_format:
                 from matplotlib.backends.backend_pdf import PdfPages
                 pdf_path = os.path.join(args.out, f"{obs}_fits.pdf")
                 with PdfPages(pdf_path) as pdf:
@@ -581,8 +587,9 @@ def build_parser():
     ex_kd.add_argument('--out', required=True, help='Output directory for figures + summary.csv')
     ex_kd.add_argument('--observable', type=_str_list, default=None,
                        help='Comma-separated observables to render (default: those present)')
-    ex_kd.add_argument('--fig-format', choices=['pdf', 'png'], default='pdf', dest='fig_format',
-                       help='pdf: one multi-page grid per observable; png: one file per residue (default: pdf)')
+    ex_kd.add_argument('--fig-format', type=_str_list, default=['pdf'], dest='fig_format',
+                       help='pdf (multi-page grid per observable) and/or png (one file per '
+                            'residue); comma-separated for both, e.g. pdf,png (default: pdf)')
     ex_kd.add_argument('--per-page', type=int, default=20, dest='per_page',
                        help='Panels per PDF page (default: 20 = 5x4, like T1/T2)')
     ex_kd.add_argument('--summary-only', action='store_true', dest='summary_only',
