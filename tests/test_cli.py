@@ -532,8 +532,9 @@ class TestDynamixsModelfree:
     def _noe(self, path, value):
         path.write_text("".join(f"R{i + 1},{value}\n" for i in range(self.N)))
 
-    def test_single_field_modelfree_end_to_end(self, tmp_path):
+    def test_single_field_modelfree_end_to_end(self, tmp_path, monkeypatch):
         from lunaNMR.cli import main
+        monkeypatch.chdir(tmp_path)               # pipeline writes intermediate txt to CWD
         delays = [10, 30, 60, 100, 150]           # ms
         self._matrix(tmp_path / "t1.csv", delays, 800.0)   # T1 ~800 ms
         self._matrix(tmp_path / "t2.csv", delays, 100.0)   # T2 ~100 ms
