@@ -195,11 +195,13 @@ class SingleSpectrumProcessor:
         if ml_manager is None:
             return None
 
-        # Check if ML is enabled in processing options
+        # ML parameter prediction was never wired up (the model has no trained
+        # weights and the feature extractor reads a spectrum attribute that does not
+        # exist), so it is opt-in: skipped unless a caller explicitly enables it.
         ml_config = processing_options.get('ml_config', {}) if processing_options else {}
-        if not ml_config.get('enabled', True):
+        if not ml_config.get('enabled', False):
             return None
-        if not ml_config.get('use_predictions', True):
+        if not ml_config.get('use_predictions', False):
             return None
 
         try:
