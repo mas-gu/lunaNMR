@@ -481,6 +481,45 @@ class TestDryRun:
         assert data["dry_run"] is True
 
 
+class TestDynamixsHetnoe:
+    def test_hetnoe_ratio(self, tmp_path):
+        from lunaNMR.cli import main
+        (tmp_path / "sat.csv").write_text("R1,800,16\nR2,1000,20\n")
+        (tmp_path / "unsat.csv").write_text("R1,1000,20\nR2,1000,20\n")
+        out = tmp_path / "h"
+        assert main(["dynamixs", "hetnoe", "--sat", str(tmp_path / "sat.csv"),
+                     "--unsat", str(tmp_path / "unsat.csv"), "--out", str(out)]) == 0
+        df = pd.read_csv(out / "field1_hetnoe.csv")
+        assert float(df.loc[df.Residue == "R1", "hetNOE"].iloc[0]) == pytest.approx(0.8)
+
+    def test_hetnoe_missing_file_errors(self, tmp_path):
+        from lunaNMR.cli import main
+        (tmp_path / "unsat.csv").write_text("R1,1000\n")
+        assert main(["dynamixs", "hetnoe", "--sat", str(tmp_path / "nope.csv"),
+                     "--unsat", str(tmp_path / "unsat.csv"), "--out", str(tmp_path / "h")]) == 1
+
+
+class TestDynamixsDensity:
+    def _table(self, path, n=4):
+        rows = [(f"{10 + i}.VAL", 1.4 + 0.01 * i, 0.06, 8.0 + 0.1 * i, 0.3,
+                 0.70 + 0.01 * i, 0.014) for i in range(n)]
+        pd.DataFrame(rows, columns=["Residue", "R1", "R1err", "R2", "R2err",
+                                    "hetNOE", "hetNOEerr"]).to_csv(path, index=False)
+
+    def test_single_field_density(self, tmp_path):
+        from lunaNMR.cli import main
+        t = tmp_path / "f1.csv"
+        self._table(t)
+        out = tmp_path / "dens"
+        code = main(["dynamixs", "density", "--input", str(t), "--out", str(out),
+                     "--field1-freq", "600", "--no-parallel", "--no-plot"])
+        assert code == 0
+        df = pd.read_csv(out / "spectral_density_results.csv")
+        assert len(df) == 4
+        assert {"J0", "JwN", "S2"} <= set(df.columns)
+        assert (df["S2"].between(0, 1.05)).all()   # order parameters are physical
+
+
 class TestDispatch:
     def test_help_exits_zero(self):
         from lunaNMR.cli import main
