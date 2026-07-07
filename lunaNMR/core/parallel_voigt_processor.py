@@ -623,6 +623,22 @@ class ParallelVoigtProcessor:
         import gc
         gc.collect()
 
+    @staticmethod
+    def _normalize_assignment(assignment):
+        """Canonicalize a peak assignment so numeric values compare equal regardless
+        of how they were stored: 3, 3.0, numpy.int64(3), '3', '3.0' all -> '3'.
+
+        Locked clusters keep the raw peak-list value (int/float/numpy) while the
+        current-spectrum context stringifies it, so the two sides must be normalized
+        before matching. Non-numeric residue labels (e.g. 'A12N-H') pass through stripped.
+        """
+        text = str(assignment).strip()
+        try:
+            value = float(text)
+        except (ValueError, TypeError):
+            return text
+        return str(int(value)) if value.is_integer() else str(value)
+
     def _convert_locked_clusters_to_positions(self, locked_clusters_by_assignment, all_peaks_context):
         """
         Convert assignment-based locked clusters to position-based clusters.
@@ -638,7 +654,7 @@ class ParallelVoigtProcessor:
         # Build assignment → position mapping from current spectrum
         assignment_to_position = {}
         for peak in all_peaks_context:
-            assignment = str(peak.get('assignment', ''))
+            assignment = self._normalize_assignment(peak.get('assignment', ''))
             x = peak.get('x_ppm') or peak.get('pos_x')
             y = peak.get('y_ppm') or peak.get('pos_y')
             if assignment and x is not None and y is not None:
@@ -649,8 +665,9 @@ class ParallelVoigtProcessor:
         for cluster_assignments in locked_clusters_by_assignment:
             cluster_positions = []
             for assignment in cluster_assignments:
-                if assignment in assignment_to_position:
-                    cluster_positions.append(assignment_to_position[assignment])
+                key = self._normalize_assignment(assignment)
+                if key in assignment_to_position:
+                    cluster_positions.append(assignment_to_position[key])
                 else:
                     log_warning(f"Locked cluster assignment '{assignment}' not found in current spectrum")
 
