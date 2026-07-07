@@ -152,6 +152,7 @@ def _run_dynamixs_t1t2(args):
         'output_prefix': os.path.join(args.out, args.prefix),
         'results_txt_file': os.path.join(args.out, f"{args.prefix}_fit_results.txt"),
         'experiment_type': args.exp,
+        'time_units': args.time_units,
         'error_method': args.error_method,
         'n_bootstrap': args.bootstrap,
         'field_name': args.field_name,
@@ -161,7 +162,7 @@ def _run_dynamixs_t1t2(args):
     with _engine_stdout(args):
         result = run_analysis_with_params(params)
     human = [f"{args.exp} analysis complete: {result['n_fitted']} residues fitted, "
-             f"mean {args.exp} = {result['mean_t2']:.2f} ms",
+             f"mean {args.exp} = {result['mean_t2']:.2f} {args.time_units}",
              f"  Results: {result['results_file']}"]
     if result.get('json_file'):
         human.append(f"  JSON:    {result['json_file']}")
@@ -187,6 +188,7 @@ def _run_dynamixs_methyl(args):
         'json_folder': args.out,
         'field_name': args.field_name,
         'field_freq': args.field_freq,
+        'time_units': args.time_units,
         'error_method': args.error_method,
         'n_bootstrap': args.bootstrap,
     }
@@ -577,6 +579,8 @@ def _add_relaxation_flags(p):
                    help='Field label used in the JSON filename (default: field1)')
     p.add_argument('--field-freq', type=float, default=600.0, dest='field_freq',
                    help='Spectrometer field frequency in MHz (default: 600)')
+    p.add_argument('--time-units', choices=['ms', 's', 'us'], default='ms', dest='time_units',
+                   help='Units of the delay values (labels output; does not rescale). Default: ms')
     p.add_argument('--error-method', choices=['analytical', 'bootstrap'], default='analytical',
                    dest='error_method', help='Error estimation method (default: analytical)')
     p.add_argument('--bootstrap', type=int, default=1000,

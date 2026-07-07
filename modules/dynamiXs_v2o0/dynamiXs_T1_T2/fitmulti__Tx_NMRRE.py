@@ -154,8 +154,18 @@ def fit_single_residue_parallel(args):
         if idx % 10 == 0:
             print(f"Processing residue {idx+1}/{total}: {residue_name}")
 
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+
+        # Data-driven initial guesses (fixed A=5/t2=100 fail to converge when the
+        # amplitude or time-scale differ by orders of magnitude).
         if initial_C is None:
             initial_C = float(np.min(y))
+        if initial_A is None:
+            initial_A = float(np.max(y) - np.min(y)) or 1.0
+        if initial_t2 is None:
+            x_max = float(np.max(x))
+            initial_t2 = x_max / 2.0 if x_max > 0 else 1.0
 
         model = Model(exp_decay)
         params = model.make_params(A=initial_A, t2=initial_t2, C=initial_C)
@@ -435,8 +445,8 @@ def main():
     signal_units = "Intensity"  # Signal axis units
 
     # Fitting parameters
-    initial_A = 5  # Initial amplitude estimate
-    initial_t2 = 100  # Initial time constant estimate
+    initial_A = None  # Data-driven unless overridden
+    initial_t2 = None  # Data-driven unless overridden
     n_bootstrap = 1000  # Number of bootstrap iterations for error estimation
     error_method = 'analytical'  # 'analytical' (fast) or 'bootstrap' (robust)
 
@@ -518,7 +528,7 @@ def main():
     args_list = []
     for idx, residue in enumerate(residue_names):
         y = y_data[idx, :]
-        args_list.append((x, y, residue, initial_A, initial_t2, n_bootstrap, error_method, idx, len(residue_names)))
+        args_list.append((x, y, residue, initial_A, initial_t2, None, n_bootstrap, error_method, idx, len(residue_names)))
 
     # Parallel fitting
     print(f"Starting parallel fitting with {n_processes} processes...")
@@ -610,8 +620,8 @@ def run_analysis_with_params(params, progress_callback=None):
     signal_units = params.get('signal_units', 'Intensity')
 
     # Fitting parameters
-    initial_A = params.get('initial_A', 5)
-    initial_t2 = params.get('initial_t2', 100)
+    initial_A = params.get('initial_A')
+    initial_t2 = params.get('initial_t2')
     n_bootstrap = params.get('n_bootstrap', 1000)
     error_method = params.get('error_method', 'analytical')
 

@@ -192,7 +192,8 @@ class TestDynamixsMethyl:
         data = json.loads((out / "field1_T1_fit_data.json").read_text())
         residues = {f["residue"] for f in data["fits"]}
         assert residues == {"3.0", "4.0"}          # dummy row excluded
-        assert all(np.isfinite(f["t2"]) and f["t2"] > 0 for f in data["fits"])
+        # Recovered T1 must be near the injected tau (0.5), not a degenerate huge value.
+        assert all(f["t2"] == pytest.approx(0.5, rel=0.1) for f in data["fits"])
 
 
 class TestSeriesHelpers:

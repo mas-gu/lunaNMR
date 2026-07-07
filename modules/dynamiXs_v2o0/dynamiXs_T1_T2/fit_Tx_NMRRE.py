@@ -118,7 +118,7 @@ def bootstrap_errors(x, y, model, params, n_bootstrap=1000):
     return np.std(a_values), np.std(t2_values), np.std(c_values)
 
 
-def fit_single_residue(x, y, residue_name, initial_A=5, initial_t2=100,
+def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
                        initial_C=None, n_bootstrap=1000, error_method='analytical'):
     """
     Fit exponential decay with baseline offset to single residue data.
@@ -152,8 +152,19 @@ def fit_single_residue(x, y, residue_name, initial_A=5, initial_t2=100,
     """
     print(f"Fitting residue: {residue_name}")
 
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    # Data-driven initial guesses (fixed defaults like A=5/t2=100 fail to converge
+    # when the amplitude or time-scale differs by orders of magnitude, e.g. real
+    # intensities ~1e6 over a 0-2 s delay range).
     if initial_C is None:
         initial_C = float(np.min(y))
+    if initial_A is None:
+        initial_A = float(np.max(y) - np.min(y)) or 1.0
+    if initial_t2 is None:
+        x_max = float(np.max(x))
+        initial_t2 = x_max / 2.0 if x_max > 0 else 1.0
 
     # Create model and parameters
     model = Model(exp_decay)
@@ -387,8 +398,8 @@ def main():
     signal_units = "Intensity"  # Signal axis units
     
     # Fitting parameters
-    initial_A = 5  # Initial amplitude estimate
-    initial_t2 = 100  # Initial time constant estimate
+    initial_A = None  # Data-driven (max-min) unless overridden
+    initial_t2 = None  # Data-driven (from delay range) unless overridden
     n_bootstrap = 1000  # Number of bootstrap iterations for error estimation
     error_method = 'analytical'  # 'analytical' (fast) or 'bootstrap' (robust)
 
@@ -465,7 +476,7 @@ def main():
         residue = residue_names[col_idx]
 
         result = fit_single_residue(x, y, residue, initial_A, initial_t2,
-                                    n_bootstrap, error_method)
+                                    n_bootstrap=n_bootstrap, error_method=error_method)
         results_list.append(result)
 
     print(f"Completed fitting for {len(results_list)} residues")
@@ -523,8 +534,8 @@ def run_analysis_with_params(params, progress_callback=None):
     signal_units = params.get('signal_units', 'Intensity')
     
     # Fitting parameters
-    initial_A = params.get('initial_A', 5)
-    initial_t2 = params.get('initial_t2', 100)
+    initial_A = params.get('initial_A')   # None -> data-driven per residue
+    initial_t2 = params.get('initial_t2')  # None -> data-driven per residue
     n_bootstrap = params.get('n_bootstrap', 1000)
     error_method = params.get('error_method', 'analytical')
 
@@ -595,7 +606,7 @@ def run_analysis_with_params(params, progress_callback=None):
         residue = residue_names[col_idx]
 
         result = fit_single_residue(x, y, residue, initial_A, initial_t2,
-                                    n_bootstrap, error_method)
+                                    n_bootstrap=n_bootstrap, error_method=error_method)
         results_list.append(result)
 
         # Report progress
