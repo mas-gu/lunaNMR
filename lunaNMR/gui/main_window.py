@@ -405,8 +405,8 @@ class LunaNMRMainWindow(BaseWindow):
         # Detection parameters from parameter_manager defaults
         self.noise_threshold = 3.0
         # Nucleus-adaptive search windows (from ps2d_config)
-        self.search_window_x = 0.01  # 1H dimension (ppm) - F2
-        self.search_window_y = 0.01  # 15N/13C dimension (ppm) - F1
+        self.search_window_x = 0.070  # 1H dimension (ppm) - F2
+        self.search_window_y = 0.070  # 15N/13C dimension (ppm) - F1
         self.detection_square_size = 3  # X-dimension/1H (pixels)
         self.detection_rectangle_y = 1  # Y-dimension/15N (pixels)
         self.detection_square_ppm_x = "0.000"  # Auto-calculated ppm conversion

@@ -155,6 +155,49 @@ def calculate_hetnoe_from_intensities(saturated_data: Dict[str, float],
     return noe_values
 
 
+def _residue_number(assignment):
+    """First integer in an assignment label ('K3'->3, 'V10'->10). None if absent."""
+    import re
+    m = re.search(r'\d+', str(assignment))
+    return int(m.group()) if m else None
+
+
+def plot_hetnoe_vs_residue(noe_values, output_pdf, title=None):
+    """QC plot of hetNOE (I_sat/I_unsat) vs residue number, one point per residue.
+
+    `noe_values` is the dict returned by calculate_hetnoe_from_intensities
+    ({residue: {'value', 'error'}}). Residues are ordered by sequence number; any
+    without a parseable number are appended alphabetically. Writes nothing (no file,
+    no error) when there is nothing to plot.
+    """
+    if not noe_values:
+        return
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    items = sorted(noe_values.items(),
+                   key=lambda kv: (_residue_number(kv[0]) is None,
+                                   _residue_number(kv[0]) if _residue_number(kv[0]) is not None else 0,
+                                   str(kv[0])))
+    labels = [k for k, _ in items]
+    x = [_residue_number(k) if _residue_number(k) is not None else i
+         for i, k in enumerate(labels)]
+    y = [v['value'] for _, v in items]
+    yerr = [v.get('error', 0.0) for _, v in items]
+
+    fig, ax = plt.subplots(figsize=(max(6, len(labels) * 0.18), 4))
+    ax.errorbar(x, y, yerr=yerr, fmt='o', ms=4, capsize=2, color='#1f77b4')
+    ax.axhline(0.8, color='0.6', ls='--', lw=0.8, label='rigid ≈ 0.8')
+    ax.set_xlabel('Residue')
+    ax.set_ylabel('hetNOE  (I$_{sat}$/I$_{unsat}$)')
+    ax.set_title(f'hetNOE — {title}' if title else 'hetNOE')
+    ax.legend(loc='best', fontsize=8)
+    fig.tight_layout()
+    fig.savefig(output_pdf)
+    plt.close(fig)
+
+
 def parse_intensity_csv(csv_file: str) -> Tuple[Dict[str, float], Optional[Dict[str, float]]]:
     """
     Parse a CSV file containing peak intensities.

@@ -27,7 +27,8 @@ try:
         convert_relaxation_times_to_rates,
         calculate_hetnoe_from_intensities,
         parse_intensity_csv,
-        create_spectral_density_input_csv
+        create_spectral_density_input_csv,
+        plot_hetnoe_vs_residue
     )
     from .data_validation import (
         merge_datasets_by_residue,
@@ -44,7 +45,8 @@ except ImportError:
         convert_relaxation_times_to_rates,
         calculate_hetnoe_from_intensities,
         parse_intensity_csv,
-        create_spectral_density_input_csv
+        create_spectral_density_input_csv,
+        plot_hetnoe_vs_residue
     )
     from data_validation import (
         merge_datasets_by_residue,
@@ -67,6 +69,11 @@ class IntegratedAnalysisParameters:
         self.field1_t2_file = None
         self.field1_noe_sat_file = None
         self.field1_noe_unsat_file = None
+        # Delay units of each relaxation series ('ms', 's', or 'us'), used when
+        # converting fitted T1/T2 to R1/R2. A T1 series may be in seconds while
+        # its T2 series is in milliseconds.
+        self.field1_t1_units = 'ms'
+        self.field1_t2_units = 'ms'
 
         # Field 2 (optional for dual-field)
         self.enable_dual_field = False
@@ -75,6 +82,8 @@ class IntegratedAnalysisParameters:
         self.field2_t2_file = None
         self.field2_noe_sat_file = None
         self.field2_noe_unsat_file = None
+        self.field2_t1_units = 'ms'
+        self.field2_t2_units = 'ms'
 
         # Analysis method
         self.analysis_method = 'dual_field_087'  # Options: 'single_jwh', 'single_087', 'dual_jwh', 'dual_087'
@@ -162,7 +171,9 @@ class IntegratedAnalysisPipeline:
             t2_file=self.params.field1_t2_file,
             noe_sat_file=self.params.field1_noe_sat_file,
             noe_unsat_file=self.params.field1_noe_unsat_file,
-            field_label='field1'
+            field_label='field1',
+            t1_units=self.params.field1_t1_units,
+            t2_units=self.params.field1_t2_units
         )
 
         # Step 2: Process Field 2 data (if dual-field)
@@ -174,7 +185,9 @@ class IntegratedAnalysisPipeline:
                 t2_file=self.params.field2_t2_file,
                 noe_sat_file=self.params.field2_noe_sat_file,
                 noe_unsat_file=self.params.field2_noe_unsat_file,
-                field_label='field2'
+                field_label='field2',
+                t1_units=self.params.field2_t1_units,
+                t2_units=self.params.field2_t2_units
             )
         else:
             self.log_progress("\n[2/7] Skipping Field 2 (single-field analysis)")
@@ -210,15 +223,22 @@ class IntegratedAnalysisPipeline:
 
     def _process_field_data(self, field_freq: float, t1_file: str, t2_file: str,
                            noe_sat_file: str, noe_unsat_file: str,
-                           field_label: str) -> Dict:
+                           field_label: str,
+                           t1_units: str = 'ms', t2_units: str = 'ms') -> Dict:
         """Process data for a single field"""
+
+        # The configured initial time constant is in ms; for a series whose delays
+        # are in other units it sits far off the curve and the fit stalls, so let the
+        # fitter derive a data-driven initial (initial_t = None) instead.
+        t1_initial_time = self.params.t1_initial_time if t1_units == 'ms' else None
+        t2_initial_time = self.params.t2_initial_time if t2_units == 'ms' else None
 
         # Step 1: Fit T1 data
         self.log_progress(f"  ├─ Fitting T1 data ({field_freq} MHz)...")
         t1_params, t1_results_file = run_t1_fitting(
             input_csv=t1_file,
             initial_amplitude=self.params.t1_initial_amplitude,
-            initial_t1=self.params.t1_initial_time,
+            initial_t1=t1_initial_time,
             n_bootstrap=self.params.t1_bootstrap_iterations,
             error_method=self.params.error_method,
             output_prefix=f"{self.params.output_prefix}_{field_label}_T1",
@@ -233,7 +253,7 @@ class IntegratedAnalysisPipeline:
         t2_params, t2_results_file = run_t2_fitting(
             input_csv=t2_file,
             initial_amplitude=self.params.t2_initial_amplitude,
-            initial_t2=self.params.t2_initial_time,
+            initial_t2=t2_initial_time,
             n_bootstrap=self.params.t2_bootstrap_iterations,
             error_method=self.params.error_method,
             output_prefix=f"{self.params.output_prefix}_{field_label}_T2",
@@ -256,10 +276,20 @@ class IntegratedAnalysisPipeline:
         )
         self.log_progress(f"  │  ✓ {len(noe_params)} residues calculated")
 
+        # QC plot: hetNOE vs residue (companion to the T1/T2 fit figures)
+        try:
+            plot_hetnoe_vs_residue(
+                noe_params,
+                f"{self.params.output_prefix}_{field_label}_hetnoe.pdf",
+                title=f"{field_label} ({field_freq} MHz)"
+            )
+        except Exception as exc:
+            self.log_progress(f"  │  ⚠ hetNOE plot skipped: {exc}")
+
         # Step 4: Convert T1/T2 → R1/R2
         self.log_progress(f"  ├─ Converting relaxation times to rates...")
-        r1_params = convert_relaxation_times_to_rates(t1_params, time_units='ms')
-        r2_params = convert_relaxation_times_to_rates(t2_params, time_units='ms')
+        r1_params = convert_relaxation_times_to_rates(t1_params, time_units=t1_units)
+        r2_params = convert_relaxation_times_to_rates(t2_params, time_units=t2_units)
         self.log_progress(f"  │  ✓ Converted to R1/R2 (s⁻¹)")
 
         # Step 5: Merge datasets

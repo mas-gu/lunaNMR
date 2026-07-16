@@ -14,6 +14,7 @@ def parse_delay_column(col_name):
                                       "003_T2_ADDA_300ms"     → 300
         filesystem-safe decimal       "600_T1_0o3"            → 0.3
         unit conversion               "..._5s" / "..._500us"  → 5000 / 0.5
+        unit + repeat marker          "..._300msb"            → 300
     Returns None when no delay token can be extracted.
     """
     col_str = str(col_name).strip()
@@ -24,11 +25,12 @@ def parse_delay_column(col_name):
     if bare:
         return float(bare.group(1))
 
-    # Descriptive name: take the trailing numeric token (with optional unit and
-    # duplicate-measurement suffix, either '_2'-style or a trailing letter like
-    # '0o0b'). 'o' stands in for '.' to keep column headers filesystem-safe.
+    # Descriptive name: trailing numeric token, an optional unit (ms/s/us), and an
+    # optional repeat-acquisition marker written as a single trailing letter (e.g.
+    # the 'b' in '300msb' or '0o0b') or an '_2'-style suffix. 'o' stands in for '.'
+    # to keep column headers filesystem-safe.
     tail = re.search(
-        r"(?:^|_)(\d+(?:[o.]\d+)?)(ms|s|us)?[a-z]?(?:_\d+)?$",
+        r"(?:^|_)(\d+(?:[o.]\d+)?)(ms|s|us)?(?:[a-z]|_\d+)?$",
         col_str,
         flags=re.IGNORECASE,
     )

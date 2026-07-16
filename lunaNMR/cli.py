@@ -177,7 +177,7 @@ def _run_dynamixs_t1t2(args):
            'mean_t2': result['mean_t2'], 'results_file': result['results_file'],
            'json_file': result.get('json_file')},
           *human)
-    return 0
+    return 0 if result['n_fitted'] else 1
 
 
 def _run_dynamixs_methyl(args):
@@ -207,7 +207,7 @@ def _run_dynamixs_methyl(args):
           f"Methyl T2 analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted",
           f"  Results: {result['results_file']}",
           f"  JSON:    {result['json_file']}")
-    return 0
+    return 0 if result['n_fitted'] else 1
 
 
 def _natural_key(text):
@@ -239,8 +239,8 @@ def _default_series_params(parallel=False):
     """
     return {
         'detection_params': {
-            'search_window_x': 0.08,
-            'search_window_y': 0.8,
+            'search_window_x': 0.070,
+            'search_window_y': 0.070,
             'noise_threshold': 3.0,
         },
         'gui_params': {
@@ -515,16 +515,20 @@ def _run_export_kd(args):
 def _run_dynamixs_hetnoe(args):
     """Compute heteronuclear NOE (I_sat / I_unsat) per residue, as the GUI pipeline does."""
     import csv
+    if args.dry_run:
+        return _dry_run(args, [('sat', args.sat), ('unsat', args.unsat)], {'output_dir': args.out})
     _add_modules_path('dynamiXs_v2o0')
     from dynamiXs_integrated.data_converters import (parse_intensity_csv,
-                                                     calculate_hetnoe_from_intensities)
+                                                     calculate_hetnoe_from_intensities,
+                                                     plot_hetnoe_vs_residue)
     for label, path in (('--sat', args.sat), ('--unsat', args.unsat)):
         if not os.path.isfile(path):
             raise FileNotFoundError(f"{label} file not found: {path}")
-    sat_i, sat_e = parse_intensity_csv(args.sat)
-    unsat_i, unsat_e = parse_intensity_csv(args.unsat)
-    noe = calculate_hetnoe_from_intensities(saturated_data=sat_i, unsaturated_data=unsat_i,
-                                            saturated_errors=sat_e, unsaturated_errors=unsat_e)
+    with _engine_stdout(args):
+        sat_i, sat_e = parse_intensity_csv(args.sat)
+        unsat_i, unsat_e = parse_intensity_csv(args.unsat)
+        noe = calculate_hetnoe_from_intensities(saturated_data=sat_i, unsaturated_data=unsat_i,
+                                                saturated_errors=sat_e, unsaturated_errors=unsat_e)
     os.makedirs(args.out, exist_ok=True)
     out_csv = os.path.join(args.out, f"{args.prefix}_hetnoe.csv")
     with open(out_csv, 'w', newline='') as fh:
@@ -532,68 +536,77 @@ def _run_dynamixs_hetnoe(args):
         writer.writerow(['Residue', 'hetNOE', 'hetNOEerr'])
         for res, rec in noe.items():
             writer.writerow([res, rec['value'], rec['error']])
+    out_pdf = os.path.join(args.out, f"{args.prefix}_hetnoe.pdf")
+    with _engine_stdout(args):
+        plot_hetnoe_vs_residue(noe, out_pdf, title=args.prefix)
     _emit(args,
-          {'command': 'dynamixs hetnoe', 'n_residues': len(noe), 'output': out_csv},
+          {'command': 'dynamixs hetnoe', 'n_residues': len(noe),
+           'output': out_csv, 'plot': out_pdf},
           f"hetNOE complete: {len(noe)} residues",
-          f"  Output: {out_csv}")
+          f"  Output: {out_csv}",
+          f"  Plot:   {out_pdf}")
     return 0
 
 
 def _run_dynamixs_density(args):
     """Reduced spectral density mapping (Farrow 1995) from an R1/R2/hetNOE table."""
+    inputs = [('input', args.input)] + ([('input2', args.input2)] if args.dual and args.input2 else [])
+    if args.dry_run:
+        return _dry_run(args, inputs, {'output_dir': args.out})
     import matplotlib
     matplotlib.use('Agg')
     from importlib import import_module
     _add_modules_path('dynamiXs_v2o0')
     if not os.path.isfile(args.input):
         raise FileNotFoundError(f"Input not found: {args.input}")
+    if args.dual and not args.input2:
+        raise ValueError("dual-field density needs a second table (--input2)")
     os.makedirs(args.out, exist_ok=True)
     r_nh_m = args.rnh * 1e-10       # Angstrom -> metre
     csa_n = args.csa * 1e-6         # ppm -> dimensionless
     prefix = os.path.join(args.out, args.prefix)
     suffix = '_087' if args.use_087 else ''
 
-    if args.dual:
-        if not args.input2:
-            raise ValueError("dual-field density needs a second table (--input2)")
-        cls = getattr(import_module(f'dynamiXs_density_functions.ZZ_multi_2fields_density{suffix}'),
-                      'DualFieldSpectralDensityAnalysis')
-        analyzer = cls(field1_freq=args.field1_freq, field2_freq=args.field2_freq,
-                       rNH=r_nh_m, csaN=csa_n)
-        df = analyzer.analyze_dual_field_csv(
-            csv_file1=args.input, csv_file2=args.input2,
-            use_monte_carlo_errors=args.monte_carlo, n_monte_carlo=args.n_samples,
-            use_multiprocessing=not args.no_parallel)
-        basic, detailed = f"{prefix}_basic.csv", f"{prefix}_detailed.csv"
-        df.to_csv(basic, index=False)
-        analyzer.save_dual_field_results(df, detailed)
-        outputs = [basic, detailed]
-        if not args.no_plot:
-            plots = f"{prefix}_plots.pdf"
-            analyzer.plot_dual_field_results(df, save_plots=True, plot_filename=plots)
-            outputs.append(plots)
-    else:
-        cls = getattr(import_module(f'dynamiXs_density_functions.ZZ_multi_density{suffix}'),
-                      'ReducedSpectralDensityAnalysis')
-        analyzer = cls(spectrometer_frequency=args.field1_freq, rNH=r_nh_m, csaN=csa_n)
-        df = analyzer.analyze_csv(
-            csv_file=args.input, use_monte_carlo_errors=args.monte_carlo,
-            n_monte_carlo=args.n_samples, use_multiprocessing=not args.no_parallel)
-        results = f"{prefix}_results.csv"
-        df.to_csv(results, index=False)
-        outputs = [results]
-        if not args.no_plot:
-            # The single-field plotter writes a hard-coded filename to the CWD, so run it
-            # from the output directory and record whatever PDF it produced.
-            cwd = os.getcwd()
-            try:
-                os.chdir(args.out)
-                before = set(f for f in os.listdir('.') if f.endswith('.pdf'))
-                analyzer.plot_results(df, save_plots=True)
-                new = [f for f in os.listdir('.') if f.endswith('.pdf') and f not in before]
-            finally:
-                os.chdir(cwd)
-            outputs += [os.path.join(args.out, f) for f in new]
+    with _engine_stdout(args):
+        if args.dual:
+            cls = getattr(import_module(f'dynamiXs_density_functions.ZZ_multi_2fields_density{suffix}'),
+                          'DualFieldSpectralDensityAnalysis')
+            analyzer = cls(field1_freq=args.field1_freq, field2_freq=args.field2_freq,
+                           rNH=r_nh_m, csaN=csa_n)
+            df = analyzer.analyze_dual_field_csv(
+                csv_file1=args.input, csv_file2=args.input2,
+                use_monte_carlo_errors=args.monte_carlo, n_monte_carlo=args.n_samples,
+                use_multiprocessing=not args.no_parallel)
+            basic, detailed = f"{prefix}_basic.csv", f"{prefix}_detailed.csv"
+            df.to_csv(basic, index=False)
+            analyzer.save_dual_field_results(df, detailed)
+            outputs = [basic, detailed]
+            if not args.no_plot:
+                plots = f"{prefix}_plots.pdf"
+                analyzer.plot_dual_field_results(df, save_plots=True, plot_filename=plots)
+                outputs.append(plots)
+        else:
+            cls = getattr(import_module(f'dynamiXs_density_functions.ZZ_multi_density{suffix}'),
+                          'ReducedSpectralDensityAnalysis')
+            analyzer = cls(spectrometer_frequency=args.field1_freq, rNH=r_nh_m, csaN=csa_n)
+            df = analyzer.analyze_csv(
+                csv_file=args.input, use_monte_carlo_errors=args.monte_carlo,
+                n_monte_carlo=args.n_samples, use_multiprocessing=not args.no_parallel)
+            results = f"{prefix}_results.csv"
+            df.to_csv(results, index=False)
+            outputs = [results]
+            if not args.no_plot:
+                # The single-field plotter writes a hard-coded filename to the CWD, so run
+                # it from the output directory and record whatever PDF it produced.
+                cwd = os.getcwd()
+                try:
+                    os.chdir(args.out)
+                    before = set(f for f in os.listdir('.') if f.endswith('.pdf'))
+                    analyzer.plot_results(df, save_plots=True)
+                    new = [f for f in os.listdir('.') if f.endswith('.pdf') and f not in before]
+                finally:
+                    os.chdir(cwd)
+                outputs += [os.path.join(args.out, f) for f in new]
 
     _emit(args,
           {'command': 'dynamixs density', 'n_residues': len(df),
@@ -605,27 +618,43 @@ def _run_dynamixs_density(args):
 
 def _run_dynamixs_modelfree(args):
     """Integrated model-free pipeline: T1/T2 fit -> hetNOE -> density -> Lipari-Szabo."""
+    f1 = [('f1-t1', args.f1_t1), ('f1-t2', args.f1_t2),
+          ('f1-noe-sat', args.f1_noe_sat), ('f1-noe-unsat', args.f1_noe_unsat)]
+    f2 = [('f2-t1', args.f2_t1), ('f2-t2', args.f2_t2),
+          ('f2-noe-sat', args.f2_noe_sat), ('f2-noe-unsat', args.f2_noe_unsat)]
+    if args.dry_run:
+        return _dry_run(args, f1 + (f2 if args.dual else []), {'output_dir': args.out})
+    if args.dual and not all(v for _, v in f2):
+        raise ValueError("dual-field model-free needs all four --f2-* files")
     import matplotlib
     matplotlib.use('Agg')
     _add_modules_path('dynamiXs_v2o0')
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
     from dynamiXs_integrated.integrated_analysis import (IntegratedAnalysisPipeline,
                                                          IntegratedAnalysisParameters)
-    os.makedirs(args.out, exist_ok=True)
+    out_dir = os.path.abspath(args.out)
+    os.makedirs(out_dir, exist_ok=True)
     p = IntegratedAnalysisParameters()
-    p.field1_t1_file = args.f1_t1
-    p.field1_t2_file = args.f1_t2
-    p.field1_noe_sat_file = args.f1_noe_sat
-    p.field1_noe_unsat_file = args.f1_noe_unsat
+    p.field1_t1_file = os.path.abspath(args.f1_t1)
+    p.field1_t2_file = os.path.abspath(args.f1_t2)
+    p.field1_noe_sat_file = os.path.abspath(args.f1_noe_sat)
+    p.field1_noe_unsat_file = os.path.abspath(args.f1_noe_unsat)
     p.field1_freq_mhz = args.field1_freq
+    p.field1_t1_units = args.f1_t1_units
+    p.field1_t2_units = args.f1_t2_units
     p.enable_dual_field = args.dual
     if args.dual:
-        p.field2_t1_file = args.f2_t1
-        p.field2_t2_file = args.f2_t2
-        p.field2_noe_sat_file = args.f2_noe_sat
-        p.field2_noe_unsat_file = args.f2_noe_unsat
+        p.field2_t1_file = os.path.abspath(args.f2_t1)
+        p.field2_t2_file = os.path.abspath(args.f2_t2)
+        p.field2_noe_sat_file = os.path.abspath(args.f2_noe_sat)
+        p.field2_noe_unsat_file = os.path.abspath(args.f2_noe_unsat)
         p.field2_freq_mhz = args.field2_freq
-    p.analysis_method = args.method
+        p.field2_t1_units = args.f2_t1_units
+        p.field2_t2_units = args.f2_t2_units
+    # Field count must match --dual (the density step branches on the method prefix);
+    # keep only the user's 087/jwh variant preference.
+    variant = 'jwh' if (args.method or '').endswith('jwh') else '087'
+    p.analysis_method = ('dual_' if args.dual else 'single_') + variant
     p.rNH_angstrom = args.rnh
     p.csaN_ppm = args.csa
     p.t1_initial_amplitude = args.init_amp
@@ -636,12 +665,19 @@ def _run_dynamixs_modelfree(args):
     p.t2_bootstrap_iterations = args.n_bootstrap
     p.error_method = args.error_method
     p.monte_carlo_iterations = args.n_monte_carlo
-    p.output_dir = args.out
+    p.output_dir = out_dir
     p.output_prefix = args.prefix
 
     cb = (lambda *a, **k: None) if getattr(args, 'format', 'text') == 'json' else None
-    with _engine_stdout(args):
-        result = IntegratedAnalysisPipeline(p, progress_callback=cb).run_complete_analysis()
+    # Run from the output dir: the single-field density plotter and the intermediate
+    # fit-result txt files are written to the CWD with relative/hard-coded names.
+    cwd = os.getcwd()
+    try:
+        os.chdir(out_dir)
+        with _engine_stdout(args):
+            result = IntegratedAnalysisPipeline(p, progress_callback=cb).run_complete_analysis()
+    finally:
+        os.chdir(cwd)
     out_files = result.get('output_files', {})
     _emit(args,
           {'command': 'dynamixs modelfree', 'method': result.get('method'),
@@ -761,11 +797,17 @@ def build_parser():
     mf.add_argument('--f2-t2', dest='f2_t2', help='Field-2 T2 matrix (dual-field)')
     mf.add_argument('--f2-noe-sat', dest='f2_noe_sat', help='Field-2 NOE saturated (dual-field)')
     mf.add_argument('--f2-noe-unsat', dest='f2_noe_unsat', help='Field-2 NOE unsaturated (dual-field)')
+    for f in ('f1', 'f2'):
+        for exp in ('t1', 't2'):
+            mf.add_argument(f'--{f}-{exp}-units', choices=['ms', 's', 'us'], default='ms',
+                            dest=f'{f}_{exp}_units',
+                            help=f'Delay units of the {f.upper()} {exp.upper()} series (default: ms)')
     mf.add_argument('--out', required=True, help='Output directory')
     mf.add_argument('--prefix', default='modelfree', help='Output prefix')
     mf.add_argument('--dual', action='store_true', help='Dual-field (needs the f2 files)')
     mf.add_argument('--method', choices=['single_jwh', 'single_087', 'dual_jwh', 'dual_087'],
-                    default='dual_087', help='Density/model-free method (default: dual_087)')
+                    default=None,
+                    help='Density/model-free variant; field count follows --dual (default: 087)')
     mf.add_argument('--init-amp', type=float, default=5.0, dest='init_amp', help='Initial fit amplitude')
     mf.add_argument('--init-t1', type=float, default=800.0, dest='init_t1', help='Initial T1 (ms)')
     mf.add_argument('--init-t2', type=float, default=100.0, dest='init_t2', help='Initial T2 (ms)')

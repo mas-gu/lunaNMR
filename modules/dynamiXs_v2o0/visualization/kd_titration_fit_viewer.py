@@ -31,6 +31,15 @@ def _residue_sort_key(name):
     return (int(m.group()) if m else float('inf'), str(name))
 
 
+def _fmt_num(value, spec):
+    """Format a fit value, or 'n/a' when it is missing or non-finite. A degenerate
+    fit (e.g. too few titration points) can yield an unbounded covariance error;
+    json_safe writes such non-finite floats as null, so value may be None or inf."""
+    if value is None or not np.isfinite(value):
+        return "n/a"
+    return format(value, spec)
+
+
 def _peak_present(series, k, value='height'):
     """True if a residue's peak is genuinely present at point k: a detected position
     (finite, non-zero sentinel) AND a real intensity (finite, > 0). Used so CSP and
@@ -218,7 +227,7 @@ class KdTitrationFitViewer(QMainWindow):
     def _update_global_label(self):
         g = self.data.get("global", {}).get("csp", {})
         self.global_label.setText(
-            f"Global shared Kd (CSP): {g['Kd']:.4g}  (n={g.get('n_residues','?')}, "
+            f"Global shared Kd (CSP): {_fmt_num(g.get('Kd'), '.4g')}  (n={g.get('n_residues','?')}, "
             f"from initial fit — not updated by per-residue refits)"
             if g.get("success") else "Global Kd: n/a")
 
@@ -366,8 +375,9 @@ class KdTitrationFitViewer(QMainWindow):
             yg = intensity_decay(Lg, fit["I0"], fit["I_inf"], fit["Kd"])
             ylab = "Intensity ratio"
         ax.plot(Lg, yg, "r-", lw=2, label="fit")
-        kd, kde = fit["Kd"], fit.get("Kd_err", float("nan"))
-        ax.set_title(f"{f['residue']}   Kd = {kd:.3g} ± {kde:.2g}   R² = {fit.get('r_squared', 0):.3f}")
+        kd, kde, r2 = fit.get("Kd"), fit.get("Kd_err"), fit.get("r_squared")
+        ax.set_title(f"{f['residue']}   Kd = {_fmt_num(kd, '.3g')} ± {_fmt_num(kde, '.2g')}"
+                     f"   R² = {_fmt_num(r2, '.3f')}")
         ax.set_xlabel("[Ligand]")
         ax.set_ylabel(ylab)
         ax.legend()
@@ -389,8 +399,9 @@ class KdTitrationFitViewer(QMainWindow):
         self._plot_residue_bars(ax, names, vals, "steelblue", errs=errs)
         if key == "Kd":
             g = self.data.get("global", {}).get("csp", {})
-            if obs == "csp" and g.get("success"):
-                ax.axhline(g["Kd"], color="red", ls="--", label=f"global Kd={g['Kd']:.3g}")
+            gkd = g.get("Kd")
+            if obs == "csp" and g.get("success") and gkd is not None and np.isfinite(gkd):
+                ax.axhline(gkd, color="red", ls="--", label=f"global Kd={_fmt_num(gkd, '.3g')}")
                 ax.legend()
         ax.set_ylabel(ylab)
         ax.set_title(f"{title}  ({obs})")

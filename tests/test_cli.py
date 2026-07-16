@@ -136,6 +136,18 @@ class TestDynamixsT1T2:
         r1 = next(f for f in data['fits'] if f['residue'] == 'R1')
         assert r1['t2'] == pytest.approx(80.0, rel=0.05)
 
+    def test_t1t2_zero_fit_returns_nonzero(self, tmp_path):
+        # No decay within the delay window -> every residue is unreliable and
+        # excluded, so nothing is fitted and the command must report failure.
+        from lunaNMR.cli import main
+        delays = [3.0, 9.0, 25.0, 50.0, 100.0]
+        header = ["residue"] + [str(int(d)) for d in delays]
+        rows = [[name] + [1.0e5 * np.exp(-t / 1.0e8) for t in delays] for name in ("R1", "R2")]
+        pd.DataFrame(rows, columns=header).to_csv(tmp_path / "flat.csv", index=False)
+        code = main(["dynamixs", "t1t2", "--input", str(tmp_path / "flat.csv"),
+                     "--out", str(tmp_path / "o"), "--exp", "T2", "--prefix", "field1"])
+        assert code == 1
+
 
 class TestDynamixsMethyl:
     def test_methyl_end_to_end_writes_json(self, tmp_path):
@@ -163,6 +175,21 @@ class TestDynamixsMethyl:
         r = next(f for f in json.loads(json_file.read_text())['fits'] if f['residue'] == '27_cg1_D')
         assert r['t2_a'] == pytest.approx(80.0, rel=0.05)
         assert r['t2_b'] == pytest.approx(15.0, rel=0.1)
+
+    def test_methyl_zero_fit_returns_nonzero(self, tmp_path):
+        # Fewer time points than the bi-exp has parameters -> every fit fails ->
+        # nothing is fitted, so the command must report failure.
+        from lunaNMR.cli import main
+        delays = [3.0, 100.0]   # 2 points < 3 bi-exp params
+        header = (["Peak_Number", "Assignment", "Reference_X", "Reference_Y"]
+                  + [f"003_T2_ADDA_{int(d)}ms" for d in delays])
+        rows = [[k + 1, name, 0.0, 0.0] + [1.0e5, 5.0e4]
+                for k, name in enumerate(("27_cg1_D", "44_cg1_D"))]
+        pd.DataFrame(rows, columns=header).to_csv(tmp_path / "m.csv", index=False)
+        code = main(["dynamixs", "methyl-t2", "--input", str(tmp_path / "m.csv"),
+                     "--out", str(tmp_path / "o"), "--field-name", "field1",
+                     "--field-freq", "600", "--bootstrap", "0"])
+        assert code == 1
 
     def test_dynamixs_requires_subcommand(self):
         from lunaNMR.cli import main
@@ -203,6 +230,9 @@ class TestSeriesHelpers:
         assert set(p) >= {'detection_params', 'gui_params', 'fitting_params', 'processing_options'}
         assert p['gui_params']['use_ps2d_multi_peak'] is True
         assert p['fitting_params']['min_r_squared'] == 0.5
+        # 1H/15N search window starting value is 0.070 ppm in both dimensions.
+        assert p['detection_params']['search_window_x'] == 0.070
+        assert p['detection_params']['search_window_y'] == 0.070
 
     def test_discover_spectra_natural_sort(self, tmp_path):
         from lunaNMR.cli import _discover_spectra
@@ -491,12 +521,24 @@ class TestDynamixsHetnoe:
                      "--unsat", str(tmp_path / "unsat.csv"), "--out", str(out)]) == 0
         df = pd.read_csv(out / "field1_hetnoe.csv")
         assert float(df.loc[df.Residue == "R1", "hetNOE"].iloc[0]) == pytest.approx(0.8)
+        # QC plot written alongside the CSV
+        assert (out / "field1_hetnoe.pdf").exists()
 
     def test_hetnoe_missing_file_errors(self, tmp_path):
         from lunaNMR.cli import main
         (tmp_path / "unsat.csv").write_text("R1,1000\n")
         assert main(["dynamixs", "hetnoe", "--sat", str(tmp_path / "nope.csv"),
                      "--unsat", str(tmp_path / "unsat.csv"), "--out", str(tmp_path / "h")]) == 1
+
+    def test_hetnoe_dry_run(self, tmp_path):
+        from lunaNMR.cli import main
+        (tmp_path / "sat.csv").write_text("R1,800\n")
+        (tmp_path / "unsat.csv").write_text("R1,1000\n")
+        out = tmp_path / "h"
+        assert main(["dynamixs", "hetnoe", "--sat", str(tmp_path / "sat.csv"),
+                     "--unsat", str(tmp_path / "unsat.csv"),
+                     "--out", str(out), "--dry-run"]) == 0
+        assert not out.exists()   # dry-run must not touch the filesystem
 
 
 class TestDynamixsDensity:
@@ -518,6 +560,15 @@ class TestDynamixsDensity:
         assert len(df) == 4
         assert {"J0", "JwN", "S2"} <= set(df.columns)
         assert (df["S2"].between(0, 1.05)).all()   # order parameters are physical
+
+    def test_density_dry_run(self, tmp_path):
+        from lunaNMR.cli import main
+        t = tmp_path / "f1.csv"
+        self._table(t)
+        out = tmp_path / "dens"
+        assert main(["dynamixs", "density", "--input", str(t), "--out", str(out),
+                     "--field1-freq", "600", "--dry-run"]) == 0
+        assert not out.exists()
 
 
 class TestDynamixsModelfree:
@@ -552,6 +603,65 @@ class TestDynamixsModelfree:
         assert basic, "no spectral-density output written"
         df = pd.read_csv(basic[0])
         assert "S2" in df.columns and len(df) >= 1
+
+    def test_modelfree_t1_units_seconds(self, tmp_path, monkeypatch):
+        # A T1 series labelled in seconds must be honoured via --f1-t1-units s.
+        # Without it the hard-coded ms conversion makes R1 ~1000x too large.
+        from lunaNMR.cli import main
+        monkeypatch.chdir(tmp_path)
+        self._matrix(tmp_path / "t1.csv", [0.02, 0.05, 0.1, 0.2, 0.4, 0.8], 0.6)  # T1 ~0.6 s
+        self._matrix(tmp_path / "t2.csv", [10, 30, 60, 100, 150], 100.0)          # T2 ~100 ms
+        self._noe(tmp_path / "sat.csv", 800)
+        self._noe(tmp_path / "unsat.csv", 1000)
+        out = tmp_path / "mf"
+        code = main(["dynamixs", "modelfree",
+                     "--f1-t1", str(tmp_path / "t1.csv"), "--f1-t2", str(tmp_path / "t2.csv"),
+                     "--f1-noe-sat", str(tmp_path / "sat.csv"),
+                     "--f1-noe-unsat", str(tmp_path / "unsat.csv"),
+                     "--field1-freq", "600", "--f1-t1-units", "s", "--out", str(out)])
+        assert code == 0
+        import glob
+        df = pd.read_csv(glob.glob(str(out / "*basic*.csv"))[0])
+        assert df["R1"].median() < 10   # physical (~1.7 s^-1), not ~1700 under wrong units
+
+    def test_modelfree_default_method_writes_only_to_out(self, tmp_path, monkeypatch):
+        # With no --method and single field (--dual off), the method must derive to
+        # single_087 (not the dual default that crashes), and every file the pipeline
+        # emits must land under --out even though the CWD is elsewhere.
+        from lunaNMR.cli import main
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        delays = [10, 30, 60, 100, 150]
+        self._matrix(tmp_path / "t1.csv", delays, 800.0)
+        self._matrix(tmp_path / "t2.csv", delays, 100.0)
+        self._noe(tmp_path / "sat.csv", 800)
+        self._noe(tmp_path / "unsat.csv", 1000)
+        out = tmp_path / "mf"
+        code = main(["dynamixs", "modelfree",
+                     "--f1-t1", str(tmp_path / "t1.csv"), "--f1-t2", str(tmp_path / "t2.csv"),
+                     "--f1-noe-sat", str(tmp_path / "sat.csv"),
+                     "--f1-noe-unsat", str(tmp_path / "unsat.csv"),
+                     "--field1-freq", "600", "--out", str(out)])
+        assert code == 0
+        import glob
+        assert glob.glob(str(out / "*basic*.csv")), "density output not under --out"
+        # The CWD must stay clean: no stray intermediate txt / plot files leaked there.
+        assert not glob.glob(str(cwd / "*.txt"))
+        assert not glob.glob(str(cwd / "*.pdf"))
+
+    def test_modelfree_dry_run(self, tmp_path):
+        from lunaNMR.cli import main
+        for name in ("t1.csv", "t2.csv", "sat.csv", "unsat.csv"):
+            (tmp_path / name).write_text("x\n")
+        out = tmp_path / "mf"
+        code = main(["dynamixs", "modelfree",
+                     "--f1-t1", str(tmp_path / "t1.csv"), "--f1-t2", str(tmp_path / "t2.csv"),
+                     "--f1-noe-sat", str(tmp_path / "sat.csv"),
+                     "--f1-noe-unsat", str(tmp_path / "unsat.csv"),
+                     "--field1-freq", "600", "--out", str(out), "--dry-run"])
+        assert code == 0
+        assert not out.exists()
 
 
 class TestDispatch:
