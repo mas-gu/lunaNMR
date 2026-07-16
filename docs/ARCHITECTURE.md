@@ -1,6 +1,6 @@
 # Architecture Guide
 
-**TL;DR**: MVC architecture with GUI (tkinter), processors (workflow orchestration), and core engines (detection, PS2D fitting, overlap resolution). Parallel mode distributes overlap clusters across workers. All paths share identical result schema for compatibility.
+**TL;DR**: GUI (PySide6/Qt6) → processors (workflow orchestration) → core engines (detection, PS2D 2D fitting, overlap clustering). A headless CLI (`python -m lunaNMR`) shares the same engines. Parallel mode distributes whole overlap clusters across worker processes. GUI and CLI produce an identical result schema.
 
 ---
 
@@ -8,17 +8,24 @@
 
 ```
 lunaNMR_v1o0/
-├── launch_lunaNMR.py           # Entry point
-├── docs/                       # Documentation
-├── lunaNMR/                    # Main package
-│   ├── gui/                    # Tkinter GUI + visualization
-│   ├── processors/             # Workflow orchestration
-│   ├── core/                   # Detection, fitting, clustering
-│   ├── utils/                  # Config, parameters, file I/O
-│   ├── ml/                     # Training data collectors
-│   └── validation/             # Installation tests
-└── modules/                    # Optional add-ons (DynamiXs)
+├── launch_lunaNMR.py       # Launcher (tkinter selector → Qt app)
+├── docs/
+├── lunaNMR/                # Main package
+│   ├── cli.py              # Headless CLI dispatcher (python -m lunaNMR)
+│   ├── __main__.py         # → cli.main()
+│   ├── gui/                # PySide6/Qt6: main_window.py, base/, components/, dialogs/, styles/
+│   ├── processors/         # Single/multi-spectrum workflow orchestration
+│   ├── core/               # Detection, Voigt/PS2D fitting, overlap clustering, parallel processor
+│   ├── batch_processing/   # CLI folder batch automation
+│   ├── ml/                 # ML/statistics parameter prediction + collectors + gui/
+│   ├── integrators/        # In-place advanced/series integrators
+│   ├── utils/              # Config, params, file I/O, project bundles, output routing
+│   └── validation/         # Installation + memory checks
+└── modules/
+    └── dynamiXs_v2o0/      # DynamiXs (relaxation/dynamics) + dynamiXs_Kd/ (Kd/titration)
 ```
+
+tkinter is used **only** for the launcher's application-selector dialog; the app is entirely Qt.
 
 ---
 
@@ -26,102 +33,63 @@ lunaNMR_v1o0/
 
 | Layer | Modules | Role |
 |-------|---------|------|
-| **GUI** | `gui/` | Tkinter UI, plots, Peak Navigator, Voigt Analysis tab |
-| **Workflow** | `processors/` | Orchestrate detection + fitting engines for single/batch/series |
-| **Core** | `core/` | Peak detection, PS2D 2D fitting, overlap clustering |
-| **Utils** | `utils/` | Parameter manager, config, file formats |
-| **ML** | `ml/` | Capture PS2D diagnostics for training datasets |
+| **GUI** | `gui/` | Qt6 UI, plots, Peak Navigator, Voigt Analysis tab, dialogs |
+| **Workflow** | `processors/` | Drive detection + fitting for single/series; batch in `batch_processing/` |
+| **Core** | `core/` | Peak detection, PS2D 2D fitting, overlap clustering, parallel dispatch |
+| **Utils** | `utils/` | Parameter manager, config, file formats, project bundles |
+| **ML** | `ml/` | ML/stats parameter prediction; PS2D/peak training collectors |
 
 ---
 
 ## 3. Core Engines
 
-### 3.1 Peak Detection (`core/enhanced_peak_picker.py`)
-- Prominence-based detection via `scipy.ndimage.maximum_filter`
-- Graph-based clustering using `networkx`
-- Top contour centroid refinement (`_calculate_top_contour_center`)
+### 3.1 Peak Detection (`core/enhanced_peak_picker.py`, `core_integrator.py`)
+- Prominence/S-N detection via `scipy.ndimage.maximum_filter`
+- Top-contour centroid refinement: `core_integrator._calculate_top_contour_center()`
 
 ### 3.2 PS2D Stack
-- **Data selector** (`ps2d_data_selector.py`): Elliptical masks around clusters
-- **Voigt primitives** (`ps2d_style_fitter.py`): Faddeeva-based Voigt profiles (Numba-accelerated)
-- **2D fitter** (`ps2d_2d_fitter.py`): 5-stage Levenberg-Marquardt optimizer
-- **Overlap detector** (`ps2d_exact_overlap_detector.py`): Two-circle touching test for clustering
+- **Data selector** (`ps2d_data_selector.py`): union of elliptical masks around a cluster
+- **Voigt primitives** (`ps2d_style_fitter.py`): Faddeeva (`scipy.special.wofz`), Numba-accelerated (`forceobj`)
+- **2D fitter** (`ps2d_2d_fitter.py::fit_multi_peak_2d`): 5-stage Levenberg-Marquardt
+- **Overlap clustering** (`core_integrator.py::identify_overlap_clusters`): agglomerative closest-pair merging under diameter/size constraints → disjoint clusters
 
 ### 3.3 Parameter Management (`utils/parameter_manager.py`)
-- **Simplified mode**: 3-5 sliders map to 25+ legacy parameters
-- **GUI override**: Centroid windows always use GUI spinbox values (not calculated defaults)
+- Simplified mode maps a few sliders onto the full legacy parameter set (`simplified_parameter_manager.py`)
+- GUI spinbox values always override calculated defaults (see §7)
 
 ---
 
 ## 4. Data Flow
 
-### 4.1 Sequential Mode (Default)
-
+### 4.1 Sequential (default)
 ```
-GUI action
-  → processors.single_spectrum_processor
-  → core.detect_peaks_sn_native()
-      → _detect_peaks_by_threshold()
-          → _calculate_top_contour_center() [centroid refinement]
-  → core.identify_overlap_clusters() [hierarchical graph clustering]
-  → For each cluster:
-      Single peak  → core.enhanced_peak_fitting() [1D cross-sections]
-      Multi-peak   → core.ps2d_2d_fitter.fit_multi_peak_2d() [2D simultaneous]
-  → processors.format_results()
+GUI → processors.SingleSpectrumProcessor
+  → core_integrator.detect_peaks_sn_native()  → _detect_peaks_by_threshold() → _calculate_top_contour_center()
+  → core_integrator.identify_overlap_clusters()          # agglomerative closest-pair clustering
+  → per cluster:  single peak → enhanced_peak_fitting() (1D)
+                  multi-peak  → ps2d_2d_fitter.fit_multi_peak_2d() (2D)
   → GUI tables/plots
 ```
 
-### 4.2 Parallel Mode
-
+### 4.2 Parallel (`core/parallel_voigt_processor.py::ParallelVoigtProcessor`)
 ```
-GUI action
-  → processors.single_spectrum_processor
-  → core.identify_overlap_clusters() [ONCE - creates disjoint clusters]
-  → parallel_voigt_processor.distribute_clusters()
-      → Worker Pool (each processes entire clusters)
-          → For each cluster:
-              Single peak  → 1D fitting
-              Multi-peak   → PS2D 2D fitting
-      → Consolidate results (integer peak_number matching)
-  → processors.format_results()
-  → GUI tables/plots
+identify_overlap_clusters()  (ONCE, disjoint clusters)
+  → fit_all_peaks_parallel()
+      → _create_cluster_tasks()  → _execute_parallel_cluster_fitting()  (multiprocessing.Pool, whole clusters per worker)
+      → _consolidate_cluster_results()  (integer peak_number matching)
 ```
 
-**Key differences**:
-- Clustering algorithm **identical** (deterministic)
-- Workers receive **entire clusters**, not individual peaks
-- Result consolidation uses `peak_number` (integer), not coordinates (float)
-- Performance: 2.7× speedup with 6 cores
+**Key differences**: identical clustering; workers receive whole clusters (not peaks); consolidation keys on integer `peak_number` (not float coords); ~2.7× speedup on 6 cores.
 
 ---
 
 ## 5. GUI Architecture
 
-**MVC pattern**:
-- **Model**: Integrator state (`core_integrator.py`), peak lists, fitting results
-- **View**: `main_gui.py`, `gui_components.py`, `visualization.py`, `spectrum_browser.py`
+- **Model**: integrator state (`core_integrator.py`), peak lists, fit results
+- **View**: `gui/main_window.py` (`LunaNMRMainWindow(BaseWindow)`), `gui/components/peak_navigator.py`, `spectrum_plotter.py`, `voigt_analysis_plotter.py`, `gui/dialogs/`
 - **Controller**: GUI callbacks → processors → update model → refresh view
 
-**Key components**:
-- **Peak Navigator** (`gui_components.py`): Browse peaks 1-N with quality color coding
-- **Voigt Analysis Tab**: Renders 1D cross-sections or 2D PS2D contour dashboard
-- **Spectrum Browser**: Tabbed viewer (Peak Table, Voigt Analysis, Metadata)
-
-**Layout**:
-```
-┌────────────────────────────────────────────────────┐
-│ Menu Bar                                           │
-├───────────────┬────────────────────┬───────────────┤
-│ Left Panel    │ Center Panel       │ Right Panel   │
-│ (Controls)    │ (Spectrum + Plot)  │ (Navigator)   │
-│               │                    │               │
-│ Detection     │ 2D Contours        │ Peak List     │
-│ Fitting       │ + Peak Markers     │ Quality       │
-│ Parameters    │ + Ellipses         │ Navigation    │
-├───────────────┴────────────────────┴───────────────┤
-│ Status Bar: Project | Nucleus | Quality | Progress │
-└────────────────────────────────────────────────────┘
-```
+Dialogs subclass `BaseDialog(QDialog)`; stylesheets from `gui/styles/main.qss`. Layout: left controls | center spectrum+contours+markers | right Peak Navigator (quality-colored); status bar shows project/nucleus/quality/progress.
 
 ---
 
@@ -129,174 +97,67 @@ GUI action
 
 | Processor | Purpose | File |
 |-----------|---------|------|
-| `SingleSpectrumProcessor` | Interactive analysis of one spectrum | `processors/single_spectrum_processor.py` |
+| `SingleSpectrumProcessor` | One spectrum, interactive | `processors/single_spectrum_processor.py` |
 | `MultiSpectrumProcessor` | Titration/condition series | `processors/multi_spectrum_processor.py` |
-| `BatchProcessor` | CLI batch processing of folders | `batch_processing/batch_processor.py` |
+| `BatchProcessor` | CLI folder batch | `batch_processing/batch_processor.py` |
 
-All processors:
-- Share identical core engines (PS2D, detection, overlap clustering)
-- Use same parameter manager
-- Produce same result schema
-- **Guarantee parity** between GUI and CLI workflows
+All share the same core engines, parameter manager, and result schema — GUI/CLI parity.
+
+## 6.1 CLI, Modules & Project Bundles
+
+- **CLI** (`lunaNMR/cli.py`, `python -m lunaNMR`): wraps the same processors/backends, no Qt (lazy `__init__`, matplotlib forced to `Agg`). Subcommands: `series`, `dynamixs {t1t2,methyl-t2,hetnoe,density,modelfree}`, `kd`, `export kd`, `project {inventory,remove}`, `batch`. See [CLI.md](CLI.md).
+- **Modules** (`modules/dynamiXs_v2o0/`): DynamiXs relaxation/dynamics + `dynamiXs_Kd/` Kd/titration; launched from the GUI Modules menu, mirrored by the CLI.
+- **Project bundles** (`utils/project_manager.py`, `.lunaNMR`): state-based save/load. Fit surfaces stored slim, reconstructed on load (after the spectrum is loaded); DynamiXs and Kd persist as multiple named analyses.
 
 ---
 
 ## 7. Parameter Flow
 
 ```
-GUI Spinboxes (centroid_window_x_ppm = 0.01)
-  ↓
-ParameterManager.update_from_gui_variables()
-  ↓
-current_params['centroid_window_x_ppm'] = 0.01
-  ↓
-ParameterManager.get_effective_parameters()
-  ↓
-if simplified_mode:
-    simplified_manager.get_simplified_parameters()  # calculates defaults
-    Override with GUI values:                        # CRITICAL
-        params['gui_params']['centroid_window_x_ppm'] = current_params[...]
-  ↓
-integrator.gui_params = params['gui_params']
-  ↓
-_detect_peaks_by_threshold() uses gui_params.get('centroid_window_x_ppm')
+GUI spinboxes → ParameterManager.update_from_gui_variables() → current_params
+  → get_effective_parameters()
+      simplified mode: compute defaults, then override with GUI values (CRITICAL)
+  → integrator.gui_params → _detect_peaks_by_threshold() reads gui_params
 ```
-
-**Result**: GUI values **always override** calculated defaults in simplified mode.
+GUI values **always override** calculated defaults in simplified mode.
 
 ---
 
 ## 8. Result Schema
 
-All fitting engines return consistent dictionaries:
+All fitting engines return dicts with a consistent shape (GUI tables, exports, ML collectors depend on it):
 
 ```python
 {
-  'assignment': str,
-  'pos_f1': float,             # F1 position (15N/13C)
-  'pos_f2': float,             # F2 position (1H)
-  'lw_lor_f1': float,          # Lorentzian FWHM F1
-  'lw_gau_f1': float,          # Gaussian FWHM F1
-  'lw_lor_f2': float,          # Lorentzian FWHM F2
-  'lw_gau_f2': float,          # Gaussian FWHM F2
-  'intensity': float,          # Volume
-  'height': float,             # Peak amplitude
-  'r_squared': float,          # Quality metric
-  'quality': str,              # 'Excellent'|'Good'|'Fair'|'Poor'|'Failed'
-  'method': str,               # '2d_simultaneous_multi_peak'|'consensus'|'1d_staged'
-  'fitted': bool,              # True if fitting succeeded
-  'failure_reason': str        # (if fitted=False)
+  'assignment': str, 'pos_f1': float, 'pos_f2': float,     # F1=15N/13C, F2=1H
+  'lw_lor_f1': float, 'lw_gau_f1': float,                  # Lorentzian/Gaussian FWHM F1
+  'lw_lor_f2': float, 'lw_gau_f2': float,                  # ... F2
+  'intensity': float, 'height': float, 'r_squared': float,
+  'quality': str, 'method': str, 'fitted': bool, 'failure_reason': str
 }
 ```
-
-**Compatibility**: GUI tables, exports, ML collectors all expect this schema.
-
----
-
-## 9. Extension Points
-
-### Add New Fitting Engine
-1. Create module in `core/` implementing `fit_peak()` method
-2. Return result dictionary matching schema (section 8)
-3. Register in `core_integrator.py` workflow
-
-### Add New Processor
-1. Subclass from `processors/base_processor.py` (or similar pattern)
-2. Reuse `core_integrator` API
-3. Add GUI entry point in `main_gui.py`
-
-### Add ML Collector
-1. Create collector in `ml/`
-2. Register callback with PS2D fitter or batch processor
-3. Export training samples to `ml_training_data/`
+`method` example: `'2d_simultaneous_multi_peak'`. Failed peaks are kept in place (`fitted=False`) to preserve 1:1 index mapping with `peak_list` — the Peak Navigator uses index-based lookups.
 
 ---
 
-## 10. File Format Handlers
+## 9. File Format Handlers
 
-**Location**: `utils/file_manager.py`
-
-**Supported**:
-- Bruker TopSpin (`.2ii`, `.2rr`)
-- NMRPipe (`.ft`, `.pipe`)
-- Varian/Agilent (`.fid`, `.ft`)
-- SPARKY (`.ucsf`)
-
-**Loader**: `nmrglue` with automatic axis ordering detection.
+`utils/file_manager.py`, loaded via `nmrglue` with automatic axis-ordering detection:
+Bruker TopSpin (`.2ii`/`.2rr`), NMRPipe (`.ft`/`.pipe`), Varian/Agilent (`.fid`/`.ft`), SPARKY (`.ucsf`).
 
 ---
 
-## 11. Quality Assurance
+## 10. Threads & Performance
 
-### Failed Peak Handling
-Peaks that fail fitting are stored with placeholder values (`quality='Failed'`, `fitted=False`) to maintain 1:1 index mapping between `peak_list` and `fitted_results`.
-
-**Why**: Peak Navigator relies on index-based lookups. Dropping failed peaks breaks clicking navigation.
-
-### Result Consolidation (Parallel Mode)
-Uses integer `peak_number` matching instead of float coordinates to avoid precision errors.
-
-**Old** (broken): `results_cache[(7.9158, 116.988)]` → lookup fails due to precision
-**New** (fixed): `results_by_number[26]` → exact match
+- **GUI**: Qt event loop; `QThread` workers for non-blocking detection/fitting.
+- **Parallel fitting**: `multiprocessing.Pool` (process-level; each worker gets a copy of integrator state, no shared mutable memory).
+- **Numba**: 3-5× on PS2D Voigt primitives.
+- Hot spots: detection O(N) (`maximum_filter`), centroid O(W×H)/peak, clustering O(P²) worst-case, PS2D O(I·n·M).
 
 ---
 
-## 12. Performance Characteristics
+## Maintenance
 
-| Component | Complexity | Bottleneck |
-|-----------|------------|------------|
-| Peak detection | O(N) | scipy.ndimage.maximum_filter |
-| Centroid | O(W×H) per peak | Window size |
-| Overlap clustering | O(P²) worst-case | Number of peaks P |
-| PS2D fitting | O(I×n×M) | Iterations I, peaks n, masked points M |
-| Parallel distribution | O(C) | Number of clusters C |
-
-**Numba acceleration**: 3-5× speedup for PS2D Voigt primitive calculations.
-
----
-
-## 13. Dependency Graph
-
-```
-launch_lunaNMR.py
-  ├── gui/main_gui.py
-  │     ├── gui/gui_components.py (Peak Navigator)
-  │     ├── gui/visualization.py (plotting)
-  │     └── gui/spectrum_browser.py (Voigt Analysis)
-  │
-  ├── processors/single_spectrum_processor.py
-  │     ├── core/core_integrator.py
-  │     │     ├── core/enhanced_peak_picker.py
-  │     │     ├── core/ps2d_2d_fitter.py
-  │     │     └── core/parallel_voigt_processor.py
-  │     └── utils/parameter_manager.py
-  │
-  └── utils/config_manager.py
-```
-
----
-
-## 14. Thread Safety
-
-**GUI**: Single-threaded (tkinter main loop)
-**Parallel processing**: Multiprocessing (not threading) via `multiprocessing.Pool`
-**State management**: Each worker gets copy of integrator state (no shared memory)
-
----
-
-## 15. Testing Strategy
-
-**Unit tests**: Core engines (detection, fitting, clustering)
-**Integration tests**: Full workflows (load → detect → fit → export)
-**Regression tests**: Compare sequential vs parallel results (must be identical)
-
-**Test data**: `test_data/` folder (if present) or synthetic Voigt peaks.
-
----
-
-## Maintenance Guidelines
-
-1. **Parity**: Keep GUI and batch processors synchronized (same engines, parameters, results)
-2. **Schema**: Extend result dictionary (section 8) when adding new metrics
-3. **Documentation**: Update this file when adding/removing directories or major components
-4. **Compatibility**: Maintain backward compatibility for result exports (CSV, JSON formats)
+1. Keep GUI and batch/CLI on the same engines, params, and result schema (parity).
+2. Extend the §8 result dict when adding metrics; keep CSV/JSON exports compatible.
+3. Update this file when adding/removing directories or major components.

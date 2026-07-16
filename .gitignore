@@ -343,6 +343,8 @@ docs/LunaNMR_V1_Workflow.pptx
 
 # Example data files (too large for repo)
 data_example/
+data_example/tmp/
 
 # AI assistant config directories
 .serena/
+docs/landing/

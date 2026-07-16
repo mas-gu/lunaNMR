@@ -1,344 +1,134 @@
 # Algorithm Reference
 
-**TL;DR**: LunaNMR uses prominence-based peak detection with top-contour centroid refinement, PS2D simultaneous 2D Voigt fitting (5-stage Levenberg-Marquardt), and hierarchical overlap clustering. Quality thresholds: Excellent (R²≥0.9), Good (0.8-0.9), Fair (0.5-0.8), Poor (0.2-0.5), Failed (<0.2).
+Prominence-based peak detection with top-contour centroid refinement, PS2D simultaneous 2D Voigt fitting (5-stage Levenberg-Marquardt), and hierarchical overlap clustering.
+
+Quality (R²): Excellent ≥0.9, Good 0.8–0.9, Fair 0.5–0.8, Poor 0.2–0.5, Failed <0.2.
 
 ---
 
 ## 1. Peak Detection
 
-### 1.1 Pipeline
-```
-Noise Estimation → Candidate Detection → Overlap Clustering → Position Refinement
-```
+`core/enhanced_peak_picker.py`
 
-**Noise estimation**: Corner sampling or MAD (Median Absolute Deviation).
+**Pipeline**: noise estimation → candidate detection → overlap clustering → centroid refinement.
 
-**Candidate detection**: `scipy.ndimage.maximum_filter` with prominence thresholding.
+- **Noise**: corner sampling / MAD.
+- **Candidates**: local maxima via `scipy.ndimage.maximum_filter` + prominence/S-N thresholding.
+- **Search window** default **0.070 ppm in both 1H and 15N** (`main_window.search_window_x/y`). Wide 15N windows are harmful on low-S/N spectra (peaks fit to noise → Height 0 → residues dropped).
 
-**Overlap clustering**: Hierarchical graph-based clustering using overlap thresholds:
-- **15N**: ±0.04 ppm (F2), ±0.4 ppm (F1)
-- **13C**: ±0.04 ppm (F2), ±0.1 ppm (F1)
+### 1.1 Top-Contour Centroid
 
-Clusters are disjoint partitions—each peak belongs to exactly one cluster.
+`calculate_top_contour_center` (picker) / `_calculate_top_contour_center` (`core_integrator.py`). Sub-pixel positioning for flat-top peaks.
 
-### 1.2 Top Contour Centroid
+1. Find max intensity I_max.
+2. Select pixels within ±5% band `[0.95·I_max, 1.05·I_max]` (`intensity_band=0.05`).
+3. Intensity-weighted center `x_c = Σ(x_i·I_i)/Σ I_i` (same for y).
+4. Clip shift to GUI `max_shift_x/y`; fall back to pixel max if band empty.
 
-**Purpose**: Sub-pixel positioning for flat-top peaks.
-
-**Algorithm** (`_calculate_top_contour_center`):
-1. Find peak maximum intensity I_max
-2. Select pixels with I ∈ [0.95×I_max, 1.05×I_max]  (±5% intensity band)
-3. Calculate intensity-weighted center:
-   ```
-   x_c = Σ(x_i × I_i) / Σ(I_i)
-   y_c = Σ(y_i × I_i) / Σ(I_i)
-   ```
-4. Apply safety constraint: clip shift to GUI-specified max_shift_x/y
-
-**GUI Parameters** (`Peak Centroid Detection`):
-- `centroid_window_x_ppm`: Max shift in F2 (default: 0.01 ppm)
-- `centroid_window_y_ppm`: Max shift in F1 (default: 0.1 ppm)
-
-**Output**: Console prints "Centroid shift: Δ=X.XXXX ppm from pixel max" when shift >0.001 ppm.
-
-**Complexity**: O(W×H) where W,H are search window dimensions.
+GUI defaults (`main_window`): `centroid_window_x_ppm=0.01` (1H), `centroid_window_y_ppm=0.1` (15N).
 
 ---
 
 ## 2. PS2D Simultaneous 2D Voigt Fitting
 
+`core/ps2d_2d_fitter.py` — `Ps2dMultiPeakFitter2D.fit_multi_peak_2d`. Optimizer `PS2DStyleFitter` in `ps2d_style_fitter.py`.
+
 ### 2.1 Data Selection
+Union of elliptical windows around each peak: `(ΔF1/radF1)² + (ΔF2/radF2)² ≤ 1`.
+Defaults (`ps2d_config.py`, 15N): radF1=0.4, radF2=0.04. 13C: radF1=0.15, radF2=0.04.
 
-Elliptical windows around each peak in overlap group:
-```
-(ΔF1/radF1)² + (ΔF2/radF2)² ≤ 1
-```
-**Defaults**: radF1=0.4 ppm (15N), radF2=0.04 ppm (1H).
+### 2.2 Parameter Vector (8 per peak)
+`[pos_f1, lw_lor_f1, lw_gau_f1, pos_f2, lw_lor_f2, lw_gau_f2, intensity, spare]` (spare fixed 0).
 
-### 2.2 Parameter Vector (8 parameters × n peaks)
-```
-[pos_f1, lw_lor_f1, lw_gau_f1, pos_f2, lw_lor_f2, lw_gau_f2, intensity, spare]
-```
-
-**FWHM to internal units**:
-- Gaussian: σ = FWHM / √(8 ln 2) ≈ FWHM / 2.3548
-- Lorentzian: γ = FWHM / 2
+Internal Voigt units: σ = FWHM/2.3548 (Gaussian), γ = FWHM/2 (Lorentzian); profile via Faddeeva `wofz`.
 
 ### 2.3 Five-Stage Levenberg-Marquardt
 
-| Stage | Parameters Floating | fix_positions | fix_linewidths |
-|-------|---------------------|---------------|----------------|
-| 0 | Intensities only | N/A | N/A |
-| 1 | Widths + intensities | N/A | Respected (Stage skipped if True) |
-| 2 | Positions + widths + intensities | **Skipped if True** | Respected |
-| 3 | (Reserved, unused) | N/A | N/A |
-| 4 | All parameters | **Positions fixed** | **Widths fixed** |
+| Stage | Floating | Notes |
+|-------|----------|-------|
+| 0 | intensities only | DISABLED (caused intensity collapse) — fitting starts at Stage 1 |
+| 1 | linewidths + intensities (positions fixed) | skipped if `fix_linewidths=True` |
+| 2 | positions + linewidths + intensities | skipped if `fix_positions=True` |
+| 3 | reserved / unused | |
+| 4 | all parameters (global refine) | fixed params restored exactly after `np.clip` bounds |
 
-**Absolute Constraint** (when `fix_positions=True`):
-- Stage 2 is entirely skipped
-- Stage 4 adds positions to `fixed_params` dictionary
-- After `np.clip()` bounds enforcement, fixed parameters are restored to exact values
-- **Result**: Zero position drift (within float precision ~10⁻¹⁵)
+GUI **Fix Positions**→skip Stage 2; **Fix Linewidths**→skip Stage 1. Stages 1/4 support optional L/G-ratio and intensity-ratio soft penalties (applied only for too-close clusters).
 
-**Damping**: Adaptive λ starting at 0.001, multiplied by 10 on rejection, divided by 10 on acceptance.
-
-**Derivatives**: Analytical for intensity (∂y/∂A = y/A), finite difference for others.
+**Optimizer** (`PS2DStyleFitter`): additive damping `α + λ·I`; λ init 1e-4, ×5 on rejection, ×0.2 on acceptance. Analytical Jacobian (`compute_multi_voigt_jacobian_2d`). Parameter normalization `self.scales = max(|params|, 1e-8)` (Hessian condition ~10¹⁰→10³–10⁴); Jacobian scaled by `scales`, covariance denormalized via `outer(scales, scales)`.
 
 ### 2.4 Bounds
+- **Positions**: `pos ± max(0.04·FWHM, pos_margin)`; `pos_margin` 15N F1=0.02, F2=0.01 (titration mode passes wider margins). Cascade mode additionally clips to `±max_drift` of the reference position.
+- **Linewidths**: min 0.03 (F1/15N), 0.005 (F2/1H); max = `min(config_max, learned_median + α·MAD)` from two-pass stats, config_max 15N F1=0.8, F2=0.08.
+- **Intensities**: `[0.001, 5.0] × max cluster intensity`.
 
-**Positions**:
-```
-pos_f1 ∈ [initial ± max(1.5×FWHM_f1, 0.1 ppm)]
-pos_f2 ∈ [initial ± max(1.5×FWHM_f2, 0.01 ppm)]
-```
-
-**Linewidths**:
-```
-F1: [0.5, 5.0] × median_FWHM
-F2: [0.5, 2.0] × median_FWHM
-```
-
-**Intensities**: [0.01, 5.0] × initial estimate.
-
-### 2.5 Output
-```python
-{
-  'pos_f1': float, 'pos_f2': float,
-  'lw_lor_f1': float, 'lw_gau_f1': float,  # FWHM units
-  'lw_lor_f2': float, 'lw_gau_f2': float,
-  'intensity': float,  # Volume
-  'height': float,     # Peak amplitude at center
-  'r_squared': float,
-  'method': '2d_simultaneous_multi_peak'
-}
-```
+### 2.5 Output (per peak)
+`pos_f1/pos_f2`, `lw_lor_f1/lw_gau_f1/lw_lor_f2/lw_gau_f2` (FWHM), `intensity` (volume), `height`, `r_squared`, `method='2d_simultaneous_multi_peak'`.
 
 ---
 
-## 3. Overlap Resolution Strategy
+## 3. Overlap Clustering & Routing
 
-### 3.1 Hierarchical Graph-Based Clustering
+`core_integrator.py:identify_overlap_clusters` — agglomerative closest-pair merging (NOT networkx / connected-components). Called once before fitting; results identical in sequential and parallel mode.
 
-**Purpose**: Group overlapping peaks into disjoint clusters for simultaneous fitting.
+**Overlap test** (`_check_peaks_overlap`): elliptical distance `√((Δx/tx)² + (Δy/ty)²) ≤ 2.0`, with thresholds `overlap_threshold_x/y` (15N: x=0.04 (1H), y=0.4 (15N); 13C: x=0.04, y=0.15).
 
-**Algorithm** (`ps2d_exact_overlap_detector.py:identify_overlap_clusters`):
+**Merging**: start singletons → repeatedly merge the closest overlapping pair whose merged **diameter** stays within `max_cluster_diameter_x=0.20` (1H), `max_cluster_diameter_y=1.5` (15N); oversized clusters (>`max_cluster_size`, default 20) are split. Diameter/size constraints deliberately bound transitive closure so it can't form mega-clusters. Result = disjoint partition, each peak in exactly one cluster.
 
-1. **Build Overlap Graph**:
-   - Nodes = detected peaks
-   - Edges = overlap relationships (two-circle touching test)
-   - Graph is undirected (overlap is symmetric)
+**Routing**: `needs_2d = len(cluster) > 1`.
+- size 1 → 1D consensus / staged Voigt (`enhanced_peak_fitting`).
+- size >1 → `fit_overlap_group_2d` → PS2D; falls back to 1D cross-sections on failure.
 
-2. **Two-Circle Touching Test**:
-   ```python
-   peaks_overlap = (|ΔF1| ≤ 2×threshold_f1) AND (|ΔF2| ≤ 2×threshold_f2)
-   ```
-
-   **Default thresholds:**
-   - 15N-HSQC: threshold_f1 = 0.4 ppm, threshold_f2 = 0.04 ppm
-   - 13C-HSQC: threshold_f1 = 0.1 ppm, threshold_f2 = 0.04 ppm
-
-3. **Connected Components**:
-   - Use `networkx.connected_components()` to find clusters
-   - Each cluster = one connected component
-   - Clusters are disjoint (no peak in multiple clusters)
-
-4. **Transitive Closure**:
-   - If peak A overlaps B, and B overlaps C, then {A, B, C} form one cluster
-   - Even if A and C don't directly overlap
-   - Ensures all mutually-interfering peaks fitted together
-
-**Example:**
-```
-Peaks: A(118.5, 8.25), B(118.6, 8.26), C(118.7, 8.25), D(120.0, 8.50)
-
-Overlaps:
-  A-B: ΔF1=0.1, ΔF2=0.01 → overlap (within thresholds)
-  B-C: ΔF1=0.1, ΔF2=0.01 → overlap
-  A-C: ΔF1=0.2, ΔF2=0.00 → overlap
-  A-D: ΔF1=1.5, ΔF2=0.25 → no overlap
-  B-D: ΔF1=1.4, ΔF2=0.24 → no overlap
-  C-D: ΔF1=1.3, ΔF2=0.25 → no overlap
-
-Graph:
-  {A, B, C} - connected component → Cluster 1
-  {D}       - isolated node → Cluster 2
-
-Result:
-  Cluster 1 (3 peaks): PS2D 2D simultaneous fitting
-  Cluster 2 (1 peak):  1D cross-section fitting
-```
-
-### 3.2 Cluster Properties
-
-**Disjoint Partitioning**:
-- Each peak appears in exactly ONE cluster
-- No overlap between clusters (by definition)
-- Clusters can be processed independently
-
-**Determinism**:
-- Same peak positions + same thresholds → same clusters
-- Graph algorithm is deterministic (breadth-first search)
-- Cluster ordering may vary (set-based), but membership is constant
-
-**Size Distribution** (typical 15N-HSQC, 150 peaks):
-- Single-peak clusters (isolated): ~60-70%
-- 2-3 peak clusters (doublets/triplets): ~20-30%
-- 4-6 peak clusters (heavy overlap): ~5-10%
-- 7+ peak clusters (pathological): <5%
-
-### 3.3 Cluster-to-Algorithm Routing
-
-**Decision Tree:**
-```
-For each cluster:
-    if cluster.size == 1:
-        → Enhanced Voigt Fitter (1D cross-sections)
-        → Method: 'consensus' or '1d_staged'
-        → Fast, simple, adequate for isolated peaks
-
-    elif cluster.size >= 2:
-        → PS2D 2D Simultaneous Fitter
-        → Method: '2d_simultaneous_multi_peak'
-        → Fits all peaks together, resolves overlap
-
-    if cluster.size > 15:
-        → Warning: cluster too large
-        → Subdivide or fit with relaxed constraints
-```
-
-**Code Reference:**
-- `core_integrator.py:~line 2400` (routing logic)
-- `core_integrator.py:fit_overlap_group_2d()` (PS2D wrapper)
-- `enhanced_voigt_fitter.py:fit_peak()` (1D wrapper)
-
-### 3.4 Parallel Mode Clustering
-
-**Critical**: Clustering happens ONCE before distribution.
-
-**Workflow:**
-1. Main process calls `identify_overlap_clusters()` → disjoint clusters
-2. Clusters distributed across workers (round-robin or load-balanced)
-3. Each worker processes entire clusters (not individual peaks)
-4. Results consolidated by integer `peak_number` matching
-
-**Properties:**
-- **Same clustering** as sequential mode (identical graph algorithm)
-- **Same results** as sequential mode (R² values match within precision)
-- **Faster execution** via parallelism (2.7× speedup with 6 cores)
-
-**Code Reference:**
-- `parallel_voigt_processor.py:distribute_clusters()`
-- `parallel_voigt_processor.py:consolidate_results()`
-
-### 3.5 Cluster Subdivision (Future Work)
-
-**Current Limits:**
-- Max cluster size: 15 peaks (hard limit to prevent combinatorial explosion)
-- Max diameter: 2.0 ppm (F1) × 0.2 ppm (F2)
-
-**Proposed Subdivision Strategies:**
-1. **K-means clustering** on (F1, F2) coordinates
-2. **Hierarchical subdivision** using distance threshold
-3. **Density-based clustering** (DBSCAN) for irregular shapes
-
-**Status**: Not yet implemented. Clusters > 15 peaks currently rejected with warning.
-
----
+**Parallel** (`parallel_voigt_processor.py::fit_all_peaks_parallel`): same clustering runs once, then whole clusters distribute across workers; results consolidated by integer `peak_number`. ~2.7× speedup (6 cores). **Two-pass linewidth learning**: pass 1 fits isolated peaks → median linewidths (+MAD); pass 2 seeds multi-peak clusters with them (falls back to `ps2d_config.py` defaults).
 
 ---
 
 ## 4. Quality Assessment
 
-### 4.1 Quality Hierarchy (Centralized at `core_integrator.py:4297-4317`)
+`_assign_quality_from_r2` (`core_integrator.py`, applied to PS2D and 1D results alike): Excellent ≥0.9, Good ≥0.8, Fair ≥0.5, Poor ≥0.2, else Failed. Colors: green (Excellent/Good), yellow (Fair), red (Poor/Failed/unfitted).
 
-| Quality | R² Range | Color |
-|---------|----------|-------|
-| Excellent | ≥ 0.9 | Green |
-| Good | [0.8, 0.9) | Green |
-| Fair | [0.5, 0.8) | Yellow |
-| Poor | [0.2, 0.5) | Red |
-| Failed | < 0.2 | Red |
+**Acceptance**: PS2D pragmatic `r_squared > 0.2` (or formal convergence / chi² reduction); 1D `min_r_squared` default 0.3.
 
-### 4.2 Acceptance Thresholds
-
-**PS2D 2D fitting**: R² > 0.2 (pragmatic threshold for difficult overlaps)
-
-**1D fitting**: R² > 0.5
-
-### 4.3 Failed Peak Storage
-
-Peaks that fail fitting are stored with placeholder values:
-```python
-{
-  'quality': 'Failed',
-  'fitted': False,
-  'r_squared': 0.0,
-  'intensity': 0.0,
-  'method': 'none',
-  'failure_reason': 'Fitting did not converge or failed acceptance criteria'
-}
-```
-
-This maintains 1:1 index mapping between peak_list and fitted_results for Navigator compatibility.
+**Failed peaks** stored with placeholders (`fitted=False, r_squared=0, intensity=0, quality='Failed'`) to keep 1:1 peak_list↔results index mapping for the Navigator.
 
 ---
 
 ## 5. Parameter Management
 
-### 5.1 Simplified Mode (Default)
+`utils/parameter_manager.py` (+ `simplified_parameter_manager.py`).
 
-3-5 core parameters:
-- `sensitivity`: Detection threshold multiplier (0.1-0.9)
-- `window_scale`: Fitting window sizing (0.1-10.0)
-- `quality_target`: Target R² (0.5-0.95)
+**Simplified mode** (`use_simplified_mode`) exposes 3 knobs → maps to legacy params via nucleus-adaptive thresholds:
+- `sensitivity` (legacy, no longer affects detection)
+- `window_scale` (default 1.0) — fitting-window sizing
+- `quality_target` (default 0.85) — feeds `min_r_squared`
 
-Maps to 25+ legacy parameters via nucleus-specific adaptive thresholds.
-
-### 5.2 GUI Parameter Override
-
-**Critical**: When simplified mode is enabled, GUI values for `centroid_window_x_ppm` and `centroid_window_y_ppm` **override** calculated defaults.
-
-**Flow**:
-```
-GUI spinboxes → ParameterManager.update_from_gui_variables()
-             → current_params['centroid_window_x_ppm']
-             → ParameterManager.get_effective_parameters()
-             → Override simplified_manager values
-             → integrator.gui_params
-```
+GUI spinbox values for `centroid_window_x/y_ppm` **override** simplified defaults via `update_from_gui_variables` → `get_effective_parameters` → `integrator.gui_params`.
 
 ---
 
-## 6. Parallel Processing
+## 6. Complexity
 
-**Cluster-based workflow**:
-1. Call `identify_overlap_clusters()` **once** (deterministic, sequential)
-2. Distribute clusters across workers
-3. Each worker processes entire clusters (not individual peaks)
-4. Consolidate results using integer `peak_number` matching (not float coordinates)
-
-**Performance**: 2.7× speedup with 6 cores.
-
-**Output**: Identical to sequential mode (same clustering, same R² values).
+- Detection O(N) data points; centroid O(W·H) per peak.
+- PS2D O(I·n·M) (iterations × cluster peaks × masked points); bottleneck for large clusters. Numba JIT gives 3–5× on the 2D model/Jacobian.
 
 ---
 
-## 7. File Format Support
+## 7. File Formats
 
-**Bruker**: `.2ii`, `.2rr` (TopSpin)
-**Varian/Agilent**: `.fid`, `.ft`
-**NMRPipe**: `.ft`, `.pipe`
-**SPARKY**: `.ucsf`
-
-Loaded via `nmrglue` with automatic axis ordering detection.
+Bruker `.2ii`/`.2rr`, Varian/Agilent `.fid`/`.ft`, NMRPipe `.ft`/`.pipe`, SPARKY `.ucsf` — loaded via `nmrglue` with automatic axis-ordering detection.
 
 ---
 
-## 8. Complexity & Performance
+## 8. Downstream Models (Modules)
 
-**Peak detection**: O(N) where N = number of data points
-**Centroid calculation**: O(W×H) per peak (W,H = window size)
-**PS2D fitting**: O(I × n × M) where I = iterations, n = peaks in cluster, M = masked data points
-**Parallel consolidation**: O(P) where P = total peaks
+Fitted series feed DynamiXs and Kd (GUI Modules menu / CLI).
 
-**Bottleneck**: PS2D 2D fitting for large overlap clusters (>6 peaks). Numba JIT provides 3-5× speedup.
+| Analysis | Model |
+|----------|-------|
+| T₁ / T₂ | Mono-exponential decay |
+| Methyl T₂ | Shared-amp bi-exp `I(t)=0.5·A·[e^(−t/T2a)+e^(−t/T2b)]`, fit in (A, T2_avg, ΔT2); T2a (slow/TROSY) is the reportable T₂ |
+| hetNOE | `I_sat/I_unsat` per residue (+ QC plot vs residue) |
+| Spectral density / model-free | Reduced spectral density → Lipari-Szabo (single/dual field) |
+| Kd — CSP | 1:1 quadratic isotherm `Δδ = Δδ_max·fraction_bound(L,P0,Kd)` |
+| Kd — intensity | `I = I_inf + (I0−I_inf)·e^(−L/Kd)` |
+
+All Kd fits bound Kd ≥ 0. Headless equivalents: [CLI.md](CLI.md).

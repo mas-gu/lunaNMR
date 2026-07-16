@@ -1,98 +1,81 @@
 # Installation Guide – lunaNMR v1.0
 
-Follow these steps to get lunaNMR running on macOS, Linux, or Windows with an activated Python environment and the correct native dependencies.
+Runs on macOS, Linux, Windows. All commands run from the `lunaNMR_v1o0/` directory.
 
 ## 1. Prerequisites
 
-- **Python**: 3.8 – 3.11 (64‑bit). Install from python.org or your package manager.
-- **Git**: if you plan to clone from version control.
-- **TK GUI toolkit**: included in most Python distributions. On some Linux distros install `python3-tk` (Ubuntu/Debian) or `python3-tkinter` (Fedora/RHEL).
+- **Python** ≥ 3.9 (64‑bit).
+- **Tk** — used only by the launcher's selector dialog. Bundled with most Python builds; on Linux install `python3-tk` (Debian/Ubuntu) or `python3-tkinter` (Fedora/RHEL).
+- **Git** — to clone the repo.
 
-## 2. Obtain the Sources
+## 2. Get the Sources
 
 ```bash
-# Clone the repository
-git clone <your fork or upstream>
-cd lunaNMR_v1o0
+git clone https://github.com/mas-gu/lunaNMR.git
+cd lunaNMR/lunaNMR_v1o0
 ```
 
-If you downloaded an archive, extract it and open the extracted `lunaNMR_v1o0` folder in your terminal.
-
-## 3. (Recommended) Create a Virtual Environment
+## 3. Virtual Environment (recommended)
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate        # Linux/macOS
-# or
-.venv\Scripts\activate          # Windows PowerShell
+source .venv/bin/activate     # Linux/macOS
+.venv\Scripts\activate        # Windows PowerShell
 ```
 
-Deactivate later with `deactivate`.
+## 4. Install Dependencies
 
-## 4. Install Python Dependencies
+All runtime deps are in `requirements.txt`:
 
-The project keeps all runtime dependencies in `requirements.txt`:
-
-```text
-numpy>=1.20.0
-pandas>=1.3.0
-matplotlib>=3.5.0
-scipy>=1.7.0
-scikit-learn>=1.0.0
-numba>=0.57.0          # REQUIRED for PS2D 2D multi-peak fitting
-networkx>=2.5
-nmrglue>=0.9.0
-psutil>=5.8.0          # Optional but used for performance dashboards
-```
-
-Install them with pip:
+| Package | Notes |
+|---|---|
+| numpy ≥1.20, pandas ≥1.3, scipy ≥1.7, scikit-learn ≥1.0 | core |
+| matplotlib ≥3.5 | backend forced to `QtAgg` |
+| PySide6 ≥6.6 | Qt6 GUI — **required** |
+| numba ≥0.57 | **required** — 3–5× faster 2D multi-peak fitting |
+| networkx ≥2.5 | peak-detection clustering |
+| nmrglue ≥0.9 | NMR file reading |
+| psutil ≥5.8 | optional — performance tracking |
+| torch ≥2.0, torchvision ≥0.15 | optional — CNN peak classifier |
 
 ```bash
 pip install -r requirements.txt
 ```
 
-If you are behind a firewall, add `--proxy` as required. To install extras for development or testing, append packages such as `pytest`, `black`, or `flake8` manually.
+### Troubleshooting
 
-### Troubleshooting dependency installs
+- **`numba` wheel missing**: `pip install --upgrade pip`, retry. On Apple silicon use an arm64 Python.
+- **`tkinter` missing**: install the OS package above.
+- **Permission errors**: use a venv or `pip install --user`.
 
-- **`numba` wheel missing**: upgrade pip (`pip install --upgrade pip`) and retry. On Apple silicon, ensure you are using an arm64 Python build.
-- **`tkinter` missing**: install OS packages noted above.
-- **Permission errors**: use a virtual environment or `pip install --user`.
-
-## 5. Verify the Installation
-
-lunaNMR ships with an automated check:
+## 5. Verify
 
 ```bash
 python3 lunaNMR/validation/verify_installation.py
 ```
 
-You should see a report confirming the Python version, required packages, and GUI availability.
+Reports Python version, required packages, and GUI availability.
 
-## 6. Launching the Application
+## 6. Launch
 
-```bash
-python3 launch_lunaNMR.py
-```
+- **GUI**: `python3 launch_lunaNMR.py` — opens the selector; choose **LunaNMR** (or **DynamiXs** if the optional module is present).
+- **Headless CLI**: `python -m lunaNMR <subcommand>` (`series`, `dynamixs`, `kd`, `export`, `project`, `batch`). See `CLI.md`.
 
-This opens the launcher window. Choose **LunaNMR** for the main analysis suite (or **DynamiXs** if the optional module is installed).
+## 7. Sample Data
 
-## 7. Optional Data Packages
+Example spectra ship under `data_example/`. Copy them into a separate workspace if you prefer not to modify the repo.
 
-- Sample spectra reside under `data_example/` and `ml_training_data/`. Copy or mount your spectra into a separate workspace if you prefer not to modify the repository.
-- Batch ML runs write to `batch_ml/` and `test_ml_output/`; ensure you have write permission.
-
-## 8. Updating to a Newer Revision
+## 8. Update
 
 ```bash
 git pull
 pip install --upgrade -r requirements.txt
 ```
 
-Re-run the verification script to confirm that compiled extensions (Numba) still import correctly after an upgrade.
+Re-run the verification script to confirm Numba still imports.
 
-## 9. Uninstallation / Cleanup
+## 9. Cleanup
 
-Deactivate and remove your virtual environment, then delete the `lunaNMR_v1o0` directory. There are no system-wide services to stop.
-
-You are now ready to explore the GUI or the batch processing CLI.
+Deactivate and delete the venv, then remove the repo directory. No system-wide services.
+</content>
+</invoke>
