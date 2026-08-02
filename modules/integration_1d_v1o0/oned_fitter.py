@@ -1,4 +1,4 @@
-# ABOUTME: Per-peak 1D integration - Voigt profile fitting and numerical region summation.
+# ABOUTME: Per-peak 1D measurement - Voigt fitting, region summation and bare intensity.
 # ABOUTME: Depends only on numpy/scipy plus oned_voigt, so it runs without any GUI or lunaNMR import.
 
 import numpy as np
@@ -14,6 +14,12 @@ DEFAULT_WINDOW = 0.05
 MIN_WIDTH = 1e-4
 
 PARAM_NAMES = ('area', 'center', 'sigma', 'gamma', 'baseline')
+
+# The baseline under a peak is read from a region this many times the measurement
+# window, at this percentile - low enough that peaks, which are positive excursions,
+# do not pull it up.
+BASELINE_REGION_FACTOR = 5.0
+BASELINE_PERCENTILE = 10.0
 
 # Same thresholds as the rest of LunaNMR so the marker colours agree across viewers.
 QUALITY_THRESHOLDS = ((0.9, 'Excellent'), (0.8, 'Good'), (0.5, 'Fair'))
@@ -62,6 +68,28 @@ def _edge_baseline(ppm, y):
 
     slope = (right_val - left_val) / (right_ppm - left_ppm)
     return left_val + slope * (ppm - left_ppm)
+
+
+def _local_baseline(ppm, y, target, window,
+                    region_factor=BASELINE_REGION_FACTOR,
+                    percentile=BASELINE_PERCENTILE):
+    """Baseline under a peak, taken as a low percentile of a wider surrounding region.
+
+    Taking it from the edges of the measurement window instead subtracts part of the
+    peak's own tails: the height then comes out 13.7% low at a window of one FWHM and
+    2.2% low at two, so the measurement depends on the window it was made in. A low
+    percentile over a wider region is flat to within a few tenths of a percent at any
+    window width, and a neighbouring peak does not disturb it because peaks are
+    positive excursions that the percentile discards.
+    """
+    ppm = np.asarray(ppm, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    region = np.abs(ppm - target) <= window * region_factor
+    if not region.any():
+        return 0.0
+
+    return float(np.percentile(y[region], percentile))
 
 
 def _integrate(ppm, y):
@@ -160,6 +188,35 @@ def fit_peak_voigt(ppm, y, target, window=DEFAULT_WINDOW, assignment=None):
     result['window_bounds'] = (float(ppm_w.min()), float(ppm_w.max()))
     result['param_errors'] = (dict(zip(PARAM_NAMES, (float(e) for e in errors)))
                               if np.all(np.isfinite(errors)) else None)
+    result['success'] = True
+
+    return result
+
+
+def measure_intensity(ppm, y, target, window=DEFAULT_WINDOW, assignment=None):
+    """Baseline-corrected peak height in the window around `target`.
+
+    The cheapest and most stable observable: no model, no integration limits, so
+    none of the window sensitivity that area carries. Valid for comparing a peak
+    across a series only while its linewidth stays constant - a broadening peak
+    loses height at constant area.
+
+    The window must stay narrower than half the distance to any neighbouring peak,
+    or the maximum found belongs to the neighbour. See oned_detector.estimate_window.
+    """
+    result = _empty_result('intensity', assignment, target)
+
+    ppm_w, y_w = _select_window(ppm, y, target, window)
+    if len(y_w) < 2:
+        return result
+
+    baseline = _local_baseline(ppm, y, target, window)
+    peak_idx = int(np.argmax(y_w))
+
+    result['height'] = float(y_w[peak_idx]) - baseline
+    result['center'] = float(ppm_w[peak_idx])
+    result['baseline'] = baseline
+    result['window_bounds'] = (float(ppm_w.min()), float(ppm_w.max()))
     result['success'] = True
 
     return result
