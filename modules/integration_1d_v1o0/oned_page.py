@@ -14,7 +14,13 @@ from oned_plotter import OneDPlotter
 from oned_series import (integrate_series, load_series, peak_at_position,
                          write_series_csv)
 
-SPECTRUM_PATTERNS = ('*.ft1', '*.ft', '*.dat')
+SPECTRUM_PATTERNS = ('*.ft1', '*.ft', '*.ft2', '*.ft3', '*.dat')
+
+# NMRPipe writes 1D spectra as .ft1, so it leads the filter. .ft2/.ft3 are offered
+# because they are picked by habit; a 2D file is rejected on load with a message
+# rather than being hidden from the dialog.
+SPECTRUM_FILTER = ("1D spectra (*.ft1 *.ft *.ft2 *.ft3 *.dat);;"
+                   "NMRPipe 1D (*.ft1);;All files (*)")
 
 
 class OneDIntegrationPage(QWidget):
@@ -46,7 +52,10 @@ class OneDIntegrationPage(QWidget):
         self.peak_table.setSelectionBehavior(QAbstractItemView.SelectRows)
 
         load_button = QPushButton("Load spectra…")
-        load_button.clicked.connect(self.load_folder)
+        load_button.clicked.connect(self.load_spectra)
+
+        load_folder_button = QPushButton("Load folder…")
+        load_folder_button.clicked.connect(self.load_folder)
 
         remove_button = QPushButton("Remove peak")
         remove_button.clicked.connect(self.remove_selected_peak)
@@ -64,8 +73,12 @@ class OneDIntegrationPage(QWidget):
         self.status = QLabel("Load a folder of 1D spectra to begin.")
         self.status.setWordWrap(True)
 
+        load_buttons = QHBoxLayout()
+        load_buttons.addWidget(load_button)
+        load_buttons.addWidget(load_folder_button)
+
         left = QVBoxLayout()
-        left.addWidget(load_button)
+        left.addLayout(load_buttons)
         left.addWidget(QLabel("Spectra"))
         left.addWidget(self.spectrum_list)
         left.addWidget(QLabel("Selected peaks"))
@@ -93,7 +106,18 @@ class OneDIntegrationPage(QWidget):
 
     # ------------------------------------------------------------- loading
 
+    def load_spectra(self, _=None, paths=None):
+        """Load an explicit list of spectrum files, chosen in the file dialog."""
+        if paths is None:
+            paths, _filter = QFileDialog.getOpenFileNames(
+                self, "Select 1D spectra", '', SPECTRUM_FILTER)
+        if not paths:
+            return
+
+        self._set_paths([Path(p) for p in paths])
+
     def load_folder(self, _=None, folder=None):
+        """Load every spectrum in a folder, in name order."""
         folder = folder or QFileDialog.getExistingDirectory(self, "Folder of 1D spectra")
         if not folder:
             return
@@ -106,13 +130,39 @@ class OneDIntegrationPage(QWidget):
             self.status.setText(f"No 1D spectra found in {folder}")
             return
 
-        self.paths = paths
+        self._set_paths(sorted(paths))
+
+    def _set_paths(self, paths):
+        """Keep the files that load as 1D, reporting the ones that do not.
+
+        A folder often holds 2D spectra beside the 1D ones, and picking one should
+        say so rather than aborting the whole selection.
+        """
+        readable, rejected = [], []
+        for path in paths:
+            try:
+                load_spectrum(path)
+                readable.append(path)
+            except Exception as exc:
+                rejected.append(f"{Path(path).name}: {exc}")
+
+        self.paths = readable
         self.spectrum_list.clear()
-        self.spectrum_list.addItems([p.name for p in paths])
+        self.spectrum_list.addItems([p.name for p in readable])
+
+        if not readable:
+            self._refresh_peaks()
+            self.status.setText("Could not read any 1D spectra from the selection. "
+                                + (rejected[0] if rejected else ''))
+            return
+
         self.spectrum_list.setCurrentRow(0)
-        self.status.setText(f"Loaded {len(paths)} spectra. "
-                            "Drag a box over a region to detect peaks, or switch to "
-                            "click mode to place one.")
+
+        message = (f"Loaded {len(readable)} spectra. Drag a box over a region to "
+                   "detect peaks, or switch to click mode to place one.")
+        if rejected:
+            message += f"  Skipped {len(rejected)} unreadable file(s)."
+        self.status.setText(message)
 
     def show_spectrum(self, row):
         if not (0 <= row < len(self.paths)):

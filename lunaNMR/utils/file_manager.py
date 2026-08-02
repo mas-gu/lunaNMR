@@ -34,7 +34,7 @@ class NMRFileManager:
                           '3rrr', '3rri', '3rir', '3rii', '3irr', '3iri', '3iir', '3iii')
 
     def __init__(self):
-        self.supported_nmr_formats = ['ft', 'ser', 'ft2', 'ft3', 'pipe', 'ucsf']
+        self.supported_nmr_formats = ['ft', 'ft1', 'ser', 'ft2', 'ft3', 'pipe', 'ucsf']
         self.supported_peak_formats = ['txt', 'csv', 'peaks']
         self.recent_files = []
         self.max_recent = 10

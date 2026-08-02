@@ -33,6 +33,35 @@ def page(app):
     return OneDIntegrationPage()
 
 
+class TestFileSelection:
+    def test_filter_offers_the_nmrpipe_1d_extension(self, page):
+        """The picker must show .ft1 files, not only .ft/.ft2."""
+        from oned_page import SPECTRUM_FILTER
+        assert '*.ft1' in SPECTRUM_FILTER
+
+    @needs_series
+    def test_loads_an_explicit_list_of_ft1_files(self, page):
+        chosen = [str(p) for p in sorted(REAL_DIR.glob('*.ft1'))[:4]]
+        page.load_spectra(paths=chosen)
+        assert len(page.paths) == 4
+        assert page.spectrum is not None
+
+    def test_unreadable_files_are_skipped_with_a_message(self, page, tmp_path):
+        bogus = tmp_path / "broken.ft1"
+        bogus.write_bytes(b"not NMR data")
+        page.load_spectra(paths=[str(bogus)])
+        assert page.paths == []
+        assert 'could not' in page.status.text().lower()
+
+    @needs_series
+    def test_a_mixed_selection_keeps_the_readable_files(self, page, tmp_path):
+        bogus = tmp_path / "broken.ft1"
+        bogus.write_bytes(b"not NMR data")
+        good = [str(p) for p in sorted(REAL_DIR.glob('*.ft1'))[:2]]
+        page.load_spectra(paths=good + [str(bogus)])
+        assert len(page.paths) == 2
+
+
 class TestPageConstruction:
     def test_starts_with_no_peaks_and_integration_disabled(self, page):
         assert page.peaks == []
