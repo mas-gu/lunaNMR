@@ -11,7 +11,7 @@ _MODULE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_MODULE_DIR))
 
 # data_example/ is gitignored, so the real-data tests skip on a fresh clone.
-REAL_SPECTRUM = _MODULE_DIR.parent.parent / "data_example" / "1D" / "1D_KB_GTP_xxx.ft1"
+REAL_SPECTRUM = _MODULE_DIR.parent.parent / "data_example" / "1D" / "1D_KB_GTP_051.ft1"
 needs_real_data = pytest.mark.skipif(not REAL_SPECTRUM.exists(),
                                      reason="real 1D spectrum not present")
 
