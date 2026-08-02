@@ -4845,6 +4845,10 @@ class LunaNMRMainWindow(BaseWindow):
         kd_titration_action.triggered.connect(self.launch_kd_titration)
         modules_menu.addAction(kd_titration_action)
 
+        integration_1d_action = QAction("1D Integration", self)
+        integration_1d_action.triggered.connect(self.launch_integration_1d)
+        modules_menu.addAction(integration_1d_action)
+
         series_qc_action = QAction("Series QC Analysis", self)
         series_qc_action.triggered.connect(self.launch_series_qc)
         modules_menu.addAction(series_qc_action)
@@ -5754,6 +5758,19 @@ class LunaNMRMainWindow(BaseWindow):
 
         self.kd_titration_dialog = KdTitrationDialog(parent=self, main_window=self)
         self.kd_titration_dialog.show()
+
+    def launch_integration_1d(self):
+        """Launch the 1D integration module as an embedded dialog."""
+        from lunaNMR.gui.dialogs import Integration1DDialog
+
+        if (hasattr(self, 'integration_1d_dialog') and self.integration_1d_dialog
+                and self.integration_1d_dialog.isVisible()):
+            self.integration_1d_dialog.raise_()
+            self.integration_1d_dialog.activateWindow()
+            return
+
+        self.integration_1d_dialog = Integration1DDialog(parent=self, main_window=self)
+        self.integration_1d_dialog.show()
 
     def open_kd_analysis(self, name):
         """Open a saved Kd analysis (from the loaded project) in the Kd dialog.

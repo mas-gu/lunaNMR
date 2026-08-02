@@ -15,6 +15,7 @@ from .dynamixs_dialog import DynamiXsDialog
 from .kd_titration_dialog import KdTitrationDialog
 from .series_qc_dialog import SeriesQCDialog
 from .spectral_inspector import SpectralInspector
+from .integration_1d_dialog import Integration1DDialog
 
 __all__ = [
     'DataLoadingDialog',
@@ -30,4 +31,5 @@ __all__ = [
     'KdTitrationDialog',
     'SeriesQCDialog',
     'SpectralInspector',
+    'Integration1DDialog',
 ]
