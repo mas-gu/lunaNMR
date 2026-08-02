@@ -11,8 +11,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFile
 
 from oned_loader import load_spectrum
 from oned_plotter import OneDPlotter
-from oned_series import (integrate_series, load_series, peak_at_position,
-                         write_series_csv)
+from oned_series import (integrate_series, load_series, locate_peaks,
+                         peak_at_position, write_series_csv)
 
 SPECTRUM_PATTERNS = ('*.ft1', '*.ft', '*.ft2', '*.ft3', '*.dat')
 
@@ -192,7 +192,7 @@ class OneDIntegrationPage(QWidget):
             return
         self.spectrum = load_spectrum(self.paths[row])
         self.plotter.set_spectrum(self.spectrum, keep_view=True)
-        self.plotter.set_peaks(self._plotter_peaks())
+        self._refresh_peaks()
 
     # ---------------------------------------------------------- peak picking
 
@@ -282,22 +282,50 @@ class OneDIntegrationPage(QWidget):
     def _update_run_state(self):
         self.integrate_button.setEnabled(bool(self.peaks) and bool(self.checked_paths()))
 
+    def _located_peaks(self):
+        """Each picked peak as it appears in the spectrum currently on screen.
+
+        The reference position is where the user picked; a resonance drifts through a
+        series, so a marker frozen at the reference slides off the peak as you browse.
+        Located here with the same matching the series run uses, so the display agrees
+        with what will be measured. Falls back to the reference where nothing matched.
+        """
+        if self.spectrum is None or not self.peaks:
+            return [dict(peak) for peak in self.peaks]
+
+        located = []
+        for peak, match in zip(self.peaks, locate_peaks(self.spectrum, self.peaks)):
+            located.append({
+                'assignment': peak['assignment'],
+                'position': peak['position'],
+                'ppm': match['ppm'] if match['matched'] else peak['position'],
+                'height': match['height'],
+                'matched': match['matched'],
+            })
+        return located
+
     def _plotter_peaks(self):
         """The page keys a peak by its reference `position`; the plotter draws at `ppm`.
         Every hand-off goes through here so the two shapes cannot drift apart."""
-        return [{'ppm': peak['position'], 'height': peak.get('height'),
-                 'assignment': peak['assignment']} for peak in self.peaks]
+        return [{'ppm': peak.get('ppm', peak['position']), 'height': peak.get('height'),
+                 'assignment': peak['assignment']} for peak in self._located_peaks()]
 
     def _refresh_peaks(self):
-        self.peak_table.setRowCount(len(self.peaks))
-        for row, peak in enumerate(self.peaks):
+        located = self._located_peaks()
+
+        self.peak_table.setRowCount(len(located))
+        for row, peak in enumerate(located):
             height = peak.get('height')
+            ppm = peak.get('ppm', peak['position'])
+            marker = '' if peak.get('matched', True) else ' ?'
             for col, text in enumerate((peak['assignment'],
-                                        f"{peak['position']:.4f}",
+                                        f"{ppm:.4f}{marker}",
                                         '' if height is None else f"{height:.3e}")):
                 self.peak_table.setItem(row, col, QTableWidgetItem(text))
 
-        self.plotter.set_peaks(self._plotter_peaks())
+        self.plotter.set_peaks([{'ppm': p.get('ppm', p['position']),
+                                 'height': p.get('height'),
+                                 'assignment': p['assignment']} for p in located])
         self._update_run_state()
         self.status.setText(f"{len(self.peaks)} peak(s) selected across "
                             f"{len(self.checked_paths())} checked spectra.")

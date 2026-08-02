@@ -78,6 +78,19 @@ def _drift_limits(spectrum, peaks, track_window):
     return limits
 
 
+def locate_peaks(spectrum, peaks, track_window=DEFAULT_TRACK_WINDOW_PPM):
+    """Where each reference peak sits in this one spectrum.
+
+    Same matching a series run uses, so what the display shows for a spectrum is what
+    the integration will measure there.
+    """
+    if not peaks:
+        return []
+
+    return match_reference_peaks(spectrum, peaks,
+                                 window=_drift_limits(spectrum, peaks, track_window))
+
+
 def _windows_for(spectrum, peaks):
     """Measurement half-width per peak, linewidth-driven and clear of its neighbours."""
     positions = [float(p['position']) for p in peaks]
