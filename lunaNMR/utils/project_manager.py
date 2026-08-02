@@ -171,6 +171,10 @@ class ProjectManager:
                 summary['saved_items'].append('Kd titration')
             process_events()
 
+            if self._save_spectral_inspector_state(project_path):
+                summary['saved_items'].append('Spectral Inspector')
+            process_events()
+
             logger.info(f"Project saved to {project_path}")
             return True, summary
 
@@ -447,6 +451,9 @@ class ProjectManager:
 
             if self._load_kd_state(project_path):
                 summary['loaded_items'].append('Kd titration')
+
+            if self._load_spectral_inspector_state(project_path):
+                summary['loaded_items'].append('Spectral Inspector')
 
             logger.info(f"Project loaded from {project_path}")
             return True, missing_files, summary
@@ -832,6 +839,7 @@ class ProjectManager:
                 'metadata': self._serialize_metadata(batch_results.metadata if hasattr(batch_results, 'metadata') else {}),
                 'statistics': batch_results.statistics if hasattr(batch_results, 'statistics') else {},
                 'errors': batch_results.errors if hasattr(batch_results, 'errors') else [],
+                'series_mode': getattr(batch_results, 'series_mode', 'time'),
             }
 
             # Serialize each spectrum result
@@ -843,6 +851,10 @@ class ProjectManager:
             batch_file = series_subdir / "batch_results.json"
             with open(batch_file, 'w') as f:
                 json.dump(data, f, default=self._json_serializer)
+
+            # Copy the tidy CSV into the bundle so the project is self-contained:
+            # a moved/renamed source run folder still resolves for Kd/titration input.
+            self._copy_series_csv(batch_results, series_subdir)
 
             # Add to manifest
             spectrum_count = len(batch_results.results) if hasattr(batch_results, 'results') else 0
@@ -860,6 +872,21 @@ class ProjectManager:
 
         logger.info(f"Saved {len(saved_series)} series integrations")
         return True
+
+    def _copy_series_csv(self, batch_results, series_subdir: Path) -> None:
+        """Copy a series' series_analysis_tidy.csv into its bundle subdirectory.
+
+        Source is the recorded csv_path, else output_folder/series_analysis_tidy.csv.
+        Silently does nothing if no source CSV exists on disk.
+        """
+        import shutil
+        metadata = batch_results.metadata if hasattr(batch_results, 'metadata') else {}
+        src = metadata.get('csv_path')
+        if not (src and Path(src).exists()):
+            output_folder = metadata.get('output_folder')
+            src = str(Path(output_folder) / "series_analysis_tidy.csv") if output_folder else None
+        if src and Path(src).exists():
+            shutil.copy2(src, series_subdir / "series_analysis_tidy.csv")
 
     def _serialize_metadata(self, metadata: dict) -> dict:
         """Serialize metadata, converting datetime objects to ISO strings."""
@@ -945,6 +972,7 @@ class ProjectManager:
                 batch_results.metadata['series_name'] = series_name
                 batch_results.statistics = data.get('statistics', {})
                 batch_results.errors = data.get('errors', [])
+                batch_results.series_mode = data.get('series_mode', 'time')
 
                 # Restore results dict
                 for name, result in data.get('results', {}).items():
@@ -972,6 +1000,7 @@ class ProjectManager:
                 batch_results.metadata = data.get('metadata', {})
                 batch_results.statistics = data.get('statistics', {})
                 batch_results.errors = data.get('errors', [])
+                batch_results.series_mode = data.get('series_mode', 'time')
 
                 for name, result in data.get('results', {}).items():
                     batch_results.results[name] = self._deserialize_spectrum_result(result)
@@ -1276,6 +1305,57 @@ class ProjectManager:
             return sum(p.stat().st_size for p in path.rglob('*') if p.is_file())
         return 0
 
+    def _save_spectral_inspector_state(self, project_path: Path) -> bool:
+        """Persist the Spectral Inspector's content to spectral_inspector/state.json.
+
+        Captures the live window's state if it is open, else the last-known state
+        held on the main window. Spectra are referenced by file path (reloaded on
+        open), never copied. Returns True if a state file was written.
+        """
+        import shutil
+        folder = project_path / 'spectral_inspector'
+        state = None
+        inspector = getattr(self.main_window, '_spectral_inspector', None)
+        if inspector is not None:
+            try:
+                state = inspector.get_state()
+                self.main_window.spectral_inspector_state = state
+            except Exception as e:
+                logger.warning(f"Could not capture Spectral Inspector state: {e}")
+        if state is None:
+            state = getattr(self.main_window, 'spectral_inspector_state', None)
+
+        if not state or not state.get('groups'):
+            if folder.exists():          # nothing to persist — prune any stale folder
+                shutil.rmtree(folder, ignore_errors=True)
+            return False
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            with open(folder / 'state.json', 'w') as fh:
+                json.dump(state, fh, indent=2)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save Spectral Inspector state: {e}")
+            return False
+
+    def _load_spectral_inspector_state(self, project_path: Path) -> bool:
+        """Restore main_window.spectral_inspector_state from the bundle.
+
+        Returns True if a state file was found and read.
+        """
+        state_file = project_path / 'spectral_inspector' / 'state.json'
+        if not state_file.exists():
+            self.main_window.spectral_inspector_state = None
+            return False
+        try:
+            with open(state_file) as fh:
+                self.main_window.spectral_inspector_state = json.load(fh)
+            return True
+        except Exception as e:
+            logger.warning(f"Could not load Spectral Inspector state: {e}")
+            self.main_window.spectral_inspector_state = None
+            return False
+
     def inventory(self, project_path: Path) -> List[Dict[str, Any]]:
         """Describe a bundle's contents grouped by category.
 
@@ -1339,6 +1419,10 @@ class ProjectManager:
                     kd_specs.append((f'kd/analyses/{sub.name}', sub.name,
                                      [f'kd/analyses/{sub.name}'], True))
         add('kd', 'Kd analyses', kd_specs)
+
+        add('spectral_inspector', 'Spectral Inspector',
+            [('spectral_inspector', 'Spectral Inspector',
+              ['spectral_inspector/state.json'], True)])
 
         return categories
 
