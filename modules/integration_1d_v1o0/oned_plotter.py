@@ -84,7 +84,7 @@ class OneDPlotter(QWidget):
         self.y_scale.setDecimals(3)
         self.y_scale.setValue(1.0)
         self.y_scale.setSingleStep(0.1)
-        self.y_scale.valueChanged.connect(self.refresh)
+        self.y_scale.valueChanged.connect(self._apply_y_scale)
 
         self.show_peaks = QCheckBox("Show peaks")
         self.show_peaks.setChecked(True)
@@ -102,8 +102,8 @@ class OneDPlotter(QWidget):
         self.controls.addWidget(self.show_peaks)
         self.controls.addStretch()
 
-        hint = QLabel("scroll: zoom  ·  shift+scroll: zoom Y  ·  middle-drag: pan  ·  "
-                      "middle-click: pick peak")
+        hint = QLabel("scroll: zoom  ·  scroll on Y axis: scale trace  ·  "
+                      "middle-drag: pan  ·  middle-click: pick peak")
         hint.setStyleSheet("color: #666; font-size: 10px;")
         self.controls.addWidget(hint)
         self.controls.addWidget(self.reset_button)
@@ -175,15 +175,35 @@ class OneDPlotter(QWidget):
 
     # ------------------------------------------------------------ navigation
 
+    def _on_y_axis(self, event):
+        """True when the pointer is over the y-axis strip beside the plotting area."""
+        if event.x is None or event.y is None:
+            return False
+
+        box = self.axes.get_window_extent()
+
+        return event.x < box.x0 and box.y0 <= event.y <= box.y1
+
     def _on_scroll(self, event):
-        """Scroll zooms about the pointer; shift-scroll zooms the intensity axis."""
-        if event.inaxes is not self.axes or self.spectrum is None:
+        """Scroll zooms about the pointer; shift-scroll zooms the intensity axis.
+
+        Scrolling on the y axis itself rescales the spectrum amplitude instead, which
+        is the control the y-scale box holds - so the two stay in step rather than
+        offering two independent notions of vertical size.
+        """
+        if self.spectrum is None:
             return
 
         direction = getattr(event, 'button', None)
         step = getattr(event, 'step', 0)
         zooming_in = direction == 'up' or step > 0
         factor = ZOOM_FACTOR if zooming_in else 1.0 / ZOOM_FACTOR
+
+        if event.inaxes is not self.axes:
+            if self._on_y_axis(event):
+                # a larger y scale draws the trace taller, so zooming in raises it
+                self._scale_amplitude(1.0 / factor)
+            return
 
         if event.key and 'shift' in str(event.key):
             self._zoom_axis(self.axes.get_ylim(), self.axes.set_ylim,
@@ -195,6 +215,27 @@ class OneDPlotter(QWidget):
                             event.xdata, factor)
 
         self.canvas.draw_idle()
+
+    def _apply_y_scale(self, *args):
+        """Set the intensity limits from the current scale, leaving the ppm view alone.
+
+        Redrawing the whole plot instead would reset the ppm zoom, so rescaling the
+        trace would throw away the region the user had navigated to.
+        """
+        if self.spectrum is None:
+            return
+
+        span = float(self.spectrum.data.max()) or 1.0
+        scale = self.y_scale.value()
+        self.axes.set_ylim(-0.1 * span / scale, span / scale)
+        self.canvas.draw_idle()
+
+    def _scale_amplitude(self, multiplier):
+        """Multiply the spectrum's vertical scale, clamped to the spin box range."""
+        target = self.y_scale.value() * multiplier
+
+        self.y_scale.setValue(min(max(target, self.y_scale.minimum()),
+                                  self.y_scale.maximum()))
 
     @staticmethod
     def _zoom_axis(limits, apply_limits, anchor, factor):

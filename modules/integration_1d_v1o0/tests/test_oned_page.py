@@ -62,6 +62,138 @@ class TestFileSelection:
         assert len(page.paths) == 2
 
 
+@needs_series
+class TestSpectrumSwitching:
+    def test_switching_spectrum_after_picking_a_peak_does_not_crash(self, page):
+        """The page keys peaks by 'position', the plotter by 'ppm'. Passing the page's
+        list to the plotter unconverted raised KeyError on every spectrum change."""
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.show_spectrum(1)
+        assert page.spectrum is not None
+
+    def test_peaks_stay_drawn_after_switching(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.show_spectrum(3)
+        assert len(page.plotter.peaks) == 1
+        assert page.plotter.peaks[0]['ppm'] == pytest.approx(PEAK_A, abs=2e-3)
+
+    def test_stepping_through_several_spectra(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.add_peak_at(PEAK_B)
+        for row in range(6):
+            page.show_spectrum(row)
+        assert len(page.plotter.peaks) == 2
+
+
+@needs_series
+class TestSpectrumSelection:
+    def test_every_spectrum_starts_checked(self, page):
+        from PySide6.QtCore import Qt
+        page.load_folder(folder=str(REAL_DIR))
+        states = [page.spectrum_list.item(i).checkState()
+                  for i in range(page.spectrum_list.count())]
+        assert all(s == Qt.Checked for s in states)
+        assert len(page.checked_paths()) == 53
+
+    def test_unchecking_removes_a_spectrum_from_the_run(self, page):
+        from PySide6.QtCore import Qt
+        page.load_folder(folder=str(REAL_DIR))
+        page.spectrum_list.item(0).setCheckState(Qt.Unchecked)
+        page.spectrum_list.item(5).setCheckState(Qt.Unchecked)
+        checked = page.checked_paths()
+        assert len(checked) == 51
+        assert all('001' not in p.name for p in checked)
+
+    def test_check_none_then_all(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.check_none()
+        assert page.checked_paths() == []
+        page.check_all()
+        assert len(page.checked_paths()) == 53
+
+    def test_integration_disabled_when_nothing_is_checked(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        assert page.integrate_button.isEnabled() is True
+        page.check_none()
+        assert page.integrate_button.isEnabled() is False
+
+    def test_only_checked_spectra_reach_the_csv(self, page, tmp_path, monkeypatch):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QMessageBox
+        monkeypatch.setattr(QMessageBox, 'information', lambda *a, **k: None)
+
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        for i in range(page.spectrum_list.count()):
+            if i >= 5:
+                page.spectrum_list.item(i).setCheckState(Qt.Unchecked)
+
+        out = tmp_path / "subset.csv"
+        page.integrate(out_path=str(out))
+        lines = out.read_text().strip().splitlines()
+        assert len(lines) == 6                       # header + 5 spectra
+
+
+@needs_series
+class TestPropagationFeedback:
+    def test_list_shows_progress_as_each_spectrum_is_measured(self, page, tmp_path, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+        monkeypatch.setattr(QMessageBox, 'information', lambda *a, **k: None)
+
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.check_none()
+        for i in range(4):
+            from PySide6.QtCore import Qt
+            page.spectrum_list.item(i).setCheckState(Qt.Checked)
+
+        page.integrate(out_path=str(tmp_path / "p.csv"))
+
+        marked = [page.spectrum_list.item(i).text() for i in range(4)]
+        assert all(page.MEASURED_MARK in t for t in marked)
+        assert page.MEASURED_MARK not in page.spectrum_list.item(10).text()
+
+    def test_status_marks_reset_on_a_new_run(self, page, tmp_path, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+        monkeypatch.setattr(QMessageBox, 'information', lambda *a, **k: None)
+
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.integrate(out_path=str(tmp_path / "a.csv"))
+        assert page.MEASURED_MARK in page.spectrum_list.item(0).text()
+
+        page.load_folder(folder=str(REAL_DIR))
+        assert page.MEASURED_MARK not in page.spectrum_list.item(0).text()
+
+    def test_a_missing_mark_is_cleared_by_the_next_run(self, page, tmp_path, monkeypatch):
+        """Both marks must be stripped between runs, not just the measured one."""
+        from PySide6.QtWidgets import QMessageBox
+        monkeypatch.setattr(QMessageBox, 'information', lambda *a, **k: None)
+
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        item = page.spectrum_list.item(0)
+        item.setText(f"{item.text()}  {page.MISSING_MARK}")
+
+        page.integrate(out_path=str(tmp_path / "r.csv"))
+
+        assert page.MISSING_MARK not in page.spectrum_list.item(0).text()
+        assert page.spectrum_list.item(0).text().startswith('1D_KB_GTP_001')
+
+    def test_progress_callback_fires_once_per_spectrum(self):
+        from oned_series import integrate_series
+        from oned_loader import load_spectrum
+        spectra = [load_spectrum(p) for p in sorted(REAL_DIR.glob('*.ft1'))[:5]]
+        seen = []
+        integrate_series(spectra, [{'assignment': 'A', 'position': PEAK_A}],
+                         progress=lambda point, rows: seen.append(point))
+        assert seen == [0, 1, 2, 3, 4]
+
+
 class TestPageConstruction:
     def test_starts_with_no_peaks_and_integration_disabled(self, page):
         assert page.peaks == []
@@ -262,6 +394,53 @@ class TestNavigation:
         plotter._on_release(_MouseEvent(plotter, xdata=8.19, button=1, x=480, y=200))
 
         assert plotter.axes.get_xlim() == before
+
+    def _y_axis_point(self, plotter):
+        """A pixel position over the y-axis strip, left of the plotting area."""
+        plotter.canvas.draw()
+        box = plotter.axes.get_window_extent()
+        return max(0.0, box.x0 - 12), (box.y0 + box.y1) / 2.0
+
+    def test_scroll_on_the_y_axis_raises_the_amplitude_scale(self, plotter):
+        x, y = self._y_axis_point(plotter)
+        before = plotter.y_scale.value()
+        plotter._on_scroll(_MouseEvent(plotter, button='up', step=1,
+                                       x=x, y=y, inaxes=False))
+        assert plotter.y_scale.value() > before
+
+    def test_scroll_down_on_the_y_axis_lowers_the_amplitude_scale(self, plotter):
+        x, y = self._y_axis_point(plotter)
+        plotter.y_scale.setValue(4.0)
+        plotter._on_scroll(_MouseEvent(plotter, button='down', step=-1,
+                                       x=x, y=y, inaxes=False))
+        assert plotter.y_scale.value() < 4.0
+
+    def test_scroll_on_the_y_axis_leaves_the_ppm_axis_alone(self, plotter):
+        plotter.axes.set_xlim(8.30, 8.05)
+        x, y = self._y_axis_point(plotter)
+        before = plotter.axes.get_xlim()
+        plotter._on_scroll(_MouseEvent(plotter, button='up', step=1,
+                                       x=x, y=y, inaxes=False))
+        assert plotter.axes.get_xlim() == pytest.approx(before)
+
+    def test_amplitude_scale_stays_within_its_limits(self, plotter):
+        x, y = self._y_axis_point(plotter)
+        plotter.y_scale.setValue(plotter.y_scale.maximum())
+        for _ in range(5):
+            plotter._on_scroll(_MouseEvent(plotter, button='up', step=1,
+                                           x=x, y=y, inaxes=False))
+        assert plotter.y_scale.value() == pytest.approx(plotter.y_scale.maximum())
+
+    def test_scroll_elsewhere_outside_the_axes_is_still_ignored(self, plotter):
+        plotter.canvas.draw()
+        box = plotter.axes.get_window_extent()
+        before_scale = plotter.y_scale.value()
+        before_xlim = plotter.axes.get_xlim()
+        # far right of the plotting area, not the y-axis strip
+        plotter._on_scroll(_MouseEvent(plotter, button='up', step=1,
+                                       x=box.x1 + 40, y=box.y1 + 40, inaxes=False))
+        assert plotter.y_scale.value() == before_scale
+        assert plotter.axes.get_xlim() == before_xlim
 
     def test_shift_scroll_zooms_the_intensity_axis(self, plotter):
         before = plotter.axes.get_ylim()

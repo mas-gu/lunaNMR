@@ -4,10 +4,10 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QHBoxLayout,
-                               QHeaderView, QLabel, QListWidget, QMessageBox,
-                               QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFileDialog,
+                               QHBoxLayout, QHeaderView, QLabel, QListWidget,
+                               QListWidgetItem, QMessageBox, QPushButton, QSplitter,
+                               QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from oned_loader import load_spectrum
 from oned_plotter import OneDPlotter
@@ -25,6 +25,11 @@ SPECTRUM_FILTER = ("1D spectra (*.ft1 *.ft *.ft2 *.ft3 *.dat);;"
 
 class OneDIntegrationPage(QWidget):
     """Pick peaks on one spectrum, integrate them across the whole series."""
+
+    # Appended to a spectrum's list entry as the run reaches it, so the propagation
+    # is visible while it happens rather than only in the finished CSV.
+    MEASURED_MARK = '✓'
+    MISSING_MARK = '✗'
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -45,6 +50,12 @@ class OneDIntegrationPage(QWidget):
 
         self.spectrum_list = QListWidget()
         self.spectrum_list.currentRowChanged.connect(self.show_spectrum)
+        self.spectrum_list.itemChanged.connect(lambda _item: self._update_run_state())
+
+        check_all_button = QPushButton("All")
+        check_all_button.clicked.connect(self.check_all)
+        check_none_button = QPushButton("None")
+        check_none_button.clicked.connect(self.check_none)
 
         self.peak_table = QTableWidget(0, 3)
         self.peak_table.setHorizontalHeaderLabels(['Peak', 'ppm', 'Height'])
@@ -79,7 +90,13 @@ class OneDIntegrationPage(QWidget):
 
         left = QVBoxLayout()
         left.addLayout(load_buttons)
-        left.addWidget(QLabel("Spectra"))
+        spectra_header = QHBoxLayout()
+        spectra_header.addWidget(QLabel("Spectra (checked are integrated)"))
+        spectra_header.addStretch()
+        spectra_header.addWidget(check_all_button)
+        spectra_header.addWidget(check_none_button)
+
+        left.addLayout(spectra_header)
         left.addWidget(self.spectrum_list)
         left.addWidget(QLabel("Selected peaks"))
         left.addWidget(self.peak_table)
@@ -147,8 +164,14 @@ class OneDIntegrationPage(QWidget):
                 rejected.append(f"{Path(path).name}: {exc}")
 
         self.paths = readable
+        self.spectrum_list.blockSignals(True)
         self.spectrum_list.clear()
-        self.spectrum_list.addItems([p.name for p in readable])
+        for path in readable:
+            item = QListWidgetItem(path.name)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked)
+            self.spectrum_list.addItem(item)
+        self.spectrum_list.blockSignals(False)
 
         if not readable:
             self._refresh_peaks()
@@ -169,7 +192,7 @@ class OneDIntegrationPage(QWidget):
             return
         self.spectrum = load_spectrum(self.paths[row])
         self.plotter.set_spectrum(self.spectrum, keep_view=True)
-        self.plotter.set_peaks(self.peaks)
+        self.plotter.set_peaks(self._plotter_peaks())
 
     # ---------------------------------------------------------- peak picking
 
@@ -202,6 +225,69 @@ class OneDIntegrationPage(QWidget):
         self.peaks = []
         self._refresh_peaks()
 
+    # ------------------------------------------------------- spectrum selection
+
+    def checked_paths(self):
+        """Spectra the user has left ticked, in list order."""
+        return [self.paths[i] for i in range(self.spectrum_list.count())
+                if self.spectrum_list.item(i).checkState() == Qt.Checked]
+
+    def _set_all_checked(self, checked):
+        self.spectrum_list.blockSignals(True)
+        for i in range(self.spectrum_list.count()):
+            self.spectrum_list.item(i).setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        self.spectrum_list.blockSignals(False)
+        self._update_run_state()
+
+    def check_all(self):
+        self._set_all_checked(True)
+
+    def check_none(self):
+        self._set_all_checked(False)
+
+    def _base_name(self, text):
+        """The spectrum name without whichever status mark was appended to it."""
+        return text.rstrip().rstrip(self.MEASURED_MARK + self.MISSING_MARK).rstrip()
+
+    def _clear_marks(self):
+        """Drop the status marks so a new run does not show the previous one's."""
+        self.spectrum_list.blockSignals(True)
+        for i in range(self.spectrum_list.count()):
+            item = self.spectrum_list.item(i)
+            item.setText(self._base_name(item.text()))
+            item.setToolTip('')
+        self.spectrum_list.blockSignals(False)
+
+    def _mark_measured(self, row, rows):
+        """Annotate a spectrum in the list once it has been measured.
+
+        This is the propagation readout: the list fills in top to bottom as the run
+        proceeds, and a peak that could not be matched is marked so a gap in the
+        series is visible rather than buried in the CSV.
+        """
+        item = self.spectrum_list.item(row)
+        if item is None:
+            return
+
+        unmatched = [r for r in rows if not r['matched']]
+        mark = self.MEASURED_MARK if not unmatched else self.MISSING_MARK
+
+        self.spectrum_list.blockSignals(True)
+        item.setText(f"{self._base_name(item.text())}  {mark}")
+        item.setToolTip('  '.join(
+            f"{r['assignment']}: {'—' if r['height'] is None else format(r['height'], '.3e')}"
+            for r in rows))
+        self.spectrum_list.blockSignals(False)
+
+    def _update_run_state(self):
+        self.integrate_button.setEnabled(bool(self.peaks) and bool(self.checked_paths()))
+
+    def _plotter_peaks(self):
+        """The page keys a peak by its reference `position`; the plotter draws at `ppm`.
+        Every hand-off goes through here so the two shapes cannot drift apart."""
+        return [{'ppm': peak['position'], 'height': peak.get('height'),
+                 'assignment': peak['assignment']} for peak in self.peaks]
+
     def _refresh_peaks(self):
         self.peak_table.setRowCount(len(self.peaks))
         for row, peak in enumerate(self.peaks):
@@ -211,34 +297,45 @@ class OneDIntegrationPage(QWidget):
                                         '' if height is None else f"{height:.3e}")):
                 self.peak_table.setItem(row, col, QTableWidgetItem(text))
 
-        self.plotter.set_peaks([{'ppm': p['position'], 'height': p.get('height'),
-                                 'assignment': p['assignment']} for p in self.peaks])
-        self.integrate_button.setEnabled(bool(self.peaks) and bool(self.paths))
-        self.status.setText(f"{len(self.peaks)} peak(s) selected across {len(self.paths)} spectra.")
+        self.plotter.set_peaks(self._plotter_peaks())
+        self._update_run_state()
+        self.status.setText(f"{len(self.peaks)} peak(s) selected across "
+                            f"{len(self.checked_paths())} checked spectra.")
 
     # ----------------------------------------------------------- integration
 
     def integrate(self, _=None, out_path=None):
-        if not (self.peaks and self.paths):
+        selected = self.checked_paths()
+        if not (self.peaks and selected):
             return None
 
         value = 'height' if self.observable.currentIndex() == 0 else 'area'
 
         out_path = out_path or QFileDialog.getSaveFileName(
-            self, "Save series table", str(Path(self.paths[0]).parent / "series_intensity.csv"),
+            self, "Save series table", str(Path(selected[0]).parent / "series_intensity.csv"),
             "CSV (*.csv)")[0]
         if not out_path:
             return None
 
-        self.status.setText(f"Integrating {len(self.peaks)} peak(s) over {len(self.paths)} spectra…")
+        self._clear_marks()
+        rows_by_path = [self.paths.index(p) for p in selected]
 
-        spectra = load_series(self.paths)
+        def on_point(point, rows):
+            self._mark_measured(rows_by_path[point], rows)
+            self.status.setText(f"Integrating… {point + 1}/{len(selected)} "
+                                f"({selected[point].name})")
+            QApplication.processEvents()      # let the list fill in as the run proceeds
+
+        spectra = load_series(selected)
         self.table_rows = integrate_series(spectra, [dict(p) for p in self.peaks],
-                                           names=[p.stem for p in self.paths])
+                                           names=[p.stem for p in selected],
+                                           progress=on_point)
         write_series_csv(self.table_rows, out_path, value=value)
 
-        self.status.setText(f"Wrote {out_path}")
+        missing = sum(1 for r in self.table_rows if not r['matched'])
+        self.status.setText(f"Wrote {out_path}"
+                            + (f"  ({missing} unmatched point(s))" if missing else ''))
         QMessageBox.information(self, "Series integration",
                                 f"Integrated {len(self.peaks)} peak(s) over "
-                                f"{len(self.paths)} spectra.\n\nSaved to:\n{out_path}")
+                                f"{len(selected)} spectra.\n\nSaved to:\n{out_path}")
         return out_path

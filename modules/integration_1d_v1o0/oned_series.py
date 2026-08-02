@@ -61,7 +61,8 @@ def _windows_for(spectrum, peaks):
     return windows
 
 
-def integrate_series(spectra, peaks, names=None, track_window=DEFAULT_TRACK_WINDOW_PPM):
+def integrate_series(spectra, peaks, names=None, track_window=DEFAULT_TRACK_WINDOW_PPM,
+                     progress=None):
     """Measure every selected peak in every spectrum of the series.
 
     Peaks are re-matched at each point within `track_window`, so a resonance that
@@ -78,6 +79,7 @@ def integrate_series(spectra, peaks, names=None, track_window=DEFAULT_TRACK_WIND
     current = [dict(p) for p in peaks]
 
     for point, (spectrum, name) in enumerate(zip(spectra, names)):
+        rows_before = len(table)
         matched = match_reference_peaks(spectrum, current, window=track_window)
         windows = _windows_for(spectrum, current)
         scale = spectrum.intensity_scale
@@ -107,6 +109,9 @@ def integrate_series(spectra, peaks, names=None, track_window=DEFAULT_TRACK_WIND
             # follow the peak: the next point looks around where it was found here
             if match['matched']:
                 peak['position'] = match['ppm']
+
+        if progress is not None:
+            progress(point, table[rows_before:])
 
     return table
 
