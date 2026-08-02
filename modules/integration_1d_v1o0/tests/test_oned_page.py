@@ -21,6 +21,14 @@ needs_series = pytest.mark.skipif(not list(REAL_DIR.glob("*.ft1")),
 PEAK_A, PEAK_B = 8.1847, 8.1752
 
 
+def _export(page, path, value=None):
+    """Export the page's last run through the results dialog, where export now lives."""
+    from oned_series_table import SeriesTableDialog
+    dialog = SeriesTableDialog(page.table_rows, default_value=value or 'height')
+    dialog.export_csv(path=str(path))
+    return path
+
+
 @pytest.fixture(scope='module')
 def app():
     from PySide6.QtWidgets import QApplication
@@ -86,6 +94,44 @@ class TestSpectrumSwitching:
         for row in range(6):
             page.show_spectrum(row)
         assert len(page.plotter.peaks) == 2
+
+
+@needs_series
+class TestViewResetOnLoad:
+    def _span(self, page):
+        low, high = page.plotter.axes.get_xlim()
+        return abs(high - low)
+
+    def test_loading_shows_the_whole_spectrum(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        assert self._span(page) > 15.0          # full 12.5 to -3.1 ppm sweep
+
+    def test_loading_again_resets_a_zoomed_view(self, page):
+        """Opening a new set must not inherit the previous one's zoom."""
+        page.load_folder(folder=str(REAL_DIR))
+        page.plotter.axes.set_xlim(8.20, 8.16)
+        page.load_folder(folder=str(REAL_DIR))
+        assert self._span(page) > 15.0
+
+    def test_loading_again_resets_the_amplitude_scale(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.plotter.y_scale.setValue(25.0)
+        page.load_folder(folder=str(REAL_DIR))
+        assert page.plotter.y_scale.value() == pytest.approx(1.0)
+
+    def test_loading_files_also_resets(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.plotter.axes.set_xlim(8.20, 8.16)
+        page.load_spectra(paths=[str(p) for p in sorted(REAL_DIR.glob('*.ft1'))[:3]])
+        assert self._span(page) > 15.0
+
+    def test_browsing_keeps_the_zoom(self, page):
+        """Within a loaded set the view is kept, or following a peak across the series
+        would be impossible - every step would jump back to the full sweep."""
+        page.load_folder(folder=str(REAL_DIR))
+        page.plotter.axes.set_xlim(8.20, 8.16)
+        page.show_spectrum(20)
+        assert self._span(page) == pytest.approx(0.04, abs=1e-6)
 
 
 @needs_series
@@ -191,7 +237,8 @@ class TestSpectrumSelection:
                 page.spectrum_list.item(i).setCheckState(Qt.Unchecked)
 
         out = tmp_path / "subset.csv"
-        page.integrate(out_path=str(out))
+        page.integrate(show_table=False)
+        _export(page, out)
         lines = out.read_text().strip().splitlines()
         assert len(lines) == 6                       # header + 5 spectra
 
@@ -209,7 +256,7 @@ class TestPropagationFeedback:
             from PySide6.QtCore import Qt
             page.spectrum_list.item(i).setCheckState(Qt.Checked)
 
-        page.integrate(out_path=str(tmp_path / "p.csv"))
+        page.integrate(show_table=False)
 
         marked = [page.spectrum_list.item(i).text() for i in range(4)]
         assert all(page.MEASURED_MARK in t for t in marked)
@@ -221,7 +268,7 @@ class TestPropagationFeedback:
 
         page.load_folder(folder=str(REAL_DIR))
         page.add_peak_at(PEAK_A)
-        page.integrate(out_path=str(tmp_path / "a.csv"))
+        page.integrate(show_table=False)
         assert page.MEASURED_MARK in page.spectrum_list.item(0).text()
 
         page.load_folder(folder=str(REAL_DIR))
@@ -237,7 +284,7 @@ class TestPropagationFeedback:
         item = page.spectrum_list.item(0)
         item.setText(f"{item.text()}  {page.MISSING_MARK}")
 
-        page.integrate(out_path=str(tmp_path / "r.csv"))
+        page.integrate(show_table=False)
 
         assert page.MISSING_MARK not in page.spectrum_list.item(0).text()
         assert page.spectrum_list.item(0).text().startswith('1D_KB_GTP_001')
@@ -311,7 +358,8 @@ class TestRealWorkflow:
         assert page.integrate_button.isEnabled() is True
 
         out = tmp_path / "series.csv"
-        page.integrate(out_path=str(out))
+        page.integrate(show_table=False)
+        _export(page, out)
 
         lines = out.read_text().strip().splitlines()
         assert lines[0] == 'spectrum,peak_1,peak_2'
@@ -331,10 +379,10 @@ class TestRealWorkflow:
         page.add_peak_at(PEAK_A)
 
         intensity = tmp_path / "i.csv"
-        page.integrate(out_path=str(intensity))
-        page.observable.setCurrentIndex(1)
+        page.integrate(show_table=False)
+        _export(page, intensity, value='height')
         area = tmp_path / "a.csv"
-        page.integrate(out_path=str(area))
+        _export(page, area, value='area')
 
         assert intensity.read_text() != area.read_text()
 

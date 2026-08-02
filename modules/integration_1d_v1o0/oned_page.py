@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFile
 from oned_loader import load_spectrum
 from oned_plotter import OneDPlotter
 from oned_series import (integrate_series, load_series, locate_peaks,
-                         peak_at_position, write_series_csv)
+                         peak_at_position)
+from oned_series_table import SeriesTableDialog
 
 SPECTRUM_PATTERNS = ('*.ft1', '*.ft', '*.ft2', '*.ft3', '*.dat')
 
@@ -77,7 +78,7 @@ class OneDIntegrationPage(QWidget):
         self.observable = QComboBox()
         self.observable.addItems(['Intensity (height)', 'Area (region sum)'])
 
-        self.integrate_button = QPushButton("Integrate series → CSV")
+        self.integrate_button = QPushButton("Integrate series")
         self.integrate_button.clicked.connect(self.integrate)
         self.integrate_button.setEnabled(False)
 
@@ -180,6 +181,11 @@ class OneDIntegrationPage(QWidget):
             return
 
         self.spectrum_list.setCurrentRow(0)
+
+        # A newly opened set gets the full sweep. Browsing within a set keeps the view,
+        # so a peak can be followed at zoom, but inheriting the previous set's zoom (or
+        # matplotlib's empty-axes default on the very first load) shows the wrong region.
+        self.plotter.reset_view()
 
         message = (f"Loaded {len(readable)} spectra. Drag a box over a region to "
                    "detect peaks, or switch to click mode to place one.")
@@ -332,17 +338,10 @@ class OneDIntegrationPage(QWidget):
 
     # ----------------------------------------------------------- integration
 
-    def integrate(self, _=None, out_path=None):
+    def integrate(self, _=None, show_table=True):
+        """Measure every checked spectrum, then show the results for review and export."""
         selected = self.checked_paths()
         if not (self.peaks and selected):
-            return None
-
-        value = 'height' if self.observable.currentIndex() == 0 else 'area'
-
-        out_path = out_path or QFileDialog.getSaveFileName(
-            self, "Save series table", str(Path(selected[0]).parent / "series_intensity.csv"),
-            "CSV (*.csv)")[0]
-        if not out_path:
             return None
 
         self._clear_marks()
@@ -358,12 +357,25 @@ class OneDIntegrationPage(QWidget):
         self.table_rows = integrate_series(spectra, [dict(p) for p in self.peaks],
                                            names=[p.stem for p in selected],
                                            progress=on_point)
-        write_series_csv(self.table_rows, out_path, value=value)
 
         missing = sum(1 for r in self.table_rows if not r['matched'])
-        self.status.setText(f"Wrote {out_path}"
-                            + (f"  ({missing} unmatched point(s))" if missing else ''))
-        QMessageBox.information(self, "Series integration",
-                                f"Integrated {len(self.peaks)} peak(s) over "
-                                f"{len(selected)} spectra.\n\nSaved to:\n{out_path}")
-        return out_path
+        self.status.setText(f"Integrated {len(self.peaks)} peak(s) over "
+                            f"{len(selected)} spectra."
+                            + (f"  {missing} unmatched point(s)." if missing else ''))
+
+        if show_table:
+            self.show_results_table()
+
+        return self.table_rows
+
+    def show_results_table(self):
+        """Open the results grid: spectra down, peaks across, with export and copy."""
+        if not self.table_rows:
+            return None
+
+        default = 'height' if self.observable.currentIndex() == 0 else 'area'
+        self.results_dialog = SeriesTableDialog(self.table_rows, parent=self,
+                                                default_value=default)
+        self.results_dialog.show()
+
+        return self.results_dialog
