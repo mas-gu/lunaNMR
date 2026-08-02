@@ -4,10 +4,11 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFileDialog,
                                QHBoxLayout, QHeaderView, QLabel, QListWidget,
-                               QListWidgetItem, QMessageBox, QPushButton, QSplitter,
-                               QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                               QListWidgetItem, QMessageBox, QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
+                               QWidget)
 
 from oned_loader import load_spectrum
 from oned_plotter import OneDPlotter
@@ -39,6 +40,13 @@ class OneDIntegrationPage(QWidget):
         self.spectrum = None
         self.peaks = []
         self.table_rows = []
+
+        # Peak picking is the undoable state. Each entry is a full snapshot of the
+        # peak list: it is a handful of small dicts, so storing the whole thing is
+        # simpler and less error-prone than reversing individual edits, and a box
+        # drag that adds several peaks undoes as the single action it looked like.
+        self._undo_stack = []
+        self._redo_stack = []
 
         self._build_ui()
 
@@ -84,6 +92,17 @@ class OneDIntegrationPage(QWidget):
 
         self.status = QLabel("Load a folder of 1D spectra to begin.")
         self.status.setWordWrap(True)
+
+        # Every standard binding Qt lists for undo/redo is bound, not just the first:
+        # the platform resolves Cmd+Z and Cmd+Shift+Z on macOS against Ctrl+Z and
+        # Ctrl+Y elsewhere, and which one comes first depends on the running platform
+        # theme. WindowShortcut so they fire wherever focus sits in the module.
+        for standard, handler in ((QKeySequence.Undo, self.undo),
+                                  (QKeySequence.Redo, self.redo)):
+            for sequence in QKeySequence.keyBindings(standard):
+                shortcut = QShortcut(sequence, self)
+                shortcut.setContext(Qt.WindowShortcut)
+                shortcut.activated.connect(handler)
 
         load_buttons = QHBoxLayout()
         load_buttons.addWidget(load_button)
@@ -200,9 +219,31 @@ class OneDIntegrationPage(QWidget):
         self.plotter.set_spectrum(self.spectrum, keep_view=True)
         self._refresh_peaks()
 
+    # ------------------------------------------------------------- undo/redo
+
+    def _record(self):
+        """Snapshot the peak list before changing it."""
+        self._undo_stack.append([dict(peak) for peak in self.peaks])
+        self._redo_stack.clear()
+
+    def undo(self):
+        if not self._undo_stack:
+            return
+        self._redo_stack.append([dict(peak) for peak in self.peaks])
+        self.peaks = self._undo_stack.pop()
+        self._refresh_peaks()
+
+    def redo(self):
+        if not self._redo_stack:
+            return
+        self._undo_stack.append([dict(peak) for peak in self.peaks])
+        self.peaks = self._redo_stack.pop()
+        self._refresh_peaks()
+
     # ---------------------------------------------------------- peak picking
 
     def add_peaks(self, found):
+        self._record()
         for peak in found:
             self._append_peak(peak['ppm'], peak.get('height'))
         self._refresh_peaks()
@@ -210,6 +251,7 @@ class OneDIntegrationPage(QWidget):
     def add_peak_at(self, ppm):
         if self.spectrum is None:
             return
+        self._record()
         peak = peak_at_position(self.spectrum, ppm)
         self._append_peak(peak['ppm'], peak.get('height'))
         self._refresh_peaks()
@@ -224,10 +266,14 @@ class OneDIntegrationPage(QWidget):
     def remove_selected_peak(self):
         row = self.peak_table.currentRow()
         if 0 <= row < len(self.peaks):
+            self._record()
             self.peaks.pop(row)
             self._refresh_peaks()
 
     def clear_peaks(self):
+        if not self.peaks:
+            return
+        self._record()
         self.peaks = []
         self._refresh_peaks()
 

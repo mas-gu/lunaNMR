@@ -97,6 +97,92 @@ class TestSpectrumSwitching:
 
 
 @needs_series
+class TestUndoRedo:
+    def test_undo_removes_the_last_picked_peak(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.add_peak_at(PEAK_B)
+        page.undo()
+        assert [p['position'] for p in page.peaks] == [pytest.approx(PEAK_A, abs=2e-3)]
+
+    def test_undo_twice_empties_the_list(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.add_peak_at(PEAK_B)
+        page.undo()
+        page.undo()
+        assert page.peaks == []
+
+    def test_redo_puts_it_back(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.undo()
+        page.redo()
+        assert len(page.peaks) == 1
+
+    def test_undo_restores_a_removed_peak(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.add_peak_at(PEAK_B)
+        page.peak_table.setCurrentCell(0, 0)
+        page.remove_selected_peak()
+        page.undo()
+        assert len(page.peaks) == 2
+
+    def test_undo_restores_a_cleared_list(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.add_peak_at(PEAK_B)
+        page.clear_peaks()
+        page.undo()
+        assert len(page.peaks) == 2
+
+    def test_undo_restores_a_box_selection_in_one_step(self, page):
+        """A box drag adds several peaks at once and undoes as one action."""
+        from oned_series import peaks_in_range
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peaks(peaks_in_range(page.spectrum, 8.20, 8.16))
+        assert len(page.peaks) >= 2
+        page.undo()
+        assert page.peaks == []
+
+    def test_undo_on_an_empty_history_does_nothing(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.undo()
+        page.undo()
+        assert page.peaks == []
+
+    def test_redo_is_dropped_after_a_new_pick(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.undo()
+        page.add_peak_at(PEAK_B)
+        page.redo()
+        assert [p['position'] for p in page.peaks] == [pytest.approx(PEAK_B, abs=2e-3)]
+
+    def test_the_plot_follows_an_undo(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.add_peak_at(PEAK_B)
+        page.undo()
+        assert len(page.plotter.peaks) == 1
+
+    def test_every_standard_undo_redo_binding_is_bound(self, page):
+        """Bind all of Qt's standard bindings, not just the first: which one leads
+        depends on the running platform theme, and the Mac binding must be present."""
+        from PySide6.QtGui import QKeySequence, QShortcut
+        bound = {s.key().toString() for s in page.findChildren(QShortcut)}
+        for standard in (QKeySequence.Undo, QKeySequence.Redo):
+            for sequence in QKeySequence.keyBindings(standard):
+                assert sequence.toString() in bound
+
+    def test_a_ctrl_or_cmd_z_binding_exists(self, page):
+        from PySide6.QtGui import QShortcut
+        bound = {s.key().toString() for s in page.findChildren(QShortcut)}
+        assert any(text.endswith('Z') for text in bound)
+
+
+@needs_series
 class TestViewResetOnLoad:
     def _span(self, page):
         low, high = page.plotter.axes.get_xlim()
