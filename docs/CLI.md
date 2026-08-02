@@ -103,11 +103,26 @@ python -m lunaNMR kd --input <titration.csv> --out <dir> --p0 <conc> [--prefix k
     [--observable csp,intensity] [--alpha 0.14] [--intensity-from {height,volume}] \
     [--conc c0,c1,...] [--bootstrap 0] [--intensity-scale s0,s1,...]
 python -m lunaNMR export kd --json <kd_fit.json> --out <dir> \
-    [--fig-format pdf,png] [--per-page 20] [--observable csp,intensity] [--summary-only]
+    [--fig-format pdf,png] [--per-page 20] [--kind curves,ref-bars,kd-bars,global-fit] \
+    [--observable csp,intensity] [--summary-only] [--prefix DNAJA1_HSPA8]
 ```
 CSP uses the full 1:1 quadratic isotherm; intensity uses exponential decay + plateau. All fits
-bound Kd ≥ 0. `export kd` writes `summary.csv`; `--fig-format` default `pdf` (multi-page grid
-per observable), `png` = one file per residue.
+bound Kd ≥ 0. `export kd` writes `summary.csv` plus, per `--kind`, all prefixed with `--prefix`
+if given (default: none, i.e. unprefixed `summary.csv`/`<obs>_fits.pdf`/...):
+- `curves` — `<obs>_fits.pdf` (multi-page grid of per-residue binding fits; `--fig-format png`
+  writes one file per residue under `<obs>/` instead).
+- `ref-bars` — `<obs>_ref_vs_point.pdf`, the observable per residue between point 0 and each
+  later titration point (one page per point; **PDF only**). Matches the GUI viewer's export.
+- `kd-bars` — `<obs>_kd_vs_residue.pdf`, per-residue Kd bars + the shared global-Kd line
+  (**PDF only**). The intensity Kd is an apparent decay constant (see the global-fit caveat),
+  not a thermodynamic dissociation constant.
+- `global-fit` — `<obs>_global_fit.pdf`, per-residue observed data + the **single shared-Kd**
+  global-model curve (one Kd for all residues, per-residue amplitudes), 20 panels/page, PDF
+  only. Each panel's title carries R²(global) = the data vs the shared-Kd curve, so you can
+  see which residues the one Kd fits poorly. Needs the run's `global[<obs>]` (≥2 residues).
+
+`--kind` default `curves,ref-bars,kd-bars,global-fit`; `--fig-format` default `pdf`. Ref-bars
+need the embedded per-point `series` + ≥2 points (both present in any `kd`-produced JSON).
 
 ### project
 ```bash

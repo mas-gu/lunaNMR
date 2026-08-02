@@ -462,8 +462,9 @@ def test_loading_input_autofills_output_dir(app, tmp_path):
     page = KdTitrationPage(_fake_main_window())
     page._set_input_file(str(csv))
     assert page.input_file == str(csv)
-    assert page.output_dir == str(sub)          # auto-filled to the series folder
-    assert page.outdir_label.text() == str(sub)
+    # auto-filled to a 'kd_analysis' subfolder of the series (peak-integration) folder
+    assert page.output_dir == str(sub / "kd_analysis")
+    assert page.outdir_label.text() == str(sub / "kd_analysis")
 
 
 def test_dynamixs_dialog_autosaves_active_run_by_series_and_type(app, tmp_path):

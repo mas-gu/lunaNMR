@@ -71,6 +71,135 @@ class TestGlobalKd:
         assert g['dd_max']['A'] == pytest.approx(0.30, rel=1e-3)
         assert g['dd_max']['C'] == pytest.approx(0.45, rel=1e-3)
 
+    def test_shared_intensity_decay_across_residues(self):
+        from kd_models import intensity_decay
+        from kd_fit import fit_global_kd_intensity
+        kd_true = 22.0
+        residues = {
+            'A': intensity_decay(L, 1.00, 0.05, kd_true),
+            'B': intensity_decay(L, 0.80, 0.20, kd_true),
+            'C': intensity_decay(L, 1.20, 0.00, kd_true),
+        }
+        g = fit_global_kd_intensity(residues, L)
+        assert g['success']
+        assert g['Kd'] == pytest.approx(kd_true, rel=1e-3)
+        assert g['I0']['A'] == pytest.approx(1.00, rel=1e-3)
+        assert g['I_inf']['B'] == pytest.approx(0.20, rel=1e-3)
+        assert g['n_residues'] == 3
+        # a shared-Kd standard error is reported and finite for clean data
+        assert g['Kd_err'] is not None and np.isfinite(g['Kd_err']) and g['Kd_err'] >= 0
+
+    def test_global_intensity_bootstrap_gives_finite_error(self):
+        # Residual-resampling bootstrap (same convention as fit_residue_intensity's
+        # own n_bootstrap), scaled to the joint multi-residue fit: pool every residue's
+        # residuals, resample, refit the whole joint problem, collect the shared Kd.
+        from kd_models import intensity_decay
+        from kd_fit import fit_global_kd_intensity
+        kd_true = 22.0
+        noise = np.array([0.02, -0.01, 0.0, 0.01, -0.02, 0.0, 0.01, -0.01])
+        residues = {
+            'A': intensity_decay(L, 1.00, 0.05, kd_true) + noise,
+            'B': intensity_decay(L, 0.80, 0.20, kd_true) - noise,
+            'C': intensity_decay(L, 1.20, 0.00, kd_true) + noise[::-1],
+        }
+        g = fit_global_kd_intensity(residues, L, n_bootstrap=30)
+        assert g['success']
+        assert np.isfinite(g['Kd_err']) and g['Kd_err'] > 0
+
+    def test_bootstrap_global_intensity_runs_without_crashing(self):
+        # Regression test for a parameter-shadowing bug: the bootstrap-count
+        # argument `n` was being overwritten by the `for i, n in enumerate(names)`
+        # loop, so `for _ in range(n)` later raised TypeError on a residue-name
+        # string and the bare except swallowed it, always returning nan. Calling
+        # the helper directly (not through the try/except in fit_global_kd_intensity)
+        # would have surfaced that as a nan here, before the fix.
+        from kd_models import intensity_decay
+        from kd_fit import fit_global_kd_intensity, _bootstrap_global_intensity
+        kd_true = 22.0
+        residues = {
+            'A': intensity_decay(L, 1.00, 0.05, kd_true),
+            'B': intensity_decay(L, 0.80, 0.20, kd_true),
+            'C': intensity_decay(L, 1.20, 0.00, kd_true),
+        }
+        g = fit_global_kd_intensity(residues, L)
+        names = list(residues.keys())
+        series = {n: np.asarray(residues[n], dtype=float) for n in names}
+        masks = {n: ~np.isnan(series[n]) for n in names}
+        popt = np.array([g['Kd']] + [v for n in names for v in (g['I0'][n], g['I_inf'][n])])
+        lo = [1e-9] + [0.0] * (2 * len(names))
+        hi = [np.inf] * (1 + 2 * len(names))
+        result = _bootstrap_global_intensity(L, series, masks, names, popt, lo, hi, 20)
+        assert np.isfinite(result)
+
+    def test_global_intensity_bootstrap_falls_back_to_analytic_on_failure(self, monkeypatch):
+        # If every bootstrap refit fails, Kd_err must fall back to the analytic
+        # covariance error rather than surface a non-finite value.
+        from kd_models import intensity_decay
+        import kd_fit
+        kd_true = 22.0
+        residues = {
+            'A': intensity_decay(L, 1.00, 0.05, kd_true),
+            'B': intensity_decay(L, 0.80, 0.20, kd_true),
+            'C': intensity_decay(L, 1.20, 0.00, kd_true),
+        }
+        monkeypatch.setattr(kd_fit, '_bootstrap_global_intensity',
+                            lambda *a, **k: float('nan'))
+        g = kd_fit.fit_global_kd_intensity(residues, L, n_bootstrap=10)
+        assert g['success']
+        assert np.isfinite(g['Kd_err'])
+
+    def test_global_csp_reports_kd_err(self):
+        from kd_models import csp_model
+        from kd_fit import fit_global_kd_csp
+        residues = {n: csp_model(L, dd, 18.0, P0)
+                    for n, dd in (('A', 0.30), ('B', 0.12), ('C', 0.45))}
+        g = fit_global_kd_csp(residues, L, P0)
+        assert g['success']
+        assert 'Kd_err' in g
+
+    def test_global_intensity_fewer_than_two_residues_fails(self):
+        from kd_models import intensity_decay
+        from kd_fit import fit_global_kd_intensity
+        g = fit_global_kd_intensity({'A': intensity_decay(L, 1.0, 0.05, 20.0)}, L)
+        assert not g['success']
+
+    def test_global_csp_kd_bounded_to_titration_range(self):
+        # A titration from 5-320 has essentially no power to resolve a Kd of 1e-8: the
+        # model looks saturated at every single point, indistinguishable from Kd=1e-6 or
+        # Kd=1e-3. Without a bound the optimizer can run the shared Kd to that nonsensical
+        # extreme (with a misleadingly small formal error); it must stay within one decade
+        # of the tested concentration range instead.
+        from kd_models import csp_model
+        from kd_fit import fit_global_kd_csp
+        residues = {n: csp_model(L, dd, 1e-8, P0) for n, dd in (('A', 0.30), ('B', 0.12))}
+        g = fit_global_kd_csp(residues, L, P0)
+        assert g['success']
+        nonzero = L[L > 0]
+        lo = nonzero.min() / 10.0
+        assert g['Kd'] >= lo
+        assert g['reliable'] is False
+
+    def test_global_csp_kd_bounded_above_titration_range(self):
+        # The mirror case: essentially flat/no-signal data (true Kd far above the highest
+        # tested concentration) must not send the shared Kd to an arbitrarily huge value.
+        from kd_models import csp_model
+        from kd_fit import fit_global_kd_csp
+        residues = {n: csp_model(L, dd, 1e8, P0) for n, dd in (('A', 0.30), ('B', 0.12))}
+        g = fit_global_kd_csp(residues, L, P0)
+        assert g['success']
+        hi = L.max() * 10.0
+        assert g['Kd'] <= hi
+        assert g['reliable'] is False
+
+    def test_global_csp_reliable_true_for_well_determined_fit(self):
+        from kd_models import csp_model
+        from kd_fit import fit_global_kd_csp
+        residues = {n: csp_model(L, dd, 18.0, P0)
+                    for n, dd in (('A', 0.30), ('B', 0.12), ('C', 0.45))}
+        g = fit_global_kd_csp(residues, L, P0)
+        assert g['success']
+        assert g['reliable'] is True
+
 
 class TestJsonSafe:
     def test_nan_inf_become_none(self):
@@ -158,6 +287,63 @@ class TestRunAnalysis:
         r1 = next(f for f in data['fits'] if f['residue'] == 'R1')
         assert r1['csp']['Kd'] == pytest.approx(20.0, rel=1e-2)
         assert 'global' in data
+
+    def test_global_fit_excludes_low_r2_residues(self, tmp_path):
+        # A residue whose own decay is poorly fit (low R²) must NOT pool into the global
+        # shared-Kd fit — otherwise one garbage residue hijacks the shared Kd.
+        from kd_models import intensity_decay
+        from kd_fit import run_kd_analysis_with_params
+        import json
+        pts = [0.0, 10.0, 25.0, 60.0, 150.0, 300.0]
+        rows = []
+        for name, (i0, iinf) in {'A1': (1000.0, 50.0), 'K2': (800.0, 200.0),
+                                 'G3': (1200.0, 0.0)}.items():
+            hs = intensity_decay(np.array(pts), i0, iinf, 40.0)   # clean, shared Kd=40
+            rows += [(str(p), name, 8.0, 120.0, h, 2 * h) for p, h in zip(pts, hs)]
+        # garbage residue: near-flat noisy intensity -> poor exp-decay fit (low R²)
+        bad = [500.0, 505.0, 495.0, 500.0, 510.0, 490.0]
+        rows += [(str(p), 'BAD', 8.0, 120.0, h, 2 * h) for p, h in zip(pts, bad)]
+        df = pd.DataFrame(rows, columns=['spectrum_name', 'assignment',
+                                         'ppm_x', 'ppm_y', 'height', 'volume'])
+        csv = tmp_path / 'series_analysis_tidy.csv'
+        df.to_csv(csv, index=False)
+        result = run_kd_analysis_with_params({
+            'input_csv_file': str(csv), 'output_dir': str(tmp_path), 'output_prefix': 'g',
+            'concentrations': pts, 'protein_conc': P0,
+            'observables': ['intensity'], 'n_bootstrap': 0})
+        data = json.loads(Path(result['json_file']).read_text())
+        gi = data['global']['intensity']
+        assert gi['Kd'] == pytest.approx(40.0, rel=0.1)   # not dragged by BAD
+        assert 'BAD' not in gi['I0']                       # low-R² residue excluded
+        assert set(gi['I0']) == {'A1', 'K2', 'G3'}
+
+    def test_end_to_end_writes_global_intensity(self, tmp_path):
+        from kd_models import intensity_decay
+        from kd_fit import run_kd_analysis_with_params
+        import json
+        pts = [0.0, 10.0, 25.0, 60.0, 150.0, 300.0]
+        # two residues sharing a decay constant, differing amplitudes
+        specs = {'R1': (1000.0, 50.0, 40.0), 'R2': (800.0, 200.0, 40.0)}
+        rows = []
+        for name, (i0, iinf, kd) in specs.items():
+            heights = intensity_decay(np.array(pts), i0, iinf, kd)
+            for p, h in zip(pts, heights):
+                rows.append((str(p), name, 8.0, 120.0, h, 2 * h))
+        df = pd.DataFrame(rows, columns=['spectrum_name', 'assignment',
+                                         'ppm_x', 'ppm_y', 'height', 'volume'])
+        csv = tmp_path / 'series_analysis_tidy.csv'
+        df.to_csv(csv, index=False)
+        result = run_kd_analysis_with_params({
+            'input_csv_file': str(csv), 'output_dir': str(tmp_path), 'output_prefix': 'ki',
+            'concentrations': pts, 'protein_conc': P0, 'alpha': 0.14,
+            'observables': ['intensity'], 'n_bootstrap': 0})
+        data = json.loads(Path(result['json_file']).read_text())
+        gi = data['global']['intensity']
+        assert gi['success']
+        assert gi['Kd'] == pytest.approx(40.0, rel=5e-2)
+        # results.txt records the apparent-Kd line
+        txt = Path(result['results_file']).read_text()
+        assert 'apparent Kd (intensity decay)' in txt
 
     def test_embeds_raw_series_per_residue(self, tmp_path):
         # The comparison view (arbitrary reference point) and exact-reopen need the

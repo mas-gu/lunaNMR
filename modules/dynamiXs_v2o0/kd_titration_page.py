@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QVBoxLayout, QLabel, QFileDialog, QDoubleSpinBox, QSpinBox,
     QComboBox, QFormLayout, QProgressBar, QPlainTextEdit, QScrollArea, QWidget,
-    QListWidget, QListWidgetItem, QMessageBox,
+    QListWidget, QListWidgetItem, QMessageBox, QInputDialog,
 )
 
 from constants import (
@@ -29,6 +29,28 @@ from workers import KdTitrationFittingParams, KdTitrationFittingWorker
 _KD_DIR = os.path.join(os.path.dirname(__file__), "dynamiXs_Kd")
 if _KD_DIR not in sys.path:
     sys.path.insert(0, _KD_DIR)
+
+
+def resolve_series_csv(name, meta, project_path):
+    """Path to a series' series_analysis_tidy.csv for the Kd input.
+
+    Prefers the copy bundled inside the project (so a moved/renamed source run
+    folder still resolves), then the recorded csv_path, then output_folder.
+    Returns the first candidate that exists on disk; if none exist, returns the
+    recorded csv_path (or best-effort candidate) for display.
+    """
+    candidates = []
+    if project_path:
+        candidates.append(os.path.join(str(project_path), "series_results",
+                                       name, "series_analysis_tidy.csv"))
+    if meta.get('csv_path'):
+        candidates.append(meta['csv_path'])
+    if meta.get('output_folder'):
+        candidates.append(os.path.join(meta['output_folder'], "series_analysis_tidy.csv"))
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return meta.get('csv_path') or (candidates[0] if candidates else "")
 
 
 class KdTitrationPage(BasePage):
@@ -117,6 +139,8 @@ class KdTitrationPage(BasePage):
         mrow.addWidget(create_secondary_button(
             "Open selected fit", clicked=self._open_selected_saved_fit, width=160))
         mrow.addWidget(create_secondary_button(
+            "Load for refit", clicked=self._refit_selected_saved_fit, width=140))
+        mrow.addWidget(create_secondary_button(
             "Delete selected", clicked=self._delete_selected_saved_fit, width=140))
         mrow.addStretch()
         mbody.addLayout(mrow)
@@ -159,6 +183,12 @@ class KdTitrationPage(BasePage):
         nb.setSingleStep(100)
         self.boot_spin = nb
         b2.addWidget(self._make_field_row("Bootstrap iterations (0 = covariance errors)", nb))
+        prow = QHBoxLayout()
+        prow.setSpacing(SPACING_SM)
+        prow.addWidget(create_secondary_button("Load params (JSON)…", clicked=self._load_params_dialog))
+        prow.addWidget(create_secondary_button("Save params (JSON)…", clicked=self._save_params_dialog))
+        prow.addStretch()
+        b2.addLayout(prow)
         layout.addWidget(sec2)
 
         # Output
@@ -228,15 +258,8 @@ class KdTitrationPage(BasePage):
         for name, br in saved_series.items():
             if getattr(br, 'series_mode', 'time') != 'titration':
                 continue
-            csv_path = ""
             meta = getattr(br, 'metadata', None) or {}
-            if meta.get('csv_path'):
-                csv_path = meta['csv_path']
-            elif meta.get('output_folder'):
-                csv_path = os.path.join(meta['output_folder'], "series_analysis_tidy.csv")
-            elif project_path:
-                csv_path = str(Path(project_path) / ".lunaNMR" / "series_results"
-                               / name / "series_analysis_tidy.csv")
+            csv_path = resolve_series_csv(name, meta, project_path)
             out.append({'name': name, 'csv_path': csv_path})
         return out
 
@@ -310,9 +333,10 @@ class KdTitrationPage(BasePage):
             # New input = new analysis identity (a drop re-sets series_name after this).
             self.series_name = None
             self._current_analysis_name = None
-            # Default the output to where the series data lives, so results land next to
-            # the fitted data without the user having to navigate (still overridable).
-            self._set_output_dir(os.path.dirname(path))
+            # Default the output to a 'kd_analysis' subfolder of where the series data
+            # lives (the peak-integration folder), so Kd results are grouped together
+            # next to the fitted data without cluttering it (still overridable).
+            self._set_output_dir(os.path.join(os.path.dirname(path), "kd_analysis"))
             self.detected_points = points
             # CSP needs per-point positions; intensity matrices have none.
             import math
@@ -328,6 +352,9 @@ class KdTitrationPage(BasePage):
                 self.points_label.setText(
                     f"Detected 0 points — is this a titration series CSV? ({len(residues)} residues)")
             self._build_conc_rows(points)
+            self._maybe_apply_params_json(path, points)
+            if not has_positions:
+                self.obs_combo.setCurrentIndex(2)  # no positions -> intensity only wins
         except Exception as e:
             # Don't leave the PREVIOUS series committed — otherwise a later "Run Kd fit"
             # silently fits the old series ("shows previous series").
@@ -399,6 +426,90 @@ class KdTitrationPage(BasePage):
         # only pass them through when the user actually changed something
         return scales if any(abs(s - 1.0) > 1e-9 for s in scales) else None
 
+    # ---------- importable binding parameters ----------
+
+    def _apply_params(self, params, n_points):
+        """Populate the Binding-parameters panel from a normalized params dict. Per-point
+        lists ([L], intensity scales) are applied only when their length matches the
+        detected points, so a mismatched file can't silently corrupt the run."""
+        from kd_params import observables_to_combo_index
+        concs = params.get('concentrations')
+        if concs and len(concs) == n_points:
+            for spin, val in zip(self.conc_spins, concs):
+                spin.setValue(float(val))
+        scales = params.get('intensity_scales')
+        if scales and len(scales) == n_points:
+            for spin, val in zip(self.scale_spins, scales):
+                spin.setValue(float(val))
+        self.p0_spin.setValue(float(params.get('protein_conc', 50.0)))
+        self.alpha_spin.setValue(float(params.get('alpha', 0.14)))
+        self.obs_combo.setCurrentIndex(observables_to_combo_index(params.get('observables')))
+        self.intvalue_combo.setCurrentText(str(params.get('intensity_value', 'height')))
+        self.boot_spin.setValue(int(params.get('n_bootstrap', 0)))
+
+    def _maybe_apply_params_json(self, csv_path, points):
+        """Auto-detect a sibling binding-parameters JSON (or a prior fit JSON) next to the
+        input CSV and populate the panel. Values stay editable; absent → manual entry."""
+        try:
+            from kd_params import find_params_source, load_params
+            src = find_params_source(csv_path)
+            if not src:
+                return
+            self._apply_params(load_params(src), n_points=len(points))
+            self._log(f"Loaded binding parameters from {os.path.basename(src)}")
+        except Exception as e:
+            self._log(f"Could not read binding-parameters JSON: {e}")
+
+    def _gather_params_dict(self):
+        """The current panel values as a params dict (for saving a params JSON)."""
+        from kd_params import combo_index_to_observables
+        return {
+            'points': list(self.detected_points),
+            'concentrations': self._parse_concentrations(),
+            'intensity_scales': [s.value() for s in self.scale_spins] or None,
+            'protein_conc': float(self.p0_spin.value()),
+            'alpha': float(self.alpha_spin.value()),
+            'observables': combo_index_to_observables(self.obs_combo.currentIndex()),
+            'intensity_value': self.intvalue_combo.currentText(),
+            'n_bootstrap': int(self.boot_spin.value()),
+        }
+
+    def _load_params_dialog(self):
+        if not self.conc_spins:
+            show_error(self, "Load a CSV first",
+                       "Load a titration CSV so the points appear, then load parameters.")
+            return
+        start = self.output_dir or (os.path.dirname(self.input_file) if self.input_file else "")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Kd binding parameters", start,
+            "Params JSON (*_kd_params.json *_kd_fit_data.json *.json);;All files (*)")
+        if not path:
+            return
+        try:
+            from kd_params import load_params
+            self._apply_params(load_params(path), n_points=len(self.conc_spins))
+            self._log(f"Loaded binding parameters from {os.path.basename(path)}")
+        except Exception as e:
+            show_error(self, "Could not load parameters", str(e))
+
+    def _save_params_dialog(self):
+        if not self.conc_spins:
+            show_error(self, "Nothing to save",
+                       "Load a titration CSV and set the parameters first.")
+            return
+        from kd_params import dump_params_json, PARAMS_SUFFIX
+        folder = self.output_dir or (os.path.dirname(self.input_file) if self.input_file else "")
+        default = os.path.join(folder, f"{self._analysis_base_name()}{PARAMS_SUFFIX}")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Kd binding parameters", default, "Params JSON (*.json)")
+        if not path:
+            return
+        try:
+            dump_params_json(path, self._gather_params_dict())
+            self._log(f"Saved binding parameters to {os.path.basename(path)}")
+        except Exception as e:
+            show_error(self, "Could not save parameters", str(e))
+
     def _start_analysis(self):
         if not self.input_file or not os.path.exists(self.input_file):
             show_error(self, "Input required", "Select a CSV file first.")
@@ -412,13 +523,13 @@ class KdTitrationPage(BasePage):
             if not self.output_dir:
                 return
 
-        idx = self.obs_combo.currentIndex()
-        observables = {0: ["csp", "intensity"], 1: ["csp"], 2: ["intensity"]}[idx]
+        from kd_params import combo_index_to_observables
+        observables = combo_index_to_observables(self.obs_combo.currentIndex())
 
         params = KdTitrationFittingParams(
             input_file=self.input_file,
             output_dir=self.output_dir,
-            output_prefix="kd",
+            output_prefix=self._analysis_base_name(),
             concentrations=concs,
             intensity_scales=self._parse_intensity_scales(),
             protein_conc=float(self.p0_spin.value()),
@@ -541,11 +652,11 @@ class KdTitrationPage(BasePage):
         mw = self.main_window
         return getattr(mw, 'main_window', None) or mw
 
-    def _store_current_analysis(self, overwrite=False):
-        """Snapshot the current fit + params into main_window.kd_analyses, named after
-        the source series. overwrite=True upserts that name (auto-save on project save);
-        otherwise a new snapshot is suffixed on collision. Returns the name, or None if
-        there is no current fit."""
+    def _store_current_analysis(self, overwrite=False, name=None):
+        """Snapshot the current fit + params into main_window.kd_analyses. `name` stores
+        under that exact name (upsert); otherwise the source-series base name is used,
+        upserted when overwrite=True or suffixed on collision. Returns the stored name,
+        or None if there is no current fit."""
         if not self.last_json_file or not os.path.exists(self.last_json_file):
             return None
         import json
@@ -554,7 +665,8 @@ class KdTitrationPage(BasePage):
         if getattr(mw, 'kd_analyses', None) is None:
             mw.kd_analyses = {}
         base = self._analysis_base_name()
-        name = base if overwrite else self._unique_analysis_name(base, mw.kd_analyses)
+        if name is None:
+            name = base if overwrite else self._unique_analysis_name(base, mw.kd_analyses)
         meta = self.get_session_state()
         meta['input_basename'] = os.path.basename(self.input_file) if self.input_file else None
         viewer = getattr(self, "_viewer", None)
@@ -570,7 +682,17 @@ class KdTitrationPage(BasePage):
         return name
 
     def _save_analysis_to_project(self):
-        name = self._store_current_analysis()       # explicit snapshot (suffixed)
+        if not self.last_json_file or not os.path.exists(self.last_json_file):
+            show_warning(self, "No results", "Run or open a fit first.")
+            return
+        mw = self._lunanmr_main_window()
+        existing = getattr(mw, 'kd_analyses', None) or {}
+        name = self._analysis_base_name()
+        if name in existing:
+            name = self._prompt_name_collision(name)
+            if name is None:                        # user cancelled
+                return
+        name = self._store_current_analysis(name=name)
         if name is None:
             show_warning(self, "No results", "Run or open a fit first.")
             return
@@ -578,6 +700,44 @@ class KdTitrationPage(BasePage):
         self._log(f"Saved analysis '{name}' to project (save the project to persist).")
         show_info(self, "Saved to project",
                   f"Analysis '{name}' added. Save the project (File ▸ Save) to write it to disk.")
+
+    def _prompt_name_collision(self, base):
+        """A Kd analysis named `base` already exists. Ask whether to replace it or save
+        under a different name. Returns the name to store under (the base to replace, or
+        a new name), or None to cancel."""
+        box = QMessageBox(self)
+        box.setWindowTitle("Analysis already exists")
+        box.setText(f"A saved Kd analysis named '{base}' already exists in this project.")
+        box.setInformativeText("Replace it, or save under a different name?")
+        replace_btn = box.addButton("Replace", QMessageBox.AcceptRole)
+        rename_btn = box.addButton("Save as…", QMessageBox.ActionRole)
+        box.addButton(QMessageBox.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is replace_btn:
+            return base
+        if clicked is rename_btn:
+            return self._prompt_new_analysis_name(base)
+        return None
+
+    def _prompt_new_analysis_name(self, base):
+        """Ask for a new analysis name, pre-filled with a collision-free suggestion.
+        Re-prompts on a blank name and confirms before overwriting an existing one.
+        Returns the chosen name, or None if the user cancels."""
+        existing = getattr(self._lunanmr_main_window(), 'kd_analyses', None) or {}
+        suggestion = self._unique_analysis_name(base, existing)
+        while True:
+            name, ok = QInputDialog.getText(
+                self, "Save analysis as", "Name for this Kd analysis:", text=suggestion)
+            if not ok:
+                return None
+            name = name.strip()
+            if not name:
+                continue
+            if name in existing and QMessageBox.question(
+                    self, "Name in use", f"'{name}' also exists. Replace it?") != QMessageBox.Yes:
+                continue
+            return name
 
     def ensure_current_saved(self):
         """Auto-capture the fit currently on screen under its source-series name
@@ -607,6 +767,87 @@ class KdTitrationPage(BasePage):
         entry = (getattr(mw, 'kd_analyses', {}) or {}).get(item.text())
         if entry is not None:
             self.open_saved_analysis(entry, name=item.text())
+
+    def _refit_selected_saved_fit(self):
+        item = self.saved_fits_list.currentItem()
+        if item is None:
+            show_warning(self, "No fit selected", "Select a saved Kd fit to load for refit.")
+            return
+        mw = self._lunanmr_main_window()
+        entry = (getattr(mw, 'kd_analyses', {}) or {}).get(item.text())
+        if entry is not None:
+            self.load_saved_for_refit(entry, name=item.text())
+
+    def _entry_fit_data(self, entry):
+        """The fit JSON dict for a saved analysis, from its bundled file or the
+        in-memory copy (saved this session, project not yet written)."""
+        import json
+        path = entry.get('fit_data_path')
+        if path and os.path.exists(path):
+            try:
+                return json.loads(Path(path).read_text())
+            except Exception:
+                return None
+        return entry.get('fit_data')
+
+    def _reconstruct_tidy_csv(self, fit_data):
+        """Rebuild a minimal series_analysis_tidy.csv from a fit JSON's embedded per-point
+        series, so a saved fit can be refit when the original CSV is gone. Heights/volumes
+        are the stored (already-scaled) values — the caller resets intensity_scales to 1.0
+        to avoid double-scaling. Returns the temp CSV path, or None if there is no series."""
+        import csv as _csv
+        import tempfile
+        meta = fit_data.get('metadata', {}) or {}
+        points = meta.get('points') or meta.get('concentrations') or []
+        if not points or not any(f.get('series') for f in fit_data.get('fits', [])):
+            return None
+        rows = []
+        for f in fit_data.get('fits', []):
+            res = f.get('residue')
+            s = f.get('series') or {}
+
+            def val(key, i):
+                v = s.get(key)
+                return v[i] if isinstance(v, list) and i < len(v) and v[i] is not None else ''
+            for i in range(len(points)):
+                rows.append([str(points[i]), res, val('ppm_x', i), val('ppm_y', i),
+                             val('height', i), val('volume', i)])
+        tmp = tempfile.NamedTemporaryFile(
+            'w', suffix='_series_analysis_tidy.csv', delete=False, newline='')
+        w = _csv.writer(tmp)
+        w.writerow(['spectrum_name', 'assignment', 'ppm_x', 'ppm_y', 'height', 'volume'])
+        w.writerows(rows)
+        tmp.close()
+        return tmp.name
+
+    def load_saved_for_refit(self, entry, name=None):
+        """Load a saved analysis's binding parameters + input data back into the panel so
+        it can be edited and re-run. Prefers the original CSV; if it's gone, rebuilds the
+        input from the fit's embedded series (resetting intensity scales to 1.0). Does not
+        open the viewer — leaves focus on the editable panel."""
+        if not isinstance(entry, dict):
+            return
+        self._current_analysis_name = name
+        meta = entry.get('meta') or {}
+        if meta:
+            self.restore_session_state(meta)
+        if not self.input_file or not os.path.exists(self.input_file):
+            fit_data = self._entry_fit_data(entry)
+            rebuilt = self._reconstruct_tidy_csv(fit_data) if fit_data else None
+            if not rebuilt:
+                show_warning(self, "Cannot refit",
+                             "The original input CSV was not found and the saved fit has no "
+                             "embedded data to rebuild from.")
+                return
+            self.input_file = rebuilt
+            self.file_drop.setText(os.path.basename(rebuilt) + "  (rebuilt from saved data)")
+            for s in self.scale_spins:
+                s.setValue(1.0)
+            self._log("Original CSV not found — rebuilt input from the saved series; "
+                      "intensity scales reset to 1.0 (stored data is already scaled).")
+        self._log(f"Loaded '{name}' for refit — edit parameters, then click Run Kd fit.")
+        show_info(self, "Loaded for refit",
+                  f"'{name}' loaded. Adjust the binding parameters and click Run Kd fit.")
 
     def _delete_selected_saved_fit(self):
         item = self.saved_fits_list.currentItem()

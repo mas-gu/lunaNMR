@@ -390,6 +390,154 @@ class TestExportKd:
         assert (figs / "summary.csv").exists()
         assert not (figs / "csp").exists()
 
+    def test_export_ref_vs_point_pdf_by_default(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs_ref"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs)]) == 0
+        # both the per-residue curves and the new ref->point bars are emitted
+        assert (figs / "csp_fits.pdf").exists()
+        ref = figs / "csp_ref_vs_point.pdf"
+        assert ref.exists() and ref.stat().st_size > 0
+
+    def test_export_kind_curves_only_skips_ref_bars(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs_curves"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
+                     "--kind", "curves"]) == 0
+        assert (figs / "csp_fits.pdf").exists()
+        assert not (figs / "csp_ref_vs_point.pdf").exists()
+
+    def test_export_ref_bars_cover_both_observables_by_default(self, tmp_path):
+        # Ref->point bars are model-free (from the raw series), so a CSP-only fit still
+        # gets BOTH csp and intensity ref-bars by default (parity with the GUI).
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs_bothref"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs)]) == 0
+        assert (figs / "csp_ref_vs_point.pdf").exists()
+        assert (figs / "intensity_ref_vs_point.pdf").exists()
+
+    def test_export_observable_flag_limits_ref_bars(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs_reffilter"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
+                     "--observable", "csp"]) == 0
+        assert (figs / "csp_ref_vs_point.pdf").exists()
+        assert not (figs / "intensity_ref_vs_point.pdf").exists()
+
+    def test_export_kind_ref_bars_only_skips_curves(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs_refonly"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
+                     "--kind", "ref-bars"]) == 0
+        assert (figs / "csp_ref_vs_point.pdf").exists()
+        assert not (figs / "csp_fits.pdf").exists()
+
+    def test_export_kd_vs_residue_pdf_by_default(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs_kdbars"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs)]) == 0
+        pdf = figs / "csp_kd_vs_residue.pdf"
+        assert pdf.exists() and pdf.stat().st_size > 0
+
+    def test_export_kind_kd_bars_only_skips_curves_and_ref(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs_kdonly"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
+                     "--kind", "kd-bars"]) == 0
+        assert (figs / "csp_kd_vs_residue.pdf").exists()
+        assert not (figs / "csp_fits.pdf").exists()
+        assert not (figs / "csp_ref_vs_point.pdf").exists()
+
+    def test_export_prefix_is_prepended_to_all_outputs(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs_prefixed"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
+                     "--prefix", "DNAJA1_HSPA8"]) == 0
+        assert (figs / "DNAJA1_HSPA8_summary.csv").exists()
+        assert (figs / "DNAJA1_HSPA8_csp_fits.pdf").exists()
+        assert (figs / "DNAJA1_HSPA8_csp_ref_vs_point.pdf").exists()
+        assert (figs / "DNAJA1_HSPA8_csp_ref_vs_point.csv").exists()
+        assert (figs / "DNAJA1_HSPA8_csp_kd_vs_residue.pdf").exists()
+        # no unprefixed duplicates left behind
+        assert not (figs / "summary.csv").exists()
+        assert not (figs / "csp_fits.pdf").exists()
+        assert not (figs / "csp_ref_vs_point.pdf").exists()
+        assert not (figs / "csp_kd_vs_residue.pdf").exists()
+
+    def test_export_no_prefix_keeps_unprefixed_names(self, tmp_path):
+        # Omitting --prefix must stay fully backward compatible.
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs_noprefix"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs)]) == 0
+        assert (figs / "summary.csv").exists()
+        assert (figs / "csp_fits.pdf").exists()
+
+    def _make_multi_kd_json(self, tmp_path):
+        """A 3-residue titration (intensity decay, shared Kd) so a global fit fires."""
+        from kd_models import intensity_decay
+        from lunaNMR.cli import main
+        pts = [0.0, 10.0, 25.0, 60.0, 150.0, 300.0]
+        specs = {'A1': (1000.0, 50.0), 'K2': (800.0, 200.0), 'G3': (1200.0, 0.0)}
+        rows = []
+        for name, (i0, iinf) in specs.items():
+            hs = intensity_decay(np.array(pts), i0, iinf, 40.0)
+            rows += [(str(p), name, 8.0, 120.0, h, 2 * h) for p, h in zip(pts, hs)]
+        df = pd.DataFrame(rows, columns=['spectrum_name', 'assignment',
+                                         'ppm_x', 'ppm_y', 'height', 'volume'])
+        csv = tmp_path / "series_analysis_tidy.csv"
+        df.to_csv(csv, index=False)
+        out = tmp_path / "kdm"
+        assert main(["kd", "--input", str(csv), "--out", str(out), "--p0", "50",
+                     "--conc", "0,10,25,60,150,300", "--observable", "intensity"]) == 0
+        return out / "kd_kd_fit_data.json"
+
+    def test_export_global_fit_pdf_by_default(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_multi_kd_json(tmp_path)
+        figs = tmp_path / "figs_global"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs)]) == 0
+        pdf = figs / "intensity_global_fit.pdf"
+        assert pdf.exists() and pdf.stat().st_size > 0
+
+    def test_export_kind_global_fit_only_skips_others(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_multi_kd_json(tmp_path)
+        figs = tmp_path / "figs_globalonly"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
+                     "--kind", "global-fit"]) == 0
+        assert (figs / "intensity_global_fit.pdf").exists()
+        assert not (figs / "intensity_fits.pdf").exists()
+        assert not (figs / "intensity_kd_vs_residue.pdf").exists()
+
+    def test_export_prefix_applies_to_global_fit(self, tmp_path):
+        from lunaNMR.cli import main
+        jf = self._make_multi_kd_json(tmp_path)
+        figs = tmp_path / "figs_globalprefixed"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
+                     "--prefix", "DNAJB12_HSPA6"]) == 0
+        assert (figs / "DNAJB12_HSPA6_intensity_global_fit.pdf").exists()
+        assert not (figs / "intensity_global_fit.pdf").exists()
+
+    def test_export_kd_sets_pdf_fonttype_42_for_illustrator(self, tmp_path):
+        # pdf.fonttype=3 (matplotlib's default) embeds Type 3/bitmap fonts that Illustrator
+        # doesn't recognize as real text; 42 (TrueType) keeps labels editable on import.
+        import matplotlib
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs_fonttype"
+        matplotlib.rcParams['pdf.fonttype'] = 3
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs)]) == 0
+        assert matplotlib.rcParams['pdf.fonttype'] == 42
+
     def test_export_missing_json_errors(self, tmp_path):
         from lunaNMR.cli import main
         assert main(["export", "kd", "--json", str(tmp_path / "no.json"),
@@ -398,6 +546,82 @@ class TestExportKd:
     def test_export_requires_subcommand(self):
         from lunaNMR.cli import main
         assert main(["export"]) != 0
+
+
+class TestIntensityPanelAxisSharing:
+    """Every intensity curve panel (raw-scale or already-normalized) must plot as a true
+    I/I(0) ratio and share one 0-1-ish y-axis, so raw-scale residues (I0 in the hundreds)
+    don't get clipped to invisible flat lines by a blind 0-1 clamp."""
+
+    def test_build_kd_panel_normalizes_raw_scale_intensity_to_i0(self):
+        from lunaNMR.cli import _build_kd_panel
+        fit = {'I0': 500.0, 'I_inf': 50.0, 'Kd': 40.0, 'r_squared': 0.9}
+        L = np.array([0.0, 10.0, 50.0])
+        y = np.array([500.0, 300.0, 100.0])
+        Ld = np.linspace(0.0, 50.0, 5)
+        panel = _build_kd_panel('R1', fit, L, y, Ld, 'intensity', P0=None)
+        assert panel['ylabel'] == 'I / I(0)'
+        np.testing.assert_allclose(panel['y'], y / 500.0)
+        assert panel['yc'].max() <= 1.0 + 1e-9
+
+    def test_build_kd_panel_leaves_csp_unnormalized(self):
+        from lunaNMR.cli import _build_kd_panel
+        fit = {'dd_max': 0.5, 'Kd': 40.0, 'r_squared': 0.9}
+        L = np.array([0.0, 10.0, 50.0])
+        y = np.array([0.0, 0.2, 0.4])
+        Ld = np.linspace(0.0, 50.0, 5)
+        panel = _build_kd_panel('R1', fit, L, y, Ld, 'csp', P0=50.0)
+        assert panel['ylabel'] == 'CSP (ppm)'
+        np.testing.assert_allclose(panel['y'], y)
+
+    def test_draw_kd_panel_applies_shared_ylim(self):
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from lunaNMR.cli import _draw_kd_panel, _INTENSITY_YLIM
+        fig, ax = plt.subplots()
+        panel = {'residue': 'R1', 'L': np.array([0.0, 1.0]), 'y': np.array([1.0, 0.5]),
+                'Ld': np.array([0.0, 1.0]), 'yc': np.array([1.0, 0.5]),
+                'ylabel': 'I / I(0)', 'kd': 40.0, 'r2': 0.9}
+        _draw_kd_panel(ax, panel, ylim=_INTENSITY_YLIM)
+        assert ax.get_ylim() == _INTENSITY_YLIM
+        plt.close(fig)
+
+    def test_draw_kd_panel_no_ylim_autoscales(self):
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from lunaNMR.cli import _draw_kd_panel
+        fig, ax = plt.subplots()
+        panel = {'residue': 'R1', 'L': np.array([0.0, 1.0]), 'y': np.array([10.0, 5.0]),
+                'Ld': np.array([0.0, 1.0]), 'yc': np.array([10.0, 5.0]),
+                'ylabel': 'CSP (ppm)', 'kd': 40.0, 'r2': 0.9}
+        _draw_kd_panel(ax, panel)
+        assert ax.get_ylim() != (0.0, 1.0)
+        plt.close(fig)
+
+    def test_export_intensity_curves_pdf_uses_shared_ylim_for_raw_scale_data(self, tmp_path):
+        # End-to-end: a raw-scale (I0=500-ish) intensity fit must not crash and must
+        # still write a real PDF (the actual per-axis ylim isn't inspectable once saved,
+        # but the unit tests above cover the normalization + ylim application directly).
+        from kd_models import intensity_decay
+        from lunaNMR.cli import main
+        pts = [0.0, 10.0, 25.0, 60.0, 150.0, 300.0]
+        hs = intensity_decay(np.array(pts), 500.0, 50.0, 40.0)
+        rows = [(str(p), 'A1', 8.0, 120.0, h, 2 * h) for p, h in zip(pts, hs)]
+        df = pd.DataFrame(rows, columns=['spectrum_name', 'assignment',
+                                         'ppm_x', 'ppm_y', 'height', 'volume'])
+        csv = tmp_path / "series_analysis_tidy.csv"
+        df.to_csv(csv, index=False)
+        kdout = tmp_path / "kd"
+        assert main(["kd", "--input", str(csv), "--out", str(kdout), "--p0", "50",
+                     "--conc", ",".join(str(p) for p in pts),
+                     "--observable", "intensity"]) == 0
+        figs = tmp_path / "figs"
+        assert main(["export", "kd", "--json", str(kdout / "kd_kd_fit_data.json"),
+                     "--out", str(figs), "--observable", "intensity"]) == 0
+        pdf = figs / "intensity_fits.pdf"
+        assert pdf.exists() and pdf.stat().st_size > 0
 
 
 class TestErrorHandling:

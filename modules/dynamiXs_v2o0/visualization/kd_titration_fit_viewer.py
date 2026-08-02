@@ -3,15 +3,16 @@
 
 import json
 import os
-import re
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem,
-    QComboBox, QLabel, QPushButton, QFileDialog, QApplication,
+    QComboBox, QLabel, QPushButton, QApplication,
+    QDialog, QCheckBox, QDialogButtonBox, QMessageBox,
 )
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -20,15 +21,20 @@ from matplotlib.figure import Figure
 _KD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dynamiXs_Kd")
 if _KD_DIR not in sys.path:
     sys.path.insert(0, _KD_DIR)
-from kd_models import csp_model, intensity_decay, compute_csp  # noqa: E402
-from kd_fit import fit_residue_csp, fit_residue_intensity, json_safe  # noqa: E402
+from kd_models import (csp_model, intensity_decay,  # noqa: E402
+                       pair_observable as _pair_observable,  # re-exported for tests
+                       ref_point_values, ref_vs_point_table,
+                       residue_sort_key as _residue_sort_key)
+from kd_fit import (fit_residue_csp, fit_residue_intensity, json_safe,  # noqa: E402
+                    _GLOBAL_R2_MIN)
 
 
-def _residue_sort_key(name):
-    """Order residues by sequence number, not amino-acid letter: 'K14' before
-    'A17'. Names without a number sort last, alphabetically among themselves."""
-    m = re.search(r'\d+', str(name))
-    return (int(m.group()) if m else float('inf'), str(name))
+_KD_OUTLIER_K = 3.5   # Hampel: drop a Kd more than k robust-SD (1.4826·MAD) from the median
+
+# Matches lunaNMR/cli.py's _INTENSITY_YLIM exactly: every intensity curve panel (raw-scale
+# or already-normalized) shares this 0-1 I/I(0) axis, so CLI- and GUI-exported figures are
+# directly comparable/overlay-able regardless of which surface produced them.
+_INTENSITY_YLIM = (-0.05, 1.05)
 
 
 def _fmt_num(value, spec):
@@ -40,45 +46,65 @@ def _fmt_num(value, spec):
     return format(value, spec)
 
 
-def _peak_present(series, k, value='height'):
-    """True if a residue's peak is genuinely present at point k: a detected position
-    (finite, non-zero sentinel) AND a real intensity (finite, > 0). Used so CSP and
-    intensity treat the same residues as missing (grey)."""
-    px = np.asarray(series.get('ppm_x', []), float)
-    py = np.asarray(series.get('ppm_y', []), float)
-    v = np.asarray(series.get(value, []), float)
-    if k < 0 or k >= min(len(px), len(py), len(v)):
-        return False
-    return (np.isfinite(px[k]) and px[k] != 0.0
-            and np.isfinite(py[k]) and py[k] != 0.0
-            and np.isfinite(v[k]) and v[k] > 0.0)
+def _hampel_keep(vals, k=_KD_OUTLIER_K):
+    """Drop values more than k robust-SDs (1.4826·MAD) ABOVE the median — the weak /
+    undetermined-Kd residues (Kd off by multiples) that inflate the mean/std even when
+    their own fit is good. One-sided on purpose: low Kd is genuine tight binding, not an
+    artifact, so it is kept. No-op for <3 values or a zero MAD."""
+    if len(vals) < 3:
+        return list(vals)
+    med = float(np.median(vals))
+    mad = float(np.median([abs(x - med) for x in vals]))
+    if mad <= 0:
+        return list(vals)
+    hi = med + k * 1.4826 * mad
+    return [x for x in vals if x <= hi]
 
 
-def _pair_observable(series, i, j, obs, alpha=0.14, value='height'):
-    """Observable for one residue between reference point i and point j.
+def _kd_with_err(kd, err, kd_spec=".4g", err_spec=".3g"):
+    """Render 'Kd ± err', dropping the '± err' when the error is missing/non-finite
+    (e.g. an older fit with no stored Kd_err, or a singular covariance)."""
+    s = _fmt_num(kd, kd_spec)
+    if err is not None and np.isfinite(err):
+        s += f" ± {format(err, err_spec)}"
+    return s
 
-    obs='csp'  -> CSP (ppm) from the position shift: sqrt(ΔδH² + (alpha·ΔδN)²).
-    obs='intensity' -> ratio v[j]/v[i] of the chosen value ('height'/'volume').
-    Returns NaN if an endpoint is missing — a 0.0 position is the undetected
-    sentinel, a non-positive reference intensity makes the ratio undefined
-    (same conventions as kd_input.csp_series / intensity_ratio_series).
-    """
-    if obs == 'csp':
-        px = np.asarray(series.get('ppm_x', []), float)
-        py = np.asarray(series.get('ppm_y', []), float)
-        if max(i, j) >= len(px) or max(i, j) >= len(py):
-            return float('nan')
-        xi, xj, yi, yj = px[i], px[j], py[i], py[j]
-        if 0.0 in (xi, xj, yi, yj) or not np.all(np.isfinite([xi, xj, yi, yj])):
-            return float('nan')
-        return float(compute_csp(xj - xi, yj - yi, alpha=alpha))
-    v = np.asarray(series.get(value, []), float)
-    if max(i, j) >= len(v):
-        return float('nan')
-    ref = v[i]
-    if not np.isfinite(ref) or ref <= 0.0:
-        return float('nan')
-    return float(v[j] / ref)
+
+class _ExportChoiceDialog(QDialog):
+    """Pick which fit figures to export as editable-vector PDF. All checked by
+    default so 'export figures → OK' writes the full set."""
+
+    def __init__(self, parent, dest):
+        super().__init__(parent)
+        self.setWindowTitle("Export figures")
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel("Export editable-vector PDF (ref→point also writes CSV + JSON):"))
+        self.cb_intensity_fit = QCheckBox("1  Intensity vs titration (per-residue fits)")
+        self.cb_intensity_ref = QCheckBox("2  Intensity I/I₀: reference → point (+ CSV/JSON)")
+        self.cb_csp_ref = QCheckBox("3  CSP: reference → point (+ CSV/JSON)")
+        self.cb_csp_kd = QCheckBox("4  CSP: Kd vs residue (+ global Kd line)")
+        self.cb_intensity_kd = QCheckBox("5  Intensity: Kd vs residue (+ global apparent Kd line)")
+        self.cb_csp_global = QCheckBox("6  CSP: global shared-Kd fit over data (per residue)")
+        self.cb_intensity_global = QCheckBox("7  Intensity: global shared-Kd fit over data (per residue)")
+        for cb in (self.cb_intensity_fit, self.cb_intensity_ref, self.cb_csp_ref,
+                   self.cb_csp_kd, self.cb_intensity_kd, self.cb_csp_global,
+                   self.cb_intensity_global):
+            cb.setChecked(True)
+            lay.addWidget(cb)
+        lay.addWidget(QLabel(f"Destination:\n{dest}"))
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        lay.addWidget(btns)
+
+    def choices(self):
+        return {"intensity_fit": self.cb_intensity_fit.isChecked(),
+                "intensity_ref": self.cb_intensity_ref.isChecked(),
+                "csp_ref": self.cb_csp_ref.isChecked(),
+                "csp_kd": self.cb_csp_kd.isChecked(),
+                "intensity_kd": self.cb_intensity_kd.isChecked(),
+                "csp_global": self.cb_csp_global.isChecked(),
+                "intensity_global": self.cb_intensity_global.isChecked()}
 
 
 class KdTitrationFitViewer(QMainWindow):
@@ -165,7 +191,7 @@ class KdTitrationFitViewer(QMainWindow):
         self.residue_list.currentRowChanged.connect(self._refresh)
         right.addWidget(self.residue_list, stretch=1)
 
-        export_btn = QPushButton("Export figure…")
+        export_btn = QPushButton("Export figures…")
         export_btn.clicked.connect(self._export)
         right.addWidget(export_btn)
         root.addLayout(right, stretch=1)
@@ -224,12 +250,48 @@ class KdTitrationFitViewer(QMainWindow):
         for combo in (self.ref_point_combo, self.cmp_point_combo):
             combo.blockSignals(False)
 
+    def _clean_kds(self, obs):
+        """Per-residue Kd for `obs` used in the summary: successful, not user-excluded,
+        well-fit (R² ≥ _GLOBAL_R2_MIN), then a Hampel reject to drop residues whose Kd is
+        off by multiples of the median even though their own fit is good."""
+        excl = self.excluded_residues.get(obs, set())
+        vals = []
+        for f in self.fits:
+            fit = f.get(obs, {})
+            v = fit.get("Kd")
+            r2 = fit.get("r_squared")
+            if (fit.get("success") and f.get("residue") not in excl
+                    and isinstance(v, (int, float)) and np.isfinite(v)
+                    and isinstance(r2, (int, float)) and r2 >= _GLOBAL_R2_MIN):
+                vals.append(float(v))
+        return _hampel_keep(vals)
+
+    def _mean_kd(self, obs):
+        """Mean of the cleaned per-residue Kd (see _clean_kds). Returns (mean, n) or
+        (None, 0) if there are none."""
+        vals = self._clean_kds(obs)
+        return (float(np.mean(vals)), len(vals)) if vals else (None, 0)
+
     def _update_global_label(self):
-        g = self.data.get("global", {}).get("csp", {})
-        self.global_label.setText(
-            f"Global shared Kd (CSP): {_fmt_num(g.get('Kd'), '.4g')}  (n={g.get('n_residues','?')}, "
-            f"from initial fit — not updated by per-residue refits)"
-            if g.get("success") else "Global Kd: n/a")
+        """Show the global shared Kd AND the per-residue average for the CURRENTLY
+        selected observable, so the label tracks the Observable selector (intensity mode
+        shows the intensity Kd, not CSP). The global fit is from the initial run —
+        per-residue refits don't update it."""
+        obs = self._obs_key()
+        g = self.data.get("global", {}).get(obs, {})
+        mean_kd, n_mean = self._mean_kd(obs)
+        avg = f"   |   per-residue avg: {mean_kd:.4g} (n={n_mean})" if mean_kd is not None else ""
+        if g.get("success"):
+            lbl = ("Global shared Kd (CSP)" if obs == "csp"
+                   else "Global shared apparent Kd (intensity)")
+            self.global_label.setText(
+                f"{lbl}: {_kd_with_err(g.get('Kd'), g.get('Kd_err'))} "
+                f"(n={g.get('n_residues','?')})" + avg +
+                "   — global from initial fit, not updated by per-residue refits")
+        else:
+            which = "CSP" if obs == "csp" else "intensity"
+            self.global_label.setText(
+                f"Global shared Kd ({which}): n/a  (re-run the fit to compute it)" + avg)
 
     def _obs_key(self):
         return "csp" if self.obs_combo.currentIndex() == 0 else "intensity"
@@ -241,6 +303,7 @@ class KdTitrationFitViewer(QMainWindow):
     # ---------- plotting ----------
 
     def _refresh(self, *_):
+        self._update_global_label()          # track the Observable selector
         self.figure.clear()
         ax = self.figure.add_subplot(111)
         view = self.view_combo.currentIndex()
@@ -258,11 +321,14 @@ class KdTitrationFitViewer(QMainWindow):
         self.canvas.draw()
 
     def _plot_comparison(self, ax):
-        """Observable (CSP or I/I₀) per residue between a chosen reference point
-        and a comparison point — computed from each residue's raw series."""
-        obs = self._obs_key()
-        i = self.ref_point_combo.currentIndex()
-        j = self.cmp_point_combo.currentIndex()
+        """Interactive comparison view: draw the observable between the reference
+        and compare points chosen in the selectors."""
+        self._draw_comparison(ax, self.ref_point_combo.currentIndex(),
+                              self.cmp_point_combo.currentIndex(), self._obs_key())
+
+    def _draw_comparison(self, ax, i, j, obs):
+        """Observable (CSP or I/I₀) per residue between reference point i and
+        comparison point j — computed from each residue's raw series."""
         labels = self._point_labels()
         if i < 0 or j < 0 or not labels:
             ax.text(0.5, 0.5, "No titration points", ha="center", va="center",
@@ -275,36 +341,27 @@ class KdTitrationFitViewer(QMainWindow):
         meta = self.data.get("metadata", {})
         alpha = float(meta.get("alpha", 0.14))
         value = meta.get("intensity_value", "height")
-        names, vals = [], []
-        for f in self.fits:
-            series = f.get("series")
-            # "Missing" is the SAME for both observables: the peak must be present
-            # (detected position + a real intensity) at both the ref and compare point.
-            # Otherwise CSP greyed on bad positions while intensity greyed on bad
-            # intensity, so the same residue looked missing in one mode but not the other.
-            if (series and _peak_present(series, i, value)
-                    and _peak_present(series, j, value)):
-                v = _pair_observable(series, i, j, obs, alpha=alpha, value=value)
-            else:
-                v = float("nan")
-            names.append(f["residue"])
-            vals.append(v)
+        # "Missing" is the SAME for both observables: the peak must be present (detected
+        # position + a real intensity) at both endpoints, so a residue isn't shown as
+        # present in one mode and grey in the other. (ref_point_values applies that rule.)
+        names, vals = ref_point_values(self.fits, i, j, obs, alpha=alpha, value=value)
         bar_color = "seagreen" if obs == "csp" else "indianred"
         # I/I₀ is a ratio → fix the axis at 0–1; CSP is in ppm → auto-scale.
         self._plot_residue_bars(ax, names, vals, bar_color,
-                                ymax=None if obs == "csp" else 1.0)
+                                ymax=None if obs == "csp" else 1.0, obs=obs)
         ax.set_ylabel("CSP (ppm)" if obs == "csp" else "Intensity ratio I/I₀")
         sym = "CSP" if obs == "csp" else "I/I₀"
         ax.set_title(f"{sym}:  {labels[i]} → {labels[j]}  (ref → point)")
 
-    def _plot_residue_bars(self, ax, names, vals, color, errs=None, ymax=None):
+    def _plot_residue_bars(self, ax, names, vals, color, errs=None, ymax=None, obs=None):
         """Bar chart of value-per-residue. Residues with no value (NaN — missing
         assignment or failed fit) draw as a full-height grey bar so the gap is visible;
         residues the user excluded (problematic values) draw hatched. In edit mode the
-        bars are pickable so a click toggles that residue's exclusion. `ymax` fixes the
+        bars are pickable so a click toggles that residue's exclusion. `obs` selects
+        which observable's exclusion set to honor (defaults to the current view). `ymax` fixes the
         y-axis top (e.g. 1.0 for an I/I₀ ratio); None auto-scales to the data."""
         self._pick_registry = {}
-        excl = self.excluded_residues[self._obs_key()]   # per-observable exclusions
+        excl = self.excluded_residues[obs or self._obs_key()]   # per-observable exclusions
         finite = [v for v, n in zip(vals, names)
                   if np.isfinite(v) and n not in excl]
         data_max = max(finite) if finite else (max([v for v in vals if np.isfinite(v)],
@@ -352,6 +409,8 @@ class KdTitrationFitViewer(QMainWindow):
             return
         L = np.asarray(fit["L"], float)
         y = np.asarray(fit["obs"], float)
+        if obs == "intensity":
+            y = y / fit["I0"]
         excl = self.excluded[obs].get(f["residue"], set())
         n = len(L)
         inc_idx = [i for i in range(n) if i not in excl]
@@ -372,18 +431,22 @@ class KdTitrationFitViewer(QMainWindow):
             yg = csp_model(Lg, fit["dd_max"], fit["Kd"], self.P0)
             ylab = "CSP (ppm)"
         else:
-            yg = intensity_decay(Lg, fit["I0"], fit["I_inf"], fit["Kd"])
-            ylab = "Intensity ratio"
+            # Normalized to I/I(0), matching the exported figures, so the interactive
+            # view and the PDF output share the same 0-1 axis.
+            yg = intensity_decay(Lg, fit["I0"], fit["I_inf"], fit["Kd"]) / fit["I0"]
+            ylab = "I / I(0)"
         ax.plot(Lg, yg, "r-", lw=2, label="fit")
         kd, kde, r2 = fit.get("Kd"), fit.get("Kd_err"), fit.get("r_squared")
         ax.set_title(f"{f['residue']}   Kd = {_fmt_num(kd, '.3g')} ± {_fmt_num(kde, '.2g')}"
                      f"   R² = {_fmt_num(r2, '.3f')}")
         ax.set_xlabel("[Ligand]")
         ax.set_ylabel(ylab)
+        if obs == "intensity":
+            ax.set_ylim(*_INTENSITY_YLIM)
         ax.legend()
 
-    def _plot_summary(self, ax, key, err_key, title, ylab):
-        obs = self._obs_key()
+    def _plot_summary(self, ax, key, err_key, title, ylab, obs=None):
+        obs = obs or self._obs_key()
         names, vals, errs = [], [], []
         for f in self.fits:
             fit = f.get(obs, {})
@@ -396,12 +459,22 @@ class KdTitrationFitViewer(QMainWindow):
             ax.text(0.5, 0.5, f"No {obs} fits", ha="center", va="center", transform=ax.transAxes)
             return
         # Missing/failed residues show as full-height grey bars (see _plot_residue_bars).
-        self._plot_residue_bars(ax, names, vals, "steelblue", errs=errs)
+        self._plot_residue_bars(ax, names, vals, "steelblue", errs=errs, obs=obs)
         if key == "Kd":
-            g = self.data.get("global", {}).get("csp", {})
+            g = self.data.get("global", {}).get(obs, {})
             gkd = g.get("Kd")
-            if obs == "csp" and g.get("success") and gkd is not None and np.isfinite(gkd):
-                ax.axhline(gkd, color="red", ls="--", label=f"global Kd={_fmt_num(gkd, '.3g')}")
+            drew = False
+            if g.get("success") and gkd is not None and np.isfinite(gkd):
+                lbl = "global Kd" if obs == "csp" else "global apparent Kd"
+                ax.axhline(gkd, color="red", ls="--",
+                           label=f"{lbl}={_kd_with_err(gkd, g.get('Kd_err'), '.3g', '.2g')}")
+                drew = True
+            mean_kd, n_mean = self._mean_kd(obs)
+            if mean_kd is not None:
+                ax.axhline(mean_kd, color="green", ls=":",
+                           label=f"per-residue avg={mean_kd:.3g} (n={n_mean})")
+                drew = True
+            if drew:
                 ax.legend()
         ax.set_ylabel(ylab)
         ax.set_title(f"{title}  ({obs})")
@@ -508,23 +581,254 @@ class KdTitrationFitViewer(QMainWindow):
         if self.json_file:
             Path(self.json_file).write_text(json.dumps(json_safe(self.data), indent=2))
 
+    # ---------- figure export ----------
+
+    def _export_base(self):
+        """Series-name prefix for exported files, taken from the fit's filename
+        (`<series>_kd_fit_data.json` → `<series>`). For a generic filename (e.g. a
+        project-bundled `fit_data.json`) it falls back to the name stored in metadata,
+        then to 'kd'."""
+        stem = os.path.basename(self.json_file or "")
+        suffix = "_kd_fit_data.json"
+        if stem.endswith(suffix):
+            base = stem[:-len(suffix)]
+            if base:
+                return base
+        name = (self.data.get("metadata", {}) or {}).get("name")
+        if name:
+            return str(name)
+        return "kd"
+
     def _export(self):
-        path, selected = QFileDialog.getSaveFileName(
-            self, "Export figure", "",
-            "SVG — editable vector (*.svg);;PDF — vector (*.pdf);;PNG — raster (*.png)")
-        if not path:
+        """Export the fit figures as editable-vector PDFs, written into the folder
+        where the fit results live (next to the *_kd_fit_data.json)."""
+        if not self.json_file:
+            QMessageBox.warning(self, "No data", "Load a fit first.")
             return
-        # Ensure the filename has an extension matching the chosen filter.
-        ext = os.path.splitext(path)[1].lower()
-        if ext not in (".svg", ".pdf", ".png"):
-            ext = ".svg" if "svg" in selected else ".pdf" if "pdf" in selected else ".png"
-            path += ext
-        # Keep text editable in vector output so it can be edited in Illustrator:
-        # svg.fonttype='none' keeps labels as <text> (not outlined paths); pdf.fonttype=42
-        # embeds TrueType so glyphs stay selectable. rc_context avoids touching globals.
+        dest = os.path.dirname(os.path.abspath(self.json_file))
+        dlg = _ExportChoiceDialog(self, dest)
+        if not dlg.exec():
+            return
+        ch = dlg.choices()
+        if not any(ch.values()):
+            return
+        base = self._export_base()
+        jobs = [
+            (ch["intensity_fit"], f"{base}_intensity_titration_fits.pdf",
+             lambda p: self._export_intensity_fits(p)),
+            (ch["intensity_ref"], f"{base}_intensity_ref_vs_point.pdf",
+             lambda p: self._export_ref_vs_point(p, "intensity")),
+            (ch["csp_ref"], f"{base}_csp_ref_vs_point.pdf",
+             lambda p: self._export_ref_vs_point(p, "csp")),
+            (ch["csp_kd"], f"{base}_csp_kd_vs_residue.pdf",
+             lambda p: self._export_kd_vs_residue(p, "csp")),
+            (ch["intensity_kd"], f"{base}_intensity_kd_vs_residue.pdf",
+             lambda p: self._export_kd_vs_residue(p, "intensity")),
+            (ch["csp_global"], f"{base}_csp_global_fit.pdf",
+             lambda p: self._export_global_fit(p, "csp")),
+            (ch["intensity_global"], f"{base}_intensity_global_fit.pdf",
+             lambda p: self._export_global_fit(p, "intensity")),
+        ]
+        written = []
+        try:
+            for wanted, fname, fn in jobs:
+                if wanted and fn(os.path.join(dest, fname)):
+                    written.append(fname)
+            # The ref→point observable data as Excel-ready CSV + JSON, alongside the PDFs.
+            for wanted, obs in [(ch["intensity_ref"], "intensity"), (ch["csp_ref"], "csp")]:
+                if wanted:
+                    for p in self._write_ref_vs_point_data(dest, base, obs):
+                        written.append(os.path.basename(p))
+            # The global shared-Kd per-residue params as CSV + JSON, alongside the PDFs.
+            for wanted, obs in [(ch["intensity_global"], "intensity"), (ch["csp_global"], "csp")]:
+                if wanted:
+                    for p in self._write_global_fit_data(dest, base, obs):
+                        written.append(os.path.basename(p))
+        except Exception as e:
+            QMessageBox.critical(self, "Export failed", str(e))
+            return
+        if written:
+            QMessageBox.information(self, "Export complete",
+                                    "Wrote to:\n" + dest + "\n\n" + "\n".join(written))
+        else:
+            QMessageBox.warning(self, "Nothing exported",
+                                "The selected figures had no data to plot "
+                                "(need embedded series and/or successful fits).")
+
+    def _export_intensity_fits(self, path):
+        """Per-residue intensity-decay curves (I vs [L] + fit), 20 per page like the
+        T1/T2 export. Returns the number of PDF pages written (0 if no fits)."""
+        fits = [f for f in self.fits
+                if f.get("intensity", {}).get("success") and f.get("intensity", {}).get("L")]
+        if not fits:
+            return 0
+        per_page = 20                          # 5 rows × 4 cols, matching the CLI export
+        pages = 0
+        with self._vector_pdf(path) as pdf:
+            for start in range(0, len(fits), per_page):
+                chunk = fits[start:start + per_page]
+                fig = Figure(figsize=(16, 15))    # matches lunaNMR/cli.py's (cols*4, rows*3)
+                axes = np.asarray(fig.subplots(5, 4)).flatten()
+                for ax, f in zip(axes, chunk):
+                    self._draw_intensity_fit(ax, f)
+                for ax in axes[len(chunk):]:
+                    ax.set_visible(False)
+                fig.tight_layout()
+                pdf.savefig(fig)
+                pages += 1
+        return pages
+
+    def _export_kd_vs_residue(self, path, obs):
+        """Per-residue Kd bar chart (+ the global-Kd line) for one observable, one
+        page. Returns 1 if written, 0 if that observable has no successful fits."""
+        if not any(f.get(obs, {}).get("success") for f in self.fits):
+            return 0
+        with self._vector_pdf(path) as pdf:
+            fig = Figure(figsize=(11, 6))
+            ax = fig.add_subplot(111)
+            self._plot_summary(ax, "Kd", "Kd_err", "Kd vs residue", "Kd", obs=obs)
+            fig.tight_layout()
+            pdf.savefig(fig)
+        return 1
+
+    def _export_global_fit(self, path, obs):
+        """Per-residue observed data overlaid with the GLOBAL (shared-Kd) model curve,
+        so one can judge how well a single Kd fits every residue. 20 panels/page. The
+        per-panel R² is the observed vs the shared-Kd curve (a per-residue goodness under
+        the global model). Returns pages written (0 if no global fit for this obs)."""
+        g = self.data.get("global", {}).get(obs, {})
+        amp = g.get("dd_max") if obs == "csp" else g.get("I0")
+        if not g.get("success") or not amp:
+            return 0
+        panels = [f for f in self.fits
+                  if f.get("residue") in amp and f.get(obs, {}).get("L")]
+        if not panels:
+            return 0
+        per_page = 20
+        pages = 0
+        with self._vector_pdf(path) as pdf:
+            for start in range(0, len(panels), per_page):
+                chunk = panels[start:start + per_page]
+                fig = Figure(figsize=(16, 15))    # matches lunaNMR/cli.py's (cols*4, rows*3)
+                axes = np.asarray(fig.subplots(5, 4)).flatten()
+                for ax, f in zip(axes, chunk):
+                    self._draw_global_fit_panel(ax, f, obs, g)
+                for ax in axes[len(chunk):]:
+                    ax.set_visible(False)
+                fig.suptitle(f"Global shared-Kd fit ({obs}): one Kd = "
+                             f"{_fmt_num(g.get('Kd'), '.4g')} for all residues "
+                             "(per-residue amplitudes)", fontsize=15)
+                fig.tight_layout(rect=[0, 0, 1, 0.99])
+                pdf.savefig(fig)
+                pages += 1
+        return pages
+
+    def _draw_global_fit_panel(self, ax, f, obs, g):
+        """One residue: observed points + the shared-Kd global-model curve. Intensity is
+        normalized to I/I(0) (dividing by the global fit's per-residue I0) so it shares
+        the same 0-1 axis as every other intensity panel, matching lunaNMR/cli.py."""
+        res = f["residue"]
+        fit = f[obs]
+        L = np.asarray(fit["L"], float)
+        y = np.asarray(fit["obs"], float)
+        Lg = np.linspace(0, L.max() * 1.05, 200)
+        kd = g["Kd"]
+        if obs == "csp":
+            yg = csp_model(Lg, g["dd_max"][res], kd, self.P0)
+            yhat = csp_model(L, g["dd_max"][res], kd, self.P0)
+            ylab = "CSP (ppm)"
+        else:
+            yg = intensity_decay(Lg, g["I0"][res], g["I_inf"][res], kd)
+            yhat = intensity_decay(L, g["I0"][res], g["I_inf"][res], kd)
+            ylab = "I / I(0)"
+        ss_res = float(np.sum((y - yhat) ** 2))
+        ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+        r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+        if obs == "intensity":
+            y = y / g["I0"][res]
+            yg = yg / g["I0"][res]
+            ax.set_ylim(*_INTENSITY_YLIM)
+        ax.scatter(L, y, color="black", s=36, zorder=3)
+        ax.plot(Lg, yg, "-", color="#1f77b4", lw=1.5)   # blue = global (vs red per-residue)
+        ax.set_title(f"{res}   R²(global)={_fmt_num(r2, '.2f')}", fontsize=9)
+        ax.set_xlabel("[Ligand]", fontsize=8)
+        ax.set_ylabel(ylab, fontsize=8)
+
+    def _export_ref_vs_point(self, path, obs):
+        """Reference (point 0) → point bar charts of the observable per residue, one
+        page per later titration point. Returns the number of pages written."""
+        labels = self._point_labels()
+        if len(labels) < 2 or not any(f.get("series") for f in self.fits):
+            return 0
+        pages = 0
+        with self._vector_pdf(path) as pdf:
+            for j in range(1, len(labels)):
+                fig = Figure(figsize=(11, 6))
+                ax = fig.add_subplot(111)
+                self._draw_comparison(ax, 0, j, obs)
+                fig.tight_layout()
+                pdf.savefig(fig)
+                pages += 1
+        return pages
+
+    def _write_ref_vs_point_data(self, dest, base, obs):
+        """Write the wide CSV + JSON for one observable's reference→point data, so the
+        bars are reproducible in Excel. Returns the written paths ([] if no data)."""
+        labels = self._point_labels()
+        if len(labels) < 2 or not any(f.get("series") for f in self.fits):
+            return []
+        meta = self.data.get("metadata", {})
+        alpha = float(meta.get("alpha", 0.14))
+        value = meta.get("intensity_value", "height")
+        from kd_export import export_ref_vs_point
+        return export_ref_vs_point(os.path.join(dest, f"{base}_{obs}_ref_vs_point"),
+                                   self.fits, labels, obs, alpha=alpha, value=value)
+
+    def _write_global_fit_data(self, dest, base, obs):
+        """Write the CSV + JSON of the per-residue global shared-Kd params for one
+        observable, so the global-fit figure is reproducible as data. Returns the written
+        paths ([] if there is no successful global fit for this observable)."""
+        from kd_export import export_global_fit
+        return export_global_fit(os.path.join(dest, f"{base}_{obs}_global_fit"),
+                                 self.fits, self.data.get("global", {}) or {},
+                                 obs, self.P0)
+
+    @contextmanager
+    def _vector_pdf(self, path):
+        """A PdfPages context that keeps text editable in the output (pdf.fonttype=42
+        embeds TrueType so glyphs stay selectable in Illustrator)."""
         import matplotlib as mpl
+        from matplotlib.backends.backend_pdf import PdfPages
         with mpl.rc_context({"svg.fonttype": "none", "pdf.fonttype": 42}):
-            self.figure.savefig(path, bbox_inches="tight", dpi=300)
+            with PdfPages(path) as pdf:
+                yield pdf
+
+    def _draw_intensity_fit(self, ax, f):
+        """Draw one residue's intensity data + fitted decay curve onto ax (compact,
+        for the multi-plot export page). Normalized to I/I(0) (dividing by the fitted
+        I0 amplitude) and pinned to the shared 0-1 axis, matching lunaNMR/cli.py, so
+        raw-scale residues (I0 in the hundreds) don't auto-scale to invisible flat
+        lines and every panel/document is directly comparable."""
+        fit = f["intensity"]
+        L = np.asarray(fit["L"], float)
+        y = np.asarray(fit["obs"], float) / fit["I0"]
+        excl = self.excluded["intensity"].get(f["residue"], set())
+        inc = [i for i in range(len(L)) if i not in excl]
+        exc = [i for i in range(len(L)) if i in excl]
+        if inc:
+            ax.scatter(L[inc], y[inc], color="black", s=36, zorder=3)
+        if exc:
+            ax.scatter(L[exc], y[exc], color="#888888", marker="x", s=36,
+                       linewidths=2, zorder=3)
+        Lg = np.linspace(0, L.max() * 1.05, 200)
+        yg = intensity_decay(Lg, fit["I0"], fit["I_inf"], fit["Kd"]) / fit["I0"]
+        ax.plot(Lg, yg, "r-", lw=1.5)
+        kd, kde, r2 = fit.get("Kd"), fit.get("Kd_err"), fit.get("r_squared")
+        ax.set_title(f"{f['residue']}   Kd={_fmt_num(kd, '.3g')}±{_fmt_num(kde, '.2g')}"
+                     f"  R²={_fmt_num(r2, '.2f')}", fontsize=9)
+        ax.set_xlabel("[Ligand]", fontsize=8)
+        ax.set_ylabel("I / I(0)", fontsize=8)
+        ax.set_ylim(*_INTENSITY_YLIM)
 
 
 def open_kd_titration_viewer(parent=None, json_file=None):

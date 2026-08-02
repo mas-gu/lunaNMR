@@ -358,6 +358,8 @@ class LunaNMRMainWindow(BaseWindow):
         self.kd_titration_dialog = None  # Reference to open Kd/titration dialog
         self.kd_state = None  # Kd/titration dialog parameters
         self.kd_file_refs = None  # Kd/titration input file paths
+        self._spectral_inspector = None  # Reference to open Spectral Inspector window
+        self.spectral_inspector_state = None  # Serialized Spectral Inspector content
 
         # ===== Selection State =====
         self.selected_peak_info = None  # {type, index, peak_id, data}
@@ -5786,17 +5788,28 @@ class LunaNMRMainWindow(BaseWindow):
         self.series_qc_dialog.show()
 
     def launch_spectral_inspector(self):
-        """Launch Spectral Inspector as a standalone top-level window."""
+        """Launch Spectral Inspector as a standalone top-level window.
+
+        Closing the window only hides it, so an existing instance is re-shown
+        with its content intact (session persistence). A freshly created window
+        is populated from any state restored by a project load.
+        """
         from lunaNMR.gui.dialogs import SpectralInspector
 
-        if (hasattr(self, '_spectral_inspector')
-                and self._spectral_inspector is not None
-                and self._spectral_inspector.isVisible()):
+        # Re-show the existing instance regardless of visibility (content persists)
+        if getattr(self, '_spectral_inspector', None) is not None:
+            self._spectral_inspector.show()
             self._spectral_inspector.raise_()
             self._spectral_inspector.activateWindow()
             return
 
         self._spectral_inspector = SpectralInspector(parent=None)
+        state = getattr(self, 'spectral_inspector_state', None)
+        if state:
+            try:
+                self._spectral_inspector.load_state(state)
+            except Exception as e:
+                logger.error(f"Failed to restore Spectral Inspector state: {e}")
         self._spectral_inspector.show()
 
     # =================== TOOLS MENU HANDLERS ===================
@@ -8263,6 +8276,15 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     logger.info(f"Loaded {len(self.last_fitting_results)} fit results into Voigt plotter")
             except Exception as e:
                 logger.warning(f"Could not update Voigt plotter: {e}")
+
+        # Apply restored Spectral Inspector state to an already-open window; a
+        # closed/not-yet-opened one picks it up on the next launch_spectral_inspector.
+        if getattr(self, '_spectral_inspector', None) is not None \
+                and getattr(self, 'spectral_inspector_state', None):
+            try:
+                self._spectral_inspector.load_state(self.spectral_inspector_state)
+            except Exception as e:
+                logger.warning(f"Could not refresh Spectral Inspector after load: {e}")
 
     # ===== Test Spectrum Creation =====
 

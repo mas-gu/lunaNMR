@@ -21,7 +21,7 @@ No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every ana
 | `dynamixs density` | Reduced spectral density mapping | `--input <table.csv>` `--out` `--field1-freq` | `<prefix>_results.csv` (or `_basic`/`_detailed` for `--dual`) + `_plots.pdf` |
 | `dynamixs modelfree` | T1/T2→hetNOE→density→Lipari-Szabo | `--f1-t1 --f1-t2 --f1-noe-sat --f1-noe-unsat --field1-freq --out` | model-free CSVs, per-field hetNOE.pdf, density plots |
 | `kd` | Kd titration (CSP quadratic / intensity decay) | `--input <titration.csv>` `--out` `--p0 <conc>` | `<prefix>_kd_fit_data.json`, results.txt |
-| `export kd` | Figures + summary from a kd fit JSON | `--json` `--out` | `summary.csv`, `<obs>_fits.pdf` / per-residue PNGs |
+| `export kd` | Figures + summary from a kd fit JSON | `--json` `--out` `[--kind curves,ref-bars,kd-bars,global-fit]` `[--prefix]` | `[prefix_]summary.csv`, `[prefix_]<obs>_fits.pdf` / per-residue PNGs (curves, per fitted obs), `[prefix_]<obs>_ref_vs_point.pdf` (ref→point bars, both obs by default, PDF only), `[prefix_]<obs>_kd_vs_residue.pdf` (per-residue Kd + global line, PDF only), `[prefix_]<obs>_global_fit.pdf` (per-residue data + shared-Kd curve, R²(global) per panel, PDF only) |
 | `project inventory` | List a bundle's contents | `<bundle.lunaNMR>` | stdout listing |
 | `project remove` | Delete bundle-relative paths | `<bundle> <rel/path>…` | (mutates bundle) |
 | `batch` | Folder-wide detect + Voigt/PS2D fit | `<folder>` (flags pass through to `batch_processing`) | per-spectrum fit outputs |
@@ -68,7 +68,7 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 - **hetNOE sat/unsat** (`--sat`/`--unsat`, modelfree `--f{1,2}-noe-*`): headerless `residue,intensity[,error]`. Split from a hetNOE series matrix's `…_sat`/`…_unsat` columns.
 - **Density table** (`density --input`): `Residue,R1,R1err,R2,R2err,hetNOE,hetNOEerr`.
 - **Kd input** (`kd --input`): `series_analysis_tidy.csv`, `comprehensive_peak_tracking.csv`, or an intensity matrix (intensity-only, no CSP). Ligand conc from CSV point labels unless `--conc` overrides.
-- **Kd fit JSON** (`export kd --json`): the self-contained `…_kd_fit_data.json` from `kd` (embeds per-point series + `metadata.protein_conc`).
+- **Kd fit JSON** (`export kd --json`): the self-contained `…_kd_fit_data.json` from `kd` (embeds per-point series + `metadata.protein_conc`; `metadata.name` records the `kd --prefix` used to create it, but `export kd` does **not** read it — pass `export kd --prefix` explicitly to prefix figures/summary.csv, independent of the JSON's own filename).
 
 ## Gotchas (silent-corruption risks)
 - **modelfree units rescale, t1t2 units don't.** `modelfree --f{1,2}-t{1,2}-units {ms,s,us}` (default `ms`) DRIVE the T→R conversion — a T1 in seconds with a T2 in ms needs `--f1-t1-units s`, else R1 is off by 1000×. Contrast `t1t2 --time-units` (default `s`) which only *labels* output.
@@ -78,5 +78,6 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 - **Search-window default is 0.070 ppm** (1H and 15N). Don't widen 15N for low-S/N spectra (e.g. saturated hetNOE) — wide windows fit peaks to noise → Height 0 → NOE≈0 → residues silently dropped.
 - **`--method` field prefix follows `--dual`.** In `modelfree` field count derives from `--dual`; you only pick the `087` vs `jwh` variant (default `087`). A mismatched `single_*`/`dual_*` prefix is ignored.
 - **`--intensity-scale` scales height/volume only** (per-point scan-count correction), never positions/CSP; a uniform scale cancels in the I/I₀ ratio.
+- **`export kd` curves vs ref-bars differ on observable.** `curves` (`<obs>_fits.pdf`) render only fitted observables (follow the JSON / `--observable`); `ref-bars` (`<obs>_ref_vs_point.pdf`) are model-free (raw series) and default to BOTH csp+intensity even for a single-observable fit — `--observable` still restricts. Ref-bars need embedded per-point `series` + ≥2 points.
 </content>
 </invoke>

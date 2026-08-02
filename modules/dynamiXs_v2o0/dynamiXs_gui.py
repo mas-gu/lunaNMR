@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView
 )
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer, QMimeData
-from PySide6.QtGui import QFont, QDrag, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QFont, QDragEnterEvent, QDropEvent
 
 # Import design constants
 from constants import (
@@ -485,6 +485,7 @@ class DraggableSeriesList(QListWidget):
         super().__init__(parent)
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.DragOnly)
+        self.setDefaultDropAction(Qt.CopyAction)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
         self.setStyleSheet(f"""
             QListWidget {{
@@ -505,18 +506,17 @@ class DraggableSeriesList(QListWidget):
             }}
         """)
 
-    def startDrag(self, supportedActions):
-        """Start dragging with series data."""
-        item = self.currentItem()
-        if item:
-            drag = QDrag(self)
-            mime_data = QMimeData()
-            # Store series name and CSV path in mime data
+    def mimeData(self, items):
+        """Build the drag payload the drop target reads. Overriding this (rather
+        than startDrag) lets the base view own the drag lifecycle, so an item
+        stays draggable after being dropped once."""
+        mime_data = QMimeData()
+        if items:
+            item = items[0]
             series_name = item.data(Qt.UserRole)
             csv_path = item.data(Qt.UserRole + 1) or ""
             mime_data.setText(f"series:{series_name}:{csv_path}")
-            drag.setMimeData(mime_data)
-            drag.exec(Qt.CopyAction)
+        return mime_data
 
 
 class DropTargetLabel(QLabel):

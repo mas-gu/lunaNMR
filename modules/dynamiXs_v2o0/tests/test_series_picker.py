@@ -188,5 +188,49 @@ class TestSeriesListPopulation:
         assert list_visible is True
 
 
+class TestDraggableSeriesListMimeData:
+    """Real-widget tests for the drag payload the drop target consumes."""
+
+    @pytest.fixture(scope="class")
+    def app(self):
+        import sys
+        from PySide6.QtWidgets import QApplication
+        return QApplication.instance() or QApplication(sys.argv)
+
+    def _widget_class(self):
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from dynamiXs_gui import DraggableSeriesList
+        return DraggableSeriesList
+
+    def test_mimedata_emits_series_payload(self, app):
+        """mimeData() carries the 'series:name:path' text the drop target reads,
+        so the base view manages the drag lifecycle (no manual drag.exec)."""
+        from PySide6.QtWidgets import QListWidgetItem
+        from PySide6.QtCore import Qt
+        lst = self._widget_class()()
+        item = QListWidgetItem("T1_series")
+        item.setData(Qt.UserRole, "T1_series")
+        item.setData(Qt.UserRole + 1, "/path/to/series_analysis_tidy.csv")
+        lst.addItem(item)
+
+        mime = lst.mimeData([item])
+        assert mime.hasText()
+        assert mime.text() == "series:T1_series:/path/to/series_analysis_tidy.csv"
+
+    def test_mimedata_handles_missing_csv_path(self, app):
+        """A series with no CSV path still yields a well-formed payload."""
+        from PySide6.QtWidgets import QListWidgetItem
+        from PySide6.QtCore import Qt
+        lst = self._widget_class()()
+        item = QListWidgetItem("S")
+        item.setData(Qt.UserRole, "S")
+        lst.addItem(item)
+
+        mime = lst.mimeData([item])
+        assert mime.text() == "series:S:"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

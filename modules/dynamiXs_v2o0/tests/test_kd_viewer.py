@@ -273,34 +273,221 @@ def test_intensity_comparison_yaxis_is_zero_to_one(app, tmp_path):
         v.deleteLater()
 
 
-def test_export_svg_keeps_editable_text(app, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QFileDialog
+def test_export_intensity_fits_writes_vector_pdf(app, tmp_path):
     from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
     jf = _make_fit_json(tmp_path)
     v = open_kd_titration_viewer(parent=None, json_file=jf)
     try:
-        out = tmp_path / "fig.svg"
-        monkeypatch.setattr(QFileDialog, "getSaveFileName",
-                            lambda *a, **k: (str(out), "SVG — editable vector (*.svg)"))
-        v._export()
-        assert out.exists()
-        # text kept as <text> elements (editable in Illustrator), not outlined paths
-        assert "<text" in out.read_text()
-
+        out = tmp_path / "int_fits.pdf"
+        assert v._export_intensity_fits(str(out)) >= 1   # ≥1 page of per-residue curves
+        data = out.read_bytes()
+        assert data[:4] == b"%PDF"
+        # pdf.fonttype=42 embeds TrueType (FontFile2) → text stays selectable/editable
+        assert b"/FontFile2" in data
     finally:
         v.deleteLater()
 
 
-def test_export_appends_extension_from_filter(app, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QFileDialog
+def test_export_ref_vs_point_page_per_point(app, tmp_path):
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+    jf = _make_fit_json(tmp_path)                        # 6 titration points
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        for obs, fname in (("csp", "csp_ref.pdf"), ("intensity", "int_ref.pdf")):
+            out = tmp_path / fname
+            assert v._export_ref_vs_point(str(out), obs) == 5   # ref(0) → points 1..5
+            assert out.read_bytes()[:4] == b"%PDF"
+    finally:
+        v.deleteLater()
+
+
+def test_export_ref_vs_point_skips_when_too_few_points(app, tmp_path):
     from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
     jf = _make_fit_json(tmp_path)
     v = open_kd_titration_viewer(parent=None, json_file=jf)
     try:
-        stem = str(tmp_path / "noext")           # user typed no extension
-        monkeypatch.setattr(QFileDialog, "getSaveFileName",
-                            lambda *a, **k: (stem, "PDF — vector (*.pdf)"))
+        v.data["metadata"]["concentrations"] = [0.0]     # only one point → nothing to compare
+        out = tmp_path / "none.pdf"
+        assert v._export_ref_vs_point(str(out), "csp") == 0
+        assert not out.exists()
+    finally:
+        v.deleteLater()
+
+
+def test_export_all_writes_three_pdfs_next_to_json(app, tmp_path, monkeypatch):
+    from visualization import kd_titration_fit_viewer as mod
+    jf = _make_fit_json(tmp_path)
+    v = mod.open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        # accept the choice dialog with all three (default-checked) selected
+        monkeypatch.setattr(mod._ExportChoiceDialog, "exec", lambda self: 1)
+        monkeypatch.setattr(mod.QMessageBox, "information", lambda *a, **k: None)
         v._export()
-        assert (tmp_path / "noext.pdf").exists()
+        dest = Path(jf).parent
+        assert (dest / "kd_intensity_titration_fits.pdf").exists()
+        assert (dest / "kd_intensity_ref_vs_point.pdf").exists()
+        assert (dest / "kd_csp_ref_vs_point.pdf").exists()
+    finally:
+        v.deleteLater()
+
+
+def test_export_base_falls_back_to_metadata_name_for_generic_filename(app, tmp_path, monkeypatch):
+    # A project-bundled fit is stored as generic 'fit_data.json'; the export prefix then
+    # comes from the series name recorded in metadata, not the filename.
+    import json
+    from visualization import kd_titration_fit_viewer as mod
+    jf = _make_fit_json(tmp_path)
+    data = json.loads(Path(jf).read_text())
+    data["metadata"]["name"] = "HSPA8"
+    generic = Path(jf).parent / "fit_data.json"
+    generic.write_text(json.dumps(data))
+    v = mod.open_kd_titration_viewer(parent=None, json_file=str(generic))
+    try:
+        monkeypatch.setattr(mod._ExportChoiceDialog, "exec", lambda self: 1)
+        monkeypatch.setattr(mod.QMessageBox, "information", lambda *a, **k: None)
+        v._export()
+        assert (generic.parent / "HSPA8_intensity_titration_fits.pdf").exists()
+        assert (generic.parent / "HSPA8_csp_ref_vs_point.pdf").exists()
+    finally:
+        v.deleteLater()
+
+
+def test_fit_json_metadata_records_name(tmp_path):
+    # run_kd_analysis_with_params stamps the output prefix into metadata['name'] so a
+    # bundled reopen can still recover the series name.
+    import json
+    from kd_fit import run_kd_analysis_with_params
+    from kd_models import csp_model
+    pts = [0.0, 10.0, 25.0, 60.0]
+    rows = []
+    for name in ("A17", "K14"):
+        d = csp_model(np.array(pts), 0.2, 15.0, 50.0)
+        for p, dv in zip(pts, d):
+            rows.append((str(p), name, 8.0 + dv, 120.0, 1000.0 - 2 * p, 2000.0))
+    df = pd.DataFrame(rows, columns=["spectrum_name", "assignment",
+                                     "ppm_x", "ppm_y", "height", "volume"])
+    csv = tmp_path / "series_analysis_tidy.csv"
+    df.to_csv(csv, index=False)
+    r = run_kd_analysis_with_params({
+        "input_csv_file": str(csv), "output_dir": str(tmp_path), "output_prefix": "HSPA8",
+        "concentrations": pts, "protein_conc": 50.0, "alpha": 0.14,
+        "observables": ["csp"], "n_bootstrap": 0})
+    meta = json.loads(Path(r["json_file"]).read_text())["metadata"]
+    assert meta["name"] == "HSPA8"
+
+
+def test_export_filenames_carry_series_prefix(app, tmp_path, monkeypatch):
+    # A fit saved as '<series>_kd_fit_data.json' exports PDFs prefixed with the series name.
+    from visualization import kd_titration_fit_viewer as mod
+    jf = _make_fit_json(tmp_path)
+    named = Path(jf).parent / "HSPA8_kd_fit_data.json"
+    Path(jf).rename(named)
+    v = mod.open_kd_titration_viewer(parent=None, json_file=str(named))
+    try:
+        monkeypatch.setattr(mod._ExportChoiceDialog, "exec", lambda self: 1)
+        monkeypatch.setattr(mod.QMessageBox, "information", lambda *a, **k: None)
+        v._export()
+        dest = named.parent
+        assert (dest / "HSPA8_intensity_titration_fits.pdf").exists()
+        assert (dest / "HSPA8_intensity_ref_vs_point.pdf").exists()
+        assert (dest / "HSPA8_csp_ref_vs_point.pdf").exists()
+    finally:
+        v.deleteLater()
+
+
+# The CLI's `export kd` (lunaNMR/cli.py) uses a 4-col x 5-row grid with figsize=(16, 15)
+# inches (1152x1080 pt). These tests pin the GUI viewer's multi-panel PDFs to the exact
+# same page size, so figures from either surface can be directly overlaid/compared.
+_CLI_MEDIABOX = b"/MediaBox [ 0 0 1152 1080 ]"
+
+
+def test_export_intensity_fits_page_size_matches_cli(app, tmp_path):
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+    jf = _make_fit_json(tmp_path)
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        out = tmp_path / "int_fits.pdf"
+        assert v._export_intensity_fits(str(out)) >= 1
+        assert _CLI_MEDIABOX in out.read_bytes()
+    finally:
+        v.deleteLater()
+
+
+def test_export_global_fit_page_size_matches_cli(app, tmp_path):
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
+    jf = _make_fit_json(tmp_path)
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        out = tmp_path / "global_fit.pdf"
+        assert v._export_global_fit(str(out), "intensity") >= 1
+        assert _CLI_MEDIABOX in out.read_bytes()
+    finally:
+        v.deleteLater()
+
+
+def test_draw_intensity_fit_normalizes_raw_scale_and_shares_ylim(app, tmp_path):
+    # Same fix as the CLI's _build_kd_panel/_INTENSITY_YLIM: a raw-scale residue
+    # (I0 in the hundreds) must plot as I/I(0) on the shared 0-1 axis, not auto-scale
+    # to its own raw magnitude.
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer, _INTENSITY_YLIM
+    jf = _make_fit_json(tmp_path)
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        ax = v.figure.axes[0] if v.figure.axes else v.figure.add_subplot(111)
+        ax.clear()
+        f = {'residue': 'RAW', 'intensity': {
+            'L': np.array([0.0, 10.0, 50.0]), 'obs': np.array([500.0, 300.0, 100.0]),
+            'I0': 500.0, 'I_inf': 50.0, 'Kd': 40.0, 'Kd_err': 1.0, 'r_squared': 0.9}}
+        v._draw_intensity_fit(ax, f)
+        assert ax.get_ylim() == _INTENSITY_YLIM
+    finally:
+        v.deleteLater()
+
+
+def test_draw_global_fit_panel_normalizes_intensity_and_shares_ylim(app, tmp_path):
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer, _INTENSITY_YLIM
+    jf = _make_fit_json(tmp_path)
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        ax = v.figure.axes[0] if v.figure.axes else v.figure.add_subplot(111)
+        ax.clear()
+        res = v.fits[0]['residue']
+        f = {'residue': res, 'intensity': {
+            'L': np.array([0.0, 10.0, 50.0]), 'obs': np.array([500.0, 300.0, 100.0])}}
+        g = {'Kd': 40.0, 'I0': {res: 500.0}, 'I_inf': {res: 50.0}}
+        v._draw_global_fit_panel(ax, f, 'intensity', g)
+        assert ax.get_ylim() == _INTENSITY_YLIM
+    finally:
+        v.deleteLater()
+
+
+def test_plot_curve_intensity_shares_ylim_with_exports(app, tmp_path):
+    # The interactive single-residue view (shown before export) must match what gets
+    # exported: I/I(0) on the same shared 0-1 axis, not raw-scale auto-scaling.
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer, _INTENSITY_YLIM
+    jf = _make_fit_json(tmp_path)
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        v.view_combo.setCurrentIndex(0)   # per-residue curve view
+        v.obs_combo.setCurrentIndex(1)    # Intensity
+        v._refresh()
+        assert v.figure.axes[0].get_ylim() == _INTENSITY_YLIM
+    finally:
+        v.deleteLater()
+
+
+def test_draw_global_fit_panel_leaves_csp_autoscaled(app, tmp_path):
+    from visualization.kd_titration_fit_viewer import open_kd_titration_viewer, _INTENSITY_YLIM
+    jf = _make_fit_json(tmp_path)
+    v = open_kd_titration_viewer(parent=None, json_file=jf)
+    try:
+        ax = v.figure.axes[0] if v.figure.axes else v.figure.add_subplot(111)
+        ax.clear()
+        res = v.fits[0]['residue']
+        f = {'residue': res, 'csp': {
+            'L': np.array([0.0, 10.0, 50.0]), 'obs': np.array([0.0, 0.1, 0.2])}}
+        g = v.data['global']['csp']
+        v._draw_global_fit_panel(ax, f, 'csp', g)
+        assert ax.get_ylim() != _INTENSITY_YLIM
     finally:
         v.deleteLater()

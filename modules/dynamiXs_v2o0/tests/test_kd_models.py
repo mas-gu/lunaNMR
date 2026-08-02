@@ -74,3 +74,36 @@ class TestRoundTrip:
             p0=[0.1, 20.0], bounds=([0, 0], [np.inf, np.inf]))
         assert kd_fit == pytest.approx(Kd_true, rel=1e-4)
         assert dd_fit == pytest.approx(dd_max_true, rel=1e-4)
+
+
+class TestObservables:
+    """Shared Qt-free observable helpers used by both the GUI viewer and the CLI."""
+
+    def _series(self):
+        return {"ppm_x": [8.0, 8.1, 8.3], "ppm_y": [120.0, 120.5, 121.0],
+                "height": [1000.0, 500.0, 250.0], "volume": [2000.0, 1000.0, 500.0]}
+
+    def test_peak_present_flags_missing_endpoint(self):
+        from kd_models import peak_present
+        assert peak_present(self._series(), 0, "height")
+        # undetected position sentinel (0.0) -> absent
+        assert not peak_present({"ppm_x": [0.0], "ppm_y": [0.0], "height": [5.0]},
+                                0, "height")
+
+    def test_pair_observable_csp_and_ratio(self):
+        import math
+        from kd_models import pair_observable
+        s = self._series()
+        assert pair_observable(s, 0, 2, "csp", alpha=0.14) == pytest.approx(
+            math.hypot(0.3, 0.14 * 1.0))
+        assert pair_observable(s, 0, 1, "intensity", value="height") == pytest.approx(0.5)
+
+    def test_ref_point_values_marks_absent_as_nan(self):
+        import math
+        from kd_models import ref_point_values
+        fits = [{"residue": "K14", "series": self._series()},
+                {"residue": "A17"}]                       # no series -> NaN
+        names, vals = ref_point_values(fits, 0, 1, "intensity", value="height")
+        assert names == ["K14", "A17"]
+        assert vals[0] == pytest.approx(0.5)
+        assert math.isnan(vals[1])

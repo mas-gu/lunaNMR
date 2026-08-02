@@ -391,7 +391,30 @@ def _safe_name(text):
     return re.sub(r'[^\w.+-]+', '_', str(text))
 
 
-def _draw_kd_panel(ax, panel):
+# Shared y-axis (with equal top/bottom margin) for every intensity curve panel, so
+# raw-scale residues (I0 in the hundreds) and already-normalized ones plot on the same
+# 0-1 I/I(0) scale instead of each auto-scaling to its own data range.
+_INTENSITY_YLIM = (-0.05, 1.05)
+
+
+def _build_kd_panel(residue, fit, L, y, Ld, obs, P0):
+    """Build one residue's curve-fit panel dict. Intensity panels are normalized to
+    I/I(0) (dividing by the fitted I0 amplitude) so every intensity panel shares a
+    meaningful 0-1 y-axis regardless of the input data's raw scale."""
+    from kd_models import csp_model, intensity_decay
+    if obs == 'csp':
+        yc = csp_model(Ld, fit['dd_max'], fit['Kd'], P0)
+        ylabel = 'CSP (ppm)'
+    else:
+        yc = intensity_decay(Ld, fit['I0'], fit['I_inf'], fit['Kd'])
+        y = y / fit['I0']
+        yc = yc / fit['I0']
+        ylabel = 'I / I(0)'
+    return {'residue': residue, 'L': L, 'y': y, 'Ld': Ld, 'yc': yc, 'ylabel': ylabel,
+            'kd': fit['Kd'], 'r2': fit.get('r_squared', float('nan'))}
+
+
+def _draw_kd_panel(ax, panel, ylim=None):
     """Draw one residue's observed points + fitted binding curve into an axis."""
     ax.plot(panel['L'], panel['y'], 'o', color='#1f77b4', ms=4)
     ax.plot(panel['Ld'], panel['yc'], '-', color='#d62728', lw=1.2)
@@ -399,6 +422,73 @@ def _draw_kd_panel(ax, panel):
     ax.set_xlabel('[ligand]', fontsize=7)
     ax.set_ylabel(panel['ylabel'], fontsize=7)
     ax.tick_params(labelsize=6)
+    if ylim is not None:
+        ax.set_ylim(*ylim)
+
+
+def _draw_ref_bars(ax, names, vals, obs, ref_label, cmp_label):
+    """Bar chart of a reference→point observable per residue. Residues absent at either
+    point (NaN) draw as a full-height grey bar so the gap stays visible. I/I₀ is a ratio
+    (axis fixed 0–1); CSP is in ppm (auto-scaled)."""
+    import numpy as np
+    finite = [v for v in vals if np.isfinite(v)]
+    if obs == 'intensity':
+        data_max = max(finite + [1.0]) if finite else 1.0
+        top = 1.0 if data_max <= 1.0 else data_max * 1.05
+        color, ylabel, sym = 'indianred', 'Intensity ratio I/I₀', 'I/I₀'
+    else:
+        top = (max(finite) * 1.1) if finite else 1.0
+        color, ylabel, sym = 'seagreen', 'CSP (ppm)', 'CSP'
+    top = top if top > 0 else 1.0          # all-zero observable -> avoid a singular axis
+    x = np.arange(len(names))
+    heights = [v if np.isfinite(v) else top for v in vals]
+    colors = [color if np.isfinite(v) else '#d0d0d0' for v in vals]
+    ax.bar(x, heights, color=colors)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, rotation=90, fontsize=6)
+    ax.set_ylim(0, top)
+    ax.set_ylabel(ylabel)
+
+    def _lab(v):
+        return f"{v:g}" if isinstance(v, (int, float)) else str(v)
+    ax.set_title(f"{sym}:  {_lab(ref_label)} → {_lab(cmp_label)}  (ref → point)")
+
+
+def _draw_kd_bars(ax, names, kds, errs, obs, global_kd):
+    """Per-residue Kd bar chart. Residues with no successful fit (NaN) draw as a
+    full-height grey bar; the shared global Kd (if any) is a red dashed line."""
+    import numpy as np
+    finite = [v for v in kds if np.isfinite(v)]
+    top = (max(finite) * 1.15) if finite else 1.0
+    top = top if top > 0 else 1.0          # all-zero Kd -> avoid a singular axis
+    x = np.arange(len(names))
+    heights = [v if np.isfinite(v) else top for v in kds]
+    colors = ['steelblue' if np.isfinite(v) else '#d0d0d0' for v in kds]
+    yerr = [e if np.isfinite(v) else 0.0 for v, e in zip(kds, errs)]
+    ax.bar(x, heights, yerr=yerr, color=colors, ecolor='#555555', capsize=2)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, rotation=90, fontsize=6)
+    ax.set_ylim(0, top)
+    ax.set_ylabel('Kd')
+    lbl = 'CSP' if obs == 'csp' else 'intensity (apparent)'
+    if global_kd is not None and np.isfinite(global_kd):
+        gl = 'global Kd' if obs == 'csp' else 'global apparent Kd'
+        ax.axhline(global_kd, color='red', ls='--', label=f"{gl}={global_kd:.3g}")
+        ax.legend()
+    ax.set_title(f"Kd vs residue  ({lbl})")
+
+
+def _draw_global_panel(ax, panel, ylim=None):
+    """One residue's observed points + the shared-Kd global-model curve. Title carries
+    the per-residue R² of the data against the global curve (goodness under one Kd)."""
+    ax.plot(panel['L'], panel['y'], 'o', color='black', ms=4)
+    ax.plot(panel['Ld'], panel['yc'], '-', color='#1f77b4', lw=1.2)   # blue = global
+    ax.set_title(f"{panel['residue']}  R²(global)={panel['r2']:.2f}", fontsize=8)
+    ax.set_xlabel('[ligand]', fontsize=7)
+    ax.set_ylabel(panel['ylabel'], fontsize=7)
+    ax.tick_params(labelsize=6)
+    if ylim is not None:
+        ax.set_ylim(*ylim)
 
 
 def _run_export_kd(args):
@@ -412,18 +502,28 @@ def _run_export_kd(args):
         return 1
     import matplotlib
     matplotlib.use('Agg')
+    matplotlib.rcParams['pdf.fonttype'] = 42  # TrueType, so text stays editable in Illustrator
     import matplotlib.pyplot as plt
     import numpy as np
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
-    from kd_models import csp_model, intensity_decay
+    from kd_models import csp_model, intensity_decay, ref_point_values
+
+    unknown_kind = [k for k in args.kind if k not in ('curves', 'ref-bars', 'kd-bars',
+                                                      'global-fit')]
+    if unknown_kind:
+        print(f"Unknown --kind value(s): {','.join(unknown_kind)} "
+              "(use curves, ref-bars, kd-bars and/or global-fit)", file=sys.stderr)
+        return 1
 
     with open(args.json) as fh:
         data = json.load(fh)
     fits = data.get('fits', [])
-    P0 = data.get('metadata', {}).get('protein_conc')
+    meta = data.get('metadata', {})
+    P0 = meta.get('protein_conc')
     observables = args.observable or [o for o in ('csp', 'intensity')
                                       if any(f.get(o) for f in fits)]
     os.makedirs(args.out, exist_ok=True)
+    tag = f'{args.prefix}_' if args.prefix else ''
 
     # Collect each residue's fit into per-observable panel lists (+ the summary rows).
     summary_rows = []
@@ -445,17 +545,9 @@ def _run_export_kd(args):
             if good.sum() < 2:
                 continue
             Ld = np.linspace(float(L[good].min()), float(L[good].max()), 200)
-            if obs == 'csp':
-                yc = csp_model(Ld, fit['dd_max'], fit['Kd'], P0)
-                ylabel = 'CSP (ppm)'
-            else:
-                yc = intensity_decay(Ld, fit['I0'], fit['I_inf'], fit['Kd'])
-                ylabel = 'I / I(0)' if float(np.max(y[good])) <= 1.5 else 'Intensity'
-            panels[obs].append({'residue': residue, 'L': L[good], 'y': y[good],
-                                'Ld': Ld, 'yc': yc, 'ylabel': ylabel,
-                                'kd': fit['Kd'], 'r2': fit.get('r_squared', float('nan'))})
+            panels[obs].append(_build_kd_panel(residue, fit, L[good], y[good], Ld, obs, P0))
 
-    summary_path = os.path.join(args.out, 'summary.csv')
+    summary_path = os.path.join(args.out, f'{tag}summary.csv')
     with open(summary_path, 'w', newline='') as fh:
         writer = csv.DictWriter(fh, fieldnames=['residue', 'observable', 'Kd', 'Kd_err', 'r_squared'])
         writer.writeheader()
@@ -468,33 +560,34 @@ def _run_export_kd(args):
         return 1
 
     outputs = []
-    if not args.summary_only:
+    if not args.summary_only and 'curves' in args.kind:
         cols = min(4, max(1, args.per_page))
         rows = max(1, -(-args.per_page // cols))  # ceil
         for obs in observables:
             plist = panels[obs]
             if not plist:
                 continue
+            ylim = _INTENSITY_YLIM if obs == 'intensity' else None
             if 'png' in args.fig_format:
-                obs_dir = os.path.join(args.out, obs)
+                obs_dir = os.path.join(args.out, f'{tag}{obs}')
                 os.makedirs(obs_dir, exist_ok=True)
                 for p in plist:
                     fig, ax = plt.subplots(figsize=(4, 3))
-                    _draw_kd_panel(ax, p)
+                    _draw_kd_panel(ax, p, ylim=ylim)
                     fig.tight_layout()
                     fig.savefig(os.path.join(obs_dir, f"{_safe_name(p['residue'])}.png"), dpi=120)
                     plt.close(fig)
                 outputs.append(obs_dir)
             if 'pdf' in args.fig_format:
                 from matplotlib.backends.backend_pdf import PdfPages
-                pdf_path = os.path.join(args.out, f"{obs}_fits.pdf")
+                pdf_path = os.path.join(args.out, f"{tag}{obs}_fits.pdf")
                 with PdfPages(pdf_path) as pdf:
                     for start in range(0, len(plist), args.per_page):
                         page = plist[start:start + args.per_page]
                         fig, axes = plt.subplots(rows, cols, figsize=(cols * 4, rows * 3))
                         axes = np.atleast_1d(axes).flatten()
                         for ax, p in zip(axes, page):
-                            _draw_kd_panel(ax, p)
+                            _draw_kd_panel(ax, p, ylim=ylim)
                         for ax in axes[len(page):]:
                             ax.axis('off')
                         fig.suptitle(f"{obs.upper()} binding fits", fontsize=12)
@@ -502,6 +595,136 @@ def _run_export_kd(args):
                         pdf.savefig(fig)
                         plt.close(fig)
                 outputs.append(pdf_path)
+
+    # Reference→point: the observable per residue between point 0 and each later
+    # titration point. The data (wide CSV + JSON) is always written so the figures are
+    # reproducible in Excel; the bars PDF is written only when requested.
+    if not args.summary_only and 'ref-bars' in args.kind:
+        labels = meta.get('concentrations') or meta.get('points') or []
+        alpha = float(meta.get('alpha', 0.14))
+        value = meta.get('intensity_value', 'height')
+        # Ref→point is model-free (computed from the raw series), so default to BOTH
+        # observables even when only one was fitted; --observable still restricts.
+        ref_observables = args.observable or ['csp', 'intensity']
+        if len(labels) >= 2 and any(f.get('series') for f in fits):
+            from kd_export import export_ref_vs_point
+            for obs in ref_observables:
+                outputs.extend(export_ref_vs_point(
+                    os.path.join(args.out, f"{tag}{obs}_ref_vs_point"),
+                    fits, labels, obs, alpha=alpha, value=value))
+            if 'pdf' in args.fig_format:
+                from matplotlib.backends.backend_pdf import PdfPages
+                for obs in ref_observables:
+                    pdf_path = os.path.join(args.out, f"{tag}{obs}_ref_vs_point.pdf")
+                    with PdfPages(pdf_path) as pdf:
+                        for j in range(1, len(labels)):
+                            names, vals = ref_point_values(fits, 0, j, obs,
+                                                           alpha=alpha, value=value)
+                            fig, ax = plt.subplots(figsize=(11, 6))
+                            _draw_ref_bars(ax, names, vals, obs, labels[0], labels[j])
+                            fig.tight_layout()
+                            pdf.savefig(fig)
+                            plt.close(fig)
+                    outputs.append(pdf_path)
+
+    # Kd-per-residue bars (+ the shared global-Kd line) for each observable. PDF only.
+    if not args.summary_only and 'kd-bars' in args.kind and 'pdf' in args.fig_format:
+        from matplotlib.backends.backend_pdf import PdfPages
+        global_fit = data.get('global', {}) or {}
+        for obs in observables:
+            names, kds, errs = [], [], []
+            for f in fits:
+                fit = f.get(obs) or {}
+                ok = fit.get('success') and isinstance(fit.get('Kd'), (int, float))
+                names.append(f.get('residue', 'peak'))
+                kds.append(float(fit['Kd']) if ok else float('nan'))
+                e = fit.get('Kd_err')
+                errs.append(float(e) if ok and isinstance(e, (int, float)) else 0.0)
+            if not any(np.isfinite(v) for v in kds):
+                continue
+            gkd = (global_fit.get(obs, {}) or {}).get('Kd')
+            pdf_path = os.path.join(args.out, f"{tag}{obs}_kd_vs_residue.pdf")
+            with PdfPages(pdf_path) as pdf:
+                fig, ax = plt.subplots(figsize=(11, 6))
+                _draw_kd_bars(ax, names, kds, errs, obs, gkd)
+                fig.tight_layout()
+                pdf.savefig(fig)
+                plt.close(fig)
+            outputs.append(pdf_path)
+
+    # Global shared-Kd per-residue params (amplitudes + shared Kd + per-residue R^2) as
+    # Excel-ready CSV + JSON, so the global-fit figure is reproducible as data.
+    if not args.summary_only and 'global-fit' in args.kind:
+        from kd_export import export_global_fit
+        global_fit = data.get('global', {}) or {}
+        for obs in observables:
+            outputs.extend(export_global_fit(
+                os.path.join(args.out, f"{tag}{obs}_global_fit"),
+                fits, global_fit, obs, P0))
+
+    # Global shared-Kd fit over the data: per-residue observed points + the single-Kd
+    # model curve, so one can judge how well one Kd fits every residue. PDF only.
+    if not args.summary_only and 'global-fit' in args.kind and 'pdf' in args.fig_format:
+        from matplotlib.backends.backend_pdf import PdfPages
+        global_fit = data.get('global', {}) or {}
+        cols = min(4, max(1, args.per_page))
+        rows = max(1, -(-args.per_page // cols))
+        for obs in observables:
+            g = global_fit.get(obs) or {}
+            amp = g.get('dd_max') if obs == 'csp' else g.get('I0')
+            if not g.get('success') or not amp:
+                continue
+            kd = g.get('Kd')
+            gpanels = []
+            for f in fits:
+                res = f.get('residue', 'peak')
+                fit = f.get(obs) or {}
+                if res not in amp or not fit.get('L'):
+                    continue
+                L = np.asarray(fit['L'], dtype=float)
+                y = np.asarray(fit['obs'], dtype=float)
+                good = np.isfinite(L) & np.isfinite(y)
+                if good.sum() < 2:
+                    continue
+                Lg = np.linspace(0.0, float(L[good].max()) * 1.05, 200)
+                y_plot = y[good]
+                if obs == 'csp':
+                    yc = csp_model(Lg, g['dd_max'][res], kd, P0)
+                    yhat = csp_model(L[good], g['dd_max'][res], kd, P0)
+                    ylabel = 'CSP (ppm)'
+                else:
+                    yc = intensity_decay(Lg, g['I0'][res], g['I_inf'][res], kd)
+                    yhat = intensity_decay(L[good], g['I0'][res], g['I_inf'][res], kd)
+                    ylabel = 'I / I(0)'
+                ss_res = float(np.sum((y[good] - yhat) ** 2))
+                ss_tot = float(np.sum((y[good] - np.mean(y[good])) ** 2))
+                r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float('nan')
+                if obs == 'intensity':
+                    # Normalize to I/I(0) so this panel shares the same 0-1 axis as
+                    # every other intensity panel, regardless of raw data scale.
+                    y_plot = y_plot / g['I0'][res]
+                    yc = yc / g['I0'][res]
+                gpanels.append({'residue': res, 'L': L[good], 'y': y_plot, 'Ld': Lg,
+                                'yc': yc, 'ylabel': ylabel, 'r2': r2})
+            if not gpanels:
+                continue
+            ylim = _INTENSITY_YLIM if obs == 'intensity' else None
+            pdf_path = os.path.join(args.out, f"{tag}{obs}_global_fit.pdf")
+            with PdfPages(pdf_path) as pdf:
+                for start in range(0, len(gpanels), args.per_page):
+                    page = gpanels[start:start + args.per_page]
+                    fig, axes = plt.subplots(rows, cols, figsize=(cols * 4, rows * 3))
+                    axes = np.atleast_1d(axes).flatten()
+                    for ax, p in zip(axes, page):
+                        _draw_global_panel(ax, p, ylim=ylim)
+                    for ax in axes[len(page):]:
+                        ax.axis('off')
+                    fig.suptitle(f"Global shared-Kd fit ({obs}): one Kd={kd:.4g} for all residues",
+                                 fontsize=12)
+                    fig.tight_layout(rect=[0, 0, 1, 0.98])
+                    pdf.savefig(fig)
+                    plt.close(fig)
+            outputs.append(pdf_path)
 
     _emit(args,
           {'command': 'export kd', 'n_fits': len(summary_rows),
@@ -833,8 +1056,19 @@ def build_parser():
                             'residue); comma-separated for both, e.g. pdf,png (default: pdf)')
     ex_kd.add_argument('--per-page', type=int, default=20, dest='per_page',
                        help='Panels per PDF page (default: 20 = 5x4, like T1/T2)')
+    ex_kd.add_argument('--kind', type=_str_list,
+                       default=['curves', 'ref-bars', 'kd-bars', 'global-fit'],
+                       help="What to render: 'curves' (per-residue binding fits), "
+                            "'ref-bars' (reference→point observable bars, one page per "
+                            "point), 'kd-bars' (per-residue Kd + global-Kd line), and/or "
+                            "'global-fit' (per-residue data + the shared-Kd global curve); "
+                            "kd-bars is PDF only, ref-bars/global-fit also write CSV+JSON; "
+                            "comma-separated (default: curves,ref-bars,kd-bars,global-fit)")
     ex_kd.add_argument('--summary-only', action='store_true', dest='summary_only',
                        help='Write only summary.csv, no figures')
+    ex_kd.add_argument('--prefix', default='',
+                       help='Output filename prefix, e.g. DNAJA1_HSPA8 (default: none, '
+                            'i.e. summary.csv/<obs>_fits.pdf/... unprefixed)')
     ex_kd.set_defaults(func=_run_export_kd)
     export.set_defaults(func=lambda a: (export.print_help(sys.stderr) or 2))
 
