@@ -18,13 +18,24 @@ Y_SCALE_MAX = 1000.0
 PEAK_COLOUR = '#d62728'
 SELECTED_COLOUR = '#1f77b4'
 
+# One scroll notch shrinks the visible span to this fraction of itself.
+ZOOM_FACTOR = 0.8
+
+# Movement below this many pixels between press and release counts as a click, not a
+# drag, so a pick with a twitchy hand still registers.
+DRAG_THRESHOLD_PIXELS = 3
+
 
 class OneDPlotter(QWidget):
     """Spectrum trace with interactive peak selection.
 
-    Two ways to pick a peak, both requested by the user:
+    Two ways to pick a peak:
       - drag a rectangle over a region, everything detectable inside becomes a peak
       - click a position directly, which snaps to the local maximum
+
+    Navigation follows the convention used elsewhere in lunaNMR: a drag pans, a press
+    and release in the same place is a pick. Scroll zooms about the pointer, and the
+    middle button pans or picks in either mode so box selection keeps the left drag.
     """
 
     peaks_selected = Signal(list)      # [{'ppm', 'height', ...}] from a box drag
@@ -52,7 +63,12 @@ class OneDPlotter(QWidget):
         self._selector = RectangleSelector(
             self.axes, self._on_box, useblit=True, button=[1],
             minspanx=1e-6, spancoords='data', interactive=False)
-        self.canvas.mpl_connect('button_press_event', self._on_click)
+
+        self._pan = None
+        self.canvas.mpl_connect('scroll_event', self._on_scroll)
+        self.canvas.mpl_connect('button_press_event', self._on_press)
+        self.canvas.mpl_connect('motion_notify_event', self._on_motion)
+        self.canvas.mpl_connect('button_release_event', self._on_release)
 
         self._apply_mode()
 
@@ -85,6 +101,11 @@ class OneDPlotter(QWidget):
         self.controls.addSpacing(12)
         self.controls.addWidget(self.show_peaks)
         self.controls.addStretch()
+
+        hint = QLabel("scroll: zoom  ·  shift+scroll: zoom Y  ·  middle-drag: pan  ·  "
+                      "middle-click: pick peak")
+        hint.setStyleSheet("color: #666; font-size: 10px;")
+        self.controls.addWidget(hint)
         self.controls.addWidget(self.reset_button)
 
     def _apply_mode(self):
@@ -152,10 +173,92 @@ class OneDPlotter(QWidget):
         if found:
             self.peaks_selected.emit(found)
 
-    def _on_click(self, event):
-        if (self._select_mode != 'click' or self.spectrum is None
-                or event.inaxes is not self.axes or event.button != 1
-                or event.xdata is None or self.toolbar.mode):
+    # ------------------------------------------------------------ navigation
+
+    def _on_scroll(self, event):
+        """Scroll zooms about the pointer; shift-scroll zooms the intensity axis."""
+        if event.inaxes is not self.axes or self.spectrum is None:
             return
 
-        self.position_clicked.emit(float(event.xdata))
+        direction = getattr(event, 'button', None)
+        step = getattr(event, 'step', 0)
+        zooming_in = direction == 'up' or step > 0
+        factor = ZOOM_FACTOR if zooming_in else 1.0 / ZOOM_FACTOR
+
+        if event.key and 'shift' in str(event.key):
+            self._zoom_axis(self.axes.get_ylim(), self.axes.set_ylim,
+                            getattr(event, 'ydata', None), factor)
+        else:
+            if event.xdata is None:
+                return
+            self._zoom_axis(self.axes.get_xlim(), self.axes.set_xlim,
+                            event.xdata, factor)
+
+        self.canvas.draw_idle()
+
+    @staticmethod
+    def _zoom_axis(limits, apply_limits, anchor, factor):
+        """Scale `limits` by `factor` while holding `anchor` at the same screen fraction."""
+        low, high = limits
+        if anchor is None:
+            anchor = (low + high) / 2.0
+
+        apply_limits(anchor + (low - anchor) * factor,
+                     anchor + (high - anchor) * factor)
+
+    def _pan_allowed(self, button):
+        """Middle button always pans. The left button pans only when it is not
+        reserved for drawing the box-selection rectangle."""
+        if button == 2:
+            return True
+        return button == 1 and self._select_mode == 'click'
+
+    def _on_press(self, event):
+        if (event.inaxes is not self.axes or self.spectrum is None
+                or self.toolbar.mode or event.button not in (1, 2)):
+            return
+
+        self._pan = {
+            'button': event.button,
+            'x': event.x,
+            'xlim': self.axes.get_xlim(),
+            'ylim': self.axes.get_ylim(),
+            'y': event.y,
+            'xdata': event.xdata,
+            'moved': False,
+        }
+
+    def _on_motion(self, event):
+        if not self._pan or event.inaxes is not self.axes:
+            return
+
+        dx_pixels = event.x - self._pan['x']
+        dy_pixels = event.y - self._pan['y']
+
+        if abs(dx_pixels) > DRAG_THRESHOLD_PIXELS or abs(dy_pixels) > DRAG_THRESHOLD_PIXELS:
+            self._pan['moved'] = True
+
+        if not (self._pan['moved'] and self._pan_allowed(self._pan['button'])):
+            return
+
+        inverse = self.axes.transData.inverted()
+        origin_x, origin_y = inverse.transform((0.0, 0.0))
+        shifted_x, shifted_y = inverse.transform((dx_pixels, dy_pixels))
+
+        low, high = self._pan['xlim']
+        self.axes.set_xlim(low - (shifted_x - origin_x), high - (shifted_x - origin_x))
+        low, high = self._pan['ylim']
+        self.axes.set_ylim(low - (shifted_y - origin_y), high - (shifted_y - origin_y))
+
+        self.canvas.draw_idle()
+
+    def _on_release(self, event):
+        pan, self._pan = self._pan, None
+
+        if not pan or pan['moved'] or event.xdata is None:
+            return
+
+        # A press and release in the same place is a pick, not a pan: the middle
+        # button picks in either mode, the left button only in click mode.
+        if pan['button'] == 2 or self._select_mode == 'click':
+            self.position_clicked.emit(float(event.xdata))

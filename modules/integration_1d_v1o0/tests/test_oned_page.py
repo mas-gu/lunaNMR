@@ -149,6 +149,129 @@ class TestRealWorkflow:
         assert intensity.read_text() != area.read_text()
 
 
+class _MouseEvent:
+    """Stand-in for a matplotlib MouseEvent, carrying only what the handlers read."""
+
+    def __init__(self, plotter, xdata=None, button=None, step=0, key=None,
+                 x=0, y=0, inaxes=True):
+        self.xdata = xdata
+        self.ydata = 0.0
+        self.button = button
+        self.step = step
+        self.key = key
+        self.x = x
+        self.y = y
+        self.inaxes = plotter.axes if inaxes else None
+
+
+@needs_series
+class TestNavigation:
+    @pytest.fixture
+    def plotter(self, app):
+        from oned_loader import load_spectrum
+        from oned_plotter import OneDPlotter
+        p = OneDPlotter()
+        p.set_spectrum(load_spectrum(sorted(REAL_DIR.glob('*.ft1'))[50]))
+        return p
+
+    def test_scroll_up_zooms_in(self, plotter):
+        before = plotter.axes.get_xlim()
+        width_before = abs(before[1] - before[0])
+        plotter._on_scroll(_MouseEvent(plotter, xdata=8.18, button='up', step=1))
+        after = plotter.axes.get_xlim()
+        assert abs(after[1] - after[0]) < width_before
+
+    def test_scroll_down_zooms_out(self, plotter):
+        width_before = abs(plotter.axes.get_xlim()[1] - plotter.axes.get_xlim()[0])
+        plotter._on_scroll(_MouseEvent(plotter, xdata=8.18, button='down', step=-1))
+        after = plotter.axes.get_xlim()
+        assert abs(after[1] - after[0]) > width_before
+
+    def test_zoom_keeps_the_cursor_position_fixed(self):
+        """Zoom is about the pointer, so the peak under the cursor stays put."""
+        from oned_loader import load_spectrum
+        from oned_plotter import OneDPlotter
+        p = OneDPlotter()
+        p.set_spectrum(load_spectrum(sorted(REAL_DIR.glob('*.ft1'))[50]))
+        cursor = 8.18
+        lo, hi = p.axes.get_xlim()
+        fraction_before = (cursor - lo) / (hi - lo)
+        p._on_scroll(_MouseEvent(p, xdata=cursor, button='up', step=1))
+        lo, hi = p.axes.get_xlim()
+        assert (cursor - lo) / (hi - lo) == pytest.approx(fraction_before, abs=0.02)
+
+    def test_scroll_outside_the_axes_is_ignored(self, plotter):
+        before = plotter.axes.get_xlim()
+        plotter._on_scroll(_MouseEvent(plotter, xdata=None, button='up', inaxes=False))
+        assert plotter.axes.get_xlim() == before
+
+    def test_middle_drag_pans_without_changing_the_span(self, plotter):
+        plotter.axes.set_xlim(8.30, 8.05)
+        before = plotter.axes.get_xlim()
+        width = abs(before[1] - before[0])
+
+        plotter._on_press(_MouseEvent(plotter, xdata=8.18, button=2, x=400, y=200))
+        plotter._on_motion(_MouseEvent(plotter, xdata=8.19, button=2, x=460, y=200))
+        plotter._on_release(_MouseEvent(plotter, xdata=8.19, button=2, x=460, y=200))
+
+        after = plotter.axes.get_xlim()
+        assert abs(after[1] - after[0]) == pytest.approx(width, rel=1e-6)
+        assert after != before
+
+    def test_middle_click_without_drag_picks_a_peak(self, plotter):
+        captured = []
+        plotter.position_clicked.connect(captured.append)
+
+        plotter._on_press(_MouseEvent(plotter, xdata=8.1847, button=2, x=400, y=200))
+        plotter._on_release(_MouseEvent(plotter, xdata=8.1847, button=2, x=401, y=200))
+
+        assert captured == [pytest.approx(8.1847)]
+
+    def test_left_click_in_click_mode_picks_a_peak(self, plotter):
+        plotter.mode_box.setCurrentIndex(1)          # click mode
+        captured = []
+        plotter.position_clicked.connect(captured.append)
+
+        plotter._on_press(_MouseEvent(plotter, xdata=8.1847, button=1, x=400, y=200))
+        plotter._on_release(_MouseEvent(plotter, xdata=8.1847, button=1, x=400, y=200))
+
+        assert captured == [pytest.approx(8.1847)]
+
+    def test_left_drag_in_click_mode_pans_instead_of_picking(self, plotter):
+        plotter.mode_box.setCurrentIndex(1)
+        plotter.axes.set_xlim(8.30, 8.05)
+        captured = []
+        plotter.position_clicked.connect(captured.append)
+        before = plotter.axes.get_xlim()
+
+        plotter._on_press(_MouseEvent(plotter, xdata=8.18, button=1, x=400, y=200))
+        plotter._on_motion(_MouseEvent(plotter, xdata=8.19, button=1, x=480, y=200))
+        plotter._on_release(_MouseEvent(plotter, xdata=8.19, button=1, x=480, y=200))
+
+        assert captured == []
+        assert plotter.axes.get_xlim() != before
+
+    def test_left_drag_in_box_mode_does_not_pan(self, plotter):
+        """Box mode reserves the left drag for drawing the selection rectangle."""
+        plotter.mode_box.setCurrentIndex(0)
+        plotter.axes.set_xlim(8.30, 8.05)
+        before = plotter.axes.get_xlim()
+
+        plotter._on_press(_MouseEvent(plotter, xdata=8.18, button=1, x=400, y=200))
+        plotter._on_motion(_MouseEvent(plotter, xdata=8.19, button=1, x=480, y=200))
+        plotter._on_release(_MouseEvent(plotter, xdata=8.19, button=1, x=480, y=200))
+
+        assert plotter.axes.get_xlim() == before
+
+    def test_shift_scroll_zooms_the_intensity_axis(self, plotter):
+        before = plotter.axes.get_ylim()
+        plotter._on_scroll(_MouseEvent(plotter, xdata=8.18, button='up', step=1, key='shift'))
+        after = plotter.axes.get_ylim()
+        assert abs(after[1] - after[0]) < abs(before[1] - before[0])
+        assert plotter.axes.get_xlim()[0] == pytest.approx(
+            plotter.axes.get_xlim()[0])          # x untouched
+
+
 @needs_series
 class TestPlotterInteraction:
     def test_box_drag_emits_the_peaks_inside_it(self, app):
