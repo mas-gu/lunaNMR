@@ -126,6 +126,84 @@ class TestSeriesExtraction:
         assert matrix.shape == (2, 4)
 
 
+def _conversion_series(n_points=6, substrate=8.1752, product=8.1847, noise=1e-4):
+    """Substrate decays to nothing while a product grows 0.0095 ppm away."""
+    from oned_loader import from_arrays
+    from oned_voigt import voigt_1d
+    import numpy as np
+    ppm = np.linspace(8.30, 8.05, 20001)
+    spectra = []
+    for k in range(n_points):
+        f = k / (n_points - 1)
+        y = (voigt_1d(ppm, 1.0 - f, substrate, 0.0012, 0.0006, 0.0)
+             + voigt_1d(ppm, f, product, 0.0012, 0.0006, 0.0))
+        spectra.append(from_arrays(y + np.random.default_rng(k).normal(0, noise, ppm.size), ppm))
+    return spectra
+
+
+class TestDriftTracking:
+    def test_follows_a_peak_that_moves(self):
+        """The whole point of tracking: the measured position moves with the peak."""
+        from oned_loader import from_arrays
+        from oned_voigt import voigt_1d
+        from oned_series import integrate_series
+        import numpy as np
+        ppm = np.linspace(5.2, 4.8, 20001)
+        spectra = [from_arrays(voigt_1d(ppm, 1.0, 5.0 + 0.002 * k, 0.0012, 0.0006, 0.0), ppm)
+                   for k in range(5)]
+        table = integrate_series(spectra, [{'assignment': 'A', 'position': 5.0}])
+        found = [r['ppm'] for r in table]
+        assert found[-1] == pytest.approx(5.008, abs=5e-4)
+        assert all(r['matched'] for r in table)
+
+    def test_drift_accumulates_beyond_a_single_step_window(self):
+        """Carry-forward means total drift may exceed the per-step window."""
+        from oned_loader import from_arrays
+        from oned_voigt import voigt_1d
+        from oned_series import integrate_series
+        import numpy as np
+        ppm = np.linspace(5.4, 4.6, 40001)
+        spectra = [from_arrays(voigt_1d(ppm, 1.0, 5.0 + 0.004 * k, 0.0012, 0.0006, 0.0), ppm)
+                   for k in range(8)]
+        table = integrate_series(spectra, [{'assignment': 'A', 'position': 5.0}],
+                                 track_window=0.008)
+        assert table[-1]['ppm'] == pytest.approx(5.028, abs=1e-3)
+
+    def test_a_vanishing_peak_does_not_jump_to_its_neighbour(self):
+        """A peak that decays to nothing must report nothing, not the intensity of a
+        different resonance 0.0095 ppm away. Tracking a decaying substrate otherwise
+        reads as fully recovered at the moment it disappears."""
+        from oned_series import integrate_series
+        table = integrate_series(_conversion_series(),
+                                 [{'assignment': 'substrate', 'position': 8.1752}])
+        for row in table:
+            assert row['ppm'] is None or abs(row['ppm'] - 8.1847) > 0.002, (
+                f"point {row['point'] + 1} jumped to the product peak")
+
+    def test_a_vanished_peak_reports_a_small_intensity_not_a_large_one(self):
+        from oned_series import integrate_series
+        table = integrate_series(_conversion_series(),
+                                 [{'assignment': 'substrate', 'position': 8.1752}])
+        heights = [r['height'] for r in table]
+        assert heights[-1] < 0.1 * heights[0]
+
+    def test_the_last_point_is_flagged_unmatched(self):
+        from oned_series import integrate_series
+        table = integrate_series(_conversion_series(),
+                                 [{'assignment': 'substrate', 'position': 8.1752}])
+        assert table[-1]['matched'] is False
+
+    def test_both_peaks_listed_still_track_independently(self):
+        from oned_series import integrate_series
+        table = integrate_series(_conversion_series(),
+                                 [{'assignment': 'sub', 'position': 8.1752},
+                                  {'assignment': 'prod', 'position': 8.1847}])
+        sub = [r for r in table if r['assignment'] == 'sub']
+        prod = [r for r in table if r['assignment'] == 'prod']
+        assert sub[0]['height'] > sub[-1]['height']
+        assert prod[0]['height'] < prod[-1]['height']
+
+
 class TestCsvExport:
     def test_writes_one_row_per_spectrum_and_one_column_per_peak(self, tmp_path):
         from oned_series import integrate_series, write_series_csv

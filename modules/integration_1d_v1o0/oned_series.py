@@ -3,14 +3,17 @@
 
 import numpy as np
 
-from oned_detector import (DEFAULT_MIN_SNR, detect_peaks, estimate_window,
-                           match_reference_peaks)
+from oned_detector import (DEFAULT_MIN_SNR, detect_peaks, estimate_fwhm,
+                           estimate_window, match_reference_peaks)
 from oned_fitter import integrate_region, measure_intensity
 from oned_loader import load_spectrum
 
 # How far a peak may move between series points and still be the same peak. Wide enough
 # for real drift, far below the spacing of resolvable peaks.
 DEFAULT_TRACK_WINDOW_PPM = 0.01
+
+# A peak may move at most this many of its own linewidths between consecutive points.
+DRIFT_FWHM_MULTIPLE = 2.0
 
 
 def load_series(paths):
@@ -51,6 +54,30 @@ def peak_at_position(spectrum, ppm, search=0.01, min_snr=DEFAULT_MIN_SNR):
             'detected': False}
 
 
+def _drift_limits(spectrum, peaks, track_window):
+    """How far each peak may move between consecutive points.
+
+    Bounded by the peak's own linewidth: a resonance drifting smoothly through a
+    series moves a small fraction of its width per point, so a candidate several
+    linewidths away is a different resonance, not the same one relocated.
+
+    Without this a peak that decays to nothing hands its identity to whatever is
+    nearest - a substrate tracked through a conversion jumps onto the product line
+    the moment it disappears and reports the product's intensity, so the decay reads
+    as a full recovery. The neighbour's position cannot be used for the bound because
+    at the first point the product does not exist yet.
+    """
+    limits = []
+    for peak in peaks:
+        fwhm = estimate_fwhm(spectrum, float(peak['position']), search=track_window)
+        limit = track_window
+        if fwhm:
+            limit = min(limit, DRIFT_FWHM_MULTIPLE * fwhm)
+        limits.append(limit)
+
+    return limits
+
+
 def _windows_for(spectrum, peaks):
     """Measurement half-width per peak, linewidth-driven and clear of its neighbours."""
     positions = [float(p['position']) for p in peaks]
@@ -78,17 +105,22 @@ def integrate_series(spectra, peaks, names=None, track_window=DEFAULT_TRACK_WIND
     table = []
     current = [dict(p) for p in peaks]
 
+    limits = _drift_limits(spectra[0], current, track_window) if spectra else []
+
     for point, (spectrum, name) in enumerate(zip(spectra, names)):
         rows_before = len(table)
-        matched = match_reference_peaks(spectrum, current, window=track_window)
+        matched = match_reference_peaks(spectrum, current, window=limits)
         windows = _windows_for(spectrum, current)
         scale = spectrum.intensity_scale
 
         for peak, match, window in zip(current, matched, windows):
             target = match['ppm'] if match['matched'] else peak['position']
 
+            # an unmatched peak is read where it should be, not where the tallest
+            # thing in range happens to sit
             intensity = measure_intensity(spectrum.ppm_axis, spectrum.data, target,
-                                          window=window, assignment=peak.get('assignment'))
+                                          window=window, assignment=peak.get('assignment'),
+                                          locate=match['matched'])
             area = integrate_region(spectrum.ppm_axis, spectrum.data, target,
                                     window=window, assignment=peak.get('assignment'))
 

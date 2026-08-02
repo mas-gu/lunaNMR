@@ -193,8 +193,14 @@ def fit_peak_voigt(ppm, y, target, window=DEFAULT_WINDOW, assignment=None):
     return result
 
 
-def measure_intensity(ppm, y, target, window=DEFAULT_WINDOW, assignment=None):
+def measure_intensity(ppm, y, target, window=DEFAULT_WINDOW, assignment=None, locate=True):
     """Baseline-corrected peak height in the window around `target`.
+
+    With `locate` false the reading is taken at `target` itself instead of at the
+    tallest point of the window. Use that when the peak is known to be absent: a
+    maximum search with nothing to find climbs whatever slope is in range, so a
+    resonance that has decayed away reports a sizeable fraction of a neighbour's
+    flank rather than the ~1% tail actually present at its position.
 
     The cheapest and most stable observable: no model, no integration limits, so
     none of the window sensitivity that area carries. Valid for comparing a peak
@@ -211,7 +217,7 @@ def measure_intensity(ppm, y, target, window=DEFAULT_WINDOW, assignment=None):
         return result
 
     baseline = _local_baseline(ppm, y, target, window)
-    peak_idx = int(np.argmax(y_w))
+    peak_idx = int(np.argmax(y_w)) if locate else int(np.argmin(np.abs(ppm_w - target)))
 
     result['height'] = float(y_w[peak_idx]) - baseline
     result['center'] = float(ppm_w[peak_idx])

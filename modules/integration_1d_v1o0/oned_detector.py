@@ -100,9 +100,16 @@ def match_reference_peaks(spectrum, targets, window=DEFAULT_MATCH_WINDOW_PPM,
     among what is left. Without this, a window wider than the peak separation makes
     every target settle on the same tallest peak, and the reported intensities are
     silently those of one peak - a ratio of 1.0 that looks entirely plausible.
+
+    `window` may be a single half-width or one per target, which is how a series run
+    gives each peak a limit derived from its own neighbours.
     """
     detected = detect_peaks(spectrum, min_snr=min_snr,
                             min_separation_ppm=DEFAULT_MIN_SEPARATION_PPM)
+
+    targets = list(targets)
+    windows = (list(window) if isinstance(window, (list, tuple))
+               else [window] * len(targets))
 
     results = [{'assignment': t.get('assignment'), 'position': float(t['position']),
                 'ppm': None, 'index': None, 'height': None, 'snr': None,
@@ -114,7 +121,7 @@ def match_reference_peaks(spectrum, targets, window=DEFAULT_MATCH_WINDOW_PPM,
     for r_idx, result in enumerate(results):
         for peak in detected:
             distance = abs(peak['ppm'] - result['position'])
-            if distance <= window:
+            if distance <= windows[r_idx]:
                 pairs.append((distance, r_idx, peak))
     pairs.sort(key=lambda p: p[0])
 
