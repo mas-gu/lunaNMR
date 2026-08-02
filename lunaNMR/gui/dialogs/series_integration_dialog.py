@@ -49,6 +49,15 @@ def natural_sort_key(s: str) -> list:
             for text in re.split(r'(\d+)', str(s))]
 
 
+def _series_results_folder(base_folder, series_name, timestamp):
+    """Output folder for a series run: 'series_results_<name>_<timestamp>', so the
+    user-provided series name is visible in the folder title. Falls back to a
+    timestamp-only name when no series name was given."""
+    name = (series_name or "").strip()
+    stem = f"series_results_{name}_{timestamp}" if name else f"series_results_{timestamp}"
+    return os.path.join(base_folder, stem)
+
+
 class ProcessingWorker(QObject):
     """Worker for background series processing."""
 
@@ -59,7 +68,8 @@ class ProcessingWorker(QObject):
     def __init__(self, processor, nmr_files, reference_peaks, peak_source_mode, voigt_params,
                  extract_delays: bool = False, series_mode: str = "time",
                  pre_detected_peaks=None, sn_from_gui_locked=None,
-                 peak_list_contour_min: float = None, lock_detection_threshold: bool = True):
+                 peak_list_contour_min: float = None, lock_detection_threshold: bool = True,
+                 series_name: str = None):
         super().__init__()
         self.processor = processor
         self.nmr_files = nmr_files
@@ -72,6 +82,7 @@ class ProcessingWorker(QObject):
         self.sn_from_gui_locked = sn_from_gui_locked
         self.peak_list_contour_min = peak_list_contour_min
         self.lock_detection_threshold = lock_detection_threshold
+        self.series_name = series_name
         self._cancelled = False
         self._paused = False
 
@@ -113,13 +124,12 @@ class ProcessingWorker(QObject):
 
             processor.processing_active = True
 
-            # Create output folder
+            # Create output folder — embed the series name so the folder is identifiable.
             if self.nmr_files:
                 base_folder = os.path.dirname(self.nmr_files[0])
-                output_folder = os.path.join(
-                    base_folder,
-                    f"series_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                )
+                output_folder = _series_results_folder(
+                    base_folder, self.series_name,
+                    datetime.now().strftime('%Y%m%d_%H%M%S'))
             else:
                 output_folder = None
 
@@ -946,7 +956,8 @@ class SeriesIntegrationDialog(BaseDialog):
             pre_detected_peaks=pre_detected_peaks,
             sn_from_gui_locked=sn_from_gui_locked,
             peak_list_contour_min=peak_list_contour_min,
-            lock_detection_threshold=lock_detection_threshold
+            lock_detection_threshold=lock_detection_threshold,
+            series_name=self.current_series_name
         )
         self.worker.moveToThread(self.thread)
 
