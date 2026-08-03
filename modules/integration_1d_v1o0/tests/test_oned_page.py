@@ -97,6 +97,29 @@ class TestSpectrumSwitching:
 
 
 @needs_series
+class TestObservableChoice:
+    def test_all_three_observables_are_offered(self, page):
+        assert [page.observable.itemText(i) for i in range(page.observable.count())] == [
+            'Intensity (height)', 'Area (region sum)', 'Area (Voigt fit)']
+
+    def test_the_chosen_observable_opens_the_table_on_it(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.observable.setCurrentIndex(2)
+        page.integrate(show_table=False)
+        dialog = page.show_results_table()
+        assert dialog.value == 'fit_area'
+        dialog.close()
+
+    def test_the_fit_columns_reach_the_results(self, page):
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        rows = page.integrate(show_table=False)
+        assert all(r['fit_area'] is not None for r in rows)
+        assert all(r['r_squared'] > 0.9 for r in rows)
+
+
+@needs_series
 class TestVanishedFiles:
     """Files validate at load time, so a file removed afterwards - moved, renamed, or
     rewritten by the processing pipeline - reached load_spectrum unguarded."""

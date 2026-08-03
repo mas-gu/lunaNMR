@@ -23,6 +23,9 @@ SPECTRUM_PATTERNS = ('*.ft1', '*.ft', '*.ft2', '*.ft3', '*.dat')
 SPECTRUM_FILTER = ("1D spectra (*.ft1 *.ft *.ft2 *.ft3 *.dat);;"
                    "NMRPipe 1D (*.ft1);;All files (*)")
 
+# Which series-row key each entry of the observable box opens the results table on.
+OBSERVABLE_KEYS = ('height', 'area', 'fit_area')
+
 
 class OneDIntegrationPage(QWidget):
     """Pick peaks on one spectrum, integrate them across the whole series."""
@@ -83,7 +86,8 @@ class OneDIntegrationPage(QWidget):
         clear_button.clicked.connect(self.clear_peaks)
 
         self.observable = QComboBox()
-        self.observable.addItems(['Intensity (height)', 'Area (region sum)'])
+        self.observable.addItems(['Intensity (height)', 'Area (region sum)',
+                                  'Area (Voigt fit)'])
 
         self.integrate_button = QPushButton("Integrate series")
         self.integrate_button.clicked.connect(self.integrate)
@@ -444,7 +448,7 @@ class OneDIntegrationPage(QWidget):
         if not self.table_rows:
             return None
 
-        default = 'height' if self.observable.currentIndex() == 0 else 'area'
+        default = OBSERVABLE_KEYS[self.observable.currentIndex()]
         self.results_dialog = SeriesTableDialog(self.table_rows, parent=self,
                                                 default_value=default)
         self.results_dialog.show()

@@ -23,19 +23,20 @@ def app():
 
 def _rows():
     """Two peaks over three spectra, with one point where a peak was not found."""
+    def row(point, spectrum, assignment, height, area, ppm, matched=True):
+        return {'point': point, 'spectrum': spectrum, 'assignment': assignment,
+                'height': height, 'area': area, 'ppm': ppm, 'matched': matched,
+                'fit_area': None if area is None else area * 1.1,
+                'r_squared': None if area is None else 0.995,
+                'fwhm': None if area is None else 0.0026}
+
     return [
-        {'point': 0, 'spectrum': 's1', 'assignment': 'A', 'height': 10.0, 'area': 1.0,
-         'ppm': 8.1847, 'matched': True},
-        {'point': 0, 'spectrum': 's1', 'assignment': 'B', 'height': 20.0, 'area': 2.0,
-         'ppm': 8.1752, 'matched': True},
-        {'point': 1, 'spectrum': 's2', 'assignment': 'A', 'height': 30.0, 'area': 3.0,
-         'ppm': 8.1848, 'matched': True},
-        {'point': 1, 'spectrum': 's2', 'assignment': 'B', 'height': 40.0, 'area': 4.0,
-         'ppm': 8.1753, 'matched': True},
-        {'point': 2, 'spectrum': 's3', 'assignment': 'A', 'height': 50.0, 'area': 5.0,
-         'ppm': 8.1849, 'matched': True},
-        {'point': 2, 'spectrum': 's3', 'assignment': 'B', 'height': None, 'area': None,
-         'ppm': None, 'matched': False},
+        row(0, 's1', 'A', 10.0, 1.0, 8.1847),
+        row(0, 's1', 'B', 20.0, 2.0, 8.1752),
+        row(1, 's2', 'A', 30.0, 3.0, 8.1848),
+        row(1, 's2', 'B', 40.0, 4.0, 8.1753),
+        row(2, 's3', 'A', 50.0, 5.0, 8.1849),
+        row(2, 's3', 'B', None, None, None, matched=False),
     ]
 
 
@@ -75,6 +76,25 @@ class TestValueToggle:
         dialog.set_value('ppm')
         dialog.set_value('height')
         assert dialog.table.item(0, 1).text() == '2.000e+01'
+
+    def test_switching_to_the_fitted_area(self, dialog):
+        dialog.set_value('fit_area')
+        assert dialog.table.item(0, 0).text() == '1.100e+00'
+
+    def test_fit_quality_reads_as_a_plain_fraction(self, dialog):
+        """R2 and linewidth in scientific notation are unreadable."""
+        dialog.set_value('r_squared')
+        assert dialog.table.item(0, 0).text() == '0.9950'
+
+    def test_linewidth_reads_as_a_plain_number(self, dialog):
+        dialog.set_value('fwhm')
+        assert dialog.table.item(0, 0).text() == '0.0026'
+
+    def test_every_observable_is_offered(self, dialog):
+        from oned_series_table import VALUES
+        keys = [key for key, _label in VALUES]
+        assert keys == ['height', 'area', 'fit_area', 'r_squared', 'fwhm', 'ppm']
+        assert dialog.value_box.count() == len(VALUES)
 
     def test_toggle_widget_drives_the_table(self, dialog):
         index = dialog.value_box.findText('Position (ppm)')

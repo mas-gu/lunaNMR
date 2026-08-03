@@ -12,12 +12,20 @@ from oned_series import write_series_csv
 
 # Selectable observables: the key in a series row, and how it reads in the toggle.
 VALUES = (('height', 'Intensity (height)'),
-          ('area', 'Area'),
+          ('area', 'Area (region sum)'),
+          ('fit_area', 'Area (Voigt fit)'),
+          ('r_squared', 'Fit quality (R²)'),
+          ('fwhm', 'Linewidth (FWHM ppm)'),
           ('ppm', 'Position (ppm)'))
 
-# Positions want fixed decimals; intensities and areas span orders of magnitude.
+# Positions and linewidths want fixed decimals, R² a plain fraction; intensities and
+# areas span orders of magnitude.
 PPM_FORMAT = '{:.4f}'
 MAGNITUDE_FORMAT = '{:.3e}'
+FIXED_FORMAT = '{:.4f}'
+
+# Keys that read as a plain number rather than in scientific notation.
+FIXED_VALUES = ('ppm', 'fwhm', 'r_squared')
 
 
 class SeriesTableDialog(QDialog):
@@ -106,7 +114,7 @@ class SeriesTableDialog(QDialog):
     def _format(self, value):
         if value is None:
             return ''
-        template = PPM_FORMAT if self.value == 'ppm' else MAGNITUDE_FORMAT
+        template = FIXED_FORMAT if self.value in FIXED_VALUES else MAGNITUDE_FORMAT
         return template.format(value)
 
     def _lookup(self):

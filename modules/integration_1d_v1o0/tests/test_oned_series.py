@@ -204,6 +204,116 @@ class TestDriftTracking:
         assert prod[0]['height'] < prod[-1]['height']
 
 
+class TestWindowRespectsUnpickedNeighbours:
+    """A neighbouring resonance exists whether or not the user picked it. Sizing the
+    window only against listed peaks made a measurement depend on what else happened
+    to be in the peak list - on the reference pair, 19% in fitted area."""
+
+    def _pair(self, n_points=3):
+        from oned_loader import from_arrays
+        from oned_voigt import voigt_1d
+        import numpy as np
+        ppm = np.linspace(8.30, 8.05, 20001)
+        return [from_arrays(voigt_1d(ppm, 1.0, 8.1847, 0.0011, 0.0004, 0.0)
+                            + voigt_1d(ppm, 1.0, 8.1752, 0.0011, 0.0004, 0.0), ppm)
+                for _ in range(n_points)]
+
+    def test_window_is_the_same_whether_the_neighbour_is_listed(self):
+        from oned_series import integrate_series
+        spectra = self._pair()
+        both = integrate_series(spectra, [{'assignment': 'A', 'position': 8.1847},
+                                          {'assignment': 'B', 'position': 8.1752}])
+        alone = integrate_series(spectra, [{'assignment': 'A', 'position': 8.1847}])
+        listed = [r['window'] for r in both if r['assignment'] == 'A'][0]
+        assert alone[0]['window'] == pytest.approx(listed, rel=1e-9)
+
+    def test_fitted_area_is_the_same_whether_the_neighbour_is_listed(self):
+        from oned_series import integrate_series
+        spectra = self._pair()
+        both = integrate_series(spectra, [{'assignment': 'A', 'position': 8.1847},
+                                          {'assignment': 'B', 'position': 8.1752}])
+        alone = integrate_series(spectra, [{'assignment': 'A', 'position': 8.1847}])
+        listed = [r['fit_area'] for r in both if r['assignment'] == 'A'][0]
+        assert alone[0]['fit_area'] == pytest.approx(listed, rel=1e-6)
+
+    def test_an_isolated_peak_still_gets_a_linewidth_sized_window(self):
+        from oned_loader import from_arrays
+        from oned_series import integrate_series
+        from oned_voigt import voigt_1d
+        import numpy as np
+        ppm = np.linspace(5.5, 4.5, 20001)
+        spectra = [from_arrays(voigt_1d(ppm, 1.0, 5.0, 0.0011, 0.0004, 0.0), ppm)]
+        row = integrate_series(spectra, [{'assignment': 'A', 'position': 5.0}])[0]
+        assert 0.001 < row['window'] < 0.05
+        assert row['r_squared'] > 0.99
+
+
+class TestVoigtFitColumns:
+    def test_every_row_carries_the_fit_results(self):
+        from oned_series import integrate_series
+        table = integrate_series(_synthetic_series(3),
+                                 [{'assignment': 'A', 'position': 5.0}])
+        for row in table:
+            assert row['fit_area'] is not None
+            assert row['r_squared'] is not None
+            assert row['fwhm'] is not None
+
+    def test_the_fit_recovers_the_known_area(self):
+        from oned_series import integrate_series
+        table = integrate_series(_synthetic_series(2, centres=(5.0,), start=(2.0,),
+                                                  end=(2.0,)),
+                                 [{'assignment': 'A', 'position': 5.0}])
+        assert table[0]['fit_area'] == pytest.approx(2.0, rel=0.05)
+
+    def test_the_fit_exceeds_the_truncated_region_sum(self):
+        """The fit integrates the Lorentzian tails analytically; the region sum stops
+        at the window, so the fitted area is the larger of the two."""
+        from oned_series import integrate_series
+        row = integrate_series(_synthetic_series(1),
+                               [{'assignment': 'A', 'position': 5.0}])[0]
+        assert row['fit_area'] > row['area']
+
+    def test_a_good_fit_reports_a_high_r_squared(self):
+        from oned_series import integrate_series
+        row = integrate_series(_synthetic_series(1),
+                               [{'assignment': 'A', 'position': 5.0}])[0]
+        assert row['r_squared'] > 0.95
+
+    def test_the_scale_applies_to_the_fitted_area_but_not_to_r_squared(self):
+        from oned_series import integrate_series
+        spectra = _synthetic_series(2)
+        plain = integrate_series(spectra, [{'assignment': 'A', 'position': 5.0}])
+        spectra[1].intensity_scale = 3.0
+        scaled = integrate_series(spectra, [{'assignment': 'A', 'position': 5.0}])
+        assert scaled[1]['fit_area'] == pytest.approx(3.0 * plain[1]['fit_area'], rel=1e-6)
+        assert scaled[1]['r_squared'] == pytest.approx(plain[1]['r_squared'], rel=1e-9)
+        assert scaled[1]['fwhm'] == pytest.approx(plain[1]['fwhm'], rel=1e-9)
+
+    def test_a_failed_fit_leaves_the_columns_empty(self):
+        from oned_loader import from_arrays
+        from oned_series import integrate_series
+        import numpy as np
+        ppm = np.linspace(5.5, 4.5, 4001)
+        flat = from_arrays(np.zeros_like(ppm), ppm)
+        row = integrate_series([flat], [{'assignment': 'A', 'position': 5.0}])[0]
+        assert row['fit_area'] is None
+        assert row['r_squared'] is None
+
+    def test_linewidth_change_across_a_series_is_visible(self):
+        """The reason the fit is worth having: heights stop tracking concentration
+        when the linewidth moves, and only the fit reports the linewidth."""
+        from oned_loader import from_arrays
+        from oned_series import integrate_series
+        from oned_voigt import voigt_1d
+        import numpy as np
+        ppm = np.linspace(5.5, 4.5, 20001)
+        spectra = [from_arrays(voigt_1d(ppm, 1.0, 5.0, 0.0008 * (1 + k), 0.0004, 0.0), ppm)
+                   for k in range(3)]
+        table = integrate_series(spectra, [{'assignment': 'A', 'position': 5.0}])
+        widths = [r['fwhm'] for r in table]
+        assert widths[2] > widths[0]
+
+
 class TestCsvExport:
     def test_writes_one_row_per_spectrum_and_one_column_per_peak(self, tmp_path):
         from oned_series import integrate_series, write_series_csv

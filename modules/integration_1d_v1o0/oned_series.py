@@ -5,7 +5,7 @@ import numpy as np
 
 from oned_detector import (DEFAULT_MIN_SNR, detect_peaks, estimate_fwhm,
                            estimate_window, match_reference_peaks)
-from oned_fitter import integrate_region, measure_intensity
+from oned_fitter import fit_peak_voigt, integrate_region, measure_intensity
 from oned_loader import load_spectrum
 
 # How far a peak may move between series points and still be the same peak. Wide enough
@@ -92,12 +92,24 @@ def locate_peaks(spectrum, peaks, track_window=DEFAULT_TRACK_WINDOW_PPM):
 
 
 def _windows_for(spectrum, peaks):
-    """Measurement half-width per peak, linewidth-driven and clear of its neighbours."""
+    """Measurement half-width per peak, linewidth-driven and clear of its neighbours.
+
+    Neighbours are every resonance detected in the spectrum, not only the ones the
+    user happened to pick. A window sized against the peak list alone makes a
+    measurement depend on what else is in that list: picking one line of a close pair
+    gave a window half again as wide, R2 falling to 0.64, and a fitted area 19% off
+    the value obtained when both were picked.
+    """
+    detected = [p['ppm'] for p in detect_peaks(spectrum)]
     positions = [float(p['position']) for p in peaks]
+
     windows = []
     for i, position in enumerate(positions):
-        neighbours = positions[:i] + positions[i + 1:]
+        # the nearest detected maximum is this peak itself, so it is not a neighbour
+        nearby = sorted(detected, key=lambda found: abs(found - position))[1:]
+        neighbours = positions[:i] + positions[i + 1:] + nearby
         windows.append(estimate_window(spectrum, position, neighbours=neighbours))
+
     return windows
 
 
@@ -137,6 +149,12 @@ def integrate_series(spectra, peaks, names=None, track_window=DEFAULT_TRACK_WIND
             area = integrate_region(spectrum.ppm_axis, spectrum.data, target,
                                     window=window, assignment=peak.get('assignment'))
 
+            # The fit is the only measurement that carries a goodness-of-fit and a
+            # linewidth. Both matter here: when a resonance broadens through a series
+            # its height stops tracking concentration, and nothing else reveals that.
+            fit = fit_peak_voigt(spectrum.ppm_axis, spectrum.data, target,
+                                 window=window, assignment=peak.get('assignment'))
+
             table.append({
                 'point': point,
                 'spectrum': name,
@@ -146,6 +164,11 @@ def integrate_series(spectra, peaks, names=None, track_window=DEFAULT_TRACK_WIND
                 'matched': match['matched'],
                 'height': intensity['height'] * scale if intensity['success'] else None,
                 'area': area['area'] * scale if area['success'] else None,
+                # r_squared and fwhm describe the shape, not the amount, so the
+                # acquisition scale must not touch them
+                'fit_area': fit['area'] * scale if fit['success'] else None,
+                'r_squared': fit['r_squared'] if fit['success'] else None,
+                'fwhm': fit['fwhm'] if fit['success'] else None,
                 'snr': match['snr'],
                 'window': window,
                 'intensity_scale': scale,
