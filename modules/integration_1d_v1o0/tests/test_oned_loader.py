@@ -127,6 +127,68 @@ class TestRealSpectrum:
         assert load_spectrum(REAL_SPECTRUM).intensity_scale == 1.0
 
 
+# Bruker 1D processed data lives outside the repository, so these skip when absent.
+BRUKER_1D = (_MODULE_DIR.parent.parent.parent / "data_test" / "bruker"
+             / "20171009_CH1_domain" / "1" / "pdata" / "999")
+BRUKER_2D = (_MODULE_DIR.parent.parent.parent / "data_test" / "bruker"
+             / "20171009_CH1_domain" / "1" / "pdata" / "1")
+needs_bruker = pytest.mark.skipif(not BRUKER_1D.exists(),
+                                  reason="Bruker 1D sample not present")
+
+
+@needs_bruker
+class TestBrukerProcessedData:
+    """The Bruker read path was implemented but never executed by a test."""
+
+    def test_loads_a_1r_directory(self):
+        from oned_loader import load_spectrum
+        s = load_spectrum(BRUKER_1D)
+        assert s.data.ndim == 1
+        assert len(s.data) == 1024
+
+    def test_ppm_axis_is_descending_and_in_range(self):
+        from oned_loader import load_spectrum
+        s = load_spectrum(BRUKER_1D)
+        assert s.ppm_axis[0] == pytest.approx(12.68, abs=0.05)
+        assert s.ppm_axis[-1] == pytest.approx(-3.33, abs=0.05)
+        assert s.ppm_axis[0] > s.ppm_axis[-1]
+
+    def test_metadata_reports_the_bruker_format_and_frequency(self):
+        from oned_loader import load_spectrum
+        s = load_spectrum(BRUKER_1D)
+        assert s.metadata['format'] == 'bruker'
+        assert s.metadata['obs_mhz'] == pytest.approx(600.13, abs=0.1)
+
+    def test_acquisition_scaling_comes_from_ns_and_rg(self):
+        """Unlike NMRPipe, Bruker headers carry the scan count and receiver gain, so a
+        series acquired at different gain can be put on a comparable footing."""
+        from oned_loader import load_spectrum
+        s = load_spectrum(BRUKER_1D)
+        assert s.metadata['scans'] == 4
+        assert s.metadata['receiver_gain'] == 57
+        assert s.intensity_scale == pytest.approx(1.0 / (4 * 57))
+
+    def test_an_explicit_scale_overrides_the_acquisition_one(self):
+        from oned_loader import load_spectrum
+        assert load_spectrum(BRUKER_1D, intensity_scale=2.0).intensity_scale == 2.0
+
+    def test_noise_is_estimated_for_bruker_data_too(self):
+        from oned_loader import load_spectrum
+        assert load_spectrum(BRUKER_1D).noise > 0
+
+    @pytest.mark.skipif(not BRUKER_2D.exists(), reason="Bruker 2D sample not present")
+    def test_a_2d_processed_dataset_is_rejected(self):
+        from oned_loader import load_spectrum
+        with pytest.raises(ValueError, match="not a 1D spectrum"):
+            load_spectrum(BRUKER_2D)
+
+    def test_a_bare_1r_file_path_is_recognised(self):
+        """Users point at the file as often as the directory."""
+        from oned_loader import load_spectrum
+        s = load_spectrum(BRUKER_1D / "1r")
+        assert len(s.data) == 1024
+
+
 class TestUnsupportedInput:
     def test_missing_file_raises(self):
         from oned_loader import load_spectrum

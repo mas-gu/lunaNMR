@@ -97,6 +97,59 @@ class TestSpectrumSwitching:
 
 
 @needs_series
+class TestVanishedFiles:
+    """Files validate at load time, so a file removed afterwards - moved, renamed, or
+    rewritten by the processing pipeline - reached load_spectrum unguarded."""
+
+    def _folder_of_three(self, tmp_path):
+        import shutil
+        for source in sorted(REAL_DIR.glob('*.ft1'))[:3]:
+            shutil.copy(source, tmp_path)
+        return str(tmp_path)
+
+    def test_selecting_a_removed_spectrum_reports_instead_of_crashing(self, page, tmp_path):
+        import os
+        page.load_folder(folder=self._folder_of_three(tmp_path))
+        os.remove(page.paths[1])
+        page.show_spectrum(1)
+        assert 'could not' in page.status.text().lower()
+
+    def test_the_previous_spectrum_stays_on_screen(self, page, tmp_path):
+        import os
+        page.load_folder(folder=self._folder_of_three(tmp_path))
+        page.show_spectrum(0)
+        still_shown = page.spectrum
+        os.remove(page.paths[1])
+        page.show_spectrum(1)
+        assert page.spectrum is still_shown
+
+    def test_integrating_with_a_removed_file_skips_it(self, page, tmp_path):
+        import os
+        page.load_folder(folder=self._folder_of_three(tmp_path))
+        page.add_peak_at(PEAK_A)
+        os.remove(page.paths[1])
+        rows = page.integrate(show_table=False)
+        assert rows is not None
+        assert len({r['spectrum'] for r in rows}) == 2
+
+    def test_integration_says_what_it_skipped(self, page, tmp_path):
+        import os
+        page.load_folder(folder=self._folder_of_three(tmp_path))
+        page.add_peak_at(PEAK_A)
+        os.remove(page.paths[1])
+        page.integrate(show_table=False)
+        assert 'skipped' in page.status.text().lower()
+
+    def test_all_files_gone_does_not_crash(self, page, tmp_path):
+        import os
+        page.load_folder(folder=self._folder_of_three(tmp_path))
+        page.add_peak_at(PEAK_A)
+        for path in list(page.paths):
+            os.remove(path)
+        assert page.integrate(show_table=False) in (None, [])
+
+
+@needs_series
 class TestUndoRedo:
     def test_undo_removes_the_last_picked_peak(self, page):
         page.load_folder(folder=str(REAL_DIR))

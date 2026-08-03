@@ -7,13 +7,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFileDialog,
                                QHBoxLayout, QHeaderView, QLabel, QListWidget,
-                               QListWidgetItem, QMessageBox, QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout,
-                               QWidget)
+                               QListWidgetItem, QPushButton, QSplitter, QTableWidget,
+                               QTableWidgetItem, QVBoxLayout, QWidget)
 
 from oned_loader import load_spectrum
 from oned_plotter import OneDPlotter
-from oned_series import (integrate_series, load_series, locate_peaks,
-                         peak_at_position)
+from oned_series import integrate_series, locate_peaks, peak_at_position
 from oned_series_table import SeriesTableDialog
 
 SPECTRUM_PATTERNS = ('*.ft1', '*.ft', '*.ft2', '*.ft3', '*.dat')
@@ -215,7 +214,16 @@ class OneDIntegrationPage(QWidget):
     def show_spectrum(self, row):
         if not (0 <= row < len(self.paths)):
             return
-        self.spectrum = load_spectrum(self.paths[row])
+
+        # Files are validated when the set is opened, so anything that fails here
+        # went away afterwards - moved, renamed, or rewritten by the pipeline. Keep
+        # showing the spectrum already on screen and say so.
+        try:
+            self.spectrum = load_spectrum(self.paths[row])
+        except Exception as exc:
+            self.status.setText(f"Could not read {self.paths[row].name}: {exc}")
+            return
+
         self.plotter.set_spectrum(self.spectrum, keep_view=True)
         self._refresh_peaks()
 
@@ -391,23 +399,40 @@ class OneDIntegrationPage(QWidget):
             return None
 
         self._clear_marks()
-        rows_by_path = [self.paths.index(p) for p in selected]
+
+        # A file that has gone missing since the set was opened is dropped from the
+        # run rather than aborting it - losing one point of a series should not cost
+        # the other fifty-two.
+        spectra, usable, unreadable = [], [], []
+        for path in selected:
+            try:
+                spectra.append(load_spectrum(path))
+                usable.append(path)
+            except Exception:
+                unreadable.append(path.name)
+
+        if not spectra:
+            self.status.setText("None of the checked spectra could be read.")
+            return None
+
+        rows_by_path = [self.paths.index(p) for p in usable]
 
         def on_point(point, rows):
             self._mark_measured(rows_by_path[point], rows)
-            self.status.setText(f"Integrating… {point + 1}/{len(selected)} "
-                                f"({selected[point].name})")
+            self.status.setText(f"Integrating… {point + 1}/{len(usable)} "
+                                f"({usable[point].name})")
             QApplication.processEvents()      # let the list fill in as the run proceeds
 
-        spectra = load_series(selected)
         self.table_rows = integrate_series(spectra, [dict(p) for p in self.peaks],
-                                           names=[p.stem for p in selected],
+                                           names=[p.stem for p in usable],
                                            progress=on_point)
 
         missing = sum(1 for r in self.table_rows if not r['matched'])
         self.status.setText(f"Integrated {len(self.peaks)} peak(s) over "
-                            f"{len(selected)} spectra."
-                            + (f"  {missing} unmatched point(s)." if missing else ''))
+                            f"{len(usable)} spectra."
+                            + (f"  {missing} unmatched point(s)." if missing else '')
+                            + (f"  Skipped {len(unreadable)} unreadable file(s)."
+                               if unreadable else ''))
 
         if show_table:
             self.show_results_table()

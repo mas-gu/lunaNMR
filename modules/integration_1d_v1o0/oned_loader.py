@@ -50,10 +50,6 @@ class OneDSpectrum:
         """Absolute ppm per point."""
         return abs(float(self.ppm_axis[1] - self.ppm_axis[0]))
 
-    def hz_per_point(self):
-        obs = self.metadata.get('obs_mhz')
-        return self.ppm_step * obs if obs else None
-
 
 def from_arrays(data, ppm_axis, noise=None, metadata=None, intensity_scale=1.0):
     """Build a OneDSpectrum from arrays, orienting the axis descending."""
@@ -93,6 +89,11 @@ def _read_nmrpipe(path):
 
 def _read_bruker(path):
     import nmrglue as ng
+
+    # read_pdata wants the pdata directory, but a file dialog hands back the 1r file
+    # inside it, which is what a user naturally picks.
+    if path.is_file():
+        path = path.parent
 
     dic, data = ng.bruker.read_pdata(str(path))
     if data.ndim != 1:
