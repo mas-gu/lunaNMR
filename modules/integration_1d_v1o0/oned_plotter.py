@@ -143,7 +143,10 @@ class OneDPlotter(QWidget):
                 colour = SELECTED_COLOUR if peak.get('selected') else PEAK_COLOUR
                 self.axes.axvline(peak['ppm'], color=colour, lw=0.8, alpha=0.7)
                 label = peak.get('assignment') or f"{peak['ppm']:.4f}"
-                self.axes.annotate(label, (peak['ppm'], peak.get('height', 0)),
+                # A peak that matched no maximum in this spectrum has no height;
+                # label it at the baseline.
+                height = peak.get('height') or 0
+                self.axes.annotate(label, (peak['ppm'], height),
                                    textcoords='offset points', xytext=(0, 6),
                                    ha='center', fontsize=7, color=colour)
 
