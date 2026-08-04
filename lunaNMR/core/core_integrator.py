@@ -2342,7 +2342,7 @@ class VoigtIntegrator(BaseIntegrator):
         return result
 
     def fit_peak_voigt_2d(self, peak_x_ppm, peak_y_ppm, assignment="Unknown",
-                          use_dynamic_optimization=True, all_peaks_context=None, linewidth_constraints=None): #True was false
+                          all_peaks_context=None, linewidth_constraints=None):
         """
         2D simultaneous multi-peak Voigt fitting for all peaks
 
@@ -2356,7 +2356,6 @@ class VoigtIntegrator(BaseIntegrator):
         - peak_x_ppm: X-axis peak position (ppm)
         - peak_y_ppm: Y-axis peak position (ppm)
         - assignment: Peak assignment/label
-        - use_dynamic_optimization: Enable iterative optimization (default: True)
         - all_peaks_context: List of all peak positions [(x1,y1), (x2,y2), ...] for overlap detection
         - linewidth_constraints: Dict with 'x' and 'y' constraints for Global Optimization Manager
 
@@ -2492,204 +2491,120 @@ class VoigtIntegrator(BaseIntegrator):
                 log_error("2D fitting failed - peak not fitted")
                 return None
 
-        # === DYNAMIC OPTIMIZATION OR STANDARD FITTING ===
-        # CRITICAL: Disable dynamic optimization when PS2D multi-peak is enabled
-        # because enhanced_fitter doesn't support Y cross-section re-extraction
+        # === 1D CROSS-SECTION FITTING ===
         gui_params = getattr(self, 'gui_params', None)
-        use_ps2d = gui_params.get('use_ps2d_multi_peak', False) if gui_params else False
 
-        # Initialize window_optimization to avoid reference errors
-        window_optimization = None
+        if self.enhanced_fitter is not None and hasattr(self.enhanced_fitter, 'set_gui_parameters'):
+            self.enhanced_fitter.set_gui_parameters(self.fitting_parameters)
 
-        if use_ps2d and use_dynamic_optimization:
-            log_info("PS2D multi-peak enabled: using standard fitting (bypassing dynamic optimization)")
-            use_dynamic_optimization = False
+        log_info(f"Using standard fitting for {assignment}")
 
-        if use_dynamic_optimization and self.enhanced_fitter is not None:
-            # ENHANCEMENT: Pass GUI parameters to enhanced fitter for consistent display
-            if hasattr(self.enhanced_fitter, 'set_gui_parameters'):
-                self.enhanced_fitter.set_gui_parameters(self.fitting_parameters)
+        # Extract peak regions for standard fitting
+        regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
+        if regions is None:
+            return None
 
-            # NEW: Dynamic window optimization
-            window_optimization = None
-            if hasattr(self, 'optimize_window_dynamically'):
-                window_optimization = self.optimize_window_dynamically(
-                    peak_x_ppm, peak_y_ppm, assignment,
-                    max_iterations=50,  # Enhanced: Up to 50 tests for comprehensive exploration
-                    r2_improvement_threshold=0.01  # More sensitive to improvements
+        # Enhanced initial guess calculation with improved parameter estimation
+        peak_intensity = self.nmr_data[regions['peak_indices'][1], regions['peak_indices'][0]]
+
+        # Better baseline estimation using multiple edge points
+        x_baseline = np.mean([np.mean(regions['x_cross_section'][:3]),
+                             np.mean(regions['x_cross_section'][-3:])])
+        y_baseline = np.mean([np.mean(regions['y_cross_section'][:5]),
+                             np.mean(regions['y_cross_section'][-5:])])
+
+        # Adaptive width estimation based on data
+        x_width_estimate = self._estimate_peak_width(regions['x_ppm_scale'], regions['x_cross_section'], peak_x_ppm)
+        y_width_estimate = self._estimate_peak_width(regions['y_ppm_scale'], regions['y_cross_section'], peak_y_ppm)
+
+        # Amplitude estimation with baseline correction
+        x_amplitude = abs(peak_intensity - x_baseline) * 1.2  # 20% buffer for fitting
+        y_amplitude = abs(peak_intensity - y_baseline) * 1.2
+
+        x_initial_guess = [
+            x_amplitude,                       # amplitude
+            peak_x_ppm,                        # center
+            x_width_estimate * 0.6,            # sigma (Gaussian component)
+            x_width_estimate * 0.4,            # gamma (Lorentzian component)
+            x_baseline                         # baseline
+        ]
+
+        y_initial_guess = [
+            y_amplitude,                       # amplitude
+            peak_y_ppm,                        # center
+            y_width_estimate * 0.6,            # sigma (Gaussian component, typically broader in Y)
+            y_width_estimate * 0.4,            # gamma (Lorentzian component)
+            y_baseline                         # baseline
+        ]
+
+        # Get GUI parameters if available
+        gui_params = getattr(self, 'gui_params', None)
+
+        # Fit X-dimension with adaptive strategy (single vs multi-peak)
+        x_fit = self.adaptive_fit_1d(regions['x_ppm_scale'], regions['x_cross_section'],
+                                    peak_x_ppm, dimension='x', gui_params=gui_params)
+
+        # CRITICAL FIX: Re-extract Y cross-section at the FITTED X position
+        # Problem: X fit may shift peak position, so Y cross-section must be updated
+        # to ensure it passes through the correct peak in 2D space
+        x_params_temp = self._safe_extract_params(x_fit, default_center=peak_x_ppm)
+        fitted_x_ppm = x_params_temp.get('center', peak_x_ppm)
+
+        # Check if X position shifted significantly
+        x_shift = abs(fitted_x_ppm - peak_x_ppm)
+        if x_shift > 0.001:  # Threshold: 0.001 ppm
+            # Find new X index for the fitted position
+            x_idx_fitted = np.argmin(np.abs(self.ppm_x_axis - fitted_x_ppm))
+
+            # Re-extract Y cross-section at the fitted X position
+            if self.ps2d_data_selector is not None:
+                # Use PS2D method for consistency
+                y_cross_full = self.nmr_data[:, x_idx_fitted]
+                y_ppm_full = self.ppm_y_axis
+
+                # Apply PS2D's elliptical window selection
+                y_selection = self.ps2d_data_selector.select_data_elliptical(
+                    y_ppm_full, y_cross_full, fitted_x_ppm, peak_y_ppm, dimension='y'
                 )
 
-                if window_optimization.get('success') and window_optimization.get('improvement', 0) > 0.03:
-                    # Use optimized windows for this peak
-                    optimized_x_window = window_optimization['optimized_x_window']
-                    optimized_y_window = window_optimization['optimized_y_window']
-
-                    log_info(f"Window optimization: X={optimized_x_window:.3f}, Y={optimized_y_window:.1f}, R² improvement={window_optimization['improvement']:.3f}")
-
-                    # Extract regions with optimized windows
-                    regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm,
-                                                     optimized_x_window, optimized_y_window)
-                else:
-                    regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
+                # Update regions with new Y cross-section
+                regions['y_cross_section'] = y_selection['y_selected']
+                regions['y_ppm_scale'] = y_selection['x_selected']
             else:
-                regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
+                # Fallback: simple extraction at fitted X position
+                regions['y_cross_section'] = self.nmr_data[:, x_idx_fitted]
 
-            # ENSURE REGIONS VARIABLE EXISTS for existing code flow:
-            if 'regions' not in locals() or regions is None:
-                regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
+        # Fit Y-dimension with adaptive strategy (single vs multi-peak)
+        # Now using the CORRECTED Y cross-section that passes through the fitted X position
+        y_fit = self.adaptive_fit_1d(regions['y_ppm_scale'], regions['y_cross_section'],
+                                    peak_y_ppm, dimension='y', gui_params=gui_params)
 
-            # Final check that regions extraction succeeded
-            if regions is None:
-                log_error(f"Failed to extract peak regions for {assignment}")
-                return None
+        # ITERATIVE REFINEMENT: Re-extract X cross-section at fitted Y position and refine
+        y_params_temp = self._safe_extract_params(y_fit, default_center=peak_y_ppm)
+        fitted_y_ppm = y_params_temp.get('center', peak_y_ppm)
 
-            try:
-                # Prepare context for global parameter estimation
-                x_context = None
-                y_context = None
+        y_shift = abs(fitted_y_ppm - peak_y_ppm)
+        if y_shift > 0.01:  # Threshold: 0.01 ppm for Y dimension (10x larger due to 15N scale)
+            # Find new Y index for the fitted position
+            y_idx_fitted = np.argmin(np.abs(self.ppm_y_axis - fitted_y_ppm))
 
-                if all_peaks_context is not None:
-                    x_context = [pos[0] for pos in all_peaks_context]  # Extract x positions
-                    y_context = [pos[1] for pos in all_peaks_context]  # Extract y positions
+            # Re-extract X cross-section at the fitted Y position
+            if self.ps2d_data_selector is not None:
+                x_cross_full = self.nmr_data[y_idx_fitted, :]
+                x_ppm_full = self.ppm_x_axis
 
-                # Extract linewidth constraints if provided
-                x_linewidth_constraints = linewidth_constraints.get('x') if linewidth_constraints else None
-                y_linewidth_constraints = linewidth_constraints.get('y') if linewidth_constraints else None
-
-                # X-dimension fitting with dynamic optimization
-                x_fit = self.enhanced_fitter.fit_peak_enhanced(
-                    regions['x_ppm_scale'], regions['x_cross_section'],
-                    initial_center=peak_x_ppm, nucleus_type='1H',
-                    method='iterative_optimization',
-                    all_peaks_context=x_context,
-                    linewidth_constraints=x_linewidth_constraints
+                # Apply PS2D's elliptical window selection
+                x_selection = self.ps2d_data_selector.select_data_elliptical(
+                    x_ppm_full, x_cross_full, fitted_x_ppm, fitted_y_ppm, dimension='x'
                 )
 
-                # Y-dimension fitting with dynamic optimization
-                y_fit = self.enhanced_fitter.fit_peak_enhanced(
-                    regions['y_ppm_scale'], regions['y_cross_section'],
-                    initial_center=peak_y_ppm, nucleus_type='15N',
-                    method='iterative_optimization',
-                    all_peaks_context=y_context,
-                    linewidth_constraints=y_linewidth_constraints
-                )
+                # Update regions with new X cross-section
+                regions['x_cross_section'] = x_selection['y_selected']
+                regions['x_ppm_scale'] = x_selection['x_selected']
 
-                # Optimization summary handled silently - success is captured in fit results
-
-            except Exception as e:
-                log_warning(f"Dynamic optimization failed ({e}), falling back to standard fitting")
-                use_dynamic_optimization = False  # Trigger fallback below
-
-        # === STANDARD FITTING (Original Method) ===
-        if not use_dynamic_optimization or self.enhanced_fitter is None:
-            log_info(f"Using standard fitting for {assignment}")
-
-            # Extract peak regions for standard fitting
-            regions = self.extract_peak_region(peak_x_ppm, peak_y_ppm)
-            if regions is None:
-                return None
-
-            # Enhanced initial guess calculation with improved parameter estimation
-            peak_intensity = self.nmr_data[regions['peak_indices'][1], regions['peak_indices'][0]]
-
-            # Better baseline estimation using multiple edge points
-            x_baseline = np.mean([np.mean(regions['x_cross_section'][:3]),
-                                 np.mean(regions['x_cross_section'][-3:])])
-            y_baseline = np.mean([np.mean(regions['y_cross_section'][:5]),
-                                 np.mean(regions['y_cross_section'][-5:])])
-
-            # Adaptive width estimation based on data
-            x_width_estimate = self._estimate_peak_width(regions['x_ppm_scale'], regions['x_cross_section'], peak_x_ppm)
-            y_width_estimate = self._estimate_peak_width(regions['y_ppm_scale'], regions['y_cross_section'], peak_y_ppm)
-
-            # Amplitude estimation with baseline correction
-            x_amplitude = abs(peak_intensity - x_baseline) * 1.2  # 20% buffer for fitting
-            y_amplitude = abs(peak_intensity - y_baseline) * 1.2
-
-            x_initial_guess = [
-                x_amplitude,                       # amplitude
-                peak_x_ppm,                        # center
-                x_width_estimate * 0.6,            # sigma (Gaussian component)
-                x_width_estimate * 0.4,            # gamma (Lorentzian component)
-                x_baseline                         # baseline
-            ]
-
-            y_initial_guess = [
-                y_amplitude,                       # amplitude
-                peak_y_ppm,                        # center
-                y_width_estimate * 0.6,            # sigma (Gaussian component, typically broader in Y)
-                y_width_estimate * 0.4,            # gamma (Lorentzian component)
-                y_baseline                         # baseline
-            ]
-
-            # Get GUI parameters if available
-            gui_params = getattr(self, 'gui_params', None)
-
-            # Fit X-dimension with adaptive strategy (single vs multi-peak)
-            x_fit = self.adaptive_fit_1d(regions['x_ppm_scale'], regions['x_cross_section'],
-                                        peak_x_ppm, dimension='x', gui_params=gui_params)
-
-            # CRITICAL FIX: Re-extract Y cross-section at the FITTED X position
-            # Problem: X fit may shift peak position, so Y cross-section must be updated
-            # to ensure it passes through the correct peak in 2D space
-            x_params_temp = self._safe_extract_params(x_fit, default_center=peak_x_ppm)
-            fitted_x_ppm = x_params_temp.get('center', peak_x_ppm)
-
-            # Check if X position shifted significantly
-            x_shift = abs(fitted_x_ppm - peak_x_ppm)
-            if x_shift > 0.001:  # Threshold: 0.001 ppm
-                # Find new X index for the fitted position
-                x_idx_fitted = np.argmin(np.abs(self.ppm_x_axis - fitted_x_ppm))
-
-                # Re-extract Y cross-section at the fitted X position
-                if self.ps2d_data_selector is not None:
-                    # Use PS2D method for consistency
-                    y_cross_full = self.nmr_data[:, x_idx_fitted]
-                    y_ppm_full = self.ppm_y_axis
-
-                    # Apply PS2D's elliptical window selection
-                    y_selection = self.ps2d_data_selector.select_data_elliptical(
-                        y_ppm_full, y_cross_full, fitted_x_ppm, peak_y_ppm, dimension='y'
-                    )
-
-                    # Update regions with new Y cross-section
-                    regions['y_cross_section'] = y_selection['y_selected']
-                    regions['y_ppm_scale'] = y_selection['x_selected']
-                else:
-                    # Fallback: simple extraction at fitted X position
-                    regions['y_cross_section'] = self.nmr_data[:, x_idx_fitted]
-
-            # Fit Y-dimension with adaptive strategy (single vs multi-peak)
-            # Now using the CORRECTED Y cross-section that passes through the fitted X position
-            y_fit = self.adaptive_fit_1d(regions['y_ppm_scale'], regions['y_cross_section'],
-                                        peak_y_ppm, dimension='y', gui_params=gui_params)
-
-            # ITERATIVE REFINEMENT: Re-extract X cross-section at fitted Y position and refine
-            y_params_temp = self._safe_extract_params(y_fit, default_center=peak_y_ppm)
-            fitted_y_ppm = y_params_temp.get('center', peak_y_ppm)
-
-            y_shift = abs(fitted_y_ppm - peak_y_ppm)
-            if y_shift > 0.01:  # Threshold: 0.01 ppm for Y dimension (10x larger due to 15N scale)
-                # Find new Y index for the fitted position
-                y_idx_fitted = np.argmin(np.abs(self.ppm_y_axis - fitted_y_ppm))
-
-                # Re-extract X cross-section at the fitted Y position
-                if self.ps2d_data_selector is not None:
-                    x_cross_full = self.nmr_data[y_idx_fitted, :]
-                    x_ppm_full = self.ppm_x_axis
-
-                    # Apply PS2D's elliptical window selection
-                    x_selection = self.ps2d_data_selector.select_data_elliptical(
-                        x_ppm_full, x_cross_full, fitted_x_ppm, fitted_y_ppm, dimension='x'
-                    )
-
-                    # Update regions with new X cross-section
-                    regions['x_cross_section'] = x_selection['y_selected']
-                    regions['x_ppm_scale'] = x_selection['x_selected']
-
-                    # Refine X fit with updated cross-section
-                    x_fit = self.adaptive_fit_1d(regions['x_ppm_scale'], regions['x_cross_section'],
-                                                fitted_x_ppm, dimension='x', gui_params=gui_params)
+                # Refine X fit with updated cross-section
+                x_fit = self.adaptive_fit_1d(regions['x_ppm_scale'], regions['x_cross_section'],
+                                            fitted_x_ppm, dimension='x', gui_params=gui_params)
 
         # Safely extract parameters from both fits (handles any format)
         x_params = self._safe_extract_params(x_fit, default_center=peak_x_ppm)
@@ -2770,8 +2685,7 @@ class VoigtIntegrator(BaseIntegrator):
             'detected_intensity': detected_intensity,  # Intensity from peak detection (before fitting)
             'gui_window_x': self.fitting_parameters.get('fitting_window_x', 'unknown'),
             'gui_window_y': self.fitting_parameters.get('fitting_window_y', 'unknown'),
-            'window_source': window_optimization.get('optimization_type', 'gui_parameters') if window_optimization else 'gui_parameters',
-            'window_optimization': window_optimization,
+            'window_source': 'gui_parameters',
             'timestamp': pd.Timestamp.now(),
             # PS2D fitting statistics (from x_params if available)
             'chi2': x_params.get('chi2', 0),
@@ -4232,7 +4146,7 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
         else:
             return "Failed"
 
-    def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown", linewidth_constraints=None, all_peaks_context=None, use_dynamic_optimization=True):
+    def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown", linewidth_constraints=None, all_peaks_context=None):
         """
         Enhanced peak fitting with advanced features and consensus fitting integration
 
@@ -4251,8 +4165,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
         all_peaks_context : list of dict, optional
             List of all peaks in the spectrum for overlap detection and 2D routing
             Format: [{'assignment': str, 'x_ppm': float, 'y_ppm': float, 'pos_x': float, 'pos_y': float}, ...]
-        use_dynamic_optimization : bool, optional
-            Enable iterative optimization (default: True)
         """
 
         # Check if simplified parameters are enabled (indicating automated mode preference)
@@ -4293,7 +4205,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
         # Fallback to legacy fitting method with PS2D linewidth constraints and 2D routing support
         result = self.fit_peak_voigt_2d(
             peak_x_ppm, peak_y_ppm, assignment,
-            use_dynamic_optimization=use_dynamic_optimization,
             linewidth_constraints=linewidth_constraints,  # Pass through PS2D constraints
             all_peaks_context=all_peaks_context  # Enable automatic 2D routing for overlapping peaks
         )
@@ -4458,7 +4369,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
                 # Preserve additional metadata
                 'avg_r_squared_local': voigt2d_result.get('avg_r_squared_local'),
                 'avg_r_squared_global': voigt2d_result.get('avg_r_squared_global'),
-                'window_optimization': voigt2d_result.get('window_optimization'),
                 'timestamp': voigt2d_result.get('timestamp')
             }
 

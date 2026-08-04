@@ -285,11 +285,9 @@ class GlobalOptimizationManager:
             logger.info(f"  Peak {i}/{len(peak_list)}: {peak_id} at ({x_pos:.3f}, {y_pos:.1f})")
 
             try:
-                # Standard fitting (no dynamic optimization)
                 # Use enhanced_peak_fitting() for proper API layering
                 result = integrator_instance.enhanced_peak_fitting(
                     x_pos, y_pos, peak_id,
-                    use_dynamic_optimization=False,  # Phase 1 uses standard fitting
                     all_peaks_context=None  # Global optimization handles overlap differently
                 )
 
@@ -520,7 +518,6 @@ class GlobalOptimizationManager:
             # Apply constraints using enhanced_peak_fitting() for proper API layering
             result = integrator_instance.enhanced_peak_fitting(
                 x_pos, y_pos, peak_id,
-                use_dynamic_optimization=True,
                 all_peaks_context=None,  # Global optimization handles overlap differently
                 linewidth_constraints={'x': x_linewidth_constraints, 'y': y_linewidth_constraints}
             )
