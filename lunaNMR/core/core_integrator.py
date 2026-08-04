@@ -2398,8 +2398,9 @@ class VoigtIntegrator(BaseIntegrator):
                 peak_assignments.append(matched_assignment or 'Unknown')
 
             # Extract fix_positions and fix_linewidths from GUI parameters
-            fix_positions = self.gui_params.get('fix_positions', False)
-            fix_linewidths = self.gui_params.get('fix_linewidths', False)
+            gui_params = getattr(self, 'gui_params', None) or {}
+            fix_positions = gui_params.get('fix_positions', False)
+            fix_linewidths = gui_params.get('fix_linewidths', False)
 
             # Fit entire overlap group using 2D multi-peak fitter
             result_2d = self.fit_overlap_group_2d(overlap_group, assignment,

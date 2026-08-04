@@ -3255,6 +3255,23 @@ class EnhancedVoigtFitter:
         Sequential processing fallback that calls existing enhanced_peak_fitting
         method for each peak individually.
         """
+        if parent_integrator is None:
+            parent_integrator = getattr(self, 'parent', None)
+
+        if parent_integrator is None:
+            log_error("Sequential fitting needs the parent integrator for spectrum data")
+            return []
+
+        # Every peak is context for every other one, so overlapping peaks still route
+        # to 2D simultaneous fitting here as they do in cluster-based fitting.
+        all_peaks_context = [{'assignment': str(row.get('Assignment', 'Unknown')),
+                              'x_ppm': float(row['Position_X']),
+                              'y_ppm': float(row['Position_Y']),
+                              'pos_x': float(row['Position_X']),
+                              'pos_y': float(row['Position_Y']),
+                              'intensity': row.get('Height', row.get('Intensity', None))}
+                             for _, row in peak_list.iterrows()]
+
         # Build detection info lookup from fitted_peaks if available
         fitted_peaks_by_pos = {}
         if parent_integrator and hasattr(parent_integrator, 'fitted_peaks'):
@@ -3270,8 +3287,10 @@ class EnhancedVoigtFitter:
             assignment = peak_row.get('Assignment', f'Peak_{i+1}')
 
             try:
-                # Call existing fit_peak_enhanced method (unchanged)
-                result = self.fit_peak_enhanced(peak_x, peak_y, assignment)
+                result = parent_integrator.enhanced_peak_fitting(
+                    peak_x, peak_y, assignment,
+                    all_peaks_context=all_peaks_context
+                )
                 if result:
                     result['processing_mode'] = 'sequential'
                     result['peak_number'] = i + 1
