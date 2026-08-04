@@ -13,6 +13,9 @@ import numpy as np
 
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
+# Below this many peaks, distributing the work costs more than it saves.
+MIN_PEAKS_FOR_PARALLEL = 3
+
 # ML module - imported lazily to avoid circular imports and handle missing sklearn
 _ml_manager = None
 
@@ -685,9 +688,16 @@ class SingleSpectrumProcessor:
     def _process_with_parallel_fitting(self, peak_list: pd.DataFrame) -> Tuple[List[Dict], Optional[Dict]]:
         """Enhanced parallel processing using complete Voigt fitting pipeline
 
+        A list too short to repay the cost of distributing it is fitted sequentially,
+        by the same cluster-based route a sequential run takes.
+
         Returns:
             Tuple of (fitted_results, learned_statistics)
         """
+
+        if len(peak_list) < MIN_PEAKS_FOR_PARALLEL:
+            log_progress(f"Fitting {len(peak_list)} peak(s) sequentially: too few to distribute")
+            return (self._process_with_sequential_fitting(peak_list), None)
 
         log_progress(f"Starting enhanced parallel processing of {len(peak_list)} peaks")
 
@@ -725,7 +735,6 @@ class SingleSpectrumProcessor:
                 skip_series_params = getattr(self, '_skip_series_params', False)
                 result = self.integrator.enhanced_fitter.enhanced_peak_fitting_parallel(
                     peak_list,
-                    use_parallel=True,
                     progress_callback=parallel_progress_callback,
                     locked_clusters_by_assignment=locked_clusters,
                     pre_learned_statistics=pre_learned_statistics,

@@ -1,10 +1,12 @@
 # ABOUTME: Regression tests for fitting peak lists too small to be worth parallelising.
-# ABOUTME: A one- or two-peak list must still come back fitted, not silently empty.
+# ABOUTME: A one- or two-peak list must come back fitted and clustered like any other.
 
 import numpy as np
 import pandas as pd
 
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
+from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
+from lunaNMR.utils.parameter_manager import NMRParameterManager
 
 PEAKS = (('Peak_101', 9.56, 120.3, 1.0),
          ('Peak_106', 9.44, 120.06, 0.8))
@@ -35,25 +37,34 @@ def _peak_list(count):
     return pd.DataFrame(rows)
 
 
-def test_two_peaks_are_fitted_although_parallel_is_skipped():
-    # Below the parallel threshold the fitter takes its sequential route; a series
-    # run of two peaks was coming back with zero fits for every spectrum.
-    integrator = _synthetic_integrator()
-    peaks = _peak_list(2)
+def _fit(count):
+    """Fit a peak list the way the GUI does with parallel processing switched on."""
+    processor = SingleSpectrumProcessor(_synthetic_integrator(), NMRParameterManager())
+    results, _ = processor.process_peak_list(_peak_list(count), {'use_parallel': True})
+    return processor, results
 
-    results, _ = integrator.enhanced_fitter.enhanced_peak_fitting_parallel(
-        peaks, use_parallel=True)
+
+def test_two_peaks_are_fitted_although_parallel_would_not_pay():
+    # A series run of two peaks was reporting zero fits for every spectrum.
+    processor, results = _fit(2)
 
     assert len(results) == 2
     assert all(result['success'] for result in results)
     assert [result['assignment'] for result in results] == ['Peak_101', 'Peak_106']
 
 
-def test_single_peak_is_fitted():
-    integrator = _synthetic_integrator()
+def test_a_single_peak_is_fitted():
+    _, results = _fit(1)
 
-    result, _ = integrator.enhanced_fitter.enhanced_peak_fitting_parallel(
-        _peak_list(1), use_parallel=True)
+    assert len(results) == 1
+    assert results[0]['success']
+    assert results[0]['assignment'] == 'Peak_101'
 
-    assert result['success']
-    assert result['assignment'] == 'Peak_101'
+
+def test_a_small_list_publishes_its_clusters():
+    """Series propagation locks spectrum 1's clusters onto every later spectrum. A run
+    that fits without publishing them leaves the series to recompute its own."""
+    processor, _ = _fit(2)
+
+    assert processor._computed_clusters_by_assignment
+    assert sorted(sum(processor._computed_clusters_by_assignment, [])) == ['Peak_101', 'Peak_106']

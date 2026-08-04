@@ -3126,16 +3126,18 @@ class EnhancedVoigtFitter:
             }
         }
 
-    def enhanced_peak_fitting_parallel(self, peak_list, use_parallel=True, progress_callback=None,
+    def enhanced_peak_fitting_parallel(self, peak_list, progress_callback=None,
                                         parent_integrator=None, locked_clusters_by_assignment=None,
                                         pre_learned_statistics=None, reference_linewidths=None,
                                         skip_series_params=False):
         """
-        New parallel entry point that maintains complete compatibility with existing interface.
+        Fit a peak list with the cluster-based parallel workflow.
+
+        Whether a list is worth parallelising is the caller's decision, so a list of any
+        size arriving here is fitted in parallel.
 
         Args:
             peak_list: DataFrame with peak information or single peak coordinates
-            use_parallel: Enable parallel processing (default: True)
             progress_callback: Progress update callback function
             parent_integrator: Parent integrator with nmr_data (auto-detected if None)
             locked_clusters_by_assignment: Optional pre-computed clusters from reference spectrum
@@ -3172,155 +3174,71 @@ class EnhancedVoigtFitter:
         if parent_integrator is None:
             parent_integrator = getattr(self, 'parent', None)
 
-        # Determine processing method
-        if use_parallel and len(peak_list) > 2:  # Parallel threshold
-            try:
-                # Ensure we have the necessary data context
-                if parent_integrator is None:
-                    # Look for integrator in common places
-                    import inspect
-                    frame = inspect.currentframe()
-                    try:
-                        # Check calling context for integrator
-                        while frame:
-                            frame_locals = frame.f_locals
-                            if 'self' in frame_locals:
-                                candidate = frame_locals['self']
-                                if hasattr(candidate, 'nmr_data') and hasattr(candidate, 'enhanced_fitter'):
-                                    if candidate.enhanced_fitter is self:
-                                        parent_integrator = candidate
-                                        break
-                            frame = frame.f_back
-                    finally:
-                        del frame
-
-                if parent_integrator is None or not hasattr(parent_integrator, 'nmr_data'):
-                    raise ValueError("No parent integrator with nmr_data found - cannot run parallel processing")
-
-                # Thread-safe setup of data context
-                import threading
-                with threading.Lock():
-                    self.nmr_data = parent_integrator.nmr_data
-                    self.ppm_x_axis = parent_integrator.ppm_x_axis
-                    self.ppm_y_axis = parent_integrator.ppm_y_axis
-
-                # Use new parallel implementation
-                from lunaNMR.core.parallel_voigt_processor import ParallelVoigtProcessor
-
-                # Get adaptive optimization setting from gui_params
-                enable_adaptive = True  # Default: ON
-                if parent_integrator and hasattr(parent_integrator, 'gui_params'):
-                    enable_adaptive = parent_integrator.gui_params.get('use_adaptive_optimization', True)
-                log_progress(f"Using parallel Voigt fitting for {len(peak_list)} peaks")
-                parallel_processor = ParallelVoigtProcessor(self, enable_adaptive=enable_adaptive)
-                self.parallel_processor = parallel_processor  # Store for ML training data collection
-
-                # Pass series_params if available (for subsequent spectra in series)
-                # Skip if skip_series_params=True (Independent mode wants fresh adaptive each spectrum)
-                if not skip_series_params and hasattr(self, 'series_params') and self.series_params is not None:
-                    parallel_processor.set_series_params(self.series_params)
-
-                # Pass locked clusters, pre-learned statistics, and reference linewidths
-                results, learned_statistics = parallel_processor.fit_all_peaks_parallel(
-                    peak_list,
-                    progress_callback,
-                    locked_clusters_by_assignment=locked_clusters_by_assignment,
-                    pre_learned_statistics=pre_learned_statistics,
-                    reference_linewidths=reference_linewidths
-                )
-
-                # Store series_params after first spectrum optimization
-                if parallel_processor.series_params and not hasattr(self, 'series_params'):
-                    self.series_params = parallel_processor.series_params
-                elif parallel_processor.series_params:
-                    self.series_params = parallel_processor.series_params
-
-                # Return tuple: (results, learned_statistics)
-                # Handle single result if single peak input
-                if len(results) == 1 and len(peak_list) == 1:
-                    return (results[0], learned_statistics)
-                else:
-                    return (results, learned_statistics)
-
-            except Exception as e:
-                log_warning(f"Parallel processing failed: {e}, falling back to sequential")
-
-        # Fallback to sequential processing (no learning in sequential mode)
-        log_progress(f"Using sequential Voigt fitting for {len(peak_list)} peaks")
-        results = self._enhanced_peak_fitting_sequential(peak_list, progress_callback, parent_integrator)
-        return (results, None)  # Sequential doesn't learn statistics
-
-    def _enhanced_peak_fitting_sequential(self, peak_list, progress_callback=None, parent_integrator=None):
-        """
-        Sequential processing fallback that calls existing enhanced_peak_fitting
-        method for each peak individually.
-        """
+        # Ensure we have the necessary data context
         if parent_integrator is None:
-            parent_integrator = getattr(self, 'parent', None)
-
-        if parent_integrator is None:
-            log_error("Sequential fitting needs the parent integrator for spectrum data")
-            return []
-
-        # Every peak is context for every other one, so overlapping peaks still route
-        # to 2D simultaneous fitting here as they do in cluster-based fitting.
-        all_peaks_context = [{'assignment': str(row.get('Assignment', 'Unknown')),
-                              'x_ppm': float(row['Position_X']),
-                              'y_ppm': float(row['Position_Y']),
-                              'pos_x': float(row['Position_X']),
-                              'pos_y': float(row['Position_Y']),
-                              'intensity': row.get('Height', row.get('Intensity', None))}
-                             for _, row in peak_list.iterrows()]
-
-        # Build detection info lookup from fitted_peaks if available
-        fitted_peaks_by_pos = {}
-        if parent_integrator and hasattr(parent_integrator, 'fitted_peaks'):
-            for fp in parent_integrator.fitted_peaks:
-                key = (fp.get('ppm_x', 0), fp.get('ppm_y', 0))
-                fitted_peaks_by_pos[key] = fp
-
-        results = []
-
-        for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
-            peak_x = float(peak_row['Position_X'])
-            peak_y = float(peak_row['Position_Y'])
-            assignment = peak_row.get('Assignment', f'Peak_{i+1}')
-
+            # Look for integrator in common places
+            import inspect
+            frame = inspect.currentframe()
             try:
-                result = parent_integrator.enhanced_peak_fitting(
-                    peak_x, peak_y, assignment,
-                    all_peaks_context=all_peaks_context
-                )
-                if result:
-                    result['processing_mode'] = 'sequential'
-                    result['peak_number'] = i + 1
+                # Check calling context for integrator
+                while frame:
+                    frame_locals = frame.f_locals
+                    if 'self' in frame_locals:
+                        candidate = frame_locals['self']
+                        if hasattr(candidate, 'nmr_data') and hasattr(candidate, 'enhanced_fitter'):
+                            if candidate.enhanced_fitter is self:
+                                parent_integrator = candidate
+                                break
+                    frame = frame.f_back
+            finally:
+                del frame
 
-                    # Add detection fields from fitted_peaks if available
-                    for (fp_x, fp_y), fp_data in fitted_peaks_by_pos.items():
-                        if abs(fp_x - peak_x) < 0.001 and abs(fp_y - peak_y) < 0.01:
-                            result['detected'] = fp_data.get('detected', True)
-                            result['detection_quality'] = fp_data.get('detection_quality', 'Matched')
-                            result['distance_from_reference'] = fp_data.get('distance_from_reference', 0)
-                            result['distance_from_reference_x'] = fp_data.get('distance_from_reference_x', 0)
-                            result['distance_from_reference_y'] = fp_data.get('distance_from_reference_y', 0)
-                            result['distance_from_reference_elliptical'] = fp_data.get('distance_from_reference_elliptical', 0)
-                            result['reference_retained'] = fp_data.get('reference_retained', False)
-                            break
+        if parent_integrator is None or not hasattr(parent_integrator, 'nmr_data'):
+            raise ValueError("No parent integrator with nmr_data found - cannot run parallel processing")
 
-                    results.append(result)
+        # Thread-safe setup of data context
+        import threading
+        with threading.Lock():
+            self.nmr_data = parent_integrator.nmr_data
+            self.ppm_x_axis = parent_integrator.ppm_x_axis
+            self.ppm_y_axis = parent_integrator.ppm_y_axis
 
-                if progress_callback:
-                    progress = ((i + 1) / len(peak_list)) * 100
-                    progress_callback(progress, f"Sequential: {i+1}/{len(peak_list)}", assignment)
+        from lunaNMR.core.parallel_voigt_processor import ParallelVoigtProcessor
 
-            except Exception as e:
-                log_warning(f"Sequential processing failed for peak {i+1} ({assignment}): {e}")
+        # Get adaptive optimization setting from gui_params
+        enable_adaptive = True  # Default: ON
+        if parent_integrator and hasattr(parent_integrator, 'gui_params'):
+            enable_adaptive = parent_integrator.gui_params.get('use_adaptive_optimization', True)
+        log_progress(f"Using parallel Voigt fitting for {len(peak_list)} peaks")
+        parallel_processor = ParallelVoigtProcessor(self, enable_adaptive=enable_adaptive)
+        self.parallel_processor = parallel_processor  # Store for ML training data collection
 
-        # Return single result if single peak input
+        # Pass series_params if available (for subsequent spectra in series)
+        # Skip if skip_series_params=True (Independent mode wants fresh adaptive each spectrum)
+        if not skip_series_params and hasattr(self, 'series_params') and self.series_params is not None:
+            parallel_processor.set_series_params(self.series_params)
+
+        # Pass locked clusters, pre-learned statistics, and reference linewidths
+        results, learned_statistics = parallel_processor.fit_all_peaks_parallel(
+            peak_list,
+            progress_callback,
+            locked_clusters_by_assignment=locked_clusters_by_assignment,
+            pre_learned_statistics=pre_learned_statistics,
+            reference_linewidths=reference_linewidths
+        )
+
+        # Store series_params after first spectrum optimization
+        if parallel_processor.series_params and not hasattr(self, 'series_params'):
+            self.series_params = parallel_processor.series_params
+        elif parallel_processor.series_params:
+            self.series_params = parallel_processor.series_params
+
+        # Return tuple: (results, learned_statistics)
+        # Handle single result if single peak input
         if len(results) == 1 and len(peak_list) == 1:
-            return results[0]
+            return (results[0], learned_statistics)
         else:
-            return results
+            return (results, learned_statistics)
 
 
 # Additional utility methods for EnhancedVoigtFitter class
