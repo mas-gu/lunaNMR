@@ -48,14 +48,14 @@ class SeriesManagerDialog(BaseDialog):
 
         # Header
         header = QLabel("Saved Series Integrations")
-        header.setStyleSheet(f"font-size: {FONT_SIZE_SECTION_LABEL}px; font-weight: bold;")
+        header.setStyleSheet(f"font-size: {FONT_SIZE_SECTION_LABEL}pt; font-weight: bold;")
         layout.addWidget(header)
 
         # Series list
         self.series_list = QListWidget()
         self.series_list.setStyleSheet(f"""
             QListWidget {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 border: 1px solid #ccc;
                 border-radius: 4px;
             }}

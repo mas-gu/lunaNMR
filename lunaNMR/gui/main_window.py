@@ -933,7 +933,7 @@ class LunaNMRMainWindow(BaseWindow):
                 color: {PRIMARY_BUTTON_TEXT};
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 padding: 6px 8px;
             }}
@@ -951,7 +951,7 @@ class LunaNMRMainWindow(BaseWindow):
         current_label = QLabel("Current Data:")
         current_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SMALL}px;
+                font-size: {FONT_SIZE_SMALL}pt;
                 color: {PRIMARY_TEXT};
                 font-weight: bold;
                 padding-top: {SPACING_SM}px;
@@ -963,7 +963,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.nmr_file_label = QLabel("NMR Spectrum: Not loaded")
         self.nmr_file_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SMALL}px;
+                font-size: {FONT_SIZE_SMALL}pt;
                 color: {SECONDARY_TEXT};
                 padding: 2px 0px;
             }}
@@ -975,7 +975,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.peak_file_label = QLabel("Peak List: Not loaded")
         self.peak_file_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SMALL}px;
+                font-size: {FONT_SIZE_SMALL}pt;
                 color: {SECONDARY_TEXT};
                 padding: 2px 0px;
             }}
@@ -1002,7 +1002,7 @@ class LunaNMRMainWindow(BaseWindow):
         group = QGroupBox("Peak Detection Workflow")
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid #D1D1D6;
@@ -1030,7 +1030,7 @@ class LunaNMRMainWindow(BaseWindow):
         # Style radio buttons
         radio_style = f"""
             QRadioButton {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 color: {PRIMARY_TEXT};
                 padding: 2px;
             }}
@@ -1070,7 +1070,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: 1px solid #D1D1D6;
                 border-radius: 4px;
                 padding: {SPACING_XS}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QDoubleSpinBox:disabled {{
                 background-color: #F0F0F0;
@@ -1092,7 +1092,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: 1px solid #D1D1D6;
                 border-radius: 4px;
                 padding: {SPACING_XS}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QSpinBox:disabled {{
                 background-color: #F0F0F0;
@@ -1107,7 +1107,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.sn_from_gui_checkbox.setStyleSheet(f"""
             QCheckBox {{
                 color: {PRIMARY_TEXT};
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 spacing: {SPACING_XS}px;
             }}
         """)
@@ -1129,12 +1129,12 @@ class LunaNMRMainWindow(BaseWindow):
 
         # Contour min display (read-only)
         self.sn_contour_min_display = QLabel("—")
-        self.sn_contour_min_display.setStyleSheet(f"color: {SECONDARY_TEXT}; font-size: {FONT_SIZE_BODY}px;")
+        self.sn_contour_min_display.setStyleSheet(f"color: {SECONDARY_TEXT}; font-size: {FONT_SIZE_BODY}pt;")
         gui_info_layout.addRow("Contour Min:", self.sn_contour_min_display)
 
         # Effective S/N display (read-only)
         self.sn_effective_sn_display = QLabel("—")
-        self.sn_effective_sn_display.setStyleSheet(f"color: {SECONDARY_TEXT}; font-size: {FONT_SIZE_BODY}px;")
+        self.sn_effective_sn_display.setStyleSheet(f"color: {SECONDARY_TEXT}; font-size: {FONT_SIZE_BODY}pt;")
         gui_info_layout.addRow("Effective S/N:", self.sn_effective_sn_display)
 
         self.sn_gui_info_widget.setVisible(False)  # Initially hidden
@@ -1275,7 +1275,7 @@ class LunaNMRMainWindow(BaseWindow):
                 color: white;
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 padding: 6px 8px;
             }}
@@ -1299,7 +1299,7 @@ class LunaNMRMainWindow(BaseWindow):
                 color: {PRIMARY_BUTTON_TEXT};
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 padding: 6px 8px;
             }}
@@ -1353,7 +1353,7 @@ class LunaNMRMainWindow(BaseWindow):
         group_box = QGroupBox("Control Center")
         group_box.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid #D1D1D6;
@@ -1391,7 +1391,7 @@ class LunaNMRMainWindow(BaseWindow):
                 color: white;
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 padding: 6px 8px;
             }}
@@ -1420,7 +1420,7 @@ class LunaNMRMainWindow(BaseWindow):
                 color: {PRIMARY_BUTTON_TEXT};
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 padding: 6px 8px;
             }}
@@ -1449,7 +1449,7 @@ class LunaNMRMainWindow(BaseWindow):
                 color: {PRIMARY_BUTTON_TEXT};
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 padding: 6px 8px;
             }}
@@ -1483,7 +1483,7 @@ class LunaNMRMainWindow(BaseWindow):
                 color: {SECONDARY_BUTTON_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 padding: 4px 6px;
                 text-align: left;
             }}
@@ -1506,7 +1506,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.edit_mode_status_label = QLabel("Mode: View Only")
         self.edit_mode_status_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SMALL}px;
+                font-size: {FONT_SIZE_SMALL}pt;
                 color: {SECONDARY_TEXT};
             }}
         """)
@@ -1519,7 +1519,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.edit_reference_checkbox = QCheckBox("Edit Reference peaks")
         self.edit_reference_checkbox.setStyleSheet(f"""
             QCheckBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 color: {PRIMARY_TEXT};
             }}
         """)
@@ -1529,7 +1529,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.edit_detected_checkbox = QCheckBox("Edit Detected peaks")
         self.edit_detected_checkbox.setStyleSheet(f"""
             QCheckBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 color: {PRIMARY_TEXT};
             }}
         """)
@@ -1545,7 +1545,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.delete_mode_checkbox = QCheckBox("Delete Mode")
         self.delete_mode_checkbox.setStyleSheet(f"""
             QCheckBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 color: {PRIMARY_TEXT};
             }}
         """)
@@ -1555,7 +1555,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.add_mode_checkbox = QCheckBox("Add Mode")
         self.add_mode_checkbox.setStyleSheet(f"""
             QCheckBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 color: {PRIMARY_TEXT};
             }}
         """)
@@ -1568,7 +1568,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.selected_peak_label = QLabel("No peak selected")
         self.selected_peak_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SMALL}px;
+                font-size: {FONT_SIZE_SMALL}pt;
                 color: {SECONDARY_TEXT};
             }}
         """)
@@ -1599,7 +1599,7 @@ class LunaNMRMainWindow(BaseWindow):
         group = QGroupBox("Shift Peak List")
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 background-color: {FRAME_BG_COLOR};
@@ -1626,7 +1626,7 @@ class LunaNMRMainWindow(BaseWindow):
 
         # 1H offset control
         h_label = QLabel("1H:")
-        h_label.setStyleSheet(f"font-size: {FONT_SIZE_BODY}px; color: {PRIMARY_TEXT};")
+        h_label.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: {PRIMARY_TEXT};")
         spinbox_layout.addWidget(h_label)
 
         self.shift_1h_spin = QDoubleSpinBox()
@@ -1637,7 +1637,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.shift_1h_spin.setSuffix(" ppm")
         self.shift_1h_spin.setStyleSheet(f"""
             QDoubleSpinBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 padding: 2px;
                 border: 1px solid #ccc;
                 border-radius: 4px;
@@ -1651,7 +1651,7 @@ class LunaNMRMainWindow(BaseWindow):
 
         # 15N/13C offset control
         n_label = QLabel("15N/13C:")
-        n_label.setStyleSheet(f"font-size: {FONT_SIZE_BODY}px; color: {PRIMARY_TEXT};")
+        n_label.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: {PRIMARY_TEXT};")
         spinbox_layout.addWidget(n_label)
 
         self.shift_15n_spin = QDoubleSpinBox()
@@ -1662,7 +1662,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.shift_15n_spin.setSuffix(" ppm")
         self.shift_15n_spin.setStyleSheet(f"""
             QDoubleSpinBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 padding: 2px;
                 border: 1px solid #ccc;
                 border-radius: 4px;
@@ -1693,7 +1693,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: 4px 6px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -1722,7 +1722,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: 4px 6px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -1984,7 +1984,7 @@ class LunaNMRMainWindow(BaseWindow):
         group = QGroupBox("Spectrum Display Controls")
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -2020,7 +2020,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: 4px 6px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -2044,7 +2044,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: 4px 6px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -2077,7 +2077,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS//2}px;
                 padding: {SPACING_XS}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
         """)
         params_layout.addRow("Levels:", self.contour_levels_spin)
@@ -2096,7 +2096,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS//2}px;
                 padding: {SPACING_XS}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
         """)
         params_layout.addRow("Min Level:", self.contour_min_spin)
@@ -2115,7 +2115,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS//2}px;
                 padding: {SPACING_XS}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
         """)
         params_layout.addRow("Increment:", self.contour_inc_spin)
@@ -2211,7 +2211,7 @@ class LunaNMRMainWindow(BaseWindow):
         group = QGroupBox("Processing Statistics")
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid #D1D1D6;
@@ -2236,7 +2236,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.stats_label = QLabel("No processing performed yet")
         self.stats_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 color: {PRIMARY_TEXT};
                 padding: {SPACING_SM}px;
             }}
@@ -2258,7 +2258,7 @@ class LunaNMRMainWindow(BaseWindow):
         group = QGroupBox("Advanced Options")
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid #D1D1D6;
@@ -2291,7 +2291,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: 4px 6px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -2317,7 +2317,7 @@ class LunaNMRMainWindow(BaseWindow):
         group = QGroupBox("Voigt Fitting")
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid #D1D1D6;
@@ -2350,7 +2350,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: 6px 8px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
             }}
             QPushButton:hover {{

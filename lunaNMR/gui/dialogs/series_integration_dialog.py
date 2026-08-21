@@ -240,7 +240,7 @@ class SeriesIntegrationDialog(BaseDialog):
         title_label = QLabel("Series Integration")
         title_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
             }}
@@ -334,7 +334,7 @@ class SeriesIntegrationDialog(BaseDialog):
 
         # Info label
         self.file_info_label = QLabel("0 files found")
-        self.file_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {PRIMARY_TEXT};")
+        self.file_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: {PRIMARY_TEXT};")
         layout.addWidget(self.file_info_label)
 
         # File list
@@ -356,7 +356,7 @@ class SeriesIntegrationDialog(BaseDialog):
 
         # X-axis value extracted from filenames: off / time series / titration
         xaxis_label = QLabel("X-axis from filenames:")
-        xaxis_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {PRIMARY_TEXT};")
+        xaxis_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: {PRIMARY_TEXT};")
         bottom_layout.addWidget(xaxis_label)
 
         self.xaxis_mode_combo = QComboBox()
@@ -382,7 +382,7 @@ class SeriesIntegrationDialog(BaseDialog):
 
         # Delay info label (shown when extract delays is enabled)
         self.delay_info_label = QLabel("")
-        self.delay_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-style: italic;")
+        self.delay_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: {SECONDARY_TEXT}; font-style: italic;")
         self.delay_info_label.setVisible(False)
         layout.addWidget(self.delay_info_label)
 
@@ -418,11 +418,11 @@ class SeriesIntegrationDialog(BaseDialog):
         task_layout.setContentsMargins(10, 6, 10, 6)
 
         task_header = QLabel("Current Task:")
-        task_header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-weight: bold; border: none; background: transparent;")
+        task_header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: {SECONDARY_TEXT}; font-weight: bold; border: none; background: transparent;")
         task_layout.addWidget(task_header)
 
         self.status_label = QLabel("Ready to start")
-        self.status_label.setStyleSheet(f"font-size: {FONT_SIZE_BODY}px; color: {PRIMARY_TEXT}; border: none; background: transparent;")
+        self.status_label.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: {PRIMARY_TEXT}; border: none; background: transparent;")
         task_layout.addWidget(self.status_label)
 
         layout.addWidget(task_frame)
@@ -440,18 +440,18 @@ class SeriesIntegrationDialog(BaseDialog):
         stats_layout.setContentsMargins(10, 6, 10, 6)
 
         stats_header = QLabel("📈 Statistics")
-        stats_header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-weight: bold; border: none; background: transparent;")
+        stats_header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: {SECONDARY_TEXT}; font-weight: bold; border: none; background: transparent;")
         stats_layout.addWidget(stats_header)
 
         self.stats_label = QLabel("🔄 Elapsed: -- | ⏱ ETA: --\n✓ Spectra: 0/0")
-        self.stats_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {PRIMARY_TEXT}; border: none; background: transparent;")
+        self.stats_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: {PRIMARY_TEXT}; border: none; background: transparent;")
         stats_layout.addWidget(self.stats_label)
 
         layout.addWidget(stats_frame)
 
         # Log area with header (like Voigt Fitting "Detailed Log")
         log_header = QLabel("📋 Detailed Log")
-        log_header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-weight: bold; margin-top: 4px; border: none; background: transparent;")
+        log_header.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: {SECONDARY_TEXT}; font-weight: bold; margin-top: 4px; border: none; background: transparent;")
         layout.addWidget(log_header)
 
         self.log_text = QTextEdit()
@@ -532,7 +532,7 @@ class SeriesIntegrationDialog(BaseDialog):
         """Get standard group box style."""
         return f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -557,7 +557,7 @@ class SeriesIntegrationDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -573,7 +573,7 @@ class SeriesIntegrationDialog(BaseDialog):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -593,7 +593,7 @@ class SeriesIntegrationDialog(BaseDialog):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -613,7 +613,7 @@ class SeriesIntegrationDialog(BaseDialog):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -697,7 +697,7 @@ class SeriesIntegrationDialog(BaseDialog):
 
         if not files_with_values:
             self.delay_info_label.setText(f"⚠ No {noun} found in filenames (expected pattern: {pattern_hint})")
-            self.delay_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: #FF6B6B; font-style: italic;")
+            self.delay_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: #FF6B6B; font-style: italic;")
         else:
             values = [d for _, d in files_with_values]
             missing = len(self.nmr_files) - len(files_with_values)
@@ -707,7 +707,7 @@ class SeriesIntegrationDialog(BaseDialog):
                 info_text += f" ({missing} files without {noun})"
 
             self.delay_info_label.setText(info_text)
-            self.delay_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-style: italic;")
+            self.delay_info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: {SECONDARY_TEXT}; font-style: italic;")
 
         self.delay_info_label.setVisible(True)
 

@@ -18,6 +18,7 @@ from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT, SUCCESS_GREEN, ERROR_RED, WARNING_ORANGE,
+    INFO_BLUE,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
@@ -87,7 +88,7 @@ class ResultsBrowserDialog(BaseDialog):
         title_label = QLabel("Series Integration Results")
         title_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 padding-bottom: {SPACING_SM}px;
@@ -145,7 +146,7 @@ class ResultsBrowserDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -164,7 +165,7 @@ class ResultsBrowserDialog(BaseDialog):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -200,7 +201,7 @@ class ResultsBrowserDialog(BaseDialog):
         for lbl in [self.total_spectra_label, self.successful_spectra_label,
                     self.failed_spectra_label, self.total_peaks_label,
                     self.avg_detection_label, self.avg_r_squared_label]:
-            lbl.setStyleSheet(f"font-size: {FONT_SIZE_BODY}px; padding: 2px;")
+            lbl.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; padding: 2px;")
             stats_layout.addWidget(lbl)
 
         layout.addWidget(stats_group)
@@ -250,7 +251,7 @@ class ResultsBrowserDialog(BaseDialog):
             QTableWidget {{
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
-                font-size: {FONT_SIZE_SMALL}px;
+                font-size: {FONT_SIZE_SMALL}pt;
             }}
             QTableWidget::item {{
                 padding: 4px;
@@ -328,7 +329,7 @@ class ResultsBrowserDialog(BaseDialog):
 
         for lbl in [self.spectrum_status_label, self.spectrum_peaks_label,
                     self.spectrum_detection_label, self.spectrum_avg_r2_label]:
-            lbl.setStyleSheet(f"font-size: {FONT_SIZE_BODY}px; padding: 2px;")
+            lbl.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; padding: 2px;")
             info_inner.addWidget(lbl)
 
         info_layout.addWidget(info_group)
@@ -347,7 +348,7 @@ class ResultsBrowserDialog(BaseDialog):
             QTableWidget {{
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
-                font-size: {FONT_SIZE_SMALL}px;
+                font-size: {FONT_SIZE_SMALL}pt;
             }}
         """)
         splitter.addWidget(self.details_table)
@@ -361,7 +362,7 @@ class ResultsBrowserDialog(BaseDialog):
         """Return standard QGroupBox stylesheet."""
         return f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -426,10 +427,10 @@ class ResultsBrowserDialog(BaseDialog):
 
         # Color code success/failure
         self.successful_spectra_label.setStyleSheet(
-            f"font-size: {FONT_SIZE_BODY}px; color: {SUCCESS_GREEN}; padding: 2px;")
+            f"font-size: {FONT_SIZE_BODY}pt; color: {SUCCESS_GREEN}; padding: 2px;")
         if failed > 0:
             self.failed_spectra_label.setStyleSheet(
-                f"font-size: {FONT_SIZE_BODY}px; color: {ERROR_RED}; padding: 2px;")
+                f"font-size: {FONT_SIZE_BODY}pt; color: {ERROR_RED}; padding: 2px;")
 
         # Draw quality distribution chart
         self.draw_quality_chart(all_r_squared)
@@ -440,8 +441,8 @@ class ResultsBrowserDialog(BaseDialog):
         ax.clear()
 
         if r_squared_values:
-            ax.hist(r_squared_values, bins=20, color='#007AFF', alpha=0.7, edgecolor='white')
-            ax.axvline(x=0.8, color='#FF3B30', linestyle='--', label='R²=0.8 threshold')
+            ax.hist(r_squared_values, bins=20, color=INFO_BLUE, alpha=0.7, edgecolor='white')
+            ax.axvline(x=0.8, color=ERROR_RED, linestyle='--', label='R²=0.8 threshold')
             ax.set_xlabel('R² Value')
             ax.set_ylabel('Count')
             ax.set_title('Fitting Quality Distribution')
@@ -593,7 +594,7 @@ class ResultsBrowserDialog(BaseDialog):
 
         if values:
             x = range(len(values))
-            ax.plot(x, values, 'o-', color='#007AFF', linewidth=2, markersize=6)
+            ax.plot(x, values, 'o-', color=INFO_BLUE, linewidth=2, markersize=6)
             ax.set_xticks(x)
             ax.set_xticklabels([s[:15] + '...' if len(s) > 15 else s for s in spectra],
                               rotation=45, ha='right')
@@ -623,7 +624,7 @@ class ResultsBrowserDialog(BaseDialog):
         status_color = SUCCESS_GREEN if status == 'success' else ERROR_RED
         self.spectrum_status_label.setText(f"Status: {status}")
         self.spectrum_status_label.setStyleSheet(
-            f"font-size: {FONT_SIZE_BODY}px; color: {status_color}; padding: 2px;")
+            f"font-size: {FONT_SIZE_BODY}pt; color: {status_color}; padding: 2px;")
 
         total_peaks = data.get('total_peaks', 0)
         detected = data.get('detected_peaks', 0)

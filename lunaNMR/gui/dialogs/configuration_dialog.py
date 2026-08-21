@@ -16,6 +16,7 @@ from lunaNMR.gui.styles.design_system import (
     PRIMARY_TEXT, PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
+    DESTRUCTIVE_BUTTON_BG,
     FRAME_BG_COLOR
 )
 
@@ -80,7 +81,7 @@ class ConfigurationDialog(BaseDialog):
         title_label = QLabel("Configuration Management")
         title_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 padding-bottom: {SPACING_SM}px;
@@ -110,7 +111,7 @@ class ConfigurationDialog(BaseDialog):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -134,7 +135,7 @@ class ConfigurationDialog(BaseDialog):
         group = QGroupBox("Configuration Files")
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -164,7 +165,7 @@ class ConfigurationDialog(BaseDialog):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {PRIMARY_BUTTON_HOVER};
@@ -183,7 +184,7 @@ class ConfigurationDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -197,12 +198,12 @@ class ConfigurationDialog(BaseDialog):
         reset_button.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         reset_button.setStyleSheet(f"""
             QPushButton {{
-                background-color: #FF3B30;
+                background-color: {DESTRUCTIVE_BUTTON_BG};
                 color: white;
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: #FF2D20;
@@ -225,7 +226,7 @@ class ConfigurationDialog(BaseDialog):
         group = QGroupBox("Current Settings")
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -250,7 +251,7 @@ class ConfigurationDialog(BaseDialog):
         self.config_text.setStyleSheet(f"""
             QTextEdit {{
                 font-family: 'Courier New', monospace;
-                font-size: {FONT_SIZE_SMALL}px;
+                font-size: {FONT_SIZE_SMALL}pt;
                 background-color: white;
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;

@@ -44,7 +44,7 @@ DEFAULT_COLORS = [
 # Shared widget styles — mirror the main window's Spectrum Display Controls / Shift sections
 _GROUPBOX_STYLE = f"""
     QGroupBox {{
-        font-size: {FONT_SIZE_SECTION_LABEL}px;
+        font-size: {FONT_SIZE_SECTION_LABEL}pt;
         font-weight: bold;
         color: {PRIMARY_TEXT};
         border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -66,7 +66,7 @@ _SECONDARY_BTN_STYLE = f"""
         border: 1px solid {SECONDARY_BUTTON_BORDER};
         border-radius: {BUTTON_CORNER_RADIUS}px;
         padding: 4px 6px;
-        font-size: {FONT_SIZE_BODY}px;
+        font-size: {FONT_SIZE_BODY}pt;
     }}
     QPushButton:hover {{ background-color: {SECONDARY_BUTTON_HOVER}; }}
     QPushButton:pressed {{ background-color: {SECONDARY_BUTTON_BORDER}; }}
@@ -79,7 +79,7 @@ _PRIMARY_BTN_STYLE = f"""
         border: none;
         border-radius: {BUTTON_CORNER_RADIUS}px;
         padding: 4px 6px;
-        font-size: {FONT_SIZE_BODY}px;
+        font-size: {FONT_SIZE_BODY}pt;
         font-weight: bold;
     }}
     QPushButton:hover {{ background-color: {PRIMARY_BUTTON_HOVER}; }}
@@ -93,7 +93,7 @@ _SPIN_STYLE = f"""
         border: 1px solid {SECONDARY_BUTTON_BORDER};
         border-radius: {BUTTON_CORNER_RADIUS // 2}px;
         padding: {SPACING_XS}px;
-        font-size: {FONT_SIZE_BODY}px;
+        font-size: {FONT_SIZE_BODY}pt;
     }}
 """
 
@@ -426,7 +426,7 @@ class SpectrumLibraryPanel(QWidget):
         scale_row = QHBoxLayout()
         scale_row.setSpacing(SPACING_XS)
         scale_label = QLabel('Scale:')
-        scale_label.setStyleSheet(f'font-size: {FONT_SIZE_BODY}px; color: {PRIMARY_TEXT};')
+        scale_label.setStyleSheet(f'font-size: {FONT_SIZE_BODY}pt; color: {PRIMARY_TEXT};')
         scale_row.addWidget(scale_label)
         self._trace_scale_slider = QSlider(Qt.Horizontal)
         self._trace_scale_slider.setRange(1, TRACE_SCALE_MAX_PERCENT)  # → amplitude 0.01–20×
@@ -552,7 +552,7 @@ class SpectrumLibraryPanel(QWidget):
         spin_row = QHBoxLayout()
         spin_row.setSpacing(SPACING_XS)
         h_label = QLabel('1H:')
-        h_label.setStyleSheet(f'font-size: {FONT_SIZE_BODY}px; color: {PRIMARY_TEXT};')
+        h_label.setStyleSheet(f'font-size: {FONT_SIZE_BODY}pt; color: {PRIMARY_TEXT};')
         spin_row.addWidget(h_label)
         self._shift_h_spin = QDoubleSpinBox()
         self._shift_h_spin.setRange(-10.0, 10.0)
@@ -563,7 +563,7 @@ class SpectrumLibraryPanel(QWidget):
         spin_row.addWidget(self._shift_h_spin)
 
         n_label = QLabel('15N/13C:')
-        n_label.setStyleSheet(f'font-size: {FONT_SIZE_BODY}px; color: {PRIMARY_TEXT};')
+        n_label.setStyleSheet(f'font-size: {FONT_SIZE_BODY}pt; color: {PRIMARY_TEXT};')
         spin_row.addWidget(n_label)
         self._shift_n_spin = QDoubleSpinBox()
         self._shift_n_spin.setRange(-50.0, 50.0)

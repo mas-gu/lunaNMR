@@ -85,12 +85,12 @@ class PeakNavigatorTable(QWidget):
 
         # Status label
         self.status_label = QLabel("No peaks loaded")
-        self.status_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT};")
+        self.status_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: {SECONDARY_TEXT};")
         layout.addWidget(self.status_label)
 
         # Quality legend
         legend = QLabel("Quality: ✅ R²≥0.85  🟠 R²<0.85  ❌ Failed")
-        legend.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {PRIMARY_TEXT};")
+        legend.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: {PRIMARY_TEXT};")
         layout.addWidget(legend)
 
         # Navigation buttons
@@ -159,7 +159,7 @@ class PeakNavigatorTable(QWidget):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};

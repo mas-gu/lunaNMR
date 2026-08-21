@@ -120,7 +120,7 @@ class MissingFilesDialog(BaseDialog):
         header_text = QLabel("Some files referenced by this project could not be found.")
         header_text.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
             }}
@@ -135,7 +135,7 @@ class MissingFilesDialog(BaseDialog):
         )
         instructions.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 color: {SECONDARY_TEXT};
                 padding-bottom: {SPACING_SM}px;
             }}
@@ -257,7 +257,7 @@ class MissingFilesDialog(BaseDialog):
         type_label = QLabel(self.get_file_type_label(file_type))
         type_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SMALL}px;
+                font-size: {FONT_SIZE_SMALL}pt;
                 color: {DISABLED_TEXT};
                 font-weight: bold;
             }}
@@ -269,7 +269,7 @@ class MissingFilesDialog(BaseDialog):
         path_label = QLabel(path_obj.name)
         path_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 color: {PRIMARY_TEXT};
             }}
         """)
@@ -280,7 +280,7 @@ class MissingFilesDialog(BaseDialog):
         status_label = QLabel("")
         status_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SMALL}px;
+                font-size: {FONT_SIZE_SMALL}pt;
                 color: {SECONDARY_TEXT};
                 font-style: italic;
             }}

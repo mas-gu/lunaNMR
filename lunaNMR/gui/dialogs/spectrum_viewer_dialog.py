@@ -21,6 +21,7 @@ from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT,
+    PRIMARY_BUTTON_BG, SUCCESS_GREEN, ERROR_RED,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
     FRAME_BG_COLOR
@@ -159,7 +160,7 @@ class SpectrumViewerDialog(BaseDialog):
         title_label = QLabel(f"Spectrum: {self.spectrum_name}")
         title_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
             }}
@@ -178,8 +179,8 @@ class SpectrumViewerDialog(BaseDialog):
             info_label = QLabel(info_text)
             info_label.setStyleSheet(f"""
                 QLabel {{
-                    font-size: {FONT_SIZE_BODY}px;
-                    color: {'#34C759' if status == 'success' else '#FF3B30'};
+                    font-size: {FONT_SIZE_BODY}pt;
+                    color: {SUCCESS_GREEN if status == 'success' else ERROR_RED};
                 }}
             """)
             layout.addWidget(info_label)
@@ -455,19 +456,19 @@ class SpectrumViewerDialog(BaseDialog):
 
         # Peak list
         self.peak_list = QListWidget()
-        self.peak_list.setStyleSheet("""
-            QListWidget {
+        self.peak_list.setStyleSheet(f"""
+            QListWidget {{
                 background-color: white;
                 border: 1px solid #C7C7CC;
                 border-radius: 6px;
-            }
-            QListWidget::item {
+            }}
+            QListWidget::item {{
                 padding: 4px;
-            }
-            QListWidget::item:selected {
-                background-color: #007AFF;
+            }}
+            QListWidget::item:selected {{
+                background-color: {PRIMARY_BUTTON_BG};
                 color: white;
-            }
+            }}
         """)
         self.peak_list.itemClicked.connect(self._on_peak_selected)
         peak_layout.addWidget(self.peak_list)
@@ -496,7 +497,7 @@ class SpectrumViewerDialog(BaseDialog):
         self.peak_info_label.setWordWrap(True)
         self.peak_info_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SMALL}px;
+                font-size: {FONT_SIZE_SMALL}pt;
                 color: {SECONDARY_TEXT};
                 padding: {SPACING_SM}px;
                 background-color: white;
@@ -593,7 +594,7 @@ class SpectrumViewerDialog(BaseDialog):
         """Get standard group box style."""
         return f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -618,7 +619,7 @@ class SpectrumViewerDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};

@@ -77,7 +77,7 @@ class SpectrumListItem(QWidget):
 
         # Name label
         name_label = QLabel(spectrum_name)
-        name_label.setStyleSheet(f"font-size: {FONT_SIZE_BODY}px;")
+        name_label.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt;")
         layout.addWidget(name_label, stretch=1)
 
         self.setLayout(layout)
@@ -537,7 +537,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         spectra_layout.setSpacing(2)
 
         info_label = QLabel(f"{len(self.spectra)} spectra available")
-        info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT};")
+        info_label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: {SECONDARY_TEXT};")
         spectra_layout.addWidget(info_label)
 
         # Scroll area for spectrum list
@@ -624,7 +624,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {PRIMARY_BUTTON_HOVER};
@@ -758,7 +758,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.edit_status_label = QLabel("")
         self.edit_status_label.setWordWrap(True)
         self.edit_status_label.setStyleSheet(
-            f"font-size: {FONT_SIZE_SMALL}px; color: {SECONDARY_TEXT}; font-style: italic;")
+            f"font-size: {FONT_SIZE_SMALL}pt; color: {SECONDARY_TEXT}; font-style: italic;")
         peak_layout.addWidget(self.edit_status_label)
 
         self._set_edit_buttons_enabled(False)
@@ -824,7 +824,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
             }}
             QPushButton:checked {{
@@ -1113,7 +1113,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
             }}
             QPushButton:checked {{
@@ -1414,7 +1414,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         """Get standard group box style."""
         return f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -1439,7 +1439,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -1460,7 +1460,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         group = QGroupBox("Contour Controls (Applied to All Spectra)")
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -1518,7 +1518,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {PRIMARY_BUTTON_HOVER};
@@ -1536,7 +1536,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -1567,7 +1567,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};

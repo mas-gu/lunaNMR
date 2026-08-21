@@ -15,6 +15,7 @@ from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT,
+    INFO_BLUE,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
@@ -102,7 +103,7 @@ class DataLoadingDialog(BaseDialog):
         title_label = QLabel(title_text)
         title_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 padding-bottom: {SPACING_SM}px;
@@ -122,7 +123,7 @@ class DataLoadingDialog(BaseDialog):
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SMALL}px;
+                font-size: {FONT_SIZE_SMALL}pt;
                 color: {SECONDARY_TEXT};
                 padding: {SPACING_SM}px 0;
             }}
@@ -148,7 +149,7 @@ class DataLoadingDialog(BaseDialog):
         group = QGroupBox("NMR Spectrum File")
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -174,7 +175,7 @@ class DataLoadingDialog(BaseDialog):
         self.nmr_path_edit.setPlaceholderText("No file selected")
         self.nmr_path_edit.setStyleSheet(f"""
             QLineEdit {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 color: {PRIMARY_TEXT};
                 background-color: white;
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -195,7 +196,7 @@ class DataLoadingDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -225,7 +226,7 @@ class DataLoadingDialog(BaseDialog):
         group = QGroupBox(title)
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -251,7 +252,7 @@ class DataLoadingDialog(BaseDialog):
         self.peak_path_edit.setPlaceholderText("No file selected (optional)" if self.workflow_mode == 'sn_threshold' else "No file selected")
         self.peak_path_edit.setStyleSheet(f"""
             QLineEdit {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 color: {PRIMARY_TEXT};
                 background-color: white;
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -272,7 +273,7 @@ class DataLoadingDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -311,7 +312,7 @@ class DataLoadingDialog(BaseDialog):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
             }}
             QPushButton:hover:enabled {{
@@ -339,7 +340,7 @@ class DataLoadingDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -421,8 +422,8 @@ class DataLoadingDialog(BaseDialog):
             self.status_label.setText(" | ".join(status_parts))
             self.status_label.setStyleSheet(f"""
                 QLabel {{
-                    font-size: {FONT_SIZE_SMALL}px;
-                    color: #007AFF;
+                    font-size: {FONT_SIZE_SMALL}pt;
+                    color: {INFO_BLUE};
                     padding: {SPACING_SM}px 0;
                 }}
             """)

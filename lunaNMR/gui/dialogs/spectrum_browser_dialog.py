@@ -17,6 +17,7 @@ from lunaNMR.gui.styles.design_system import (
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, PRIMARY_TEXT, PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
+    INFO_BLUE,
     FRAME_BG_COLOR
 )
 
@@ -99,7 +100,7 @@ class SpectrumBrowserDialog(BaseDialog):
         title_label = QLabel("Individual Spectrum Browser")
         title_label.setStyleSheet(f"""
             QLabel {{
-                font-size: {FONT_SIZE_SECTION_LABEL}px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
             }}
@@ -117,8 +118,8 @@ class SpectrumBrowserDialog(BaseDialog):
             info_label = QLabel(info_text)
             info_label.setStyleSheet(f"""
                 QLabel {{
-                    font-size: {FONT_SIZE_BODY}px;
-                    color: #007AFF;
+                    font-size: {FONT_SIZE_BODY}pt;
+                    color: {INFO_BLUE};
                 }}
             """)
             title_layout.addWidget(info_label)
@@ -148,7 +149,7 @@ class SpectrumBrowserDialog(BaseDialog):
         group = QGroupBox("Filter & Search")
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -210,7 +211,7 @@ class SpectrumBrowserDialog(BaseDialog):
         group = QGroupBox("Spectrum List")
         group.setStyleSheet(f"""
             QGroupBox {{
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
                 font-weight: bold;
                 color: {PRIMARY_TEXT};
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
@@ -256,19 +257,19 @@ class SpectrumBrowserDialog(BaseDialog):
         self.tree.itemClicked.connect(self.on_spectrum_select)
 
         # Style
-        self.tree.setStyleSheet("""
-            QTreeWidget {
+        self.tree.setStyleSheet(f"""
+            QTreeWidget {{
                 background-color: white;
                 border: 1px solid #C7C7CC;
                 border-radius: 6px;
-            }
-            QTreeWidget::item {
+            }}
+            QTreeWidget::item {{
                 padding: 4px;
-            }
-            QTreeWidget::item:selected {
-                background-color: #007AFF;
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {PRIMARY_BUTTON_BG};
                 color: white;
-            }
+            }}
         """)
 
         layout.addWidget(self.tree)
@@ -295,7 +296,7 @@ class SpectrumBrowserDialog(BaseDialog):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {PRIMARY_BUTTON_HOVER};
@@ -314,7 +315,7 @@ class SpectrumBrowserDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -333,7 +334,7 @@ class SpectrumBrowserDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
@@ -354,7 +355,7 @@ class SpectrumBrowserDialog(BaseDialog):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}px;
+                font-size: {FONT_SIZE_BODY}pt;
             }}
             QPushButton:hover {{
                 background-color: {SECONDARY_BUTTON_HOVER};
