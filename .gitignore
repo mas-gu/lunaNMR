@@ -348,3 +348,7 @@ data_example/tmp/
 # AI assistant config directories
 .serena/
 docs/landing/
+
+# Developer convenience targets (schematic render, test suite)
+Makefile
+docs/schematic/
