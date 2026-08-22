@@ -34,7 +34,7 @@ class TestFractionBound:
         assert fb < hyperbola
 
 
-class TestObservables:
+class TestBindingModels:
     def test_csp_model_scales_fraction(self):
         from kd_models import csp_model, fraction_bound
         L, P, Kd, dd_max = 20.0, 50.0, 10.0, 0.3
