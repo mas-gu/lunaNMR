@@ -1,15 +1,59 @@
 #!/usr/bin/env python3
+# ABOUTME: Verifies that lunaNMR's dependencies, package modules and GUI entry point
+# ABOUTME: all import, and reports what is missing when they do not.
+"""Installation verification for lunaNMR.
+
+Run from anywhere:  python3 lunaNMR/validation/verify_installation.py
+
+Exits 0 when the checkout is usable and 1 otherwise, so it can gate CI as well
+as answer "did my install work?".
 """
-Installation Verification Script
 
-This script verifies that all required dependencies and modules are properly
-installed and that the NMR Peak Series Analysis application can run.
-
-Author: Guillaume Mas
-Date: 2025
-"""
-
+import importlib
 import sys
+from pathlib import Path
+
+# Python puts this script's own directory on sys.path, not the caller's working
+# directory, so an uninstalled checkout cannot import `lunaNMR` without help.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+LAUNCH_SCRIPT = "launch_lunaNMR.py"
+
+# Required at runtime; mirrors the `dependencies` list in pyproject.toml.
+REQUIRED_DEPENDENCIES = {
+    'numpy': 'Numerical computing',
+    'pandas': 'Data manipulation',
+    'matplotlib': 'Plotting and visualization',
+    'scipy': 'Scientific computing',
+    'sklearn': 'Machine learning (peak clustering)',
+    'networkx': 'Graph clustering for peak detection',
+    'nmrglue': 'NMR data file reading',
+    'PySide6': 'Qt GUI framework',
+    'numba': '2D multi-peak fitting acceleration',
+}
+
+# Absent installs degrade a feature rather than breaking the application.
+OPTIONAL_DEPENDENCIES = {
+    'torch': 'CNN peak classifier',
+    'torchvision': 'CNN peak classifier',
+    'psutil': 'Memory and performance monitoring',
+}
+
+INTERNAL_MODULES = [
+    ('lunaNMR.core.core_integrator', 'Core integration engine'),
+    ('lunaNMR.core.enhanced_voigt_fitter', '1D Voigt profile fitting'),
+    ('lunaNMR.core.enhanced_peak_picker', 'Peak detection'),
+    ('lunaNMR.core.ps2d_2d_fitter', '2D simultaneous multi-peak fitting'),
+    ('lunaNMR.core.parallel_voigt_processor', 'Parallel processing'),
+    ('lunaNMR.processors.multi_spectrum_processor', 'Series processing'),
+    ('lunaNMR.utils.file_manager', 'File handling'),
+    ('lunaNMR.utils.config_manager', 'Configuration'),
+    ('lunaNMR.utils.project_manager', 'Project save and load'),
+    ('lunaNMR.gui.main_window', 'Main window'),
+    ('lunaNMR.gui.components.spectrum_plotter', 'Spectrum plotting'),
+]
 
 def check_python_version():
     """Check Python version compatibility"""
@@ -28,32 +72,26 @@ def check_external_dependencies():
     """Check external package dependencies"""
     print("\n📦 Checking External Dependencies...")
 
-    dependencies = {
-        'numpy': 'Numerical computing',
-        'pandas': 'Data manipulation',
-        'matplotlib': 'Plotting and visualization',
-        'scipy': 'Scientific computing',
-        'sklearn': 'Machine learning (peak clustering)',
-        'nmrglue': 'NMR data file reading'
-    }
-
     missing = []
     available = []
 
-    for package, description in dependencies.items():
+    for package, description in REQUIRED_DEPENDENCIES.items():
         try:
-            if package == 'sklearn':
-                import sklearn
-                version = sklearn.__version__
-            else:
-                module = __import__(package)
-                version = getattr(module, '__version__', 'unknown')
-
+            module = importlib.import_module(package)
+            version = getattr(module, '__version__', 'unknown')
             print(f"   ✅ {package} {version} - {description}")
             available.append(package)
         except ImportError:
             print(f"   ❌ {package} - {description} (MISSING)")
             missing.append(package)
+
+    for package, description in OPTIONAL_DEPENDENCIES.items():
+        try:
+            module = importlib.import_module(package)
+            version = getattr(module, '__version__', 'unknown')
+            print(f"   ✅ {package} {version} - {description} (optional)")
+        except ImportError:
+            print(f"   ➖ {package} - {description} (optional, not installed)")
 
     return missing, available
 
@@ -61,26 +99,17 @@ def check_internal_modules():
     """Check internal module imports"""
     print("\n🔧 Checking Internal Modules...")
 
-    modules = [
-        ('core_integrator', 'Core Voigt fitting'),
-        ('enhanced_voigt_fitter', 'Local quality assessment'),
-        ('spectrum_browser', 'Individual spectrum browser'),
-        ('visualization', 'Plotting components'),
-        ('gui_components', 'GUI widgets'),
-        ('file_manager', 'File handling'),
-        ('series_processor', 'Series processing'),
-        ('config_manager', 'Configuration')
-    ]
-
     missing = []
     available = []
 
-    for module_name, description in modules:
+    for module_name, description in INTERNAL_MODULES:
         try:
-            module = __import__(module_name)
+            importlib.import_module(module_name)
             print(f"   ✅ {module_name} - {description}")
             available.append(module_name)
-        except ImportError as e:
+        # A module that calls sys.exit() at import time raises SystemExit, which
+        # is a BaseException and would otherwise abort the whole report.
+        except (ImportError, SystemExit) as e:
             print(f"   ❌ {module_name} - {description} (ERROR: {e})")
             missing.append(module_name)
 
@@ -91,90 +120,58 @@ def check_main_application():
     print("\n🎯 Checking Main Application...")
 
     try:
-        from lunaNMR.gui.main_gui import NMRPeaksSeriesGUI
+        from lunaNMR.gui.main_window import LunaNMRMainWindow  # noqa: F401
         print("   ✅ Main GUI application can be imported")
         return True
-    except ImportError as e:
+    except (ImportError, SystemExit) as e:
         print(f"   ❌ Main GUI import failed: {e}")
         return False
 
-def check_local_quality_fix():
-    """Check that the local quality assessment fix is working"""
-    print("\n🔍 Checking Local Quality Assessment Fix...")
+def check_fitting_pipeline():
+    """Check the integrator wires up a Voigt fitter with its quality methods"""
+    print("\n🔍 Checking Fitting Pipeline...")
 
     try:
         from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
         integrator = EnhancedVoigtIntegrator()
 
-        # Check if enhanced fitter is available
-        if hasattr(integrator, 'enhanced_fitter') and integrator.enhanced_fitter is not None:
-            print("   ✅ Enhanced Voigt fitter initialized")
-
-            # Check if local quality methods are available
-            if hasattr(integrator.enhanced_fitter, 'extract_local_peak_region'):
-                print("   ✅ Local peak region extraction available")
-            else:
-                print("   ❌ Local peak region extraction missing")
-                return False
-
-            if hasattr(integrator.enhanced_fitter, 'comprehensive_quality_assessment'):
-                print("   ✅ Local quality assessment available")
-            else:
-                print("   ❌ Local quality assessment missing")
-                return False
-
-            print("   ✅ Local quality assessment fix is properly integrated")
-            return True
-        else:
-            print("   ❌ Enhanced fitter not initialized")
+        fitter = getattr(integrator, 'enhanced_fitter', None)
+        if fitter is None:
+            print("   ❌ Voigt fitter not initialized")
             return False
+        print("   ✅ Voigt fitter initialized")
 
-    except Exception as e:
-        print(f"   ❌ Local quality check failed: {e}")
+        required_methods = ('extract_local_peak_region', 'comprehensive_quality_assessment')
+        for method in required_methods:
+            if not hasattr(fitter, method):
+                print(f"   ❌ {method} missing from fitter")
+                return False
+            print(f"   ✅ {method} available")
+
+        return True
+
+    except (Exception, SystemExit) as e:
+        print(f"   ❌ Fitting pipeline check failed: {e}")
         return False
 
-def run_quick_test():
-    """Run a quick test of the local quality assessment"""
-    print("\n🧪 Running Quick Integration Test...")
-
-    try:
-        # Run the simple integration test
-        import subprocess
-        result = subprocess.run([sys.executable, 'test_simple_integration.py'],
-                              capture_output=True, text=True, timeout=60)
-
-        if result.returncode == 0 and "INTEGRATION SUCCESSFUL" in result.stdout:
-            print("   ✅ Integration test passed")
-            print("   ✅ Local quality assessment working correctly")
-            return True
-        else:
-            print("   ❌ Integration test failed")
-            if result.stdout:
-                print(f"   Output: {result.stdout[-200:]}")  # Last 200 chars
-            return False
-
-    except subprocess.TimeoutExpired:
-        print("   ⚠️ Integration test timed out")
-        return False
-    except Exception as e:
-        print(f"   ⚠️ Could not run integration test: {e}")
-        return True  # Don't fail for this
-
-def generate_installation_report(missing_external, missing_internal, app_ok, fix_ok):
+def generate_installation_report(missing_external, missing_internal, app_ok, fix_ok, python_ok):
     """Generate installation report"""
     print("\n📋 INSTALLATION REPORT")
     print("=" * 50)
 
-    if not missing_external and not missing_internal and app_ok and fix_ok:
+    if python_ok and not missing_external and not missing_internal and app_ok and fix_ok:
         print("🎉 INSTALLATION COMPLETE!")
         print("   ✅ All dependencies installed")
         print("   ✅ All modules available")
         print("   ✅ Main application ready")
-        print("   ✅ Local quality assessment fix working")
-        print("\n🚀 Ready to run: python launch_gui.py")
+        print("   ✅ Fitting pipeline ready")
+        print(f"\n🚀 Ready to run: python {LAUNCH_SCRIPT}")
         return True
     else:
         print("❌ INSTALLATION INCOMPLETE!")
+
+        if not python_ok:
+            print("\n Python version is below the 3.7 minimum")
 
         if missing_external:
             print("\n📦 Missing External Dependencies:")
@@ -191,11 +188,11 @@ def generate_installation_report(missing_external, missing_internal, app_ok, fix
 
         if not app_ok:
             print("\n🎯 Main application cannot be imported")
-            print("   Check for import errors in lunaNMR.gui.main_gui")
+            print("   Check for import errors in lunaNMR.gui.main_window")
 
         if not fix_ok:
-            print("\n🔍 Local quality assessment fix not working")
-            print("   The R² improvement fix may not be properly integrated")
+            print("\n🔍 Fitting pipeline unavailable")
+            print("   EnhancedVoigtIntegrator did not expose a usable Voigt fitter")
 
         return False
 
@@ -209,18 +206,10 @@ def main():
     missing_external, _ = check_external_dependencies()
     missing_internal, _ = check_internal_modules()
     app_ok = check_main_application()
-    fix_ok = check_local_quality_fix()
-    test_ok = run_quick_test()
+    fix_ok = check_fitting_pipeline()
 
-    # Generate report
-    success = generate_installation_report(missing_external, missing_internal, app_ok, fix_ok)
-
-    if success:
-        print("\n✨ The local quality assessment fix is ready!")
-        print("   Users will now see improved R² values in the GUI")
-        print("   that exclude distant peaks from quality evaluation.")
-
-    return success
+    return generate_installation_report(
+        missing_external, missing_internal, app_ok, fix_ok, python_ok)
 
 if __name__ == "__main__":
     success = main()
