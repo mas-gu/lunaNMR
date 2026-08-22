@@ -168,7 +168,7 @@ class TestIndexExtraction:
         """Extract 3-digit index from filename."""
         from lunaNMR.gui.components.intensity_decay_widget import extract_index_from_spectrum_name
 
-        assert extract_index_from_spectrum_name('03_2D_NR_ATP_ref_noCa_001.ft') == 1
+        assert extract_index_from_spectrum_name('03_2D_series_ref_001.ft') == 1
         assert extract_index_from_spectrum_name('experiment_042.ucsf') == 42
         assert extract_index_from_spectrum_name('scan_0123.ft') == 123
 

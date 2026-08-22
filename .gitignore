@@ -352,3 +352,33 @@ docs/landing/
 # Developer convenience targets (schematic render, test suite)
 Makefile
 docs/schematic/
+
+# The rule above keeps every data_example/ folder out, at any depth, including
+# the working copies under modules/. The demo set below is tracked on purpose --
+# a peak list, a 2D T1 series and a 1D series that the CLI and integration_1d
+# tests run against. Spelling it out here stops the ignore rule and the
+# repository contents from contradicting each other. Leading slashes anchor
+# these to the repository root; the negations come last so they win over the
+# blanket *.ft / *.ft1 / *.csv rules earlier in this file.
+!/data_example/
+/data_example/*
+!/data_example/1D/
+/data_example/1D/*
+!/data_example/1D/*.ft1
+!/data_example/1D/series_intensity.csv
+!/data_example/2DHSQC/
+/data_example/2DHSQC/*
+!/data_example/2DHSQC/600_assi.txt
+!/data_example/2DHSQC/600_peaks.txt
+!/data_example/2DHSQC/m_600_peaks.txt
+!/data_example/2DHSQC/r_600_peaks.txt
+!/data_example/2DHSQC/600_T1_0o0.ft
+!/data_example/2DHSQC/600_T1_0o1.ft
+!/data_example/more/
+/data_example/more/*
+!/data_example/more/600_T1_0o15.ft
+!/data_example/more/600_T1_0o3.ft
+!/data_example/more/600_T1_0o6.ft
+!/data_example/more/600_T1_0o9.ft
+!/data_example/more/600_T1_1o2.ft
+!/data_example/more/600_T1_1o5.ft

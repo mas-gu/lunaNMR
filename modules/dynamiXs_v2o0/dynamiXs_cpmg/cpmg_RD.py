@@ -59,7 +59,7 @@ def fit_dispersion(r2_eff, nu_cpmg):
         return None, None
 
 def main():
-    filename = "A1_WT_CPMG_15ms.csv"
+    filename = "CPMG_15ms.csv"
     residue_names, vclist, intensities = read_peak_list(filename)
     vclist = vclist[:intensities.shape[1]]
     nu_cpmg = calculate_nu_cpmg(vclist)

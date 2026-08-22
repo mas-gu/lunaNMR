@@ -8,7 +8,7 @@ T_CPMG = 0.015  # Total CPMG time per block (d21, in seconds)
 P30 = 120e-6    # 180° pulse length (in seconds)
 FIELD = 700     # MHz (for 15N Larmor = field * 0.1013)
 N_BOOTSTRAP = 10  # Number of bootstrap iterations for fit parameters
-NOISE = 45475  # User-specified noise value (standard deviation) for all delays
+NOISE = 1.0e4  # Placeholder: set to your spectrum's noise standard deviation
 
 def read_peak_list(filename):
     df = pd.read_csv(filename, header=None)
@@ -109,7 +109,7 @@ def bootstrap_fit(intensities, I_ref, noise, nu_cpmg, residue_names):
     return param_mean, param_std
 
 def main():
-    filename = "A1_WT_CPMG_15ms.csv"
+    filename = "CPMG_15ms.csv"
     noise = NOISE  # User-specified noise value
     residue_names, vclist, intensities = read_peak_list(filename)
     vclist = vclist[:intensities.shape[1]]

@@ -14,7 +14,7 @@ def _to_point(label):
 
     Accepts bare numbers ('0.0', '10o5' -> 0.0, 10.5) and real spectrum names,
     from which the trailing numeric token is taken as the point index
-    (e.g. '03_2D_NR_ATP_ref_noCa_001' -> 1.0). Actual concentrations come from the
+    (e.g. '03_2D_series_ref_001' -> 1.0). Actual concentrations come from the
     caller's --conc; the point value only needs to order and count the points.
     """
     s = str(label).strip()

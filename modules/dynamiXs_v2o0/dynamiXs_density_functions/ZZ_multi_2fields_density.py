@@ -1235,8 +1235,8 @@ def main():
     """
     # Initialize analysis with dual-field experimental parameters
     analyzer = DualFieldSpectralDensityAnalysis(
-        field1_freq=700.093,    # First field in MHz
-        field2_freq=600.133,    # Second field in MHz  
+        field1_freq=700.0,    # First field in MHz
+        field2_freq=600.0,    # Second field in MHz  
         rNH=1.023e-10,        # N-H bond length in meters 1.023
         csaN=-160.0e-6        # 15N CSA in ppm
     )
@@ -1247,13 +1247,13 @@ def main():
         print(f"Available CPU cores: {cpu_count()}, Using: {int(cpu_count() * 0.8)} cores")
         
         # Define all input and output filenames centrally
-        csv_file1 = 'data_in_WT_700.csv'  # Field 1 data file
-        csv_file2 = 'data_in_WT_600.csv'  # Field 2 data file
+        csv_file1 = 'data_in_700.csv'  # Field 1 data file
+        csv_file2 = 'data_in_600.csv'  # Field 2 data file
         
         # Output filenames
-        basic_results_csv = 'WT_density_basic.csv'
-        detailed_results_csv = 'WT_density_detailled.csv'
-        plots_pdf = 'WT_density_.pdf'
+        basic_results_csv = 'density_basic.csv'
+        detailed_results_csv = 'density_detailled.csv'
+        plots_pdf = 'density_.pdf'
         
         results = analyzer.analyze_dual_field_csv(
             csv_file1, csv_file2,

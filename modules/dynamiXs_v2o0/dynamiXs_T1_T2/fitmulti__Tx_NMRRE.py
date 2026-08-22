@@ -438,11 +438,11 @@ def main():
     # ========================
 
     # Input file configuration
-    input_csv_file = "T2_T6D_data.csv"  # Input CSV file path
+    input_csv_file = "T2_data_700.csv"  # Input CSV file path
 
     # Output file configuration
-    output_prefix = "700_T6D_T2"  # Prefix for output files
-    results_txt_file = "700_T6D_T2_fit_results.txt"  # Results text file
+    output_prefix = "700_T2"  # Prefix for output files
+    results_txt_file = "700_T2_fit_results.txt"  # Results text file
 
     # Experiment configuration
     experiment_type = "T2"  # T1, T2, etc. (for labels and headers)

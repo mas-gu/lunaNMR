@@ -1031,8 +1031,8 @@ def main():
     """
     # Initialize analysis with dual-field experimental parameters
     analyzer = DualFieldSpectralDensityAnalysis(
-        field1_freq=700.093,    # First field in MHz
-        field2_freq=600.133,    # Second field in MHz  
+        field1_freq=700.0,    # First field in MHz
+        field2_freq=600.0,    # Second field in MHz  
         rNH=1.023e-10,        # N-H bond length in meters
         csaN=-160.0e-6        # 15N CSA in ppm
     )
@@ -1042,8 +1042,8 @@ def main():
         print("Running dual-field analysis with Monte Carlo error propagation...")
         
         # Specify your two CSV files here
-        csv_file1 = 'data_in_WT_700.csv'  # Field 1 data file
-        csv_file2 = 'data_in_WT_600.csv'  # Field 2 data file
+        csv_file1 = 'data_in_700.csv'  # Field 1 data file
+        csv_file2 = 'data_in_600.csv'  # Field 2 data file
         
         results = analyzer.analyze_dual_field_csv(
             csv_file1, csv_file2,

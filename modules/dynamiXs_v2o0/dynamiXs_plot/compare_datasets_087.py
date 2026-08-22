@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Standalone script for comparing two NMR datasets by subtraction - J(0.87ωH) Version
-Allows comparison of different protein variants (WT, T5D, T6D) at the same field.
+Allows comparison of different protein variants at the same field.
 
 J(0.87ωH) VERSION: Updated to plot J(0.87ωH) instead of J(ωH) for more accurate
 spectral density visualization in NMR relaxation analysis.
@@ -1234,6 +1234,7 @@ def main():
 if __name__ == '__main__':
     main()
     
-## python compare_datasets_087.py 087_T5D.csv 087_WT.csv -c R1,R2,hetNOE,J0,JwN,JwH_087,S2,te,Rex --ylim-config ylimits087.json --label1 T5D --label2 WT --field both --output 087_T5DminusWT
-## python compare_datasets_087.py 087_T6D.csv 087_WT.csv -c R1,R2,hetNOE,J0,JwN,JwH_087,S2,te,Rex --ylim-config ylimits087.json --label1 T6D --label2 WT --field both --output 087_T6DminusWT
-## python compare_datasets_087.py 087_T5D.csv 087_T6D.csv -c R1,R2,hetNOE,J0,JwN,JwH_087,S2,te,Rex --ylim-config ylimits087.json --label1 T5D --label2 T6D --field both --output 087_T5DminusT6D
+## Example: subtract a control dataset from a variant across both fields.
+## python compare_datasets_087.py 087_variant.csv 087_control.csv -c R1,R2,hetNOE,J0,JwN,JwH_087,S2,te,Rex \
+##     --ylim-config ylimits087.json --label1 variant --label2 control \
+##     --field both --output 087_variant_minus_control

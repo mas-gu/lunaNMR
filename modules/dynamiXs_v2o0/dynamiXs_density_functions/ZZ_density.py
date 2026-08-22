@@ -754,13 +754,13 @@ class ReducedSpectralDensityAnalysis:
         plt.tight_layout()
 
         if save_plots:
-            plt.savefig('ZZ_WT_rsdm_mcmc.pdf', dpi=300, bbox_inches='tight')
-            print("Plots saved as 'ZZ_WT_rsdm_analysis_results.pdf'")
+            plt.savefig('ZZ_rsdm_mcmc.pdf', dpi=300, bbox_inches='tight')
+            print("Plots saved as 'ZZ_rsdm_analysis_results.pdf'")
             plt.close(fig)  # Close figure to free memory
         else:
             plt.close(fig)  # Always close to prevent memory leaks
 
-    def save_detailed_results(self, results_df, filename='ZZ_WT_detailed_results.csv'):
+    def save_detailed_results(self, results_df, filename='ZZ_detailed_results.csv'):
         """
         Save results with confidence intervals if Monte Carlo was used
         
@@ -797,7 +797,7 @@ def main():
     """
     # Initialize analysis with experimental parameters
     analyzer = ReducedSpectralDensityAnalysis(
-        spectrometer_frequency=700.093,  # MHz
+        spectrometer_frequency=700.0,  # MHz
         rNH=1.023e-10,                   # meters
         csaN=-160.0e-6                   # ppm in frequency units
     )
@@ -806,13 +806,13 @@ def main():
     try:
         # Option 1: Use Monte Carlo errors (new default behavior)
         print("Running analysis with Monte Carlo error propagation...")
-        results = analyzer.analyze_csv('data_in_WT.csv', 
+        results = analyzer.analyze_csv('data_in.csv', 
                                      use_monte_carlo_errors=True,
                                      n_monte_carlo=100)
         
         # Option 2: Use original ensemble-based errors (backward compatible)
         # print("Running analysis with ensemble-based errors only...")
-        # results = analyzer.analyze_csv('data_in_WT.csv', 
+        # results = analyzer.analyze_csv('data_in.csv', 
         #                              use_monte_carlo_errors=False)
         
         # Check if any data was processed
@@ -833,7 +833,7 @@ def main():
         print(results[display_cols].round(4))
         
         # Save basic results
-        results.to_csv('ZZ_WT_rsdm_mcmc.csv', index=False)
+        results.to_csv('ZZ_rsdm_mcmc.csv', index=False)
         
         # Save detailed results with confidence intervals
         analyzer.save_detailed_results(results)
@@ -862,7 +862,7 @@ def main():
             print("  No successful model-free fits obtained!")
             
     except FileNotFoundError:
-        print("Please provide a CSV file named 'data_in_WT.csv' with columns:")
+        print("Please provide a CSV file named 'data_in.csv' with columns:")
         print("R1, R1err, R2, R2err, hetNOE, hetNOEerr, and optionally Residue")
         
         # Create example data

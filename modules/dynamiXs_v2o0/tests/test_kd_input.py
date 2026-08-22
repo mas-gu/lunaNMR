@@ -151,8 +151,8 @@ class TestDescriptiveLabels:
         assert _to_point("0.0") == 0.0
         assert _to_point("10o5") == 10.5
         # Real spectrum names: trailing sequence number is the point index.
-        assert _to_point("03_2D_NR_ATP_ref_noCa_001") == 1.0
-        assert _to_point("03_2D_NR_ATP_ref_noCa_002") == 2.0
+        assert _to_point("03_2D_series_ref_001") == 1.0
+        assert _to_point("03_2D_series_ref_002") == 2.0
         assert _to_point("no_number_here") is None
 
     def test_load_tracking_reads_descriptive_labels(self, tmp_path):

@@ -188,7 +188,7 @@ def write_series_csv(table, path, value='height'):
     """Write the series as one row per spectrum and one column per peak.
 
     spectrum,PeakA,PeakB
-    1D_KB_GTP_001,5.77e+10,1.00e+12
+    1D_series_001,5.77e+10,1.00e+12
 
     A peak that could not be measured at a point leaves its cell empty rather than
     writing a zero, which would read as a real measurement of nothing.

@@ -449,7 +449,7 @@ class TestPropagationFeedback:
         page.integrate(show_table=False)
 
         assert page.MISSING_MARK not in page.spectrum_list.item(0).text()
-        assert page.spectrum_list.item(0).text().startswith('1D_KB_GTP_001')
+        assert page.spectrum_list.item(0).text().startswith('1D_series_001')
 
     def test_progress_callback_fires_once_per_spectrum(self):
         from oned_series import integrate_series
@@ -526,7 +526,7 @@ class TestRealWorkflow:
         lines = out.read_text().strip().splitlines()
         assert lines[0] == 'spectrum,peak_1,peak_2'
         assert len(lines) == 54                          # header + 53 spectra
-        assert lines[1].startswith('1D_KB_GTP_001')
+        assert lines[1].startswith('1D_series_001')
 
         first = [float(v) for v in lines[1].split(',')[1:]]
         last = [float(v) for v in lines[-1].split(',')[1:]]

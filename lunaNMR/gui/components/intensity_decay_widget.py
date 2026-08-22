@@ -110,7 +110,7 @@ def extract_index_from_spectrum_name(spectrum_name: str) -> Optional[int]:
     group of 3 or more digits before the file extension.
 
     Examples:
-        "03_2D_NR_ATP_ref_noCa_001.ft" -> 1
+        "03_2D_series_ref_001.ft" -> 1
         "experiment_042.ucsf" -> 42
         "scan_0123.ft" -> 123
 

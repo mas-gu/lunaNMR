@@ -860,13 +860,13 @@ class ReducedSpectralDensityAnalysis:
         plt.tight_layout()
 
         if save_plots:
-            plt.savefig('ZZ_WT_rsdm_multicore_analysis_results_087.pdf', dpi=300, bbox_inches='tight')
-            print("Plots saved as 'ZZ_WT_rsdm_multicore_analysis_results_087.pdf'")
+            plt.savefig('ZZ_rsdm_multicore_analysis_results_087.pdf', dpi=300, bbox_inches='tight')
+            print("Plots saved as 'ZZ_rsdm_multicore_analysis_results_087.pdf'")
             plt.close(fig)  # Close figure to free memory
         else:
             plt.close(fig)  # Always close to prevent memory leaks
 
-    def save_detailed_results(self, results_df, filename='ZZ_WT_multicore_detailed_results_087.csv'):
+    def save_detailed_results(self, results_df, filename='ZZ_multicore_detailed_results_087.csv'):
         """
         Save results with confidence intervals if Monte Carlo was used (J(0.87ωH) version)
         
@@ -1008,7 +1008,7 @@ def main():
     """
     # Initialize analysis with experimental parameters
     analyzer = ReducedSpectralDensityAnalysis(
-        spectrometer_frequency=700.093,  # MHz
+        spectrometer_frequency=700.0,  # MHz
         rNH=1.023e-10,                   # meters
         csaN=-160.0e-6                   # ppm in frequency units
     )
@@ -1018,7 +1018,7 @@ def main():
         print("Running analysis with multiprocessing, J(0.87ωH), and Monte Carlo error propagation...")
         print(f"Using proton frequency correction factor: {OMEGA_H_FACTOR}")
         
-        results = analyzer.analyze_csv('data_in_WT_700.csv',
+        results = analyzer.analyze_csv('data_in_700.csv',
                                      use_monte_carlo_errors=True,
                                      n_monte_carlo=100,
                                      use_multiprocessing=True,
@@ -1042,7 +1042,7 @@ def main():
         print(results[display_cols].round(4))
         
         # Save basic results
-        results.to_csv('ZZ_WT_rsdm_multicore_087.csv', index=False)
+        results.to_csv('ZZ_rsdm_multicore_087.csv', index=False)
         
         # Save detailed results with confidence intervals
         analyzer.save_detailed_results(results)
@@ -1073,7 +1073,7 @@ def main():
             print("  No successful model-free fits obtained!")
             
     except FileNotFoundError:
-        print("Please provide a CSV file named 'data_in_WT.csv' with columns:")
+        print("Please provide a CSV file named 'data_in.csv' with columns:")
         print("R1, R1err, R2, R2err, hetNOE, hetNOEerr, and optionally Residue")
         
         # Create example data

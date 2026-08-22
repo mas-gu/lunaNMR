@@ -36,13 +36,13 @@ python plot_rex_field_analysis.py <csv_file> --field1 600 --field2 700
 ### Common Examples
 
 ```bash
-# Analyze WT data at 600/700 MHz
-python plot_rex_field_analysis.py ../../density_function_macro/087_WT_density_basic.csv \
-    --field1 600 --field2 700 --title "WT" --output rex_analysis_WT.pdf
+# Analyze the control dataset at 600/700 MHz
+python plot_rex_field_analysis.py ../../density_function_macro/087_density_basic.csv \
+    --field1 600 --field2 700 --title "control" --output rex_analysis_ctrl.pdf
 
-# Analyze T5D variant with stricter threshold
-python plot_rex_field_analysis.py ../../density_function_macro/087_T5D_density_basic.csv \
-    --field1 600 --field2 700 --title "T5D" --min-rex 1.0 --output rex_analysis_T5D.pdf
+# Analyze a variant with a stricter threshold
+python plot_rex_field_analysis.py ../../density_function_macro/087_variant_density_basic.csv \
+    --field1 600 --field2 700 --title "variant" --min-rex 1.0 --output rex_analysis_variant.pdf
 
 # Use alternative column names (if your CSV uses Rex_field1/Rex_field2)
 python plot_rex_field_analysis.py data.csv \
@@ -84,7 +84,7 @@ Index,Rex_f1,Rex_f2,S2,te,...
 
 The script prints detailed statistics:
 ```
-Loaded CSV file: 087_WT_density_basic.csv
+Loaded CSV file: 087_density_basic.csv
   Total rows: 45
   Using columns: Rex_f1, Rex_f2
 

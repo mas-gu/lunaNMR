@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Standalone script for comparing two NMR datasets by subtraction.
-Allows comparison of different protein variants (WT, T5D, T6D) at the same field.
+Allows comparison of different protein variants at the same field.
 
 User can select which columns to subtract (e.g., R1-R1, hetNOE-hetNOE) and
 the results are plotted showing the differences.
@@ -1232,6 +1232,7 @@ def main():
 if __name__ == '__main__':
     main()
     
-## python compare_datasetsRESlimitsSSPD.py T5D.csv WT.csv -c R1,R2,hetNOE,J0,JwN,JwH,S2,te,Rex --ylim-config ylimits.json --label1 T5D --label2 WT --field both --output T5DminusWT --ss-file SS.txt
-## python compare_datasetsRESlimitsSSPD.py T6D.csv WT.csv -c R1,R2,hetNOE,J0,JwN,JwH,S2,te,Rex --ylim-config ylimits.json --label1 T6D --label2 WT --field both --output T6DminusWT --ss-file SS.txt
-## python compare_datasetsRESlimitsSSPD.py T5D.csv T6D.csv -c R1,R2,hetNOE,J0,JwN,JwH,S2,te,Rex --ylim-config ylimits.json --label1 T5D --label2 T6D --field both --output T5DminusT6D --ss-file SS.txt
+## Example: subtract a control dataset from a variant across both fields.
+## python compare_datasets.py variant.csv control.csv -c R1,R2,hetNOE,J0,JwN,JwH,S2,te,Rex \
+##     --ylim-config ylimits.json --label1 variant --label2 control \
+##     --field both --output variant_minus_control --ss-file SS.txt

@@ -22,8 +22,8 @@ Date: 2025
 # ========================================================================
 
 # Input files and directories
-PEAK_LIST_FILE = "peak_list/600_T1_KRASB_Q61L_0o0.txt"    # Path to peak list file
-NMR_DATA_PATH = "data/600_T1_KRASB_Q61L_0o0.ft"          # Path to NMR data file or directory
+PEAK_LIST_FILE = "peak_list/reference_peaks.txt"    # Path to peak list file
+NMR_DATA_PATH = "data/600_T1_0o0.ft"          # Path to NMR data file or directory
 
 # Output settings
 OUTPUT_DIR = "inplace_results"                      # Output directory for results

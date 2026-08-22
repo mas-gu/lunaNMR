@@ -281,8 +281,8 @@ class TestT2bLowerBoundInvariant:
         measurement — a fitting artifact). The fitter should refit as a mono-exp
         in that regime and report A as the actually-visible amplitude.
 
-        Reproduces residue 594_ce_D from real data, where the original fit
-        reported A = 2.32e6 with the highest data point at ~1.4e6.
+        The decay below is shaped to land in that regime: a bi-exp fit wants
+        to report A near 2.3e6 while the tallest measured point is only ~1.4e6.
         """
         from fit_methyl_T2 import fit_single_residue_methyl
 
@@ -290,7 +290,7 @@ class TestT2bLowerBoundInvariant:
         y = np.array([1.40e6, 0.97e6, 0.98e6, 0.81e6, 0.86e6,
                       0.83e6, 0.75e6, 0.45e6])
 
-        res = fit_single_residue_methyl(x, y, "594_REPRO")
+        res = fit_single_residue_methyl(x, y, "methyl_1")
         assert res["bi_exp_unidentifiable"] is True
         # Reported A must be near the visible amplitude (~1.4e6), not 2× it.
         assert res["A"] < 1.7e6, (

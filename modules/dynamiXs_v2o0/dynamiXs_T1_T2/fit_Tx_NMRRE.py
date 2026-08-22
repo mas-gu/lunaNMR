@@ -405,11 +405,11 @@ def main():
     # ========================
     
     # Input file configuration
-    input_csv_file = "T1_WT_data_600.csv"  # Input CSV file path
+    input_csv_file = "T1_data_600.csv"  # Input CSV file path
     
     # Output file configuration
-    output_prefix = "600_WT_T1"  # Prefix for output files
-    results_txt_file = "600_WT_T1_fit_results.txt"  # Results text file
+    output_prefix = "600_T1"  # Prefix for output files
+    results_txt_file = "600_T1_fit_results.txt"  # Results text file
     
     # Experiment configuration
     experiment_type = "T1"  # T1, T2, etc. (for labels and headers)

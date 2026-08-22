@@ -35,16 +35,16 @@ from lunaNMR.integrators.inplace_advanced_nmr_integrator import InPlaceAdvancedN
 # ========================================================================
 
 # Input settings
-PEAK_LIST_FILE = "peak_list/KRASB/WT/600_KRASB_GTP.txt"    # Initial peak list for reference
-NMR_DATA_DIRECTORY = "data/KRASB/WT/WT_600/600_T1_WT/"                # Directory containing .ft files
-REFERENCE_SPECTRUM = "600_T1_KRASB_WT_0o0.ft"                          # Reference spectrum filename
+PEAK_LIST_FILE = "peak_list/reference_peaks.txt"    # Initial peak list for reference
+NMR_DATA_DIRECTORY = "data/T1_series/"                # Directory containing .ft files
+REFERENCE_SPECTRUM = "600_T1_0o0.ft"                          # Reference spectrum filename
 
 # File pattern matching
 FILE_PATTERN = "*.ft"                                 # Pattern to match NMR files
 EXCLUDE_FILES = []                                    # List of files to exclude
 
 # Output settings
-OUTPUT_DIR = "series_results/KRASB/WT/WT_600/600_T1_WT"     # Output directory for series results
+OUTPUT_DIR = "series_results/T1_series"     # Output directory for series results
 CREATE_INDIVIDUAL_PLOTS = True                       # Create plot for each spectrum
 CREATE_PDF_PLOTS = True                              # Save plots as PDF format
 CREATE_SERIES_SUMMARY = True                         # Create series summary plots

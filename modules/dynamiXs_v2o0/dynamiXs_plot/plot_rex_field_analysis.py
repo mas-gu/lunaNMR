@@ -15,7 +15,7 @@ Usage:
     python plot_rex_field_analysis.py <csv_file> [--field1 600] [--field2 700] [--min-rex 0.5] [--output output.pdf]
 
 Example:
-    python plot_rex_field_analysis.py ../density_function_macro/087_WT_density_basic.csv --field1 600 --field2 700 --output rex_analysis_WT.pdf
+    python plot_rex_field_analysis.py ../density_function_macro/087_density_basic.csv --field1 600 --field2 700 --output rex_analysis_ctrl.pdf
 """
 
 import pandas as pd
