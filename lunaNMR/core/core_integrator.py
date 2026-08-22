@@ -2187,16 +2187,6 @@ class VoigtIntegrator(BaseIntegrator):
                 'tooclose': tooclose  # Flag for L/G and intensity constraints
             })
 
-        # Log estimated linewidths for diagnostic purposes
-        #print(f"   📏 Initial linewidth estimates (FWHM from 1D cross-sections):")
-        for i, peak in enumerate(initial_peaks):
-            # FIXED 2025-10-13: lw_gau IS the Gaussian FWHM (not half-width)
-            #fwhm_f1 = peak['lw_gau_f1']  # NEW: lw_gau IS the FWHM (no compensation needed)
-            #fwhm_f2 = peak['lw_gau_f2']  # NEW: lw_gau IS the FWHM (no compensation needed)
-            fwhm_f1 = 2.0 * peak['lw_gau_f1']  # OLD: Compensated for FWHM/2 storage bug
-            fwhm_f2 = 2.0 * peak['lw_gau_f2']  # OLD: Compensated for FWHM/2 storage bug
-            #print(f"      Peak {i+1}: F1={fwhm_f1:.3f} ppm ({config.nucleus_type}), F2={fwhm_f2:.4f} ppm (1H)")
-
         # Log initial intensity estimates
         #print(f"   📊 Initial intensity estimates:")
         for i, (peak_dict, initial_peak) in enumerate(zip(overlap_group, initial_peaks)):

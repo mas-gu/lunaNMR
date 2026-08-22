@@ -4,7 +4,7 @@ import glob
 import os
 
 """
-Transforms NMR peak list files in data/ matching 'T1_A1_WT_0o0*.txt'.
+Transforms NMR peak list files in data/ matching 'T1_sample_0o0*.txt'.
 - Reads tab-separated files with headers: Assignment, Position_X, Position_Y, Height.
 - Transforms assignments like '(<NA:A.10.VAL.H>, <NA:A.10.VAL.N>)' to '10.VAL'.
 - Sorts by the number before the first '.' in the transformed Assignment (e.g., 10 in '10.VAL').
@@ -13,8 +13,8 @@ Transforms NMR peak list files in data/ matching 'T1_A1_WT_0o0*.txt'.
 
 # Define input directory and file pattern
 input_directory = "data"
-file_pattern = "*"  # Matches T1_A1_WT_0o0s, T1_A1_WT_0o0, etc.
-input_files = glob.glob(os.path.join(cdinput_directory, file_pattern))
+file_pattern = "*"  # Matches T1_sample_0o0s, T1_sample_0o0, etc.
+input_files = glob.glob(os.path.join(input_directory, file_pattern))
 
 # Check if input directory exists and contains files
 if not os.path.exists(input_directory):
