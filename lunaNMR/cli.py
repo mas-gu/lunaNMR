@@ -112,11 +112,137 @@ def _add_modules_path(*parts):
     return path
 
 
+_PERSISTED_SETTINGS = ('conc_units', 'csp_sigma_multiple', 'kd_outlier_z',
+                       'noise_quantile',
+                       'dd_runaway_ratio', 'ref_max_ratio')
+
+
+def _apply_thresholds(args, params):
+    """Resolve persisted settings: an explicit flag beats a value persisted beside the
+    input, which beats the schema default."""
+    from kd_params import find_params_source, load_params
+    stored = {}
+    src = find_params_source(args.input)
+    if src:
+        try:
+            stored = load_params(src)
+        except Exception:
+            stored = {}
+    for key in _PERSISTED_SETTINGS:
+        flag = getattr(args, key, None)
+        if flag is not None:
+            params[key] = flag
+        elif key in stored:
+            params[key] = stored[key]
+    return params
+
+
+_DATA_SUBDIR = 'data'   # CSV/JSON companions sit one level under the figures
+
+
+def _data_dir(out):
+    """Machine-readable companions live under <out>/data; the top level stays figures."""
+    d = os.path.join(out, _DATA_SUBDIR)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _read_residue_selection(value):
+    """Resolve --residues: a selection file if it names one, else a comma-separated list."""
+    from kd_survey import parse_residues_file
+    text = value
+    if os.path.isfile(value):
+        with open(value) as fh:
+            text = fh.read()
+    names = parse_residues_file(text)
+    if not names:
+        raise ValueError(f"no residues selected in {value}")
+    return names
+
+
+def _draw_vs_sequence(ax, rows, key, ylabel, floor=None):
+    """Per-residue bars against sequence, greying out residues the survey rejected."""
+    import numpy as np
+    names = [r['residue'] for r in rows]
+    vals = [r[key] if np.isfinite(r[key]) else 0.0 for r in rows]
+    colors = ['#d0d0d0' if r['verdict'] == 'unusable'
+              else ('#e8a33d' if r['verdict'] == 'check' else 'steelblue') for r in rows]
+    ax.bar(range(len(rows)), vals, color=colors)
+    ax.set_xticks(range(len(rows)))
+    ax.set_xticklabels(names, rotation=90, fontsize=5)
+    ax.set_ylabel(ylabel)
+    if floor is not None and np.isfinite(floor):
+        ax.axhline(floor, color='red', ls=':', lw=0.8,
+                   label=f"noise floor {floor:.4f}")
+        ax.legend(fontsize=7)
+
+
+def _run_kd_survey(args):
+    """Survey a titration and render the vs-sequence figures. Writes no fit JSON."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from kd_survey import run_kd_survey_with_params
+
+    params = {
+        'input_csv_file': args.input,
+        'output_dir': args.out,
+        'output_prefix': args.prefix,
+        'protein_conc': args.p0,
+        'alpha': args.alpha,
+        'intensity_value': args.intensity_from,
+    }
+    if args.conc is not None:
+        params['concentrations'] = args.conc
+    if args.intensity_scale is not None:
+        params['intensity_scales'] = args.intensity_scale
+    if args.selection is not None:
+        params['selection_file'] = args.selection
+    _apply_thresholds(args, params)
+
+    with _engine_stdout(args):
+        result = run_kd_survey_with_params(params)
+    rows = result['rows']
+
+    matplotlib.rcParams['pdf.fonttype'] = 42
+    movers = [r['max_csp'] for r in rows if np.isfinite(r['max_csp'])]
+    floor = float(np.quantile(movers, 0.25)) if movers else None
+    figures = []
+    for key, ylabel, tag, ref in (
+            ('max_csp', 'max CSP (ppm)', 'csp', floor),
+            ('intensity_final', 'I/I$_0$ at last point', 'intensity', None)):
+        fig, ax = plt.subplots(figsize=(max(8.0, len(rows) * 0.16), 4.0))
+        _draw_vs_sequence(ax, rows, key, ylabel, floor=ref)
+        ax.set_title(f"{tag} vs sequence — {result['n_selected']}/{result['n_total']} selected")
+        fig.tight_layout()
+        path = os.path.join(args.out, f"{args.prefix}_{tag}_vs_sequence.pdf")
+        fig.savefig(path)
+        plt.close(fig)
+        figures.append(path)
+
+    counts = result['counts']
+    _emit(args,
+          {'command': 'kd survey', 'n_total': result['n_total'],
+           'n_selected': result['n_selected'], 'counts': counts,
+           'residues_file': result['residues_file'],
+           'survey_file': result['survey_file'], 'figures': figures},
+          f"Survey complete: {result['n_selected']}/{result['n_total']} residues selected "
+          f"({counts['ok']} ok, {counts['check']} to check, {counts['unusable']} unusable)",
+          f"  Selection: {result['residues_file']}",
+          f"  Evidence:  {result['survey_file']}",
+          *(f"  Figure:    {p}" for p in figures),
+          "  Edit the selection file, then re-run with --residues to fit.")
+    return 0
+
+
 def _run_kd(args):
     """Wrap dynamiXs_Kd.kd_fit.run_kd_analysis_with_params for the CLI."""
     if args.dry_run:
         return _dry_run(args, [('input', args.input)], {'output_dir': args.out})
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
+    if args.survey:
+        return _run_kd_survey(args)
     import kd_fit
 
     params = {
@@ -133,11 +259,19 @@ def _run_kd(args):
         params['concentrations'] = args.conc
     if args.intensity_scale is not None:
         params['intensity_scales'] = args.intensity_scale
+    if args.residues is not None:
+        params['residues'] = _read_residue_selection(args.residues)
+    _apply_thresholds(args, params)
 
     with _engine_stdout(args):
         result = kd_fit.run_kd_analysis_with_params(params)
+    for w in result.get('quality_warnings') or []:
+        print('\n' + '!' * 72, file=sys.stderr)
+        print(w, file=sys.stderr)
+        print('!' * 72 + '\n', file=sys.stderr)
     _emit(args,
           {'command': 'kd', 'n_fitted': result['n_fitted'], 'n_total': result['n_total'],
+           'quality_warnings': result.get('quality_warnings') or [],
            'json_file': result['json_file'], 'results_file': result['results_file']},
           f"Kd analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted",
           f"  JSON:    {result['json_file']}",
@@ -542,7 +676,8 @@ def _draw_kd_panel(ax, panel, ylim=None):
         ax.set_ylim(*ylim)
 
 
-def _draw_ref_bars(ax, names, vals, obs, ref_label, cmp_label):
+def _draw_ref_bars(ax, names, vals, obs, ref_label, cmp_label, threshold=None,
+                   threshold_label=None):
     """Bar chart of a reference→point observable per residue. Residues absent at either
     point (NaN) draw as a full-height grey bar so the gap stays visible. I/I₀ is a ratio
     (axis fixed 0–1); CSP is in ppm (auto-scaled)."""
@@ -555,6 +690,8 @@ def _draw_ref_bars(ax, names, vals, obs, ref_label, cmp_label):
     else:
         top = (max(finite) * 1.1) if finite else 1.0
         color, ylabel, sym = 'seagreen', 'CSP (ppm)', 'CSP'
+    if threshold is not None and np.isfinite(threshold):
+        top = max(top, float(threshold) * 1.15)
     top = top if top > 0 else 1.0          # all-zero observable -> avoid a singular axis
     x = np.arange(len(names))
     heights = [v if np.isfinite(v) else top for v in vals]
@@ -564,6 +701,13 @@ def _draw_ref_bars(ax, names, vals, obs, ref_label, cmp_label):
     ax.set_xticklabels(names, rotation=90, fontsize=6)
     ax.set_ylim(0, top)
     ax.set_ylabel(ylabel)
+    if threshold is not None and np.isfinite(threshold):
+        # The gate's own threshold, read from the fit rather than recomputed, so the line
+        # and the pool can never disagree. It is defined at the last titration point, so
+        # on earlier pages it shows how far the shifts still are from clearing it.
+        ax.axhline(float(threshold), color='red', ls='--', lw=1.2,
+                   label=threshold_label or f"threshold {threshold:.4f}")
+        ax.legend(fontsize=7, loc='upper right')
 
     def _lab(v):
         return f"{v:g}" if isinstance(v, (int, float)) else str(v)
@@ -663,7 +807,7 @@ def _run_export_kd(args):
             Ld = np.linspace(float(L[good].min()), float(L[good].max()), 200)
             panels[obs].append(_build_kd_panel(residue, fit, L[good], y[good], Ld, obs, P0))
 
-    summary_path = os.path.join(args.out, f'{tag}summary.csv')
+    summary_path = os.path.join(_data_dir(args.out), f'{tag}summary.csv')
     with open(summary_path, 'w', newline='') as fh:
         writer = csv.DictWriter(fh, fieldnames=['residue', 'observable', 'Kd', 'Kd_err', 'r_squared'])
         writer.writeheader()
@@ -726,7 +870,7 @@ def _run_export_kd(args):
             from kd_export import export_ref_vs_point
             for obs in ref_observables:
                 outputs.extend(export_ref_vs_point(
-                    os.path.join(args.out, f"{tag}{obs}_ref_vs_point"),
+                    os.path.join(_data_dir(args.out), f"{tag}{obs}_ref_vs_point"),
                     fits, labels, obs, alpha=alpha, value=value))
             if 'pdf' in args.fig_format:
                 from matplotlib.backends.backend_pdf import PdfPages
@@ -737,7 +881,16 @@ def _run_export_kd(args):
                             names, vals = ref_point_values(fits, 0, j, obs,
                                                            alpha=alpha, value=value)
                             fig, ax = plt.subplots(figsize=(11, 6))
-                            _draw_ref_bars(ax, names, vals, obs, labels[0], labels[j])
+                            sig = (meta.get('csp_significance') or {}) if obs == 'csp' else {}
+                            thr = sig.get('threshold')
+                            thr_lab = None
+                            if thr is not None:
+                                last = labels[-1]
+                                last = f"{last:g}" if isinstance(last, (int, float)) else last
+                                thr_lab = (f"{sig.get('multiple', 1.0):g}σ significance "
+                                           f"threshold = {thr:.4f}  (defined at {last})")
+                            _draw_ref_bars(ax, names, vals, obs, labels[0], labels[j],
+                                           threshold=thr, threshold_label=thr_lab)
                             fig.tight_layout()
                             pdf.savefig(fig)
                             plt.close(fig)
@@ -748,10 +901,16 @@ def _run_export_kd(args):
         from matplotlib.backends.backend_pdf import PdfPages
         global_fit = data.get('global', {}) or {}
         for obs in observables:
+            # Only residues whose Kd is actually reported — i.e. those in the shared
+            # fit's pool. Drawing every residue put insignificant and unmeasured ones
+            # beside the ones that count, with nothing saying which was which.
+            pool = (global_fit.get(obs, {}) or {}).get('residues')
             names, kds, errs = [], [], []
             for f in fits:
                 fit = f.get(obs) or {}
                 ok = fit.get('success') and isinstance(fit.get('Kd'), (int, float))
+                if pool is not None and f.get('residue') not in pool:
+                    continue
                 names.append(f.get('residue', 'peak'))
                 kds.append(float(fit['Kd']) if ok else float('nan'))
                 e = fit.get('Kd_err')
@@ -763,6 +922,11 @@ def _run_export_kd(args):
             with PdfPages(pdf_path) as pdf:
                 fig, ax = plt.subplots(figsize=(11, 6))
                 _draw_kd_bars(ax, names, kds, errs, obs, gkd)
+                excl = data.get('metadata', {}).get('csp_pool_excluded') or {}
+                if obs == 'csp' and excl:
+                    ax.set_title(f"{ax.get_title()}  —  {len(names)} of "
+                                 f"{len(names) + len(excl)} residues "
+                                 f"(see csp_pool_excluded for the rest)", fontsize=9)
                 fig.tight_layout()
                 pdf.savefig(fig)
                 plt.close(fig)
@@ -775,7 +939,7 @@ def _run_export_kd(args):
         global_fit = data.get('global', {}) or {}
         for obs in observables:
             outputs.extend(export_global_fit(
-                os.path.join(args.out, f"{tag}{obs}_global_fit"),
+                os.path.join(_data_dir(args.out), f"{tag}{obs}_global_fit"),
                 fits, global_fit, obs, P0))
 
     # Global shared-Kd fit over the data: per-residue observed points + the single-Kd
@@ -1148,6 +1312,37 @@ def build_parser():
                     help='Bootstrap iterations for error estimates (default: 0)')
     kd.add_argument('--intensity-scale', type=_float_list, default=None,
                     help='Comma-separated per-point height/volume scale factors')
+    kd.add_argument('--survey', action='store_true',
+                    help='Survey residues and write an editable selection file + '
+                         'vs-sequence figures. Writes no fit JSON and no global Kd')
+    kd.add_argument('--conc-units', choices=['absolute', 'equivalents'], default=None,
+                    dest='conc_units',
+                    help='Whether concentrations (parsed from spectrum names or given via '
+                         '--conc) are absolute or equivalents of --p0. Equivalents are '
+                         'multiplied by --p0 (default: absolute)')
+    kd.add_argument('--csp-sigma-multiple', type=float, default=None,
+                    dest='csp_sigma_multiple',
+                    help='Multiples of the trimmed CSP spread at the last titration '
+                         'point a residue must exceed to enter the shared CSP fit '
+                         '(default 1.0)')
+    kd.add_argument('--kd-outlier-z', type=float, default=None, dest='kd_outlier_z',
+                    help='Robust z (median/MAD on log10 Kd) beyond which a residue '
+                         'leaves the shared CSP fit (default 3.0; 0 disables)')
+    kd.add_argument('--selection', default=None,
+                    help='Path for the survey selection file (default: beside --input)')
+    kd.add_argument('--noise-quantile', type=float, default=None, dest='noise_quantile',
+                    help='Quantile of the max-CSP distribution below which a residue '
+                         'counts as a non-mover (default 0.25; persisted in the params JSON)')
+    kd.add_argument('--dd-runaway-ratio', type=float, default=None, dest='dd_runaway_ratio',
+                    help='Flag a residue whose fitted plateau exceeds its own largest CSP '
+                         'by more than this (default 10.0; 17%% of one dataset, 43%% of another)')
+    kd.add_argument('--ref-max-ratio', type=float, default=None, dest='ref_max_ratio',
+                    help='Reject a reference intensity this many times below the residue '
+                         "own series max (default 10.0; legitimate values top out at 1.30)")
+    kd.add_argument('--residues', default=None,
+                    help='Restrict the fit to these residues: a selection file from '
+                         '--survey (one name per line, # comments out) or a '
+                         'comma-separated list')
     kd.set_defaults(func=_run_kd)
 
     series = sub.add_parser('series', parents=[common],
@@ -1306,7 +1501,7 @@ def build_parser():
     ex_kd.add_argument('--summary-only', action='store_true', dest='summary_only',
                        help='Write only summary.csv, no figures')
     ex_kd.add_argument('--prefix', default='',
-                       help='Output filename prefix, e.g. DNAJA1_HSPA8 (default: none, '
+                       help='Output filename prefix, e.g. the sample name (default: none, '
                             'i.e. summary.csv/<obs>_fits.pdf/... unprefixed)')
     ex_kd.set_defaults(func=_run_export_kd)
     export.set_defaults(func=lambda a: (export.print_help(sys.stderr) or 2))

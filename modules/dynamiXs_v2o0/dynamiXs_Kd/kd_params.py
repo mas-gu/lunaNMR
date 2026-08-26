@@ -18,6 +18,21 @@ _DEFAULTS = {
     'observables': ['csp', 'intensity'],
     'intensity_value': 'height',
     'n_bootstrap': 0,
+    # 'equivalents' multiplies every concentration by protein_conc. Titration filenames
+    # commonly encode equivalents, and read as absolute they give a confident Kd wrong by
+    # the factor P0.
+    'conc_units': 'absolute',
+    # Survey thresholds. Persisted so a dataset remembers how it was judged; CLI flags
+    # override. Defaults are measured, not assumed — see kd_survey.py for the evidence.
+    # Multiples of the trimmed CSP spread a residue must exceed at the last
+    # titration point to enter the shared CSP fit. 2.0 is a common stricter variant.
+    'csp_sigma_multiple': 1.0,
+    # Robust z (median/MAD on log10 Kd) beyond which a residue leaves the shared
+    # CSP fit. 0 or non-finite disables the gate.
+    'kd_outlier_z': 3.0,
+    'noise_quantile': 0.25,
+    'dd_runaway_ratio': 10.0,
+    'ref_max_ratio': 10.0,
 }
 
 _OBS_BY_INDEX = {0: ['csp', 'intensity'], 1: ['csp'], 2: ['intensity']}
@@ -58,6 +73,14 @@ def normalize_params(d):
         'observables': _parse_observables(obs_source),
         'intensity_value': str(d.get('intensity_value', _DEFAULTS['intensity_value'])),
         'n_bootstrap': int(boot),
+        'conc_units': str(d.get('conc_units', _DEFAULTS['conc_units'])),
+        'csp_sigma_multiple': float(d.get('csp_sigma_multiple',
+                                          _DEFAULTS['csp_sigma_multiple'])),
+        'kd_outlier_z': float(d.get('kd_outlier_z', _DEFAULTS['kd_outlier_z'])),
+        'noise_quantile': float(d.get('noise_quantile', _DEFAULTS['noise_quantile'])),
+        'dd_runaway_ratio': float(d.get('dd_runaway_ratio',
+                                        _DEFAULTS['dd_runaway_ratio'])),
+        'ref_max_ratio': float(d.get('ref_max_ratio', _DEFAULTS['ref_max_ratio'])),
     }
 
 

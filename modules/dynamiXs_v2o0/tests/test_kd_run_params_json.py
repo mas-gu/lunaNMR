@@ -1,4 +1,4 @@
-# ABOUTME: Tests that every Kd run writes an importable <prefix>_kd_params.json next to results.
+# ABOUTME: Tests that every Kd run writes an importable <prefix>_kd_params.json into the results folder's data/ subfolder.
 # ABOUTME: Reproducibility: re-running an analysis needs no manual re-entry of binding params.
 
 import sys
@@ -38,7 +38,7 @@ def test_run_writes_importable_params_json(tmp_path):
 
     pf = result.get('params_file')
     assert pf and Path(pf).exists()
-    assert Path(pf) == out / "TESTSER_kd_params.json"
+    assert Path(pf) == out / "data" / "TESTSER_kd_params.json"
 
     loaded = load_params(pf)
     assert loaded['concentrations'] == [0.0, 6.25, 12.5]

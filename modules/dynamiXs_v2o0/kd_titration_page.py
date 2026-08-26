@@ -177,6 +177,10 @@ class KdTitrationPage(BasePage):
         iv.addItems(["height", "volume"])
         self.intvalue_combo = iv
         b2.addWidget(self._make_field_row("Intensity from", iv))
+        cu = QComboBox()
+        cu.addItems(["absolute", "equivalents of [P]0"])
+        self.conc_units_combo = cu
+        b2.addWidget(self._make_field_row("Concentration units", cu))
         nb = QSpinBox()
         nb.setRange(0, 100000)
         nb.setValue(0)
@@ -445,6 +449,8 @@ class KdTitrationPage(BasePage):
         self.alpha_spin.setValue(float(params.get('alpha', 0.14)))
         self.obs_combo.setCurrentIndex(observables_to_combo_index(params.get('observables')))
         self.intvalue_combo.setCurrentText(str(params.get('intensity_value', 'height')))
+        self.conc_units_combo.setCurrentIndex(
+            1 if str(params.get('conc_units', 'absolute')).lower().startswith('eq') else 0)
         self.boot_spin.setValue(int(params.get('n_bootstrap', 0)))
 
     def _maybe_apply_params_json(self, csv_path, points):
@@ -471,6 +477,8 @@ class KdTitrationPage(BasePage):
             'alpha': float(self.alpha_spin.value()),
             'observables': combo_index_to_observables(self.obs_combo.currentIndex()),
             'intensity_value': self.intvalue_combo.currentText(),
+            'conc_units': ('equivalents' if self.conc_units_combo.currentIndex() == 1
+                           else 'absolute'),
             'n_bootstrap': int(self.boot_spin.value()),
         }
 
@@ -567,10 +575,20 @@ class KdTitrationPage(BasePage):
         self.last_json_file = result.get("json_file")
         self.last_json_folder = os.path.dirname(result.get("json_file") or "") or result.get("output_dir")
         self._log(f"Fit complete: {n} residues -> {result.get('json_file')}")
+        warnings_ = result.get("quality_warnings") or []
+        for w in warnings_:
+            self._log(w)
         if n:
             self.viewer_btn.setEnabled(True)
             self.save_to_project_btn.setEnabled(True)
-            show_info(self, "Fit complete", f"Fitted {n} residues. Open the viewer to inspect.")
+            if warnings_:
+                # A dataset the titration cannot answer must not be reported as a plain
+                # success — the number would look ordinary and mean nothing.
+                show_warning(self, "Fit complete, but the result is not usable",
+                             "\n\n".join(warnings_))
+            else:
+                show_info(self, "Fit complete",
+                          f"Fitted {n} residues. Open the viewer to inspect.")
         else:
             show_warning(self, "No fits succeeded", "All residues failed. Check the log.")
 
@@ -596,10 +614,22 @@ class KdTitrationPage(BasePage):
         except Exception as e:
             show_error(self, "Viewer error", f"Could not open viewer:\n{e}")
 
+    def _json_browse_dir(self):
+        """Where fit JSONs live: the data/ subfolder of the output, when it exists.
+
+        last_json_folder is already the JSON's own directory, so it is used as-is;
+        only an output_dir needs the data/ suffix appended.
+        """
+        if self.last_json_folder and os.path.isdir(self.last_json_folder):
+            return self.last_json_folder
+        base = self.output_dir or ""
+        nested = os.path.join(base, "data") if base else ""
+        return nested if nested and os.path.isdir(nested) else base
+
     def _open_previous_dataset(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select *_kd_fit_data.json",
-            self.output_dir or "", "JSON files (*_kd_fit_data.json);;All files (*)")
+            self._json_browse_dir(), "JSON files (*_kd_fit_data.json);;All files (*)")
         if not path:
             return
         try:
@@ -618,7 +648,7 @@ class KdTitrationPage(BasePage):
         """A meaningful identity for the saved fit: the opened fit's name (preserved on
         re-save), else the dropped series name, else derived from the input path —
         falling back to the SERIES FOLDER when the file is a generic series output
-        (e.g. .../series_results_ERDj6/series_analysis_tidy.csv -> 'ERDj6')."""
+        (e.g. .../series_results_<name>/series_analysis_tidy.csv -> '<name>')."""
         if self._current_analysis_name:
             return self._current_analysis_name
         if self.series_name:

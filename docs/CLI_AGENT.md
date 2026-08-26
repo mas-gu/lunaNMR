@@ -22,7 +22,7 @@ No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every ana
 | `dynamixs t1rho` | Fit a T1rho series and convert it to R2 (tilt-angle corrected, per residue) | `--input` `--t1` `--peaks` `--omega1` `--carrier` `--theta` `--out` | `<prefix>_r2_from_t1rho.csv` |
 | `dynamixs density` | Reduced spectral density mapping | `--input <table.csv>` `--out` `--field1-freq` | `<prefix>_results.csv` (or `_basic`/`_detailed` for `--dual`) + `_plots.pdf` |
 | `dynamixs modelfree` | T1/T2→hetNOE→density→Lipari-Szabo | `--f1-t1 --f1-t2 --f1-noe-sat --f1-noe-unsat --field1-freq --out` | model-free CSVs, per-field hetNOE.pdf, density plots |
-| `kd` | Kd titration (CSP quadratic / intensity decay) | `--input <titration.csv>` `--out` `--p0 <conc>` | `<prefix>_kd_fit_data.json`, results.txt |
+| `kd` | Kd titration (CSP quadratic / intensity decay). `--survey` first, then `--residues` to fit a human-chosen subset | `--input <titration.csv>` `--out` `--p0 <conc>` `[--conc-units {absolute,equivalents}]` `[--survey]` `[--residues FILE|list]` `[--selection PATH]` `[--csp-sigma-multiple 1.0]` `[--kd-outlier-z 3.0]` | `data/<prefix>_kd_fit_data.json`, `<prefix>_kd_results.txt`; with `--survey`: `<prefix>_{csp,intensity}_vs_sequence.pdf`, `data/<prefix>_survey.csv`, and `<prefix>_residues.txt` **beside the input** |
 | `export kd` | Figures + summary from a kd fit JSON | `--json` `--out` `[--kind curves,ref-bars,kd-bars,global-fit]` `[--prefix]` | `[prefix_]summary.csv`, `[prefix_]<obs>_fits.pdf` / per-residue PNGs (curves, per fitted obs), `[prefix_]<obs>_ref_vs_point.pdf` (ref→point bars, both obs by default, PDF only), `[prefix_]<obs>_kd_vs_residue.pdf` (per-residue Kd + global line, PDF only), `[prefix_]<obs>_global_fit.pdf` (per-residue data + shared-Kd curve, R²(global) per panel, PDF only) |
 | `project inventory` | List a bundle's contents | `<bundle.lunaNMR>` | stdout listing |
 | `project remove` | Delete bundle-relative paths | `<bundle> <rel/path>…` | (mutates bundle) |
@@ -195,3 +195,75 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 - **`modelfree --f{1,2}-t{1,2}-units` applies to matrices `series` did not write.** A `series`-produced matrix is already normalised to ms (`value_units` in the sidecar), so the default `ms` is right. Hand-built or DynamiXs-format tables still need the flag — a T1 in s with a T2 in ms puts R1 out by 1000×.
 - **model-free CSV columns differ single vs dual.** Dual: `R1_f1`/`R1_f2`, `Rex_f1_err`, `Rex_f1_95CI`, … Single: the bare names `R1`, `Rex_err`, `Rex_95CI` **plus `_f1` aliases of each**, so a reader written against the dual spelling works on both. Shared, never suffixed: `Residue, S2, tc, te, S2_err, te_err, chi2, fit_success`. CSVs written before the aliases existed carry only the bare names, and a `_f1` selection on those returns an **empty selection** rather than raising — which reads as "no exchange anywhere".
 - **`export kd` curves vs ref-bars differ on observable.** `curves` (`<obs>_fits.pdf`) render only fitted observables (follow the JSON / `--observable`); `ref-bars` (`<obs>_ref_vs_point.pdf`) are model-free (raw series) and default to BOTH csp+intensity even for a single-observable fit — `--observable` still restricts. Ref-bars need embedded per-point `series` + ≥2 points.
+
+## Kd workflow: survey → choose → fit
+
+Fitting every residue to a Kd is meaningless — most residues do not bind. The agent
+proposes, a human disposes, and only then is a Kd reported.
+
+```
+1. python -m lunaNMR kd --survey --input tidy.csv --out RESULTS --p0 50 --conc-units equivalents
+2. read RESULTS/<prefix>_csp_vs_sequence.pdf; edit <input_dir>/<prefix>_residues.txt
+3. python -m lunaNMR kd --input tidy.csv --out RESULTS --p0 50 --conc-units equivalents \
+       --residues <input_dir>/<prefix>_residues.txt
+4. python -m lunaNMR export kd --json RESULTS/data/<prefix>_kd_fit_data.json --out RESULTS
+```
+
+**Selection file.** One residue per line; `#` comments a line out, deleting the `#` puts it
+back. Trailing comments are evidence, never exclusions. It lives **beside the input CSV**,
+not in `--out`, so a different `--out` cannot lose it; `--selection` overrides. Re-running
+`--survey` MERGES: human decisions survive, evidence refreshes, disagreements are marked
+`[kept]`/`[dropped]` and never re-suggested.
+
+**Output layout.** `--out` holds `*.pdf` and `*_kd_results.txt`; every CSV and JSON is in
+`<out>/data/`. `export kd --json` therefore points into `data/`.
+
+**Why a residue is missing from a shared CSP Kd.** Five gates, each naming its exclusions
+in `metadata.csp_pool_excluded` — `dummy_*`, `quality='Failed'`, CSP below the significance
+threshold, R² < 0.8, Kd outside the resolvable window or a robust-z outlier.
+
+**Read `metadata.quality_warnings` before quoting any Kd.** When the *typical* residue fits
+a Kd outside what the titration can resolve, the tool says so in plain language and refuses
+to exclude outliers — there is no trustworthy centre to measure deviation from, and the
+whole dataset is unusable rather than a few residues. `--kd-outlier-z 0` disables the
+statistical gate but never this verdict.
+
+**Survey thresholds — flags, with the measurement behind each default.** The reason a
+default is what it is, is what you need before changing it.
+
+| flag | default | measured basis |
+|---|---|---|
+| `--csp-sigma-multiple` | `1.0` | multiples of the trimmed CSP spread at the last titration point a residue must exceed to enter the shared fit. `2.0` is a common stricter variant |
+| `--kd-outlier-z` | `3.0` | robust z (median/MAD on log10 Kd). `0` disables the statistical test but never the credibility verdict or the resolvable-window gate |
+| `--ref-max-ratio` | `10.0` | a reference intensity this far below the residue's own series max is a broken denominator. Across 129 residues legitimate ratios topped out at 1.30 and the next value was 49.9 — 10 sits in the empty band |
+| `--dd-runaway-ratio` | `10.0` | fitted plateau over the residue's own largest CSP. Cited as evidence, never used to exclude: the flagged fraction ran 17% on one dataset and 43% on another, so it describes the experiment, not the residue |
+| `--noise-quantile` | `0.25` | quantile of the max-CSP distribution below which a residue counts as a non-mover. Derived per dataset, because the noise floor is a property of the spectra |
+
+All five persist per dataset and follow the same precedence as everything else.
+
+**Settings persist per dataset.** `conc_units`, `csp_sigma_multiple`, `kd_outlier_z`,
+`noise_quantile`, `dd_runaway_ratio` and `ref_max_ratio` are written to
+`<input_dir>/<prefix>_kd_params.json` and read back automatically. Precedence: an explicit
+flag beats the persisted value beats the schema default.
+
+**⚠ Equivalents are not concentrations.** Titration filenames commonly encode equivalents
+(`..._3o0.ft` = 3.0 eq). Read as absolute they give a confident Kd wrong by the factor
+`--p0`, with `success=True` and no error. Pass `--conc-units equivalents`, or `--conc` with
+explicit values. The default is `absolute`, so this trap is avoidable, **not closed**.
+
+## Deep guides
+
+`docs/CLI_AGENTS_DEEP/` holds the long-form runbooks — the phase structure, the physical QC
+thresholds, and the traps that are invisible from the CLI surface. Read the playbook for
+your analysis type before starting; it is the difference between running the commands and
+knowing whether the answer is real.
+
+| file | for |
+|---|---|
+| `AFFINITY_PLAYBOOK.md` | binding titrations → Kd: diagnose → survey → fit → QC, and the traps (equivalents read as concentrations, broken reference points, spread-based gates that widen to admit the garbage inflating them) |
+| `AFFINITY_PROMPT.md` | a ready task prompt for an end-to-end titration run, with timing and the two mandatory stop points |
+| `RELAXATION_PLAYBOOK.md` | ¹⁵N T1/T2/hetNOE → model-free: the diagnose/run split, field-pair ratio bands, τc cross-checks |
+| `RELAXATION_PROMPT.md` | a ready task prompt for an end-to-end relaxation run |
+
+Both playbooks share one rule worth stating here: **diagnose, report, stop.** Corrections
+change the science, so raise them with the measured number and let the user decide.

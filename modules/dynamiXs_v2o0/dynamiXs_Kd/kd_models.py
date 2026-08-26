@@ -6,6 +6,23 @@ import re
 import numpy as np
 
 
+# A reference intensity this many times below the residue's own series maximum is a
+# broken denominator, not a measurement: binding lowers intensity, so I/I0 far above 1
+# means the L=0 point is wrong. Measured across two datasets (n=129): legitimate ratios
+# top out at 1.30, the next value up is 49.9, and nothing lies between.
+# Defined here so the fit path and the figure path cannot disagree about it.
+REF_MAX_RATIO = 10.0
+
+
+def reference_usable(v, ref, ref_max_ratio=None):
+    """Whether a residue's reference intensity can serve as a denominator."""
+    if not np.isfinite(ref) or ref <= 0.0:
+        return False
+    finite = v[np.isfinite(v)]
+    cap = REF_MAX_RATIO if ref_max_ratio is None else float(ref_max_ratio)
+    return not (finite.size and float(np.max(finite)) / ref > cap)
+
+
 def fraction_bound(L, P, Kd):
     """Fraction of protein bound for a 1:1 interaction (full quadratic isotherm).
 
@@ -96,7 +113,12 @@ def pair_observable(series, i, j, obs, alpha=0.14, value='height'):
     if max(i, j) >= len(v):
         return float('nan')
     ref = v[i]
-    if not np.isfinite(ref) or ref <= 0.0:
+    # Same rule the fit path applies. A residue the fitter dropped for a broken reference
+    # must not reappear in a figure at a ratio of 1e9 — one such bar flattens every real
+    # one, and the figure would be describing a residue the fit already rejected.
+    if not reference_usable(v, ref):
+        return float('nan')
+    if not np.isfinite(v[j]) or v[j] <= 0.0:
         return float('nan')
     return float(v[j] / ref)
 

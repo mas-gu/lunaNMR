@@ -79,7 +79,7 @@ class TestKdSubcommand:
         code = main(["kd", "--input", str(csv), "--out", str(out),
                      "--p0", "50", "--observable", "csp"])
         assert code == 0
-        json_file = out / "kd_kd_fit_data.json"
+        json_file = out / "data" / "kd_kd_fit_data.json"
         assert json_file.exists()
         data = json.loads(json_file.read_text())
         r1 = next(f for f in data['fits'] if f['residue'] == 'R1')
@@ -351,14 +351,14 @@ class TestExportKd:
         kdout = tmp_path / "kd"
         assert main(["kd", "--input", str(csv), "--out", str(kdout),
                      "--p0", "50", "--observable", observable]) == 0
-        return kdout / "kd_kd_fit_data.json"
+        return kdout / "data" / "kd_kd_fit_data.json"
 
     def test_export_writes_pdf_and_summary_by_default(self, tmp_path):
         from lunaNMR.cli import main
         jf = self._make_kd_json(tmp_path, "csp")
         figs = tmp_path / "figs"
         assert main(["export", "kd", "--json", str(jf), "--out", str(figs)]) == 0
-        assert (figs / "summary.csv").exists()
+        assert (figs / "data" / "summary.csv").exists()
         pdf = figs / "csp_fits.pdf"
         assert pdf.exists() and pdf.stat().st_size > 0
         assert not (figs / "csp").exists()          # no per-residue PNG dir in pdf mode
@@ -387,7 +387,7 @@ class TestExportKd:
         figs = tmp_path / "figs2"
         assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
                      "--summary-only"]) == 0
-        assert (figs / "summary.csv").exists()
+        assert (figs / "data" / "summary.csv").exists()
         assert not (figs / "csp").exists()
 
     def test_export_ref_vs_point_pdf_by_default(self, tmp_path):
@@ -461,13 +461,13 @@ class TestExportKd:
         figs = tmp_path / "figs_prefixed"
         assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
                      "--prefix", "DNAJA1_HSPA8"]) == 0
-        assert (figs / "DNAJA1_HSPA8_summary.csv").exists()
+        assert (figs / "data" / "DNAJA1_HSPA8_summary.csv").exists()
         assert (figs / "DNAJA1_HSPA8_csp_fits.pdf").exists()
         assert (figs / "DNAJA1_HSPA8_csp_ref_vs_point.pdf").exists()
-        assert (figs / "DNAJA1_HSPA8_csp_ref_vs_point.csv").exists()
+        assert (figs / "data" / "DNAJA1_HSPA8_csp_ref_vs_point.csv").exists()
         assert (figs / "DNAJA1_HSPA8_csp_kd_vs_residue.pdf").exists()
         # no unprefixed duplicates left behind
-        assert not (figs / "summary.csv").exists()
+        assert not (figs / "data" / "summary.csv").exists()
         assert not (figs / "csp_fits.pdf").exists()
         assert not (figs / "csp_ref_vs_point.pdf").exists()
         assert not (figs / "csp_kd_vs_residue.pdf").exists()
@@ -478,7 +478,7 @@ class TestExportKd:
         jf = self._make_kd_json(tmp_path, "csp")
         figs = tmp_path / "figs_noprefix"
         assert main(["export", "kd", "--json", str(jf), "--out", str(figs)]) == 0
-        assert (figs / "summary.csv").exists()
+        assert (figs / "data" / "summary.csv").exists()
         assert (figs / "csp_fits.pdf").exists()
 
     def _make_multi_kd_json(self, tmp_path):
@@ -498,7 +498,7 @@ class TestExportKd:
         out = tmp_path / "kdm"
         assert main(["kd", "--input", str(csv), "--out", str(out), "--p0", "50",
                      "--conc", "0,10,25,60,150,300", "--observable", "intensity"]) == 0
-        return out / "kd_kd_fit_data.json"
+        return out / "data" / "kd_kd_fit_data.json"
 
     def test_export_global_fit_pdf_by_default(self, tmp_path):
         from lunaNMR.cli import main
@@ -618,7 +618,7 @@ class TestIntensityPanelAxisSharing:
                      "--conc", ",".join(str(p) for p in pts),
                      "--observable", "intensity"]) == 0
         figs = tmp_path / "figs"
-        assert main(["export", "kd", "--json", str(kdout / "kd_kd_fit_data.json"),
+        assert main(["export", "kd", "--json", str(kdout / "data" / "kd_kd_fit_data.json"),
                      "--out", str(figs), "--observable", "intensity"]) == 0
         pdf = figs / "intensity_fits.pdf"
         assert pdf.exists() and pdf.stat().st_size > 0
@@ -713,7 +713,7 @@ class TestDryRun:
         out = tmp_path / "o"
         code = main(["kd", "--input", str(csv), "--out", str(out), "--p0", "50", "--dry-run"])
         assert code == 0
-        assert not (out / "kd_kd_fit_data.json").exists()  # nothing was executed
+        assert not (out / "data" / "kd_kd_fit_data.json").exists()  # nothing was executed
 
     def test_kd_dry_run_missing_input_returns_1(self, tmp_path):
         from lunaNMR.cli import main

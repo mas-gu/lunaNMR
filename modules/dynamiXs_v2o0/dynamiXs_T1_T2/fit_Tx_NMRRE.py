@@ -506,7 +506,10 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
         
         plt.tight_layout()
         fig.savefig(f"{output_prefix}_fit_results_fig{fig_idx + 1}.pdf", format='pdf', dpi=300)
-        plt.show()
+        # The figure is already saved; showing it only makes sense on an interactive
+        # backend. Under Agg (CLI, tests) plt.show() warns and does nothing.
+        if matplotlib.get_backend().lower() not in ('agg', 'pdf', 'ps', 'svg', 'template'):
+            plt.show()
         plt.close(fig)
 
 

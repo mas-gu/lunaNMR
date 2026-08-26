@@ -6,7 +6,8 @@ import re
 import numpy as np
 import pandas as pd
 
-from kd_models import compute_csp
+from kd_models import compute_csp, REF_MAX_RATIO, reference_usable
+
 
 
 def _to_point(label):
@@ -40,7 +41,14 @@ def load_titration_tidy(csv_path):
         Sorted titration point values (ascending).
     residues : dict[str, dict]
         assignment -> {'points', 'ppm_x', 'ppm_y', 'height', 'volume'} lists,
-        each aligned to `points` (missing entries are NaN).
+        each aligned to `points` (missing entries are NaN), plus 'n_failed_points'
+        counting the points this residue lost to a failed fit.
+
+    Points the series marked quality='Failed' are blanked to NaN so they drop out of
+    the fit. The series writes a sentinel height (0.1, or a negative amplitude) on a
+    failed fit; read as a measurement those become a confident intensity of zero and
+    an unphysical ratio. Blanking is POINT-WISE: a residue that failed at one point
+    keeps every other point.
     """
     df = pd.read_csv(csv_path)
     df = df.copy()
@@ -49,9 +57,14 @@ def load_titration_tidy(csv_path):
     points = sorted(df['_pt'].unique())
 
     cols = ['ppm_x', 'ppm_y', 'height', 'volume']
+    failed = (df['quality'].astype(str).str.strip().str.lower() == 'failed'
+              if 'quality' in df.columns else pd.Series(False, index=df.index))
+    df.loc[failed, [c for c in cols if c in df.columns]] = np.nan
+
     residues = {}
     for assignment, g in df.groupby('assignment'):
-        row = {'points': list(points)}
+        row = {'points': list(points),
+               'n_failed_points': int(failed.reindex(g.index, fill_value=False).sum())}
         for c in cols:
             if c in g.columns:
                 # Collapse any duplicate rows at the same point to one value (mean,
@@ -146,15 +159,27 @@ def csp_series(residue, alpha=0.14):
     return list(compute_csp(dH, dN, alpha=alpha))
 
 
-def intensity_ratio_series(residue, value='height'):
+def intensity_ratio_series(residue, value='height', ref_max_ratio=None):
     """Per-point intensity normalised to the first (reference) point.
 
     If the reference point is missing/non-positive (NaN, 0, or negative — peak not
     detected or below noise at L=0) the ratio is undefined, so return all-NaN
     (excluded from the fit) rather than raw unnormalised values.
+
+    A reference orders of magnitude below the residue's own series maximum is also
+    unusable: binding lowers intensity, so a ratio far above 1 means the reference is
+    wrong, not that the peak grew. Such a reference rescales the WHOLE residue rather
+    than degrading one point, and it survives a quality label of 'Good'.
+
+    Non-positive intensities at other points are undefined too, and are dropped
+    point-wise. kd_models.peak_present already defines presence as finite and > 0;
+    this keeps the fit path honouring the same rule.
     """
     v = np.asarray(residue[value], dtype=float)
     ref = v[0]
     if not np.isfinite(ref) or ref <= 0.0:
         return [float('nan')] * len(v)
+    if not reference_usable(v, ref, ref_max_ratio):
+        return [float('nan')] * len(v)
+    v = np.where(np.isfinite(v) & (v > 0.0), v, np.nan)
     return list(v / ref)
