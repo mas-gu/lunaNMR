@@ -25,12 +25,19 @@ _SAMPLES = ["A1_" + "WT", "data_in_" + "WT", "ZZ_" + "WT", "T1_" + "WT",
             "T2_" + "T6D", "WT_" + "density", "rex_analysis_" + "WT"]
 _FREQUENCIES = ["700." + "093", "600." + "133"]
 _ACQUISITIONS = ["NR_ATP_" + "ref_noCa", "594_" + "ce_D"]
+# The construct designation of an unpublished study. Test comments explaining WHY a
+# fixture uses a given delay grid or intensity scale are worth keeping; naming the sample
+# those numbers came from is not. Deliberately narrow: a published protein name (DNAJA1)
+# or a ligand (GDP) is ordinary vocabulary and appears legitimately in examples and
+# assignments, so screening those would fire on correct content.
+_STUDY_NAMES = ["KRA" + "SB"]
 
 FORBIDDEN = {
     "calibrated spectrometer frequency": _FREQUENCIES,
     "protein variant code": _MUTANTS,
     "per-construct example filename": _SAMPLES,
     "real acquisition or residue label": _ACQUISITIONS,
+    "unpublished study or sample name": _STUDY_NAMES,
 }
 
 # Binary payloads and this test cannot meaningfully be scanned.

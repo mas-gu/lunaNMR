@@ -13,7 +13,7 @@ sys.path.insert(0, str(_DIR))
 from fit_Tx_NMRRE import (fit_single_residue, shared_baseline_test,                          save_results, DEGENERATE_T2_OVER_TMAX)
 
 T_TRUE = 900.0
-DELAYS = np.array([0, 100, 150, 300, 600, 900, 1200, 1500], float)   # KRASB T1 grid: t_max/T = 1.7
+DELAYS = np.array([0, 100, 150, 300, 600, 900, 1200, 1500], float)   # a real truncated T1 grid: t_max/T = 1.7
 
 
 def _decay(t=T_TRUE, amp=1e7, offset=0.0, noise=0.0, seed=0):
@@ -113,7 +113,8 @@ class TestSharedBaselineDiagnostic:
         assert abs(r['f']) < 0.03
 
     def test_detects_a_real_shared_baseline(self):
-        """KRASB T1 sits at f = 0.15, with 70% of residues improving (p = 5e-07)."""
+        """A real truncated T1 series sits at f = 0.15, with 70% of residues
+        improving (p = 5e-07)."""
         r = shared_baseline_test(self._series(0.15))
         assert r['significant'] is True
         assert r['f'] == pytest.approx(0.15, abs=0.04)
@@ -178,7 +179,7 @@ class TestProvenanceSurvivesToDisk:
         assert 'WindowRatio' in header
 
     def test_a_marginal_window_is_reported_in_the_run_summary(self, tmp_path):
-        """t_max 1500 against T ~ 1400 is the KRASB T1 regime."""
+        """t_max 1500 against T ~ 1400 is the marginal-window regime real data shows."""
         r = self._run(tmp_path, 1400.0, [0, 100, 150, 300, 600, 900, 1200, 1500])
         assert r['n_window_marginal'] >= 1
         assert r['baseline_fixed'] is True
@@ -375,7 +376,7 @@ class TestWindowRatioSaysWhichModelItIsUnder:
     def test_divergence_tracks_the_size_of_f_not_the_verdict(self):
         """Keyed on |f| deliberately. The earlier version asserted agreement whenever the
         series was REJECTED, which held only because no fixture was both rejected and far
-        from zero — real JA1 700_T2 is rejected on sign at f = -0.06 and diverges 11%.
+        from zero — a real T2 series is rejected on sign at f = -0.06 and diverges 11%.
         The relationship is monotone in |f| and signed by f: 0% at f = 0, -11% at -0.06,
         +43% at +0.15."""
         near = shared_baseline_test(self._series(0.0))

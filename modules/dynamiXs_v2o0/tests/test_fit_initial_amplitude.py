@@ -30,7 +30,7 @@ class TestAmplitudeScaleInvariance:
         assert fit['t2'] == pytest.approx(TRUE_T2, rel=0.02)
 
     def test_two_scales_of_the_same_decay_agree(self):
-        """KRASB's 800 MHz spectra sit ~30,000x above its 600 MHz ones; the fitted T2
+        """Two fields of one real dataset differ ~30,000x in intensity scale; the fitted T2
         must not move because of that."""
         small = fit_single_residue(DELAYS, _decay(1e6), 'A1', n_bootstrap=0)
         large = fit_single_residue(DELAYS, _decay(3e10), 'A1', n_bootstrap=0)
