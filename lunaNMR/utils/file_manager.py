@@ -235,6 +235,12 @@ class NMRFileManager:
             # Standardize column names
             df = self.standardize_peak_columns(df)
 
+            # Strip whitespace from assignments: a list written "3LysH, 8.2, 126.3"
+            # otherwise carries the space into every output CSV, and residue
+            # matching across datasets is by exact string.
+            if 'Assignment' in df.columns:
+                df['Assignment'] = df['Assignment'].astype(str).str.strip()
+
             # Add to recent files
             self.add_recent_file(file_path)
 
