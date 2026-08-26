@@ -32,9 +32,16 @@ class DelayExtractor:
 
     # Patterns to match delay values (case-insensitive)
     # Support both with extension (_50ms.ft) and without (_50ms or T1_50ms)
+    # A repeat acquisition at the same delay is marked either by a single trailing letter
+    # (`_300msb`) or by a numeric suffix (`_8ms_2`); both name the same delay as the
+    # original, and both must parse or that spectrum ends up with a stem-named column
+    # while the rest of the series is delay-named.
+    _REPEAT = r'(?:[a-zA-Z])?(?:_\d+)?'
     PATTERNS = [
-        (r'_(\d+(?:\.\d+)?)ms(?:\.|$)', 1.0),      # _50ms. or _50ms (end of string)
-        (r'_(\d+(?:\.\d+)?)s(?:\.|$)', 1000.0),    # _1s. or _1s (end of string)
+        # microseconds first: '2400us' must not be read as a bare-'s' match
+        (r'_(\d+(?:\.\d+)?)us' + _REPEAT + r'(?:\.|$)', 0.001),
+        (r'_(\d+(?:\.\d+)?)ms' + _REPEAT + r'(?:\.|$)', 1.0),
+        (r'_(\d+(?:\.\d+)?)s' + _REPEAT + r'(?:\.|$)', 1000.0),
     ]
 
     # Titration suffix: trailing _<value> where value uses 'o' or '.' for the

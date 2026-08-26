@@ -43,6 +43,82 @@ def resolve_titration_tracking(series_mode, peak_source_mode, enable_drift_limit
     return "cascade", False, True
 
 
+def build_series_metadata(spectrum_names, delay_mapping, series_mode: str = "time") -> Dict[str, Any]:
+    """Map every output matrix column back to the spectrum it came from.
+
+    Matrix columns are series values (a delay in ms, or a titration point), so the
+    filename is not recoverable from the matrix alone — and which of two files at the
+    same value owns the bare label rather than the `_2` one follows a case-sensitive
+    sort of the basename, not the acquisition order. A spectrum whose value cannot be
+    parsed falls back to a column named after the file stem and reports `value: None`;
+    that mix is invisible in the matrix, so it is counted here too.
+    """
+    from lunaNMR.utils.delay_extractor import DelayExtractor
+
+    extractor = DelayExtractor(mode=series_mode)
+    columns = []
+    for name in spectrum_names:
+        label = delay_mapping.get(name)
+        columns.append({
+            'column': label if label is not None else os.path.splitext(name)[0],
+            'spectrum': name,
+            'value': extractor.extract_value(name) if label is not None else None,
+        })
+
+    return {
+        'series_mode': series_mode,
+        'value_units': 'ms' if series_mode == 'time' else 'point',
+        'n_spectra': len(columns),
+        'n_value_unparsed': sum(1 for c in columns if c['value'] is None),
+        'columns': columns,
+    }
+
+
+def measure_repeat_scale(intensity_matrix, columns) -> Optional[Dict[str, Any]]:
+    """Compare repeat acquisitions at shared series values, on the fitted intensities.
+
+    A sub-series re-acquired at a different receiver gain or scan count sits at a
+    constant fraction of the other, which a free baseline in the relaxation fit
+    absorbs by stretching T. A pre-flight check can only estimate this from box
+    maxima; here the fitted heights are already available, so the number is the one
+    worth acting on.
+
+    Reports only. Rescaling the data changes the science and stays a decision for the
+    user, so the matrix is never modified.
+    """
+    by_value: Dict[float, List[str]] = {}
+    for entry in columns:
+        if entry['value'] is not None:
+            by_value.setdefault(entry['value'], []).append(entry['column'])
+
+    per_value, ratios = {}, []
+    for value, labels in sorted(by_value.items()):
+        if len(labels) != 2:
+            continue
+        # "8" sorts before "8_2", so the first is the one holding the bare label.
+        first, second = sorted(labels)
+        if first not in intensity_matrix or second not in intensity_matrix:
+            continue
+        a = intensity_matrix[first].to_numpy(float)
+        b = intensity_matrix[second].to_numpy(float)
+        usable = (a > 0) & (b > 0)
+        if usable.sum() < 3:
+            continue
+        # The strong half only: weak or failed peaks would dominate a ratio of ratios.
+        usable &= a >= np.median(a[usable])
+        ratio = float(np.median(b[usable] / a[usable]))
+        per_value[value] = dict(first=first, second=second, ratio=ratio,
+                                n_peaks=int(usable.sum()))
+        ratios.append(ratio)
+
+    if not ratios:
+        return None
+    ratio = float(np.median(ratios))
+    return dict(per_value=per_value, ratio=ratio, scale=1.0 / ratio,
+                deviation_percent=abs(ratio - 1.0) * 100,
+                needs_normalisation=abs(ratio - 1.0) > 0.05)
+
+
 class MultiSpectrumProcessor:
     """
     Completely independent multi-spectrum processor.
@@ -1382,6 +1458,7 @@ class MultiSpectrumProcessor:
 
         # Create tracking DataFrame
         tracking_df = self._create_peak_tracking_table(batch_results)
+        intensity_matrix = None
 
         if not tracking_df.empty:
             # Main comprehensive tracking file
@@ -1392,7 +1469,7 @@ class MultiSpectrumProcessor:
             log_info(f"Created comprehensive peak tracking: {tracking_file}")
 
             # Create matrix files
-            self._create_intensity_matrix(tracking_df)
+            intensity_matrix = self._create_intensity_matrix(tracking_df)
             self._create_detected_intensity_matrix(tracking_df)
             self._create_volume_matrix(tracking_df)
             self._create_detection_matrix(tracking_df)
@@ -1407,6 +1484,32 @@ class MultiSpectrumProcessor:
         # the Kd/titration module, and manual-audit save. Created unconditionally
         # so it exists even when the tracking table is empty.
         self._create_tidy_results_file(batch_results)
+
+        self._create_series_metadata_file(batch_results, intensity_matrix)
+
+    def _create_series_metadata_file(self, batch_results: Dict[str, Any],
+                                     intensity_matrix: Optional[pd.DataFrame] = None):
+        """Record column -> spectrum -> series value, which the matrices cannot carry,
+        plus how well any repeat acquisitions agree."""
+        metadata = build_series_metadata(
+            list(batch_results.get('results', {}).keys()),
+            getattr(self, 'delay_mapping', {}) or {},
+            getattr(self, 'series_mode', 'time'),
+        )
+        if intensity_matrix is not None:
+            metadata['repeat_scale'] = measure_repeat_scale(intensity_matrix, metadata['columns'])
+        path = os.path.join(self.output_folder, 'series_metadata.json')
+        with open(path, 'w') as fh:
+            json.dump(metadata, fh, indent=2)
+        log_info(f"Created series metadata: {path}")
+        if metadata['n_value_unparsed']:
+            log_warning(f"{metadata['n_value_unparsed']} spectra have no parseable series "
+                        f"value; their columns are named after the file stem")
+        repeats = metadata.get('repeat_scale')
+        if repeats and repeats['needs_normalisation']:
+            log_warning(f"repeat acquisitions differ by {repeats['deviation_percent']:.1f}% "
+                        f"(ratio {repeats['ratio']:.4f}); cross-normalising the low sub-series "
+                        f"would need x{repeats['scale']:.4f} — reported, not applied")
 
     def _create_peak_tracking_table(self, batch_results: Dict[str, Any]) -> pd.DataFrame:
         """Create comprehensive peak tracking table.
@@ -1553,6 +1656,7 @@ class MultiSpectrumProcessor:
         # Format with 3 decimals for Reference_X/Y, 1 decimal for other columns
         intensity_data_formatted = self._format_dataframe_for_csv(intensity_data)
         intensity_data_formatted.to_csv(intensity_file, index=False)
+        return intensity_data
 
     def _create_detection_matrix(self, tracking_df: pd.DataFrame):
         """Create peak detection matrix file"""

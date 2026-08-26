@@ -14,10 +14,12 @@ No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every ana
 ## Subcommands
 | Command | Does | Required inputs | Key outputs |
 |---|---|---|---|
+| `diagnose` | Read-only pre-flight over a dataset: registration, capture, delays, peak lists, cross-experiment residue set | `<root>` | stdout report / JSON |
 | `series` | Fit a multi-spectrum series/titration | `--spectra <dir/glob>` `--peaks` `--out` | `peak_intensity_matrix.csv`, `_volume_matrix`, `comprehensive_peak_tracking.csv`, `series_analysis_tidy.csv`, per-spectrum CSVs |
 | `dynamixs t1t2` | Mono-exp T1/T2 fit | `--input <matrix.csv>` `--out` `--exp {T1,T2}` | `<prefix>_fit_results.txt` + JSON |
 | `dynamixs methyl-t2` | Bi-exp Tugarinov-Kay methyl T2 | `--input` `--out` | `<prefix>_fit_results.txt` + JSON |
 | `dynamixs hetnoe` | I_sat/I_unsat per residue | `--sat` `--unsat` `--out` | `<prefix>_hetnoe.csv`, `<prefix>_hetnoe.pdf` |
+| `dynamixs t1rho` | Fit a T1rho series and convert it to R2 (tilt-angle corrected, per residue) | `--input` `--t1` `--peaks` `--omega1` `--carrier` `--theta` `--out` | `<prefix>_r2_from_t1rho.csv` |
 | `dynamixs density` | Reduced spectral density mapping | `--input <table.csv>` `--out` `--field1-freq` | `<prefix>_results.csv` (or `_basic`/`_detailed` for `--dual`) + `_plots.pdf` |
 | `dynamixs modelfree` | T1/T2→hetNOE→density→Lipari-Szabo | `--f1-t1 --f1-t2 --f1-noe-sat --f1-noe-unsat --field1-freq --out` | model-free CSVs, per-field hetNOE.pdf, density plots |
 | `kd` | Kd titration (CSP quadratic / intensity decay) | `--input <titration.csv>` `--out` `--p0 <conc>` | `<prefix>_kd_fit_data.json`, results.txt |
@@ -26,8 +28,98 @@ No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every ana
 | `project remove` | Delete bundle-relative paths | `<bundle> <rel/path>…` | (mutates bundle) |
 | `batch` | Folder-wide detect + Voigt/PS2D fit | `<folder>` (flags pass through to `batch_processing`) | per-spectrum fit outputs |
 
-## Copy-paste blocks
+**Doing T1/T2/hetNOE?** Follow the Recipe below in order — it is the canonical workflow and
+states every requirement that is not visible from `--help`. The Copy-paste blocks after it are
+just the flag surface.
+
+## Recipe: ¹⁵N relaxation → model-free
+
+The dominant workflow. Follow it in order — do not reinvent it. Each step states its own
+non-obvious requirement.
+
+**0. Diagnose first.** Read-only, seconds, changes nothing. It answers the questions the
+later steps depend on — which hetNOE plane is saturated, whether any repeat acquisitions
+disagree, whether every peak list matches its own spectra, and whether the residue sets
+agree across fields.
 ```bash
+python -m lunaNMR diagnose <dataset_root> [--quick] [--format json]
+```
+A wrong peak list does not raise — it produces zero heights and R²≈0.2 shoulder fits that
+read as noisy data, after minutes of integration. This is what catches it first. For a single
+experiment the same checks are available as `series --dry-run --deep`.
+
+**1. Every experiment gets its OWN peak list.** hetNOE lists are typically offset ~0.07 ppm ¹H / ~0.7 ppm ¹⁵N from the T1/T2 frame — 1× and 10× the 0.070 ppm search window. Using the wrong one gives Height 0 or R²≈0.2 shoulder fits that read as "noisy data". Never widen the window to compensate.
+
+**2. Name the hetNOE planes before integrating.** Two planes are not a delay series, so the matrix columns become the filename stems. Symlink to `*_saturated.ft` / `*_unsaturated.ft`, deciding which is which by the **measured** intensity ratio over high-S/N peaks (saturated is the lower one; 0.75–0.85 typical, never >1). `001`/`002` filenames say nothing.
+
+**3. Integrate — one `series` call per experiment** (6 calls for two fields):
+```bash
+python -m lunaNMR series --spectra <exp_dir> --peaks <its_own_list.txt> \
+  --out RUN/series/<name> --mode time --peak-source reference --parallel --format json
+```
+Matrix columns are series values (ms), not filenames. **`series_metadata.json`** beside the matrices maps every column → spectrum → value; read it rather than inferring, and check its `n_value_unparsed` is 0.
+
+**4. Build the hetNOE inputs.** Split the hetNOE matrix's two columns into headerless `residue,intensity,error` files. **Write the third column** — without it the error defaults to a flat `noe*0.02` (≈0.016), ~3× too tight, which over-weights hetNOE and fakes tight S² errors; a realistic floor is ~0.044 relative per plane → hetNOE_err ≈ 0.05. Gate residues using `series_analysis_tidy.csv`'s `quality` (both planes Excellent/Good, both intensities > 0, ratio in −0.2…1.05).
+
+**5. Fit T1/T2** — usually unnecessary. `modelfree` refits the matrices internally and already writes `<prefix>_field{1,2}_T{1,2}_fit_results.txt` (per-residue T and T_err), the `_fig{1,2,3}.pdf` decay plots, and R1/R2 in `<prefix>_spectral_density_basic.csv`. Run `t1t2` separately only for a different `--error-method`, or to apply your own fit filter before deciding which residues to keep:
+```bash
+python -m lunaNMR dynamixs t1t2 --input RUN/series/T1_600/peak_intensity_matrix.csv \
+  --out RUN/fits/T1_600 --exp T1 --field-freq 600 --time-units ms --format json
+```
+Keep fits with finite `T`, `T > 0`, `T_err < T`. Its residue count will not match `modelfree`'s.
+
+**6. Model-free — run `--dual` AND each field alone.** The single-field runs are the control that tells you whether to believe the dual one (step 7).
+```bash
+python -m lunaNMR dynamixs modelfree --dual \
+  --f1-t1 … --f1-t2 … --f1-noe-sat … --f1-noe-unsat … --field1-freq 600 \
+  --f2-t1 … --f2-t2 … --f2-noe-sat … --f2-noe-unsat … --field2-freq 700 \
+  --out RUN/mf --prefix dual --format json
+```
+Per-residue results land in `<prefix>_spectral_density_basic.csv`.
+
+**6b. T1ρ instead of T2.** A T1ρ series measures R1ρ, not R2: `R1ρ = R1·cos²θ + R2·sin²θ`.
+Recovering R2 needs R1 *and* the spin-lock geometry, and the tilt angle differs per residue
+because residues sit at different offsets from the spin-lock carrier — one nominal angle is
+not enough (a residue 22 ppm off carrier at ω₁ = 2 kHz tilts to ~56°, not 90°, and its R2 is
+~40% higher than the uncorrected value).
+```bash
+python -m lunaNMR dynamixs t1rho --input <t1rho_matrix.csv> --t1 <t1_matrix.csv> \
+  --peaks <list.txt> --omega1 <Hz> --carrier <15N ppm> --theta <deg> \
+  --field-freq 600 --out RUN/t1rho --prefix field1 --format json
+```
+`--omega1` (cnst27), `--carrier` and `--theta` (cnst28) are **acquisition parameters that are
+not in the files** — get them from whoever ran the experiment; there is nothing to measure
+them from. The output feeds model-free in place of a T2 series:
+```bash
+python -m lunaNMR dynamixs modelfree --f1-t1 … --f1-r2-table RUN/t1rho/field1_r2_from_t1rho.csv \
+  --f1-noe-sat … --f1-noe-unsat … --field1-freq 600 --out RUN/mf
+```
+`--f{1,2}-t2` and `--f{1,2}-r2-table` are alternatives; giving both is an error. Everything
+downstream is identical, so the QC table below still applies — and comparing R2-from-T1ρ
+against a directly measured R2 is the sharpest validation available: agreement confirms both,
+disagreement localises exchange (R1ρ and R2 weight it differently).
+
+**7. Physical QC — check these before believing anything.** R1 = 1000/T1, R2 = 1000/T2 (ms), per residue, common set.
+
+| check | expect | if it fails |
+|---|---|---|
+| R1(high)/R1(low) | 0.80–0.90 | peak identity / referencing / scaling broken |
+| R2(high)/R2(low) | 1.10–1.25 | a T2 problem, or the two datasets differ in temperature |
+| τc = (1/4πν_N)·√(6·R2/R1 − 7), per field | agree within ~5% | there is no single global τc — the dual fit's premise is false |
+| hetNOE median | 0.75–0.85 for a rigid fold | plane identity or gating is wrong |
+| Rex>1 fraction, dual vs single-field | comparable | dual ≫ single (and χ² ~25× higher) = the dual fit is absorbing a τc mismatch, not reporting chemistry. Take per-residue Rex from the single-field runs. |
+| S² spread | `real = √(observed_sd² − mean_err²)` | if noise is ~half the variance (cross-field S² r ≈ 0.2 with matching medians), report a uniform S² with outliers, not a per-residue profile |
+
+**R1 agreeing while R2 disagrees isolates the fault to T2** — the most useful single diagnostic here. Report such a failure; do not tune it away.
+
+## Copy-paste blocks
+The flag surface. For T1/T2/hetNOE the Recipe above is the order to run them in.
+```bash
+# Pre-flight: whole dataset, or one experiment folded into its dry-run
+python -m lunaNMR diagnose <root> [--quick] [--sample] [--mode {time,titration}]
+python -m lunaNMR series --spectra 600/T1 --peaks 600/T1/peaks.txt --out RUN/T1 \
+  --dry-run --deep [--quick] [--sample]
+
 # Series (titration adds --mode titration; --mode time is default)
 python -m lunaNMR series --spectra 600/T1 --peaks 600/T1/peaks.txt --out RUN/T1 \
   [--mode {time,titration}] [--peak-source {reference,cascade,detected,independent}] [--parallel]
@@ -64,11 +156,31 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 ## Input file shapes
 - **Peak list** (`series --peaks`): header `Assignment, Position_X, Position_Y[, Height]` (comma or tab; column aliases standardized).
 - **Series spectra** (`series --spectra`): folder or glob; files auto-discovered by extension (`ft ser ft2 ft3 pipe ucsf`), naturally sorted.
-- **Relaxation matrix** (`t1t2/methyl-t2 --input`): a series `peak_intensity_matrix.csv` / `comprehensive_peak_tracking.csv`; delay columns parsed by `parse_delay_column` (explicit `ms`/`s`/`us` + optional repeat marker `b` or `_2`, e.g. `..._300msb`).
-- **hetNOE sat/unsat** (`--sat`/`--unsat`, modelfree `--f{1,2}-noe-*`): headerless `residue,intensity[,error]`. Split from a hetNOE series matrix's `…_sat`/`…_unsat` columns.
+- **Relaxation matrix** (`t1t2/methyl-t2 --input`): a series `peak_intensity_matrix.csv` / `comprehensive_peak_tracking.csv`; delay columns parsed by `parse_delay_column` (explicit `ms`/`s`/`us` + optional repeat marker `b` or `_2`, e.g. `..._300msb`). A matrix **produced by `series`** has already had the unit stripped and normalised to ms — its columns are bare numbers (`8`, `2400`, `102_2`); see the units gotcha.
+- **hetNOE sat/unsat** (`--sat`/`--unsat`, modelfree `--f{1,2}-noe-*`): headerless `residue,intensity[,error]`. Split from the hetNOE series matrix's two columns — which are the plane **filename stems**, not `…_sat`/`…_unsat`, unless you named the files that way. **Supply the error column:** with only two columns the hetNOE error falls back to a flat `noe * 0.02` (≈0.016 at hetNOE 0.78), ~3× tighter than a realistic ~0.044-per-plane floor gives (≈0.05), which over-weights hetNOE in the model-free fit.
 - **Density table** (`density --input`): `Residue,R1,R1err,R2,R2err,hetNOE,hetNOEerr`.
 - **Kd input** (`kd --input`): `series_analysis_tidy.csv`, `comprehensive_peak_tracking.csv`, or an intensity matrix (intensity-only, no CSP). Ligand conc from CSV point labels unless `--conc` overrides.
 - **Kd fit JSON** (`export kd --json`): the self-contained `…_kd_fit_data.json` from `kd` (embeds per-point series + `metadata.protein_conc`; `metadata.name` records the `kd --prefix` used to create it, but `export kd` does **not** read it — pass `export kd --prefix` explicitly to prefix figures/summary.csv, independent of the JSON's own filename).
+
+## Output file shapes (what you parse back)
+
+- **`series` matrices**: `Peak_Number,Assignment,Reference_X,Reference_Y` + one column per spectrum, labelled with the parsed delay (`8`, `2400`, `102_2`) or, when none parses, the filename stem (`hetnoe_600_saturated`). Per spectrum, so one folder can carry both kinds.
+- **`series_analysis_tidy.csv`**: `spectrum_name, assignment, peak_number, ppm_x, ppm_y, height, volume, snr, quality, r_squared`. **The only place per-peak fit quality reaches the series output** — gate residues here, the matrices are intensities only.
+- **`per_spectrum_results/<original_filename>.csv`**: `…,Detected_Intensity,Height,Volume,LW_X,LW_Y,R_Squared,Quality`. The only output where the filename→data link survives.
+- **`series_metadata.json`**: **the column → spectrum → delay map**; nothing else carries it. `value` is `null` when the filename had no parseable delay — that column is named after the file stem instead, and `n_value_unparsed` counts them. `repeat_scale` is present only when the series has repeat acquisitions; it is measured on the fitted intensities and **reported, never applied**.
+  ```json
+  {"series_mode": "time", "value_units": "ms", "n_spectra": 14, "n_value_unparsed": 0,
+   "columns": [{"column": "8",     "spectrum": "T2_sample_8ms.ft",  "value": 8.0},
+               {"column": "8_2",   "spectrum": "bT2_sample_8ms.ft", "value": 8.0},
+               {"column": "T2_odd","spectrum": "T2_odd.ft",         "value": null}],
+   "repeat_scale": {"ratio": 0.8731, "scale": 1.1454, "deviation_percent": 12.7,
+                    "needs_normalisation": true,
+                    "per_value": {"8.0": {"first": "8", "second": "8_2",
+                                          "ratio": 0.8592, "n_peaks": 29}}}}
+  ```
+- **`processing_summary.csv`**: processing order — **not** the matrix column order.
+- **model-free `<prefix>_spectral_density_basic.csv`**: one row per residue; column names differ single vs dual (see gotchas).
+- **`diagnose --format json`** (and `series --dry-run --deep`'s `checks` key): `experiments[]` each with `spectra[]` (`dx`, `dy`, `capture`, `capture_rate`, `median_snr`, `weak`, `decayed`, `is_reference`), `delays` (`parsed`, `unparsed`, `repeats`), `peak_list`, `hetnoe`, `subseries`; plus a flat `findings[]` of `{severity, check, message}` with severity `FAIL`/`WARN`.
 
 ## Gotchas (silent-corruption risks)
 - **modelfree units rescale, t1t2 units don't.** `modelfree --f{1,2}-t{1,2}-units {ms,s,us}` (default `ms`) DRIVE the T→R conversion — a T1 in seconds with a T2 in ms needs `--f1-t1-units s`, else R1 is off by 1000×. Contrast `t1t2 --time-units` (default `s`) which only *labels* output.
@@ -78,6 +190,8 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 - **Search-window default is 0.070 ppm** (1H and 15N). Don't widen 15N for low-S/N spectra (e.g. saturated hetNOE) — wide windows fit peaks to noise → Height 0 → NOE≈0 → residues silently dropped.
 - **`--method` field prefix follows `--dual`.** In `modelfree` field count derives from `--dual`; you only pick the `087` vs `jwh` variant (default `087`). A mismatched `single_*`/`dual_*` prefix is ignored.
 - **`--intensity-scale` scales height/volume only** (per-point scan-count correction), never positions/CSP; a uniform scale cancels in the I/I₀ ratio.
+- **Which duplicate delay gets `_2` is a case-sensitive sort, not semantics.** `sort_files_with_sequence` orders by `(delay, basename)`; the first gets the bare label. `..._600ms` beats `..._b_600ms`, and `T2_8ms` beats `bT2_8ms` only because `T` < `b` in ASCII — a `BT2_` sub-series would steal the bare label. It is not the sort `--spectra` uses to discover files, so `processing_summary.csv` order is not column order either. **Read `series_metadata.json` instead of reasoning about this.**
+- **The series delay parser needs an explicit unit at the end of the stem.** `ms`, `s` and `us` all parse and all normalise to ms (`_2.4s` → `2400.0`, `_2400us` → `2.4`), optionally followed by a repeat marker — a single letter (`_300msb`) or a numeric suffix (`_8ms_2`) — which names the same delay as the original, so the two collide into `300`/`300_2`. A **bare number** (`_2400`) does **not** parse: ms or s is unknowable and guessing puts R1 out by 1000×. Unparsed spectra fall back to a stem-named column, mixing label kinds in one matrix; `series_metadata.json`'s `n_value_unparsed` counts them after the fact and `diagnose` reports them before you run.
+- **`modelfree --f{1,2}-t{1,2}-units` applies to matrices `series` did not write.** A `series`-produced matrix is already normalised to ms (`value_units` in the sidecar), so the default `ms` is right. Hand-built or DynamiXs-format tables still need the flag — a T1 in s with a T2 in ms puts R1 out by 1000×.
+- **model-free CSV columns differ single vs dual.** Dual: `R1_f1`/`R1_f2`, `Rex_f1_err`, `Rex_f1_95CI`, … Single: the bare names `R1`, `Rex_err`, `Rex_95CI` **plus `_f1` aliases of each**, so a reader written against the dual spelling works on both. Shared, never suffixed: `Residue, S2, tc, te, S2_err, te_err, chi2, fit_success`. CSVs written before the aliases existed carry only the bare names, and a `_f1` selection on those returns an **empty selection** rather than raising — which reads as "no exchange anywhere".
 - **`export kd` curves vs ref-bars differ on observable.** `curves` (`<obs>_fits.pdf`) render only fitted observables (follow the JSON / `--observable`); `ref-bars` (`<obs>_ref_vs_point.pdf`) are model-free (raw series) and default to BOTH csp+intensity even for a single-observable fit — `--observable` still restricts. Ref-bars need embedded per-point `series` + ≥2 points.
-</content>
-</invoke>

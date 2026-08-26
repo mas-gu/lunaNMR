@@ -209,3 +209,40 @@ def calculate_T2_from_T1rho(
         })
 
     return pd.DataFrame(results)
+
+
+def r2_table_from_fits(t1_fits, t1rho_fits, peak_list, *, omega1_hz, carrier_ppm,
+                       theta_deg, spec_freq_mhz, time_units='ms'):
+    """Build a per-residue R2 table from fitted T1 and T1rho decays.
+
+    The fitters return {residue: {'value': T, 'error': T_err}}; the tilt-angle
+    correction wants rates and a chemical shift per residue. This is the join between
+    them, so callers do not re-derive the algebra.
+
+    Returns a DataFrame with residue, R1, R1_err, R1rho, R1rho_err, theta, R2, R2_err,
+    T2 and T2_err — the shape the spectral-density step consumes.
+    """
+    scale = {'ms': 1000.0, 's': 1.0, 'us': 1e6}[time_units]
+
+    def _rates(fits, value_key, err_key):
+        rows = []
+        for residue, rec in fits.items():
+            t = float(rec['value'])
+            if not np.isfinite(t) or t <= 0:
+                continue
+            err = float(rec.get('error', 0.0) or 0.0)
+            rows.append({'residue': str(residue), value_key: scale / t,
+                         err_key: scale * err / (t ** 2)})
+        return pd.DataFrame(rows)
+
+    r1 = _rates(t1_fits, 'R1', 'R1_err')
+    r1rho = _rates(t1rho_fits, 'R1rho', 'R1rho_err')
+    if r1.empty or r1rho.empty:
+        raise ValueError('T1 and T1rho fits must both contain usable residues')
+
+    peaks = peak_list.copy()
+    peaks['residue'] = peaks['residue'].astype(str)
+    return calculate_T2_from_T1rho(
+        r1_data=r1, r1rho_data=r1rho, theta_deg=theta_deg, omega1_hz=omega1_hz,
+        carrier_ppm=carrier_ppm, spec_freq_mhz=spec_freq_mhz, peak_list=peaks,
+        chemical_shift_column='N_ppm')

@@ -118,3 +118,34 @@ class TestParserConsistency:
         de = DelayExtractor(mode="titration").extract_value(name)
         widget = extract_titration_from_spectrum_name(name)
         assert de == widget, f"{name}: DelayExtractor={de} widget={widget}"
+
+
+class TestMicrosecondsAndRepeatMarkers:
+    """Naming conventions the extractor used to drop on the floor, leaving those spectra
+    with stem-named columns while the rest of the series got delay-named ones."""
+
+    @pytest.mark.parametrize("name,expected", [
+        ("vd_2400us.ft", 2.4),          # microseconds normalise to ms like everything else
+        ("T1_500us.ft", 0.5),
+        ("T1_300msb.ft", 300.0),        # trailing letter = repeat acquisition at the same delay
+        ("T1_2sb.ft", 2000.0),
+        ("T2_8ms_2.ft", 8.0),           # numeric repeat suffix
+        ("T1_300msb", 300.0),           # no extension
+    ])
+    def test_now_parsed(self, name, expected):
+        assert DelayExtractor().extract_value(name) == pytest.approx(expected)
+
+    @pytest.mark.parametrize("name", [
+        "T1_2400.ft",       # bare number: ms or s is unknowable, so it stays unparsed
+        "T1_100msec.ft",    # not a unit we accept; must not match on the 'ms' prefix
+        "titr_1o0.ft",      # a titration point is not a delay
+    ])
+    def test_still_unparsed(self, name):
+        assert DelayExtractor().extract_value(name) is None
+
+    def test_a_repeat_marker_now_collides_with_its_original(self):
+        """The point of the fix: `_300ms` and `_300msb` are the same delay, so they become
+        `300` and `300_2` instead of one delay column and one stem-named orphan."""
+        names = ["T1_300ms.ft", "T1_300msb.ft", "T1_600ms.ft"]
+        mapping = DelayExtractor().build_column_mapping(names)
+        assert mapping == {"T1_300ms.ft": "300", "T1_300msb.ft": "300_2", "T1_600ms.ft": "600"}

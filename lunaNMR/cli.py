@@ -172,10 +172,16 @@ def _run_dynamixs_t1t2(args):
              f"  Results: {result['results_file']}"]
     if result.get('json_file'):
         human.append(f"  JSON:    {result['json_file']}")
+    marginal = result.get('n_window_marginal')
+    if marginal:
+        human.append(f"  NOTE: {marginal} residues have t_max/T < 2 — the delay window is "
+                     f"too short to pin the time constant down for those")
     _emit(args,
           {'command': 'dynamixs t1t2', 'experiment': args.exp, 'n_fitted': result['n_fitted'],
            'mean_t2': result['mean_t2'], 'results_file': result['results_file'],
-           'json_file': result.get('json_file')},
+           'json_file': result.get('json_file'),
+           'baseline_fixed': result.get('baseline_fixed', True),
+           'n_window_marginal': marginal},
           *human)
     return 0 if result['n_fitted'] else 1
 
@@ -278,6 +284,107 @@ def _default_series_params(parallel=False):
     }
 
 
+def _serialise_checks(result):
+    """Findings are NamedTuples and the peak list carries its coordinates; neither belongs
+    in a JSON summary as-is."""
+    out = {}
+    for key, value in result.items():
+        if key == 'findings':
+            out[key] = [f._asdict() for f in value]
+        elif key == 'peak_list' and isinstance(value, dict):
+            out[key] = {'path': value.get('path'), 'n_peaks': len(value.get('peaks', [])),
+                        'assignments': value.get('assignments', [])}
+        elif key == 'experiments':
+            out[key] = [_serialise_checks(e) for e in value]
+        elif isinstance(value, dict) and 'findings' in value:
+            out[key] = {k: v for k, v in value.items() if k != 'findings'}
+        else:
+            out[key] = value
+    return out
+
+
+def _format_experiment(check):
+    """The per-experiment block of the human-readable report."""
+    lines = [f"\n### {check['experiment']}  —  {check['n_spectra']} spectra"]
+    delays = check.get('delays')
+    if delays and delays['values']:
+        lines.append(f"    delays     : {delays['values']}")
+        if delays['repeats']:
+            lines.append(f"    repeats    : {delays['repeats']}")
+    if delays and delays['unparsed']:
+        lines.append(f"    unparsed   : {len(delays['unparsed'])} spectra -> stem-named columns")
+    peak_list = check.get('peak_list')
+    if peak_list:
+        lines.append(f"    peak list  : {os.path.basename(peak_list['path'])} "
+                     f"({len(peak_list['peaks'])} peaks)")
+    for spec in check['spectra']:
+        flag = ''
+        offset = max(abs(spec['dx']), abs(spec['dy'])) / 0.070
+        if offset > 0.5:
+            flag = '   <-- OFFSET'
+        elif offset > 0.15:
+            flag = '   (minor)'
+        if spec['decayed']:
+            flag += '   (decayed)'
+        lines.append(f"    {spec['spectrum']:34s} shift=({spec['dx']:+.4f},{spec['dy']:+.3f}) "
+                     f"capture={spec['capture']}/{spec['n_peaks']} "
+                     f"medS/N={spec['median_snr']:.0f} weak={spec['weak']}{flag}")
+    if check.get('hetnoe'):
+        h = check['hetnoe']
+        lines.append(f"    hetNOE sat/unsat = {h['ratio']:.3f}   SATURATED = {h['saturated']}"
+                     f"   UNSATURATED = {h['unsaturated']}")
+    if check.get('subseries'):
+        sub_ = check['subseries']
+        lines.append(f"    repeat acquisitions, shared delays {sub_['shared']}:")
+        for delay, rec in sorted(sub_['per_delay'].items()):
+            lines.append(f"        {delay:g}: {rec['second']}/{rec['first']} = {rec['ratio']:.3f}"
+                         f"  (n={rec['n_strong']})")
+    return lines
+
+
+def _format_findings(findings):
+    if not findings:
+        return ['', 'NO ISSUES — safe to run the pipeline.']
+    lines = ['']
+    for severity in ('FAIL', 'WARN'):
+        for f in findings:
+            if f.severity == severity:
+                lines.append(f'  [{severity}] {f.message}')
+    n_fail = sum(1 for f in findings if f.severity == 'FAIL')
+    n_warn = len(findings) - n_fail
+    lines.append(f'\n{n_fail} FAIL, {n_warn} WARN — review before running the pipeline.')
+    return lines
+
+
+def _run_diagnose(args):
+    """Read-only pre-flight over a whole dataset: registration, capture, delays, peak lists."""
+    from lunaNMR.validation.spectra_check import check_dataset
+    root = os.path.abspath(args.root)
+    if not os.path.isdir(root):
+        raise FileNotFoundError(f"dataset root not found: {root}")
+    result = check_dataset(root, quick=args.quick, sample=args.sample, series_mode=args.mode)
+    human = [f'DIAGNOSTIC — {root}', '=' * 72]
+    for check in result['experiments']:
+        human.extend(_format_experiment(check))
+    if result.get('assignments'):
+        human.append('\n### assignment sets')
+        for name, n in result['assignments']['per_experiment'].items():
+            human.append(f'    {name:28s} {n} residues')
+        human.append(f"    common to all: {result['assignments']['common']}   "
+                     f"union: {result['assignments']['union']}")
+    human.append('\n' + '=' * 72)
+    human.extend(_format_findings(result['findings']))
+    _emit(args, {'command': 'diagnose', **_serialise_checks(result)}, *human)
+    return 0
+
+
+def _validate_series(parser, args):
+    """`--deep` inspects the spectra instead of running them, so it needs `--dry-run`."""
+    if getattr(args, 'deep', False) and not args.dry_run:
+        parser.error('--deep only applies to --dry-run (it inspects the spectra rather than '
+                     'processing them)')
+
+
 def _run_series(args):
     """Wrap MultiSpectrumProcessor.process_nmr_series for a headless series/titration run."""
     import matplotlib
@@ -291,16 +398,25 @@ def _run_series(args):
     if args.dry_run:
         peaks_ok = os.path.exists(args.peaks)
         missing = ([] if nmr_files else ['spectra']) + ([] if peaks_ok else [args.peaks])
-        _emit(args,
-              {'command': 'series', 'dry_run': True, 'spectra_found': len(nmr_files),
-               'peaks': args.peaks, 'peaks_exists': peaks_ok, 'mode': args.mode,
-               'peak_source': args.peak_source, 'parallel': args.parallel,
-               'output_dir': args.out, 'missing_inputs': missing},
+        summary = {'command': 'series', 'dry_run': True, 'spectra_found': len(nmr_files),
+                   'peaks': args.peaks, 'peaks_exists': peaks_ok, 'mode': args.mode,
+                   'peak_source': args.peak_source, 'parallel': args.parallel,
+                   'output_dir': args.out, 'missing_inputs': missing}
+        deep_lines = []
+        if getattr(args, 'deep', False) and nmr_files and peaks_ok:
+            from lunaNMR.validation.spectra_check import check_experiment
+            checks = check_experiment(os.path.dirname(nmr_files[0]), args.peaks,
+                                      quick=args.quick, sample=args.sample,
+                                      series_mode=args.mode)
+            summary['checks'] = _serialise_checks(checks)
+            deep_lines = _format_experiment(checks) + _format_findings(checks['findings'])
+        _emit(args, summary,
               "[dry-run] series",
               f"  spectra found: {len(nmr_files)}",
               f"  peaks: {args.peaks} [{'OK' if peaks_ok else 'MISSING'}]",
               f"  mode={args.mode} peak-source={args.peak_source} parallel={args.parallel}",
-              f"  output: {args.out}")
+              f"  output: {args.out}",
+              *deep_lines)
         return 0 if not missing else 1
 
     if not nmr_files:
@@ -771,6 +887,76 @@ def _run_dynamixs_hetnoe(args):
     return 0
 
 
+def _run_dynamixs_t1rho(args):
+    """Fit a T1rho series and convert it to R2, so T1/T1rho/hetNOE reaches model-free.
+
+    R1rho = R1 cos^2(theta) + R2 sin^2(theta), so R2 needs R1 as well as the spin-lock
+    geometry. The tilt angle is computed per residue: residues sit at different offsets
+    from the spin-lock carrier, so one nominal angle is not enough.
+    """
+    inputs = [('input', args.input), ('t1', args.t1), ('peaks', args.peaks)]
+    if args.dry_run:
+        return _dry_run(args, inputs, {'output_dir': args.out})
+    for label, path in inputs:
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"--{label} file not found: {path}")
+    import matplotlib
+    matplotlib.use('Agg')
+    import json
+    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
+    from fit_Tx_NMRRE import run_analysis_with_params
+    from lunaNMR.utils.file_manager import NMRFileManager
+    from lunaNMR.utils.t1rho_calculator import r2_table_from_fits
+    import pandas as pd
+
+    os.makedirs(args.out, exist_ok=True)
+
+    def _fit(input_csv, label):
+        """Both series are mono-exponential decays, so the shared T1/T2 fitter is used."""
+        params = {
+            'input_csv_file': input_csv,
+            'output_prefix': os.path.join(args.out, f"{args.prefix}_{label}"),
+            'results_txt_file': os.path.join(args.out, f"{args.prefix}_{label}_fit_results.txt"),
+            'experiment_type': 'T2',
+            'time_units': args.time_units,
+            'error_method': args.error_method,
+            'n_bootstrap': args.bootstrap,
+            'field_name': label,
+            'field_freq': args.field_freq,
+            'json_folder': args.out,
+        }
+        with _engine_stdout(args):
+            result = run_analysis_with_params(params)
+        data = json.load(open(result['json_file']))
+        return ({str(f['residue']): {'value': f['t2'], 'error': f.get('t2_err', 0.0)}
+                 for f in data['fits']}, result)
+
+    t1_fits, t1_res = _fit(os.path.abspath(args.t1), 'T1')
+    rho_fits, rho_res = _fit(os.path.abspath(args.input), 'T1rho')
+
+    peaks_df = NMRFileManager().load_peak_list(os.path.abspath(args.peaks))
+    peak_list = pd.DataFrame({'residue': peaks_df['Assignment'].astype(str),
+                              'N_ppm': peaks_df['Position_Y'].astype(float)})
+
+    table = r2_table_from_fits(t1_fits, rho_fits, peak_list,
+                               omega1_hz=args.omega1, carrier_ppm=args.carrier,
+                               theta_deg=args.theta, spec_freq_mhz=args.field_freq,
+                               time_units=args.time_units)
+    out_csv = os.path.join(args.out, f"{args.prefix}_r2_from_t1rho.csv")
+    table.to_csv(out_csv, index=False)
+    _emit(args,
+          {'command': 'dynamixs t1rho', 'n_residues': len(table),
+           'n_t1_fitted': len(t1_fits), 'n_t1rho_fitted': len(rho_fits),
+           'theta_nominal_deg': args.theta, 'omega1_hz': args.omega1,
+           'r2_table': out_csv,
+           't1_results': t1_res['results_file'], 't1rho_results': rho_res['results_file']},
+          f"T1rho complete: R2 derived for {len(table)} residues",
+          f"  theta (nominal): {args.theta} deg, omega1: {args.omega1} Hz "
+          f"(per-residue tilt applied)",
+          f"  R2 table: {out_csv}")
+    return 0 if len(table) else 1
+
+
 def _run_dynamixs_density(args):
     """Reduced spectral density mapping (Farrow 1995) from an R1/R2/hetNOE table."""
     inputs = [('input', args.input)] + ([('input2', args.input2)] if args.dual and args.input2 else [])
@@ -839,11 +1025,20 @@ def _run_dynamixs_density(args):
     return 0
 
 
+def _validate_modelfree(parser, args):
+    """R2 comes from a T2 series or from a precomputed table, never both."""
+    for field in ('f1', 'f2'):
+        if getattr(args, f'{field}_t2') and getattr(args, f'{field}_r2_table'):
+            parser.error(f'--{field}-t2 and --{field}-r2-table are alternatives; give one')
+    if not (args.f1_t2 or args.f1_r2_table):
+        parser.error('one of --f1-t2 or --f1-r2-table is required')
+
+
 def _run_dynamixs_modelfree(args):
     """Integrated model-free pipeline: T1/T2 fit -> hetNOE -> density -> Lipari-Szabo."""
-    f1 = [('f1-t1', args.f1_t1), ('f1-t2', args.f1_t2),
+    f1 = [('f1-t1', args.f1_t1), ('f1-t2', args.f1_t2 or args.f1_r2_table),
           ('f1-noe-sat', args.f1_noe_sat), ('f1-noe-unsat', args.f1_noe_unsat)]
-    f2 = [('f2-t1', args.f2_t1), ('f2-t2', args.f2_t2),
+    f2 = [('f2-t1', args.f2_t1), ('f2-t2', args.f2_t2 or args.f2_r2_table),
           ('f2-noe-sat', args.f2_noe_sat), ('f2-noe-unsat', args.f2_noe_unsat)]
     if args.dry_run:
         return _dry_run(args, f1 + (f2 if args.dual else []), {'output_dir': args.out})
@@ -859,7 +1054,8 @@ def _run_dynamixs_modelfree(args):
     os.makedirs(out_dir, exist_ok=True)
     p = IntegratedAnalysisParameters()
     p.field1_t1_file = os.path.abspath(args.f1_t1)
-    p.field1_t2_file = os.path.abspath(args.f1_t2)
+    p.field1_t2_file = os.path.abspath(args.f1_t2) if args.f1_t2 else None
+    p.field1_r2_table_file = os.path.abspath(args.f1_r2_table) if args.f1_r2_table else None
     p.field1_noe_sat_file = os.path.abspath(args.f1_noe_sat)
     p.field1_noe_unsat_file = os.path.abspath(args.f1_noe_unsat)
     p.field1_freq_mhz = args.field1_freq
@@ -868,7 +1064,8 @@ def _run_dynamixs_modelfree(args):
     p.enable_dual_field = args.dual
     if args.dual:
         p.field2_t1_file = os.path.abspath(args.f2_t1)
-        p.field2_t2_file = os.path.abspath(args.f2_t2)
+        p.field2_t2_file = os.path.abspath(args.f2_t2) if args.f2_t2 else None
+        p.field2_r2_table_file = os.path.abspath(args.f2_r2_table) if args.f2_r2_table else None
         p.field2_noe_sat_file = os.path.abspath(args.f2_noe_sat)
         p.field2_noe_unsat_file = os.path.abspath(args.f2_noe_unsat)
         p.field2_freq_mhz = args.field2_freq
@@ -963,9 +1160,27 @@ def build_parser():
     series.add_argument('--peak-source', choices=['reference', 'cascade', 'detected', 'independent'],
                         default='reference', dest='peak_source',
                         help='Peak position source across spectra (default: reference)')
+    series.add_argument('--deep', action='store_true',
+                        help='With --dry-run: also check registration, capture, delays and '
+                             'the peak list against the spectra (reads them; seconds, not instant)')
+    series.add_argument('--quick', action='store_true',
+                        help='Coarser registration grid for --deep')
+    series.add_argument('--sample', action='store_true',
+                        help='With --deep: assess only the first and last spectrum')
     series.add_argument('--parallel', action='store_true',
                         help='Use the two-pass parallel processor (~2.7x faster)')
-    series.set_defaults(func=_run_series)
+    series.set_defaults(func=_run_series, _validate=_validate_series)
+
+    diagnose = sub.add_parser('diagnose', parents=[common],
+                              help='Read-only pre-flight over a dataset: registration, capture, '
+                                   'delays, peak lists, and the cross-experiment residue set')
+    diagnose.add_argument('root', help='Dataset root containing the experiment folders')
+    diagnose.add_argument('--quick', action='store_true', help='Coarser registration grid')
+    diagnose.add_argument('--sample', action='store_true',
+                          help='Assess only the first and last spectrum of each experiment')
+    diagnose.add_argument('--mode', choices=['time', 'titration'], default='time',
+                          help='How filenames encode the series value (default: time)')
+    diagnose.set_defaults(func=_run_diagnose)
 
     dx = sub.add_parser('dynamixs', help='Relaxation fitting: T1/T2 and methyl-T2')
     dx_sub = dx.add_subparsers(dest='dynamixs_command', metavar='<kind>')
@@ -990,6 +1205,25 @@ def build_parser():
     hetnoe.add_argument('--prefix', default='field1', help='Output filename prefix (default: field1)')
     hetnoe.set_defaults(func=_run_dynamixs_hetnoe)
 
+    t1rho = dx_sub.add_parser('t1rho', parents=[common],
+                              help='Fit a T1rho series and convert it to R2 (needs T1)')
+    t1rho.add_argument('--input', required=True, help='T1rho relaxation matrix')
+    t1rho.add_argument('--t1', required=True, help='T1 relaxation matrix (R1 is needed for the tilt correction)')
+    t1rho.add_argument('--peaks', required=True, help='Peak list, for each residue\'s 15N shift')
+    t1rho.add_argument('--omega1', type=float, required=True, help='Spin-lock field strength in Hz (cnst27)')
+    t1rho.add_argument('--carrier', type=float, required=True, help='15N carrier position in ppm')
+    t1rho.add_argument('--theta', type=float, required=True, help='Nominal tilt angle in degrees (cnst28)')
+    t1rho.add_argument('--field-freq', type=float, default=600.0, dest='field_freq',
+                       help='1H spectrometer frequency in MHz (default: 600)')
+    t1rho.add_argument('--out', required=True, help='Output directory')
+    t1rho.add_argument('--prefix', default='field1', help='Output filename prefix')
+    t1rho.add_argument('--time-units', choices=['ms', 's', 'us'], default='ms', dest='time_units',
+                       help='Units of the delay values (default: ms)')
+    t1rho.add_argument('--error-method', choices=['analytical', 'bootstrap'], default='analytical',
+                       dest='error_method')
+    t1rho.add_argument('--bootstrap', type=int, default=1000)
+    t1rho.set_defaults(func=_run_dynamixs_t1rho)
+
     density = dx_sub.add_parser('density', parents=[common],
                                 help='Reduced spectral density mapping from an R1/R2/hetNOE table')
     density.add_argument('--input', required=True,
@@ -1013,11 +1247,15 @@ def build_parser():
     mf = dx_sub.add_parser('modelfree', parents=[common],
                            help='Integrated model-free: T1/T2 fit -> hetNOE -> density -> Lipari-Szabo')
     mf.add_argument('--f1-t1', required=True, dest='f1_t1', help='Field-1 T1 relaxation matrix')
-    mf.add_argument('--f1-t2', required=True, dest='f1_t2', help='Field-1 T2 relaxation matrix')
+    mf.add_argument('--f1-t2', dest='f1_t2', help='Field-1 T2 relaxation matrix')
+    mf.add_argument('--f1-r2-table', dest='f1_r2_table',
+                    help='Field-1 per-residue R2 table (from `dynamixs t1rho`), instead of --f1-t2')
     mf.add_argument('--f1-noe-sat', required=True, dest='f1_noe_sat', help='Field-1 NOE saturated intensities')
     mf.add_argument('--f1-noe-unsat', required=True, dest='f1_noe_unsat', help='Field-1 NOE unsaturated intensities')
     mf.add_argument('--f2-t1', dest='f2_t1', help='Field-2 T1 matrix (dual-field)')
     mf.add_argument('--f2-t2', dest='f2_t2', help='Field-2 T2 matrix (dual-field)')
+    mf.add_argument('--f2-r2-table', dest='f2_r2_table',
+                    help='Field-2 per-residue R2 table, instead of --f2-t2')
     mf.add_argument('--f2-noe-sat', dest='f2_noe_sat', help='Field-2 NOE saturated (dual-field)')
     mf.add_argument('--f2-noe-unsat', dest='f2_noe_unsat', help='Field-2 NOE unsaturated (dual-field)')
     for f in ('f1', 'f2'):
@@ -1031,7 +1269,8 @@ def build_parser():
     mf.add_argument('--method', choices=['single_jwh', 'single_087', 'dual_jwh', 'dual_087'],
                     default=None,
                     help='Density/model-free variant; field count follows --dual (default: 087)')
-    mf.add_argument('--init-amp', type=float, default=5.0, dest='init_amp', help='Initial fit amplitude')
+    mf.add_argument('--init-amp', type=float, default=None, dest='init_amp',
+                    help='Initial fit amplitude (default: derived from the data)')
     mf.add_argument('--init-t1', type=float, default=800.0, dest='init_t1', help='Initial T1 (ms)')
     mf.add_argument('--init-t2', type=float, default=100.0, dest='init_t2', help='Initial T2 (ms)')
     mf.add_argument('--n-bootstrap', type=int, default=1000, dest='n_bootstrap')
@@ -1039,7 +1278,7 @@ def build_parser():
                     dest='error_method')
     mf.add_argument('--n-monte-carlo', type=int, default=50, dest='n_monte_carlo')
     _add_density_flags(mf)
-    mf.set_defaults(func=_run_dynamixs_modelfree)
+    mf.set_defaults(func=_run_dynamixs_modelfree, _validate=_validate_modelfree)
 
     dx.set_defaults(func=lambda a: (dx.print_help(sys.stderr) or 2))
 
@@ -1137,6 +1376,9 @@ def main(argv=None):
     if not getattr(args, 'command', None):
         parser.print_help(sys.stderr)
         return 2
+    validate = getattr(args, '_validate', None)
+    if validate:
+        validate(parser, args)
     try:
         return args.func(args)
     except (FileNotFoundError, ValueError, RuntimeError, KeyError, TypeError) as exc:
