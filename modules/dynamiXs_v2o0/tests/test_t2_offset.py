@@ -37,7 +37,12 @@ class TestExpDecaySignature:
 
 
 class TestFitRecoversOffset:
-    """fit_single_residue recovers a non-zero baseline within fit error."""
+    """fit_single_residue recovers a non-zero baseline within fit error.
+
+    The baseline is fixed at zero by default because it is not identifiable per residue
+    at realistic sampling; these tests exercise the explicit `fit_baseline=True` model,
+    which the shared-baseline diagnostic uses.
+    """
 
     def _synthetic(self, A_true=1000.0, t2_true=50.0, C_true=30.0, noise=2.0, seed=42):
         rng = np.random.default_rng(seed)
@@ -60,7 +65,8 @@ class TestFitRecoversOffset:
 
         C_true = 30.0
         x, y = self._synthetic(C_true=C_true)
-        res = fit_single_residue(x, y, "TEST", initial_A=900.0, initial_t2=60.0)
+        res = fit_single_residue(x, y, "TEST", initial_A=900.0, initial_t2=60.0,
+                                 fit_baseline=True)
 
         C_fit = res["C"]
         C_err = res["C_err"]
@@ -75,7 +81,8 @@ class TestFitRecoversOffset:
 
         t2_true = 50.0
         x, y = self._synthetic(t2_true=t2_true)
-        res = fit_single_residue(x, y, "TEST", initial_A=900.0, initial_t2=60.0)
+        res = fit_single_residue(x, y, "TEST", initial_A=900.0, initial_t2=60.0,
+                                 fit_baseline=True)
 
         assert abs(res["t2"] - t2_true) < 1.0, (
             f"t2_fit={res['t2']:.3f} not within 1 of t2_true={t2_true}"
@@ -113,8 +120,25 @@ class TestSaveResultsTSV:
 
         text = out.read_text()
         header, row = text.strip().splitlines()
-        assert header.split("\t") == ["Residue", "A", "T2", "C", "A_err", "T2_err", "C_err"]
+        assert header.split("\t") == ["Residue", "A", "T2", "C", "A_err", "T2_err",
+                              "C_err", "Success", "WindowRatio"]
         cols = row.split("\t")
         assert cols[0] == "R1"
         assert float(cols[3]) == pytest.approx(30.0)
         assert float(cols[6]) == pytest.approx(1.2)
+
+
+class TestDefaultDeclinesTheOffset:
+    """The default must not chase a per-residue baseline, and must say so in the result."""
+
+    def test_default_fixes_c_and_reports_the_known_bias(self):
+        from fit_Tx_NMRRE import fit_single_residue
+
+        rng = np.random.default_rng(42)
+        x = np.linspace(0.0, 250.0, 24)
+        y = 1000.0 * np.exp(-x / 50.0) + 30.0 + rng.normal(0.0, 2.0, size=x.size)
+        res = fit_single_residue(x, y, "TEST", n_bootstrap=0)
+
+        assert res["C"] == 0.0 and res["baseline_fixed"] is True
+        # A real +3% offset that the fit declines to model shows up as a longer T2.
+        assert res["t2"] > 50.0

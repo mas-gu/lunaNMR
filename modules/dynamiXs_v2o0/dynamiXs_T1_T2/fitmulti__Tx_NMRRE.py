@@ -25,6 +25,9 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend for thread safety
 import matplotlib.pyplot as plt
 from lmfit import Model
+# One definition of the fit conventions, shared with the single-core fitter.
+from fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
+                          MARGINAL_TMAX_OVER_T, _is_reliable_t2)
 import pandas as pd
 import multiprocessing
 from multiprocessing import Pool, cpu_count
@@ -47,7 +50,7 @@ def exp_decay(x, A, t2, C=0.0):
     return A * np.exp(-x / t2) + C
 
 
-def bootstrap_errors(x, y, model, params, n_bootstrap=1000):
+def bootstrap_errors(x, y, model, params, n_bootstrap=1000, fit_baseline=None):
     """
     Classic residual bootstrap error estimation.
 
@@ -109,6 +112,8 @@ def bootstrap_errors(x, y, model, params, n_bootstrap=1000):
         )
         params_boot['A'].min = 0
         params_boot['t2'].min = 0
+        vary_c = params['C'].vary if fit_baseline is None else bool(fit_baseline)
+        params_boot['C'].set(vary=vary_c)
 
         try:
             res = model.fit(y_synthetic, params_boot, x=x)
@@ -136,18 +141,23 @@ def fit_single_residue_parallel(args):
 
     Model: I(t) = A * exp(-t/t2) + C
 
+    The baseline convention travels IN `args`. A module-level global cannot work here:
+    macOS spawns fresh workers that re-import this module, so each would read the value
+    as declared in the source and silently ignore whatever the caller chose.
+
     Parameters
     ----------
     args : tuple
         (x, y, residue_name, initial_A, initial_t2, initial_C,
-         n_bootstrap, error_method, idx, total)
+         n_bootstrap, error_method, idx, total[, fit_baseline])
 
     Returns
     -------
     dict : Fitting results with success flag
     """
     (x, y, residue_name, initial_A, initial_t2, initial_C,
-     n_bootstrap, error_method, idx, total) = args
+     n_bootstrap, error_method, idx, total) = args[:10]
+    fit_baseline = bool(args[10]) if len(args) > 10 else FIT_BASELINE_BY_DEFAULT
 
     try:
         # Progress indicator
@@ -168,9 +178,12 @@ def fit_single_residue_parallel(args):
             initial_t2 = x_max / 2.0 if x_max > 0 else 1.0
 
         model = Model(exp_decay)
+        if not fit_baseline:
+            initial_C = 0.0
         params = model.make_params(A=initial_A, t2=initial_t2, C=initial_C)
         params['A'].min = 0
         params['t2'].min = 0
+        params['C'].set(vary=fit_baseline)
 
         # Unweighted least squares fit
         result = model.fit(y, params, x=x)
@@ -195,17 +208,31 @@ def fit_single_residue_parallel(args):
 
         # Error estimation based on selected method
         if error_method == 'bootstrap':
-            a_err, t2_err, c_err = bootstrap_errors(x, y, model, params, n_bootstrap)
+            a_err, t2_err, c_err = bootstrap_errors(x, y, model, params, n_bootstrap,
+                                                   fit_baseline=fit_baseline)
         else:
             # Analytical: use covariance matrix from lmfit
             a_err = result.params['A'].stderr if result.params['A'].stderr else np.nan
             t2_err = result.params['t2'].stderr if result.params['t2'].stderr else np.nan
             c_err = result.params['C'].stderr if result.params['C'].stderr else np.nan
+        # lmfit reports no stderr both when the covariance is singular and when the residuals
+        # vanish, but those mean opposite things: an exact fit has ~zero uncertainty, a
+        # singular one has unknown uncertainty. Only the first is safe to call zero, and
+        # leaving it NaN drops the residue from every downstream table.
+        _resid = np.asarray(getattr(result, 'residual', []), float).ravel()
+        _scale = float(np.max(np.abs(np.asarray(y, float)))) if np.size(y) else 0.0
+        if _resid.size and _scale > 0 and float(np.sqrt(np.mean(_resid ** 2))) < 1e-9 * _scale:
+            a_err = 0.0 if not np.isfinite(a_err) else a_err
+            t2_err = 0.0 if not np.isfinite(t2_err) else t2_err
+        if not fit_baseline:
+            # Fixed, not unmeasured. NaN here propagates into the density input table and
+            # every residue is then dropped as "contains NaN".
+            c_err = 0.0
 
         # A fit whose t2 exceeds 100x the longest delay has no measurable decay
         # in the window (flat / no-signal / bad peak) -> unreliable, excluded.
         x_max = float(np.max(x)) if np.size(x) else 0.0
-        reliable = bool(np.isfinite(t2)) and (x_max <= 0 or t2 <= 100.0 * x_max)
+        reliable = _is_reliable_t2(t2, t2_err, x, amplitude=a, y=y)
 
         return {
             'residue': residue_name,
@@ -334,19 +361,22 @@ def save_results(results_list, output_file, experiment_type="T1"):
     """
     with open(output_file, "w") as f:
         f.write(
-            f"Residue\tA\t{experiment_type}\tC\tA_err\t{experiment_type}_err\tC_err\tSuccess\n"
+            f"Residue\tA\t{experiment_type}\tC\tA_err\t{experiment_type}_err\tC_err"
+            f"\tSuccess\tWindowRatio\n"
         )
         for result in results_list:
             success_flag = "Yes" if result.get('success', False) else "No"
+            # t_max/T: below ~2 the window is too short to pin the time constant down.
+            wr = result.get('window_ratio', float('nan'))
             if result.get('success', False):
                 f.write(
                     f"{result['residue']}\t{result['A']:.6e}\t{result['t2']:.6e}\t"
                     f"{result['C']:.6e}\t{result['A_err']:.6e}\t"
-                    f"{result['t2_err']:.6e}\t{result['C_err']:.6e}\t{success_flag}\n"
+                    f"{result['t2_err']:.6e}\t{result['C_err']:.6e}\t{success_flag}\t{wr:.3f}\n"
                 )
             else:
                 f.write(
-                    f"{result['residue']}\tNaN\tNaN\tNaN\tNaN\tNaN\tNaN\t{success_flag}\n"
+                    f"{result['residue']}\tNaN\tNaN\tNaN\tNaN\tNaN\tNaN\t{success_flag}\tNaN\n"
                 )
 
 
@@ -399,6 +429,12 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
             'A_err': float(result['A_err']),
             't2_err': float(result['t2_err']),
             'C_err': float(c_err),
+            # Fit provenance: whether the baseline was fixed, and whether the delay window
+            # was long enough to pin the time constant down. Computed by the fitter and
+            # previously dropped here, which made them unreachable from the CLI.
+            'baseline_fixed': bool(result.get('baseline_fixed', True)),
+            'window_ratio': float(result.get('window_ratio', float('nan'))),
+            'window_marginal': bool(result.get('window_marginal', False)),
             'intensities': [float(val) for val in result['y']],
             'fit_curve': {
                 'time': [float(t) for t in fit_time_dense],
@@ -530,10 +566,14 @@ def main():
 
     # Prepare arguments for parallel processing
     print("Preparing parallel processing...")
+    # Carried per call rather than read from the module global, so a caller
+    # can choose and spawned workers cannot silently disagree.
+    fit_baseline = FIT_BASELINE_BY_DEFAULT
     args_list = []
     for idx, residue in enumerate(residue_names):
         y = y_data[idx, :]
-        args_list.append((x, y, residue, initial_A, initial_t2, None, n_bootstrap, error_method, idx, len(residue_names)))
+        args_list.append((x, y, residue, initial_A, initial_t2, None, n_bootstrap,
+                          error_method, idx, len(residue_names), fit_baseline))
 
     # Parallel fitting
     print(f"Starting parallel fitting with {n_processes} processes...")
@@ -709,12 +749,17 @@ def run_analysis_with_params(params, progress_callback=None):
 
     # Prepare arguments for parallel processing
     print("Preparing parallel processing...")
+    # Carried per call rather than read from the module global, so a caller
+    # can choose and spawned workers cannot silently disagree.
+    fit_baseline = bool(params.get('fit_baseline', FIT_BASELINE_BY_DEFAULT)) \
+        if isinstance(params, dict) else FIT_BASELINE_BY_DEFAULT
     args_list = []
     for idx, residue in enumerate(residue_names):
         y = y_data[idx, :]
         # initial_C=None lets fit_single_residue_parallel use min(y) per-residue.
         args_list.append((x, y, residue, initial_A, initial_t2, None,
-                          n_bootstrap, error_method, idx, total_residues))
+                          n_bootstrap, error_method, idx, total_residues,
+                          fit_baseline))
 
     # Parallel fitting with progress reporting
     print(f"Starting parallel fitting with {n_processes} processes...")
@@ -829,7 +874,11 @@ def run_analysis_with_params(params, progress_callback=None):
         'mean_error': np.mean(t2_errors) if successful_fits else 0,
         'n_cores_used': n_processes,
         'processing_time': elapsed_time,
-        'failed_residues': [r['residue'] for r in failed_fits]
+        'failed_residues': [r['residue'] for r in failed_fits],
+        # Fit provenance, so a caller can see the convention and the sampling quality
+        # without opening the per-residue files.
+        'baseline_fixed': not fit_baseline,
+        'n_window_marginal': sum(1 for r in successful_fits if r.get('window_marginal')),
     }
 
 

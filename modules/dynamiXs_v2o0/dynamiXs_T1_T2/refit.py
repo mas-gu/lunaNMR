@@ -73,7 +73,9 @@ def refit_residue(fit_entry: dict, metadata: dict,
         x_fit, y_fit, fit_entry.get("residue", ""),
         initial_A=float(fit_entry.get("A", 1.0)),
         initial_t2=float(fit_entry.get("t2", 100.0)),
-        initial_C=float(fit_entry.get("C", 0.0)),
+        # Not warm-started from the stored C: the baseline is fixed at zero, and
+        # feeding a previous non-zero value back would pin the refit at that offset.
+        initial_C=0.0,
         n_bootstrap=n_bootstrap,
         error_method=error_method,
     )

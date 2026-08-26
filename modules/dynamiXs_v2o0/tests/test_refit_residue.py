@@ -18,7 +18,9 @@ sys.path.insert(0, str(_FITTER_DIR))
 def _synthetic_fit_entry(seed=0, with_outlier_at=None):
     """Build a fit_entry/metadata pair for one residue, optionally with one outlier."""
     rng = np.random.default_rng(seed)
-    A_true, t2_true, C_true, noise = 1000.0, 50.0, 30.0, 2.0
+    # C_true = 0: the fitter fixes the baseline at zero, so a synthetic offset would
+    # only measure that convention's bias rather than what refit is for.
+    A_true, t2_true, C_true, noise = 1000.0, 50.0, 0.0, 2.0
     x = np.linspace(0.0, 250.0, 24)
     y = A_true * np.exp(-x / t2_true) + C_true + rng.normal(0.0, noise, size=x.size)
     if with_outlier_at is not None:
@@ -34,12 +36,12 @@ def _synthetic_fit_entry(seed=0, with_outlier_at=None):
         "residue": "142",
         "A": 950.0,
         "t2": 55.0,
-        "C": 28.0,
+        "C": 0.0,
         "A_err": 5.0,
         "t2_err": 1.0,
         "C_err": 1.0,
         "intensities": y.tolist(),
-        "fit_curve": {"time": [0.0, 250.0], "intensity": [1000.0, 30.0]},
+        "fit_curve": {"time": [0.0, 250.0], "intensity": [1000.0, 0.0]},
     }
     return fit_entry, metadata, (A_true, t2_true, C_true)
 
@@ -108,7 +110,7 @@ class TestRefit:
         assert abs(new_entry["t2"] - t2_true) < 1.5, (
             f"T2 not recovered: got {new_entry['t2']}, expected ~{t2_true}"
         )
-        assert abs(new_entry["C"] - C_true) < 5.0
+        assert new_entry["C"] == 0.0        # baseline is fixed, never warm-started
         assert abs(new_entry["A"] - A_true) < 50.0
 
     def test_refit_preserves_full_intensities(self):
@@ -172,7 +174,7 @@ class TestRefit:
 
         # Generate clean data with a clear-best mono-exp solution.
         rng = np.random.default_rng(101)
-        A_true, t2_true, C_true = 1000.0, 50.0, 30.0
+        A_true, t2_true, C_true = 1000.0, 50.0, 0.0   # baseline is fixed at zero
         x = np.linspace(0.0, 250.0, 24)
         y = A_true * np.exp(-x / t2_true) + C_true + rng.normal(0.0, 2.0, size=x.size)
 
@@ -181,7 +183,7 @@ class TestRefit:
             "residue": "BAD_ANCHOR",
             "A": 100000.0,   # 100× too large
             "t2": 5.0,       # 10× too small
-            "C": -200.0,     # wrong sign
+            "C": -200.0,     # wrong sign (must not be warm-started back in)
             "A_err": 1.0, "t2_err": 1.0, "C_err": 1.0,
             "intensities": y.tolist(),
             "fit_curve": {"time": [0.0, 250.0], "intensity": [100000.0, 0.0]},

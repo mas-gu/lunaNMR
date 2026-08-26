@@ -799,8 +799,14 @@ class TestDynamixsModelfree:
     N = 12   # pipeline requires >= 10 residues
 
     def _matrix(self, path, delays, tau):
+        # Noise is not decoration here. A perfectly noiseless decay fits exactly, so the
+        # fit error is zero, and the spectral-density step rejects a zero error as
+        # unweightable (`r2_err <= 0` -> "invalid values"). Real data always has noise;
+        # a noiseless matrix is not a case the pipeline can or should handle.
+        rng = np.random.default_rng(0)
         header = ["Peak_Number", "Assignment", "Reference_X", "Reference_Y"] + [str(d) for d in delays]
-        rows = [[i + 1, f"R{i + 1}", 8.0, 120.0] + [1e5 * np.exp(-t / tau) for t in delays]
+        rows = [[i + 1, f"R{i + 1}", 8.0, 120.0]
+                + [1e5 * np.exp(-t / tau) * (1.0 + rng.normal(0, 0.01)) for t in delays]
                 for i in range(self.N)]
         pd.DataFrame(rows, columns=header).to_csv(path, index=False)
 

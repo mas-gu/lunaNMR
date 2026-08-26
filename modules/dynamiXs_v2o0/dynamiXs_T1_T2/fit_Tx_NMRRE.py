@@ -36,12 +36,44 @@ except ImportError:  # imported as dynamiXs_T1_T2.fit_Tx_NMRRE (parent dir on pa
 DEGENERATE_T2_OVER_TMAX = 100.0
 
 
-def _is_reliable_t2(t2, t2_err, x):
-    """True when a fitted time constant is measurable within the delay window."""
+def _is_reliable_t2(t2, t2_err, x, amplitude=None, y=None):
+    """True when a fitted time constant is measurable within the delay window.
+
+    Two ways to fail. The time constant can exceed the window so far that nothing
+    decays within it. Or there can be no signal to decay: a flat or empty trace fits
+    an amplitude of zero, at which the time constant is unconstrained and whatever
+    the optimiser last held is meaningless. The amplitude check matters because a
+    fixed baseline no longer forces such a fit to a visibly absurd time constant.
+    """
     if not np.isfinite(t2):
         return False
+    scale = 0.0
+    if y is not None and np.size(y):
+        finite = np.asarray(y, float)[np.isfinite(np.asarray(y, float))]
+        scale = float(np.max(np.abs(finite))) if finite.size else 0.0
+        if scale <= 0:
+            return False
+    if amplitude is not None:
+        # Compared against the data's own scale: an all-zero trace fits an amplitude of
+        # ~1e-12, which is positive but carries no decay.
+        if not np.isfinite(amplitude) or amplitude <= 1e-6 * max(scale, 0.0):
+            return False
+        if scale == 0.0 and amplitude <= 0:
+            return False
     x_max = float(np.max(x)) if np.size(x) else 0.0
     return x_max <= 0 or t2 <= DEGENERATE_T2_OVER_TMAX * x_max
+
+
+# A free per-residue baseline is not identifiable at realistic sampling. At t_max/T ~ 1.7
+# it correlates with the time constant at -0.92 to -0.97 and inflates sigma(T) 2-4x, and on
+# data whose baseline is genuinely zero it lands negative for 40-95% of residues. It is
+# therefore fixed at zero by default; whether a real offset exists is a question about the
+# whole series, answered by shared_baseline_test() over all residues at once.
+FIT_BASELINE_BY_DEFAULT = False
+
+# Below this ratio of longest delay to fitted time constant the decay is too incomplete
+# for the window to pin T down; the fit still returns, but the value is weakly determined.
+MARGINAL_TMAX_OVER_T = 2.0
 
 
 def exp_decay(x, A, t2, C=0.0):
@@ -49,7 +81,7 @@ def exp_decay(x, A, t2, C=0.0):
     return A * np.exp(-x / t2) + C
 
 
-def bootstrap_errors(x, y, model, params, n_bootstrap=1000):
+def bootstrap_errors(x, y, model, params, n_bootstrap=1000, fit_baseline=None):
     """
     Classic residual bootstrap error estimation.
 
@@ -111,6 +143,10 @@ def bootstrap_errors(x, y, model, params, n_bootstrap=1000):
         )
         params_boot['A'].min = 0
         params_boot['t2'].min = 0
+        # make_params always returns a free C; without this the resampled fits would carry
+        # a baseline the original fit did not have.
+        vary_c = params['C'].vary if fit_baseline is None else bool(fit_baseline)
+        params_boot['C'].set(vary=vary_c)
 
         try:
             res = model.fit(y_synthetic, params_boot, x=x)
@@ -132,8 +168,164 @@ def bootstrap_errors(x, y, model, params, n_bootstrap=1000):
     return np.std(a_values), np.std(t2_values), np.std(c_values)
 
 
+def _median_window_ratio(data, t_values):
+    """Median t_max/T over residues, for whichever fitted T is passed in."""
+    ratios = [float(np.max(x)) / t for (x, _), t in zip(data, t_values)
+              if np.isfinite(t) and t > 0]
+    return float(np.nanmedian(ratios)) if ratios else float('nan')
+
+
+def shared_baseline_test(series, f_max=0.45, f_min=-0.15, n_grid=61):
+    """Is there a baseline COMMON to every residue in this series?
+
+    A per-residue baseline cannot be measured at realistic sampling, but a shared one can:
+    it is a single parameter against hundreds of points. The model is
+
+        I_i(t) = A_i * [ (1 - f) * exp(-t / T_i) + f ]
+
+    with A_i and T_i free per residue and one global plateau fraction f, profiled over f so
+    each inner fit stays a well-conditioned two-parameter problem.
+
+    `series` is either {residue: (x, y)} or a sequence of (residue, x, y). Prefer the
+    sequence: a dict cannot hold two rows with the same name, and dropping one silently
+    changes the answer.
+
+    Two things make this robust, and both were learned the hard way on real data:
+
+    * Each residue contributes its SSR **relative to its own scale**, and the residues are
+      combined by **median**, not sum. A summed raw SSR is dominated by whichever rows fit
+      worst: on one real series seven `dummy_*` rows held 2.6% of the signal but 44-54% of
+      the SSR, and removing them moved the estimate from 0.00 to 0.32.
+    * Significance is a **per-residue sign test**, not an F-test on the pooled SSR. With
+      hundreds of residues an F-test turns a 1% SSR improvement into p ~ 0, which says
+      nothing about whether the effect is real in each residue.
+
+    `dummy_*` rows are excluded, matching every other fitter in the package.
+
+    Read `significant` and, when it is False, `reason` — which names the gate that stopped
+    it. Do NOT read `well_determined` as evidence a baseline exists: it asks only whether f
+    is resolved above the grid step, and a precisely located NEGATIVE f is precisely no
+    baseline. Real 800 T1rho is the case to remember: f = -0.08, eight grid steps from
+    zero, so well_determined is True and significant is False.
+
+    `profile_depth` orders candidates WITHIN one series but is NOT comparable ACROSS series:
+    it is not scale-free in t_max/T, and truncating a window moves it by as much as the whole
+    significant-versus-rejected range, in either direction (6.25% -> 15.71% on one real
+    series, 25.81% -> 15.08% on another). `window_ratio_at_f` and
+    `window_ratio_at_zero` are both reported so that confound is visible; check the windows
+    match before comparing two depths. They differ by 37-43% wherever a baseline is claimed,
+    and can straddle the t_max/T < 2 line, so always read the one matching the model you are
+    quoting — the fitter's own per-residue `window_ratio` is the C = 0 one. `f` is quantised to
+    `f_grid_step`; quote it to two digits.
+    """
+    from scipy.optimize import curve_fit
+
+    items = (list(series) if not isinstance(series, dict)
+             else [(k, x, y) for k, (x, y) in series.items()])
+    n_dummy = sum(1 for name, _, _ in items if str(name).lower().startswith('dummy'))
+    data = [(np.asarray(x, float), np.asarray(y, float))
+            for name, x, y in items
+            if not str(name).lower().startswith('dummy') and np.size(x) >= 3]
+
+    base = {'f': 0.0, 'significant': False, 'well_determined': False,
+            'n_improved': 0, 'frac_improved': 0.0, 'p_value': 1.0,
+            'n_residues': len(data), 'n_excluded_dummy': n_dummy, 'reason': ''}
+    if len(data) < 5:
+        return dict(base, reason='too few residues')
+
+    def scaled_ssr(x, y, f, want_t=False):
+        """This residue's residual sum of squares at trial f, relative to its own scale."""
+        shape = lambda t, A, T: A * ((1.0 - f) * np.exp(-t / T) + f)
+        try:
+            p_, _ = curve_fit(shape, x, y,
+                              p0=[float(np.max(y)), max(float(np.max(x)) / 2, 1e-9)],
+                              bounds=([0, 1e-9], [np.inf, np.inf]), maxfev=20000)
+        except Exception:
+            return (np.nan, np.nan) if want_t else np.nan
+        scale = float(np.sum(y ** 2))
+        ssr = float(np.sum((y - shape(x, *p_)) ** 2)) / scale if scale > 0 else np.nan
+        return (ssr, float(p_[1])) if want_t else ssr
+
+    # The grid reaches below zero on purpose: when the true f is zero the estimate must be
+    # free to land either side of it, or the null is truncated by construction.
+    grid = np.linspace(f_min, f_max, n_grid)
+    per_f = np.array([[scaled_ssr(x, y, f) for x, y in data] for f in grid])
+    profile = np.nanmedian(per_f, axis=1)
+    if not np.any(np.isfinite(profile)):
+        return dict(base, reason='no residue could be fitted')
+    # f is quantised to the grid, and the floor is reported as `f_grid_step`. The default
+    # grid gives +/-0.005, small against a real baseline of ~0.15. Parabolic refinement was
+    # tried and rejected: the median profile is not locally parabolic, and on real series it
+    # returned no improvement over the grid point. Pass a larger n_grid if you need more.
+    # Rounded to the grid's own precision: comparing an unrounded 0.010000000000000009
+    # against a rounded step of 0.01 made the size gate miss by one ulp, and the row was
+    # then rejected for a different reason than the one that actually applied.
+    f_hat = round(float(grid[int(np.nanargmin(profile))]), 12)
+
+    # Per-residue sign test: does this residue's own fit actually improve at f_hat?
+    zero = [scaled_ssr(x, y, 0.0, want_t=True) for x, y in data]
+    at_zero = np.array([v[0] for v in zero])
+    t_zero = np.array([v[1] for v in zero])
+    hat = [scaled_ssr(x, y, f_hat, want_t=True) for x, y in data]
+    at_hat = np.array([v[0] for v in hat])
+    t_hat = np.array([v[1] for v in hat])
+    ok = np.isfinite(at_zero) & np.isfinite(at_hat)
+    n_ok = int(ok.sum())
+    n_improved = int(np.sum(at_hat[ok] < at_zero[ok]))
+    frac = n_improved / n_ok if n_ok else 0.0
+    try:
+        from scipy.stats import binomtest
+        p_value = float(binomtest(n_improved, n_ok, 0.5, alternative='greater').pvalue) if n_ok else 1.0
+    except Exception:
+        p_value = float('nan')
+
+    grid_step = round(float(grid[1] - grid[0]), 12)
+    # `well_determined` asks ONE question: is f resolved above the measurement floor?
+    # It deliberately excludes frac_improved, which asks whether residues AGREE — a
+    # different question, reported separately. Folding the two together described a real
+    # series whose f sat 8 grid steps from zero as "not well determined" because 59% of
+    # residues improved rather than 60%, which is not what the name says.
+    well_determined = bool(abs(f_hat) > grid_step)
+
+    # Every rejection states its own reason, in the order the gates apply. A caller should
+    # not have to read the fields in a particular sequence to avoid the wrong conclusion.
+    if f_hat < 0:
+        reason = ('f is negative: a plateau cannot sit below zero, so this is scatter '
+                  'about no baseline, not a baseline')
+    elif abs(f_hat) <= grid_step:
+        reason = f'f is within one grid step ({grid_step:g}) of zero — too small to call'
+    elif frac < 0.6:
+        reason = (f'only {100 * frac:.0f}% of residues individually improve; a shared '
+                  f'baseline should help most of them')
+    elif not (p_value < 0.05):
+        reason = f'per-residue sign test not significant (p = {p_value:.3g})'
+    else:
+        reason = ''
+    return dict(base, f=f_hat, n_residues=n_ok, n_improved=n_improved,
+                frac_improved=frac, p_value=p_value, well_determined=well_determined,
+                significant=(reason == ''), reason=reason,
+                f_grid_step=grid_step,
+                # Median t_max/T, reported under BOTH models because they disagree by
+                # 37-43% wherever a baseline is claimed: a plateau absorbs part of the tail,
+                # so T shortens and the ratio rises. The names say which model each is
+                # conditioned on, because the two can straddle the t_max/T < 2 line and give
+                # opposite readings of whether the window was adequate. The fitter's own
+                # per-residue `window_ratio` is the C = 0 one.
+                window_ratio_at_f=_median_window_ratio(data, t_hat),
+                window_ratio_at_zero=_median_window_ratio(data, t_zero),
+                # How much better the profile is at f_hat than at zero. Orders WITHIN a
+                # series; not comparable ACROSS series with different windows — it is not
+                # scale-free in t_max/T. Read alongside `window_ratio`.
+                profile_depth=(float((np.nanmedian(at_zero[ok]) - np.nanmin(profile))
+                                     / np.nanmedian(at_zero[ok]))
+                               if n_ok and np.nanmedian(at_zero[ok]) > 0 else float('nan')),
+                profile_min=float(np.nanmin(profile)),
+                profile_at_zero=float(np.nanmedian(at_zero[ok])) if n_ok else float('nan'))
+
+
 def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
-                       initial_C=None, n_bootstrap=1000, error_method='analytical'):
+                       initial_C=None, n_bootstrap=1000, error_method='analytical',
+                       fit_baseline=FIT_BASELINE_BY_DEFAULT):
     """
     Fit exponential decay with baseline offset to single residue data.
 
@@ -180,9 +372,12 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
 
     # Create model and parameters
     model = Model(exp_decay)
+    if not fit_baseline:
+        initial_C = 0.0
     params = model.make_params(A=initial_A, t2=initial_t2, C=initial_C)
     params['A'].min = 0
     params['t2'].min = 0
+    params['C'].set(vary=bool(fit_baseline))
 
     # Unweighted least squares fit
     result = model.fit(y, params, x=x)
@@ -193,14 +388,32 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
 
     # Error estimation based on selected method
     if error_method == 'bootstrap':
-        a_err, t2_err, c_err = bootstrap_errors(x, y, model, params, n_bootstrap)
+        a_err, t2_err, c_err = bootstrap_errors(x, y, model, params, n_bootstrap,
+                                               fit_baseline=fit_baseline)
     else:
         # Analytical: use covariance matrix from lmfit
         a_err = result.params['A'].stderr if result.params['A'].stderr else np.nan
         t2_err = result.params['t2'].stderr if result.params['t2'].stderr else np.nan
         c_err = result.params['C'].stderr if result.params['C'].stderr else np.nan
+    # lmfit reports no stderr both when the covariance is singular and when the residuals
+    # vanish, but those mean opposite things: an exact fit has ~zero uncertainty, a
+    # singular one has unknown uncertainty. Only the first is safe to call zero, and
+    # leaving it NaN drops the residue from every downstream table.
+    _resid = np.asarray(getattr(result, 'residual', []), float).ravel()
+    _scale = float(np.max(np.abs(np.asarray(y, float)))) if np.size(y) else 0.0
+    if _resid.size and _scale > 0 and float(np.sqrt(np.mean(_resid ** 2))) < 1e-9 * _scale:
+        a_err = 0.0 if not np.isfinite(a_err) else a_err
+        t2_err = 0.0 if not np.isfinite(t2_err) else t2_err
+    if not fit_baseline:
+        # Fixed, not unmeasured: NaN here would be indistinguishable from a singular
+        # covariance, which downstream code treats as a failed error estimate.
+        c_err = 0.0
 
-    success = _is_reliable_t2(t2, t2_err, x)
+    x_max = float(np.max(x)) if np.size(x) else 0.0
+    window_ratio = (x_max / t2) if (np.isfinite(t2) and t2 > 0) else np.nan
+    window_marginal = bool(np.isfinite(window_ratio) and window_ratio < MARGINAL_TMAX_OVER_T)
+
+    success = _is_reliable_t2(t2, t2_err, x, amplitude=a, y=y)
     if success:
         print(f"Fitting residue: {residue_name}  ->  {t2:.4g}")
     else:
@@ -214,6 +427,9 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
         'A_err': a_err,
         't2_err': t2_err,
         'C_err': c_err,
+        'baseline_fixed': not bool(fit_baseline),
+        'window_ratio': window_ratio,
+        'window_marginal': window_marginal,
         'x': x,
         'y': y,
         'result': result,
@@ -309,13 +525,18 @@ def save_results(results_list, output_file, experiment_type="T1"):
     """
     with open(output_file, "w") as f:
         f.write(
-            f"Residue\tA\t{experiment_type}\tC\tA_err\t{experiment_type}_err\tC_err\n"
+            f"Residue\tA\t{experiment_type}\tC\tA_err\t{experiment_type}_err"
+            f"\tC_err\tSuccess\tWindowRatio\n"
         )
         for result in results_list:
+            # fitting_wrapper.py reads row['Success']; the multicore writer has always
+            # emitted it and this one did not, so the single-core path raised KeyError.
+            ok = 'Yes' if result.get('reliable', result.get('success', True)) else 'No'
+            wr = result.get('window_ratio', float('nan'))
             f.write(
                 f"{result['residue']}\t{result['A']:.6e}\t{result['t2']:.6e}\t"
                 f"{result['C']:.6e}\t{result['A_err']:.6e}\t"
-                f"{result['t2_err']:.6e}\t{result['C_err']:.6e}\n"
+                f"{result['t2_err']:.6e}\t{result['C_err']:.6e}\t{ok}\t{wr:.3f}\n"
             )
 
 
@@ -366,6 +587,12 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
             'A_err': float(result['A_err']),
             't2_err': float(result['t2_err']),
             'C_err': float(c_err),
+            # Fit provenance: whether the baseline was fixed, and whether the delay window
+            # was long enough to pin the time constant down. Computed by the fitter and
+            # previously dropped here, which made them unreachable from the CLI.
+            'baseline_fixed': bool(result.get('baseline_fixed', True)),
+            'window_ratio': float(result.get('window_ratio', float('nan'))),
+            'window_marginal': bool(result.get('window_marginal', False)),
             'intensities': [float(val) for val in result['y']],
             'fit_curve': {
                 'time': [float(t) for t in fit_time_dense],
@@ -539,6 +766,9 @@ def run_analysis_with_params(params, progress_callback=None):
     --------
     dict : Results summary
     """
+
+    # Callers may choose; the CLI never does, because C = 0 is the convention.
+    fit_baseline = bool(params.get('fit_baseline', FIT_BASELINE_BY_DEFAULT))
     
     # Input file configuration
     input_csv_file = params['input_csv_file']
@@ -701,7 +931,12 @@ def run_analysis_with_params(params, progress_callback=None):
         't2_range': (min(t2_values), max(t2_values)) if t2_values else (np.nan, np.nan),
         'mean_t2': np.mean(t2_values) if t2_values else np.nan,
         'std_t2': np.std(t2_values) if t2_values else np.nan,
-        'mean_error': np.nanmean(t2_errors) if t2_errors else np.nan
+        'mean_error': np.nanmean(t2_errors) if t2_errors else np.nan,
+        # Fit provenance, so a caller sees the convention and the sampling quality
+        # without opening the per-residue files.
+        'baseline_fixed': not FIT_BASELINE_BY_DEFAULT,
+        'n_window_marginal': sum(1 for r in results_list
+                                 if isinstance(r, dict) and r.get('window_marginal')),
     }
 
 

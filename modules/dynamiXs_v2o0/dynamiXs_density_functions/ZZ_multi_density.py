@@ -780,7 +780,7 @@ class ReducedSpectralDensityAnalysis:
         
         return pd.DataFrame(results)
     
-    def plot_results(self, results_df, save_plots=True):
+    def plot_results(self, results_df, save_plots=True, plot_filename=None):
         """
         Generate plots of the analysis results
         
@@ -851,8 +851,9 @@ class ReducedSpectralDensityAnalysis:
         plt.tight_layout()
 
         if save_plots:
-            plt.savefig('ZZ_rsdm_multicore_analysis_results.pdf', dpi=300, bbox_inches='tight')
-            print("Plots saved as 'ZZ_rsdm_multicore_analysis_results.pdf'")
+            filename = plot_filename or 'ZZ_rsdm_multicore_analysis_results.pdf'
+            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            print(f"Plots saved as '{filename}'")
             plt.close(fig)  # Close figure to free memory
         else:
             plt.close(fig)  # Always close to prevent memory leaks

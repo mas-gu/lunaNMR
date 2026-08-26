@@ -19,7 +19,10 @@ Y = np.array([3691303.2, 3030295.3, 2026739.6, 1614479.0,
 def test_single_core_converges_with_data_driven_initials():
     from fit_Tx_NMRRE import fit_single_residue
     r = fit_single_residue(X, Y, "3.0")          # no initial_A/t2 -> data-driven
-    assert 0.3 < r['t2'] < 0.7                    # sensible, not a degenerate ~1e9
+    # Band widened when the baseline was fixed at zero: this trace only decays to 19%
+    # of its start (t_max/T ~ 1.9), where a free C used to absorb part of the decay
+    # and shorten T. The test guards convergence, not the convention.
+    assert 0.3 < r['t2'] < 1.5                    # sensible, not a degenerate ~1e9
     assert np.isfinite(r['t2_err'])
 
 
@@ -29,7 +32,7 @@ def test_multicore_worker_converges_with_correct_arg_order():
     #            error_method, idx, total)
     r = fit_single_residue_parallel((X, Y, "3.0", None, None, None, 0, 'analytical', 0, 1))
     assert r['success']
-    assert 0.3 < r['t2'] < 0.7
+    assert 0.3 < r['t2'] < 1.5
 
 
 def test_degenerate_residues_flagged_unreliable():
@@ -61,4 +64,4 @@ def test_summary_excludes_degenerate_residues(tmp_path):
         'results_txt_file': str(tmp_path / 'f.txt'), 'experiment_type': 'T1',
     })
     assert result['n_fitted'] == 2 and result['n_excluded'] == 1
-    assert 0.3 < result['mean_t2'] < 0.7          # not polluted by the 1e11 outlier
+    assert 0.3 < result['mean_t2'] < 1.5          # not polluted by the 1e11 outlier

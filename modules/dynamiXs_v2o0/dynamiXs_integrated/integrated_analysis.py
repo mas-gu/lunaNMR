@@ -59,6 +59,37 @@ except ImportError:
     from fitting_wrapper import run_t1_fitting, run_t2_fitting
 
 
+# Quantities that do not belong to a spectrometer field, so they are spelled the same
+# in single- and dual-field output. Everything else is per-field.
+FIELD_INDEPENDENT_COLUMNS = frozenset({
+    'Index', 'Residue', 'S2', 'S2_err', 'S2_95CI', 'tc', 'te', 'te_err', 'te_95CI',
+    'fit_success', 'chi2', 'iterations', 'mc_success_rate',
+})
+
+
+def add_field1_aliases(results_df):
+    """Give a single-field results frame the dual-field `_f1` column names as well.
+
+    Dual-field output spells per-field quantities `R1_f1`, `Rex_f1_err`, `Rex_f1_95CI`;
+    single-field spells the same things `R1`, `Rex_err`, `Rex_95CI`. A reader written for
+    one shape selects nothing on the other and reports an empty result rather than
+    raising. Adding the aliases is additive — existing readers of `Rex` keep working.
+    """
+    out = results_df.copy()
+    for column in list(results_df.columns):
+        if column in FIELD_INDEPENDENT_COLUMNS:
+            continue
+        for suffix in ('_err', '_95CI'):
+            if column.endswith(suffix):
+                alias = f"{column[:-len(suffix)]}_f1{suffix}"
+                break
+        else:
+            alias = f"{column}_f1"
+        if alias not in out.columns:
+            out[alias] = results_df[column]
+    return out
+
+
 class IntegratedAnalysisParameters:
     """Container for all analysis parameters"""
 
@@ -93,11 +124,17 @@ class IntegratedAnalysisParameters:
         self.csaN_ppm = -160.0      # 15N CSA in ppm
 
         # Fitting parameters
-        self.t1_initial_amplitude = 5.0
+        # None lets the fitter derive the amplitude from the data. A constant works
+        # only for spectra that happen to sit near it: intensities differ by orders of
+        # magnitude between instruments and receiver gains, and the fit then fails.
+        self.t1_initial_amplitude = None
         self.t1_initial_time = 800.0
         self.t1_bootstrap_iterations = 1000
 
-        self.t2_initial_amplitude = 5.0
+        self.t2_initial_amplitude = None
+        # R2 may arrive already computed (e.g. from T1rho) instead of as a T2 series.
+        self.field1_r2_table_file = None
+        self.field2_r2_table_file = None
         self.t2_initial_time = 100.0
         self.t2_bootstrap_iterations = 1000
 
@@ -248,20 +285,36 @@ class IntegratedAnalysisPipeline:
         )
         self.log_progress(f"  │  ✓ {len(t1_params)} residues fitted")
 
-        # Step 2: Fit T2 data
-        self.log_progress(f"  ├─ Fitting T2 data ({field_freq} MHz)...")
-        t2_params, t2_results_file = run_t2_fitting(
-            input_csv=t2_file,
-            initial_amplitude=self.params.t2_initial_amplitude,
-            initial_t2=t2_initial_time,
-            n_bootstrap=self.params.t2_bootstrap_iterations,
-            error_method=self.params.error_method,
-            output_prefix=f"{self.params.output_prefix}_{field_label}_T2",
-            json_folder=self.params.json_folder,
-            field_name=field_label,
-            field_freq=field_freq
-        )
-        self.log_progress(f"  │  ✓ {len(t2_params)} residues fitted")
+        # Step 2: R2 either comes from a T2 series fitted here, or already computed
+        # elsewhere — a T1rho experiment yields R2 only after a tilt-angle correction
+        # that needs R1, so it cannot be expressed as a decay series.
+        r2_table_file = getattr(self.params, f'{field_label}_r2_table_file', None)
+        t2_params, t2_results_file, precomputed_r2 = None, None, None
+        if r2_table_file:
+            self.log_progress(f"  ├─ Reading precomputed R2 ({field_freq} MHz)...")
+            table = pd.read_csv(r2_table_file)
+            residue_col = 'residue' if 'residue' in table.columns else 'Residue'
+            err_col = 'R2_err' if 'R2_err' in table.columns else 'R2err'
+            precomputed_r2 = {str(row[residue_col]): {'value': float(row['R2']),
+                                                      'error': float(row.get(err_col, 0.0) or 0.0)}
+                              for _, row in table.iterrows()
+                              if pd.notna(row['R2']) and float(row['R2']) > 0}
+            t2_results_file = r2_table_file
+            self.log_progress(f"  │  ✓ {len(precomputed_r2)} residues read")
+        else:
+            self.log_progress(f"  ├─ Fitting T2 data ({field_freq} MHz)...")
+            t2_params, t2_results_file = run_t2_fitting(
+                input_csv=t2_file,
+                initial_amplitude=self.params.t2_initial_amplitude,
+                initial_t2=t2_initial_time,
+                n_bootstrap=self.params.t2_bootstrap_iterations,
+                error_method=self.params.error_method,
+                output_prefix=f"{self.params.output_prefix}_{field_label}_T2",
+                json_folder=self.params.json_folder,
+                field_name=field_label,
+                field_freq=field_freq
+            )
+            self.log_progress(f"  │  ✓ {len(t2_params)} residues fitted")
 
         # Step 3: Calculate hetNOE
         self.log_progress(f"  ├─ Calculating hetNOE...")
@@ -289,7 +342,8 @@ class IntegratedAnalysisPipeline:
         # Step 4: Convert T1/T2 → R1/R2
         self.log_progress(f"  ├─ Converting relaxation times to rates...")
         r1_params = convert_relaxation_times_to_rates(t1_params, time_units=t1_units)
-        r2_params = convert_relaxation_times_to_rates(t2_params, time_units=t2_units)
+        r2_params = (precomputed_r2 if precomputed_r2 is not None
+                     else convert_relaxation_times_to_rates(t2_params, time_units=t2_units))
         self.log_progress(f"  │  ✓ Converted to R1/R2 (s⁻¹)")
 
         # Step 5: Merge datasets
@@ -479,9 +533,9 @@ class IntegratedAnalysisPipeline:
             detailed_csv = f"{output_prefix}_spectral_density_detailed.csv"
             plots_pdf = f"{output_prefix}_spectral_density_plots.pdf"
 
-            results_df.to_csv(basic_csv, index=False)
+            add_field1_aliases(results_df).to_csv(basic_csv, index=False)
             analyzer.save_detailed_results(results_df, detailed_csv)
-            analyzer.plot_results(results_df, save_plots=True)
+            analyzer.plot_results(results_df, save_plots=True, plot_filename=plots_pdf)
 
             self.log_progress(f"  ✓ Single-field analysis completed: {len(results_df)} residues")
             self.log_progress(f"  ✓ Results saved to: {basic_csv}")
@@ -511,7 +565,5 @@ class IntegratedAnalysisPipeline:
         self.log_progress("  ✓ Analysis report generated")
 
     def _save_final_results(self, results: Dict) -> str:
-        """Save final results to CSV"""
-        output_file = f"{self.params.output_prefix}_integrated_results.csv"
-        # Save results (placeholder)
-        return output_file
+        """Return the path of the per-residue results file the analysis produced."""
+        return results.get('output_files', {}).get('basic_csv', '')
