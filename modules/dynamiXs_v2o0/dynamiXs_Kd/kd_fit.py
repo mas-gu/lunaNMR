@@ -639,8 +639,12 @@ def run_kd_analysis_with_params(params, progress_callback=None):
         global_fit['intensity'] = fit_global_kd_intensity(intensity_for_global, L)
 
     data = {
+        # `concentrations` here is the L the fit actually used, i.e. post-conversion.
+        # load_params accepts this metadata as a params source, so conc_units must say
+        # 'absolute' explicitly — inheriting the schema default would be the same value
+        # by luck rather than by statement, and re-converting it is the P0-factor bug.
         'metadata': {'analysis': 'Kd_titration', 'protein_conc': P0, 'alpha': alpha,
-                     'concentrations': concs, 'points': points,
+                     'concentrations': concs, 'conc_units': 'absolute', 'points': points,
                      'intensity_scales': list(scales) if scales else None,
                      'intensity_value': value,
                      'observables': observables, 'n_bootstrap': n_boot,
@@ -681,13 +685,13 @@ def run_kd_analysis_with_params(params, progress_callback=None):
     _write_results_txt(results_file, fits, global_fit, observables)
 
     # Importable binding-parameters JSON, so re-running needs no manual re-entry.
+    # The run's own params, in the units the caller gave: `concs` has already had
+    # equivalents multiplied by P0, so persisting it under the caller's conc_units would
+    # convert twice on read-back. normalize_params keeps the schema keys and drops the
+    # rest, so a setting added later round-trips without being enumerated here.
     from kd_params import dump_params_json, PARAMS_SUFFIX
     params_file = os.path.join(data_dir, f"{prefix}{PARAMS_SUFFIX}")
-    dump_params_json(params_file, {
-        'points': points, 'concentrations': concs,
-        'intensity_scales': list(scales) if scales else None,
-        'protein_conc': P0, 'alpha': alpha, 'observables': observables,
-        'intensity_value': value, 'n_bootstrap': n_boot})
+    dump_params_json(params_file, {**params, 'points': points})
 
     return {'n_fitted': n_fitted, 'n_total': total, 'output_dir': params['output_dir'],
             'json_file': json_file, 'results_file': results_file,

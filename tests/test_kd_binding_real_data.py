@@ -983,6 +983,59 @@ class TestConcentrationUnits:
             [0.0, 0.125, 0.25, 0.5, 1.0, 2.0, 3.0])
 
 
+class TestTheSurveyRecordsWhatTheFitNeeds:
+    """AFFINITY_PLAYBOOK tells an agent the survey persists its settings and not to
+    re-enter them on the fit. Whatever the survey fails to record, the fit re-derives in
+    silence: concentrations fall back to the CSV's own point labels, and conc_units falls
+    back to 'absolute', which reads equivalents as molar — a Kd wrong by the factor P0
+    with success=True. This is the round-trip that sentence promises.
+    """
+
+    def _survey(self, tidy, out, extra):
+        from lunaNMR.cli import main
+        assert main(["kd", "--survey", "--input", str(tidy), "--out", str(out),
+                     "--prefix", "t", "--p0", P0, *extra]) == 0
+
+    def _fit(self, tidy, out, extra):
+        from lunaNMR.cli import main
+        assert main(["kd", "--input", str(tidy), "--out", str(out), "--prefix", "t",
+                     "--p0", P0, "--observable", "csp,intensity", *extra]) == 0
+        return json.loads((out / "data" / "t_kd_fit_data.json").read_text())
+
+    def test_a_fit_after_a_survey_inherits_its_units(self, own_tidy, tmp_path):
+        """The documented workflow: survey names the units, the fit does not repeat them."""
+        self._survey(own_tidy, tmp_path / "s", ["--conc-units", "equivalents"])
+        inherited = self._fit(own_tidy, tmp_path / "f", [])
+        assert inherited["metadata"]["concentrations"] == pytest.approx(
+            [0.0, 6.25, 12.5, 25.0, 50.0, 100.0, 150.0])
+
+    def test_a_fit_after_a_survey_inherits_its_concentrations(self, own_tidy, tmp_path):
+        """An explicit --conc list is the other half of the same promise."""
+        self._survey(own_tidy, tmp_path / "s", ["--conc", CONC_X10])
+        inherited = self._fit(own_tidy, tmp_path / "f", [])
+        assert inherited["metadata"]["concentrations"] == pytest.approx(
+            [0.0, 62.5, 125.0, 250.0, 500.0, 1000.0, 1500.0])
+
+    def test_re_stating_the_units_does_not_convert_twice(self, own_tidy, tmp_path):
+        """The trap in persisting concentrations: if the stored list were already
+        converted, an agent that also passes --conc-units would multiply by P0 again.
+        Restating what the survey recorded must be a no-op, not an error."""
+        self._survey(own_tidy, tmp_path / "s",
+                     ["--conc", CONC_X10, "--conc-units", "equivalents"])
+        restated = self._fit(own_tidy, tmp_path / "f", ["--conc-units", "equivalents"])
+        silent = self._fit(own_tidy, tmp_path / "g", [])
+        assert restated["metadata"]["concentrations"] == pytest.approx(
+            silent["metadata"]["concentrations"])
+
+    def test_the_survey_records_the_thresholds_it_judged_with(self, own_tidy, tmp_path):
+        """A threshold the survey used to reject residues, but does not record, makes
+        the fit's pool disagree with the selection file the survey just wrote."""
+        from kd_params import find_params_source, load_params
+        self._survey(own_tidy, tmp_path / "s", ["--csp-sigma-multiple", "2.0"])
+        stored = load_params(find_params_source(str(own_tidy)))
+        assert stored["csp_sigma_multiple"] == 2.0
+
+
 # Measured at the last titration point, top 10% trimmed so the binders do not set the
 # threshold meant to identify them. Untrimmed sigma is materially larger.
 DNAJA1_SIGMA_TRIMMED = 0.0202

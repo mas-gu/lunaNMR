@@ -116,10 +116,21 @@ _PERSISTED_SETTINGS = ('conc_units', 'csp_sigma_multiple', 'kd_outlier_z',
                        'noise_quantile',
                        'dd_runaway_ratio', 'ref_max_ratio')
 
+# The list-valued inputs, mapped schema key -> argparse dest. They round-trip too, so a
+# survey's concentrations do not have to be retyped on the fit, but they differ from the
+# settings above: an unrecorded one is stored as null rather than being absent, so the
+# restore tests the value and not just the key.
+_PERSISTED_INPUTS = {'concentrations': 'conc', 'intensity_scales': 'intensity_scale'}
+
 
 def _apply_thresholds(args, params):
-    """Resolve persisted settings: an explicit flag beats a value persisted beside the
-    input, which beats the schema default."""
+    """Resolve persisted binding params: an explicit flag beats a value persisted beside
+    the input, which beats the schema default.
+
+    Concentrations are stored as the caller typed them, next to the conc_units that
+    describe them, so restoring the pair converts equivalents exactly once however the
+    two are mixed between flags and the stored file.
+    """
     from kd_params import find_params_source, load_params
     stored = {}
     src = find_params_source(args.input)
@@ -127,14 +138,20 @@ def _apply_thresholds(args, params):
         try:
             stored = load_params(src)
         except Exception:
-            stored = {}
+            src, stored = None, {}
     for key in _PERSISTED_SETTINGS:
         flag = getattr(args, key, None)
         if flag is not None:
             params[key] = flag
         elif key in stored:
             params[key] = stored[key]
-    return params
+    for key, dest in _PERSISTED_INPUTS.items():
+        flag = getattr(args, dest, None)
+        if flag is not None:
+            params[key] = flag
+        elif stored.get(key) is not None:
+            params[key] = stored[key]
+    return src
 
 
 _DATA_SUBDIR = 'data'   # CSV/JSON companions sit one level under the figures
@@ -193,10 +210,6 @@ def _run_kd_survey(args):
         'alpha': args.alpha,
         'intensity_value': args.intensity_from,
     }
-    if args.conc is not None:
-        params['concentrations'] = args.conc
-    if args.intensity_scale is not None:
-        params['intensity_scales'] = args.intensity_scale
     if args.selection is not None:
         params['selection_file'] = args.selection
     _apply_thresholds(args, params)
@@ -255,13 +268,9 @@ def _run_kd(args):
         'intensity_value': args.intensity_from,
         'n_bootstrap': args.bootstrap,
     }
-    if args.conc is not None:
-        params['concentrations'] = args.conc
-    if args.intensity_scale is not None:
-        params['intensity_scales'] = args.intensity_scale
     if args.residues is not None:
         params['residues'] = _read_residue_selection(args.residues)
-    _apply_thresholds(args, params)
+    params_source = _apply_thresholds(args, params)
 
     with _engine_stdout(args):
         result = kd_fit.run_kd_analysis_with_params(params)
@@ -272,9 +281,14 @@ def _run_kd(args):
     _emit(args,
           {'command': 'kd', 'n_fitted': result['n_fitted'], 'n_total': result['n_total'],
            'quality_warnings': result.get('quality_warnings') or [],
+           'conc_units': params.get('conc_units', 'absolute'),
+           'params_source': params_source,
+           'params_file': result.get('params_file'),
            'json_file': result['json_file'], 'results_file': result['results_file']},
           f"Kd analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted",
+          *([f"  Settings restored from: {params_source}"] if params_source else []),
           f"  JSON:    {result['json_file']}",
+          f"  Params:  {result.get('params_file')}",
           f"  Results: {result['results_file']}")
     return 0
 

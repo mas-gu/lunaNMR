@@ -262,13 +262,14 @@ def run_kd_survey_with_params(params):
     params_file = os.path.join(
         os.path.dirname(os.path.abspath(params['input_csv_file'])),
         f"{prefix}{PARAMS_SUFFIX}")
-    dump_params_json(params_file, {
-        'points': data_in['points'], 'concentrations': data_in['concs'],
-        'intensity_scales': data_in['scales'], 'protein_conc': data_in['P0'],
-        'alpha': data_in['alpha'], 'intensity_value': data_in['value'],
-        'noise_quantile': params.get('noise_quantile', NO_MOTION_QUANTILE),
-        'dd_runaway_ratio': params.get('dd_runaway_ratio', DD_RUNAWAY_RATIO),
-        'ref_max_ratio': params.get('ref_max_ratio', 10.0)})
+    # Persist the run's own params, not the loaded ones: data_in['concs'] has already
+    # had equivalents multiplied by P0, so storing it beside a conc_units of
+    # 'equivalents' would convert twice on read-back, and storing it as 'absolute'
+    # would silently contradict a --conc-units the next run restates. Recording what
+    # the caller gave keeps the numbers and their units describing the same thing.
+    # normalize_params keeps the schema keys and drops the rest, so every setting a run
+    # was judged with round-trips without being enumerated here.
+    dump_params_json(params_file, {**params, 'points': data_in['points']})
 
     counts = {v: sum(1 for r in rows if r['verdict'] == v)
               for v in ('ok', 'check', 'unusable')}
