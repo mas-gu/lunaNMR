@@ -49,9 +49,9 @@ python -m lunaNMR kd --survey --input <tidy.csv> --out <RESULTS> --p0 <conc> \
     [--conc-units equivalents] --format json
 ```
 
-Produces `<obs>_vs_sequence.pdf`, `data/<prefix>_survey.csv`, and an editable
-`<prefix>_residues.txt` **beside the input CSV** — not in `--out`, so a different output
-path cannot lose it.
+Produces `<out>/<prefix>_<obs>_vs_sequence.pdf` (prefix first, one per observable),
+`<out>/data/<prefix>_survey.csv`, and an editable `<prefix>_residues.txt` **beside the
+input CSV** — not in `--out`, so a different output path cannot lose it.
 
 Selection file: one residue per line, `#` comments a line out, deleting the `#` puts it
 back. Trailing comments are **evidence, not exclusions**. Re-running `--survey` merges —
@@ -107,9 +107,11 @@ bad. No Kd from such a run should be reported at any confidence.
 relative error exceeds 30%. A pinned Kd is the optimizer hitting a wall, not a measurement.
 
 **3. Reconcile the pool.** `metadata.csp_pool_excluded` names the gate that removed every
-residue — placeholder, failed fit, below the significance threshold, R² too low, outside
-the resolvable window, statistical outlier. Pool + excluded must equal every fitted
-residue. If a pool is surprisingly small, the answer is in that map, not in the figures.
+residue — failed fit, no CSP at the last point, below the significance threshold, R² too
+low, outside the resolvable window, statistical outlier. Pool + excluded must equal every
+fitted residue. If a pool is surprisingly small, the answer is in that map, not in the
+figures. **Placeholders are not in it**: `dummy_*` rows are dropped before fitting, so they
+are never *fitted* residues — their count is `metadata.n_excluded_dummy`, a separate key.
 
 **4. Sanity band.** The resolvable window is roughly one decade either side of the
 titration's own concentrations. A Kd outside it was not measured, however good its R².
