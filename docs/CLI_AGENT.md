@@ -150,7 +150,7 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 ## Machine conventions
 - **`--format json`** → stdout is one JSON summary object, nothing else; all engine chatter goes to stderr (fd-level, so spawn workers stay clean). Parse stdout for `n_fitted`/`n_successful`, output paths, etc.
 - **`--dry-run`** → validates required inputs exist, prints the plan, runs nothing. Exit 1 if any input missing, else 0.
-- **`--parallel`** → `series` only (two-pass processor, ~2.7×). `density`/`modelfree` parallelize internally and accept `--no-parallel`.
+- **`--parallel`** → `series` only (two-pass processor, ~2.7×). **`--no-parallel` → `density` only.** `modelfree` also parallelizes internally but hard-codes `use_multiprocessing=True`, so its CPU use cannot be bounded — `modelfree --no-parallel` exits 2 with `unrecognized arguments`.
 - **Exit codes:** `2` = no/invalid subcommand (help to stderr). `1` = bad input (missing file, malformed CSV/JSON, unparseable delay label — reported as `error: …` on stderr, no traceback) OR dry-run with a missing input. `series`/`t1t2`/`methyl-t2` also return `1` when nothing fit. `hetnoe`/`density`/`modelfree`/`kd`/`export` return `0` on any successful run even if some residues failed — check the JSON `n_successful`/`n_fitted`, don't rely on exit code for partial failure.
 
 ## Input file shapes
@@ -168,7 +168,7 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 - **`series` matrices**: `Peak_Number,Assignment,Reference_X,Reference_Y` + one column per spectrum, labelled with the parsed delay (`8`, `2400`, `102_2`) or, when none parses, the filename stem (`hetnoe_600_saturated`). Per spectrum, so one folder can carry both kinds.
 - **`series_analysis_tidy.csv`**: `spectrum_name, assignment, peak_number, ppm_x, ppm_y, height, volume, snr, quality, r_squared`. **The only place per-peak fit quality reaches the series output** — gate residues here, the matrices are intensities only.
 - **`per_spectrum_results/<original_filename>.csv`**: `…,Detected_Intensity,Height,Volume,LW_X,LW_Y,R_Squared,Quality`. The only output where the filename→data link survives.
-- **`series_metadata.json`**: **the column → spectrum → delay map**; nothing else carries it. `value` is `null` when the filename had no parseable delay — that column is named after the file stem instead, and `n_value_unparsed` counts them. `repeat_scale` is present only when the series has repeat acquisitions; it is measured on the fitted intensities and **reported, never applied**.
+- **`series_metadata.json`**: **the column → spectrum → delay map**; nothing else carries it. `value` is `null` when the filename had no parseable delay — that column is named after the file stem instead, and `n_value_unparsed` counts them. `repeat_scale` is measured on the fitted intensities and **reported, never applied**. **It is `null` when the series has no repeat acquisitions** — the common case — and absent entirely when no intensity matrix was produced, so `if 'repeat_scale' in meta:` is True with a `null` payload and crashes on `['ratio']`. Use `meta.get('repeat_scale') or {}`.
   ```json
   {"series_mode": "time", "value_units": "ms", "n_spectra": 14, "n_value_unparsed": 0,
    "columns": [{"column": "8",     "spectrum": "T2_sample_8ms.ft",  "value": 8.0},

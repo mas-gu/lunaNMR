@@ -96,12 +96,13 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   `series_analysis_tidy.csv`, `series_metadata.json`, per-spectrum CSVs.
 
 **Repeat acquisitions are measured for you.** When two spectra share a series value,
-`series_metadata.json` gains a `repeat_scale` block giving the median ratio of the second to
+`series_metadata.json`'s `repeat_scale` gives the median ratio of the second to
 the first over the strong peaks, per shared value and overall, plus the `scale` that would
 cross-normalise them and a `needs_normalisation` flag (>5% off). It is measured on the
 intensities the run just fitted, which is the number worth acting on — a pre-flight check can
 only estimate it from box maxima. It is **reported and never applied**: rescaling one
-sub-series changes the science and stays your decision.
+sub-series changes the science and stays your decision. The key is always written but is
+`null` when there are no repeats, so read it as `meta.get('repeat_scale') or {}`.
 
 **Column labels, and how to get back to the filename.** The CLI always extracts delays, so
 each matrix column is labelled with the delay parsed from the filename (`8`, `102`, `2400`)
