@@ -191,6 +191,45 @@ class TestGlobalKd:
         assert g['Kd'] <= hi
         assert g['reliable'] is False
 
+    def test_global_intensity_reliable_true_for_well_determined_fit(self):
+        """AFFINITY_PLAYBOOK and AFFINITY_PROMPT tell an agent never to report a Kd
+        without its `reliable` flag. Only the CSP global had one, so the instruction was
+        unfollowable for obs=intensity."""
+        from kd_models import intensity_decay
+        from kd_fit import fit_global_kd_intensity
+        residues = {n: intensity_decay(L, i0, inf, 22.0)
+                    for n, i0, inf in (('A', 1.0, 0.05), ('B', 0.8, 0.20))}
+        g = fit_global_kd_intensity(residues, L)
+        assert g['success']
+        assert g['reliable'] is True
+
+    def test_global_intensity_flat_data_is_not_reliable(self):
+        """Data that never decays does not push Kd out of the window — the model fits it
+        by driving I_inf to I0, which cancels the exponential and leaves Kd free near its
+        seed. So this case is caught by the relative error, not the window: the two gates
+        are not redundant, and dropping either would pass a Kd nothing measured."""
+        from kd_models import intensity_decay
+        from kd_fit import fit_global_kd_intensity, _resolvable_window
+        residues = {n: intensity_decay(L, i0, 0.0, 1e8)
+                    for n, i0 in (('A', 1.0), ('B', 0.8))}
+        g = fit_global_kd_intensity(residues, L)
+        assert g['success']
+        lo, hi = _resolvable_window(L)
+        assert lo <= g['Kd'] <= hi                     # inside the window ...
+        assert g['Kd_err'] > 0.3 * g['Kd']             # ... but unconstrained
+        assert g['reliable'] is False
+
+    def test_global_intensity_below_the_titration_range_is_not_reliable(self):
+        """The mirror case: decayed at every measured point, so any smaller Kd fits
+        equally well."""
+        from kd_models import intensity_decay
+        from kd_fit import fit_global_kd_intensity
+        residues = {n: intensity_decay(L, i0, 0.0, 1e-6)
+                    for n, i0 in (('A', 1.0), ('B', 0.8))}
+        g = fit_global_kd_intensity(residues, L)
+        assert g['success']
+        assert g['reliable'] is False
+
     def test_global_csp_reliable_true_for_well_determined_fit(self):
         from kd_models import csp_model
         from kd_fit import fit_global_kd_csp
@@ -344,6 +383,10 @@ class TestRunAnalysis:
         # results.txt records the apparent-Kd line
         txt = Path(result['results_file']).read_text()
         assert 'apparent Kd (intensity decay)' in txt
+        # ... and the reliability verdict beside it. The runbooks say never to quote a
+        # Kd without stating whether `reliable` was true, which a reader of this file
+        # could not do while the flag existed only in the JSON.
+        assert 'reliable' in txt.lower()
 
     def test_embeds_raw_series_per_residue(self, tmp_path):
         # The comparison view (arbitrary reference point) and exact-reopen need the

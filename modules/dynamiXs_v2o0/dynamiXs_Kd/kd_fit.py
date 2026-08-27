@@ -329,6 +329,29 @@ def _shared_kd_err(res, n_params):
         return None
 
 
+def _resolvable_window(L):
+    """The Kd range a titration has power to resolve: one decade below its lowest
+    nonzero ligand concentration through one decade above its highest.
+
+    Outside it the model is saturated (or untouched) at every measured point, so
+    decades of Kd fit equally well and the formal error stays misleadingly small.
+    Returns (None, None) when no nonzero concentration was measured.
+    """
+    L = np.asarray(L, dtype=float)
+    nonzero = L[L > 0]
+    if nonzero.size == 0:
+        return None, None
+    return float(np.min(nonzero)) / 10.0, float(np.max(nonzero)) * 10.0
+
+
+def _well_determined(kd, kd_err, max_rel_err=0.3):
+    """A shared Kd inside the resolvable window can still be unconstrained: the
+    dd_max/Kd degeneracy at large Kd, or saturation at small Kd, leaves the value free
+    while the fit itself succeeds. That shows up as a large relative error."""
+    return (kd_err is not None and np.isfinite(kd_err) and kd > 0
+            and kd_err <= max_rel_err * kd)
+
+
 def fit_global_kd_csp(residues, L, P0):
     """Joint CSP fit with one shared Kd and a per-residue Δδ_max.
 
@@ -348,11 +371,9 @@ def fit_global_kd_csp(residues, L, P0):
     names = [n for n in residues if not np.all(np.isnan(np.asarray(residues[n], dtype=float)))]
     if len(names) < 2:
         return {'success': False, 'reason': 'fewer than 2 usable residues'}
-    nonzero_L = L[L > 0]
-    if nonzero_L.size == 0:
+    kd_lo, kd_hi = _resolvable_window(L)
+    if kd_lo is None:
         return {'success': False, 'reason': 'no nonzero ligand concentrations'}
-    kd_lo = float(np.min(nonzero_L)) / 10.0
-    kd_hi = float(np.max(nonzero_L)) * 10.0
     series = {n: np.asarray(residues[n], dtype=float) for n in names}
     dd0 = [max(float(np.nanmax(series[n])), 1e-6) for n in names]
     kd0 = float(np.clip(max(float(np.nanmax(L)) / 2.0, 1.0), kd_lo, kd_hi))
@@ -375,8 +396,7 @@ def fit_global_kd_csp(residues, L, P0):
     kd = float(res.x[0])
     kd_err = _shared_kd_err(res, 1 + len(names))
     not_pinned = kd_lo * 1.01 < kd < kd_hi * 0.99
-    well_determined = kd_err is not None and np.isfinite(kd_err) and kd_err <= 0.3 * kd
-    reliable = bool(not_pinned and well_determined)
+    reliable = bool(not_pinned and _well_determined(kd, kd_err))
     return {'success': True, 'Kd': kd,
             'Kd_err': kd_err,
             'dd_max': {n: float(res.x[1 + i]) for i, n in enumerate(names)},
@@ -434,12 +454,22 @@ def fit_global_kd_intensity(residues, L, n_bootstrap=0):
                                                    lo, hi, n_bootstrap)
         if np.isfinite(boot_kd_err):
             kd_err = boot_kd_err          # fall back to the analytic value otherwise
-    return {'success': True, 'Kd': float(res.x[0]),
+    kd = float(res.x[0])
+    # Reported as a verdict, not imposed as a bound. The CSP isotherm is a physical
+    # model, so clamping its shared Kd to the resolvable decade keeps the optimizer in
+    # the region the data speaks to. The intensity decay is phenomenological and its
+    # Kd an apparent decay constant, so clipping it would invent a number; saying the
+    # titration could not resolve it is the honest report. Same window either way.
+    kd_lo, kd_hi = _resolvable_window(L)
+    reliable = bool(kd_lo is not None and kd_lo <= kd <= kd_hi
+                    and _well_determined(kd, kd_err))
+    return {'success': True, 'Kd': kd,
             'Kd_err': kd_err,
             'I0': {n: float(res.x[1 + 2 * i]) for i, n in enumerate(names)},
             'I_inf': {n: float(res.x[2 + 2 * i]) for i, n in enumerate(names)},
             'residues': list(names),
-            'n_residues': len(names)}
+            'n_residues': len(names),
+            'reliable': reliable}
 
 
 def _bootstrap_global_intensity(L, series, masks, names, popt, lo, hi, n):
@@ -704,13 +734,20 @@ def _write_results_txt(path, fits, global_fit, observables):
         def _gerr(g):
             e = g.get('Kd_err')
             return f" ± {e:.4g}" if isinstance(e, (int, float)) else ""
+
+        def _verdict(g):
+            """A shared Kd is not quotable without saying whether the titration could
+            resolve it, so the flag travels with the number rather than living only in
+            the JSON."""
+            return "  [reliable]" if g.get('reliable') else (
+                "  [NOT reliable: outside the resolvable range, or relative error > 30%]")
         if global_fit.get('csp', {}).get('success'):
             g = global_fit['csp']
-            f.write(f"# Global shared Kd (CSP): {g['Kd']:.4g}{_gerr(g)}\n")
+            f.write(f"# Global shared Kd (CSP): {g['Kd']:.4g}{_gerr(g)}{_verdict(g)}\n")
         if global_fit.get('intensity', {}).get('success'):
             g = global_fit['intensity']
             f.write("# Global shared apparent Kd (intensity decay): "
-                    f"{g['Kd']:.4g}{_gerr(g)}\n")
+                    f"{g['Kd']:.4g}{_gerr(g)}{_verdict(g)}\n")
         f.write("Residue\tCSP_Kd\tCSP_Kd_err\tCSP_ddmax\tCSP_R2\tInt_Kd\tInt_Kd_err\n")
         for e in fits:
             c = e.get('csp', {})

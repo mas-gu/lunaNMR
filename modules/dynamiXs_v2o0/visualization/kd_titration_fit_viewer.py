@@ -284,9 +284,12 @@ class KdTitrationFitViewer(QMainWindow):
         if g.get("success"):
             lbl = ("Global shared Kd (CSP)" if obs == "csp"
                    else "Global shared apparent Kd (intensity)")
+            # A Kd the titration could not resolve looks identical to one it could,
+            # so the verdict belongs next to the number, not only in the JSON.
+            verdict = "" if g.get("reliable") else "   ⚠ NOT reliable"
             self.global_label.setText(
                 f"{lbl}: {_kd_with_err(g.get('Kd'), g.get('Kd_err'))} "
-                f"(n={g.get('n_residues','?')})" + avg +
+                f"(n={g.get('n_residues','?')})" + verdict + avg +
                 "   — global from initial fit, not updated by per-residue refits")
         else:
             which = "CSP" if obs == "csp" else "intensity"
