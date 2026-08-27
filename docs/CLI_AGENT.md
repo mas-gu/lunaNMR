@@ -103,8 +103,8 @@ disagreement localises exchange (R1ρ and R2 weight it differently).
 
 | check | expect | if it fails |
 |---|---|---|
-| R1(high)/R1(low) | 0.80–0.90 | peak identity / referencing / scaling broken |
-| R2(high)/R2(low) | 1.10–1.25 | a T2 problem, or the two datasets differ in temperature |
+| R1(high)/R1(low) | **field-pair dependent** — table in [`CLI_AGENTS_DEEP/RELAXATION_PLAYBOOK.md`](CLI_AGENTS_DEEP/RELAXATION_PLAYBOOK.md) | peak identity / referencing / scaling broken |
+| R2(high)/R2(low) | **field-pair dependent** — same table | a T2 problem, or the two datasets differ in temperature |
 | τc = (1/4πν_N)·√(6·R2/R1 − 7), per field | agree within ~5% | there is no single global τc — the dual fit's premise is false |
 | hetNOE median | 0.75–0.85 for a rigid fold | plane identity or gating is wrong |
 | Rex>1 fraction, dual vs single-field | comparable | dual ≫ single (and χ² ~25× higher) = the dual fit is absorbing a τc mismatch, not reporting chemistry. Take per-residue Rex from the single-field runs. |
