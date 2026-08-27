@@ -247,13 +247,15 @@ if given (default: none, i.e. unprefixed `summary.csv`/`<obs>_fits.pdf`/...):
 - `curves` — `<obs>_fits.pdf` (multi-page grid of per-residue binding fits; `--fig-format png`
   writes one file per residue under `<obs>/` instead).
 - `ref-bars` — `<obs>_ref_vs_point.pdf`, the observable per residue between point 0 and each
-  later titration point (one page per point; **PDF only**). Matches the GUI viewer's export.
+  later titration point (one page per point). Also writes `<obs>_ref_vs_point.csv` (wide,
+  Excel-ready) and `.json`. Matches the GUI viewer's export.
 - `kd-bars` — `<obs>_kd_vs_residue.pdf`, per-residue Kd bars + the shared global-Kd line
   (**PDF only**). The intensity Kd is an apparent decay constant (see the global-fit caveat),
   not a thermodynamic dissociation constant.
 - `global-fit` — `<obs>_global_fit.pdf`, per-residue observed data + the **single shared-Kd**
-  global-model curve (one Kd for all residues, per-residue amplitudes), 20 panels/page, PDF
-  only. Each panel's title carries R²(global) = the data vs the shared-Kd curve, so you can
+  global-model curve (one Kd for all residues, per-residue amplitudes), 20 panels/page. Also
+  writes `<obs>_global_fit.csv` and `.json` with the per-residue parameters behind the global
+  fit. Each panel's title carries R²(global) = the data vs the shared-Kd curve, so you can
   see which residues the one Kd fits poorly. Needs the run's `global[<obs>]` (≥2 residues).
 
 `--kind` default `curves,ref-bars,kd-bars,global-fit`; `--fig-format` default `pdf`. Ref-bars
