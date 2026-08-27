@@ -2,6 +2,7 @@
 # ABOUTME: Agents run these documents verbatim, so a stale flag or a duplicated number is a bug.
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCS = REPO_ROOT / "docs"
 CLI_AGENT_DOC = DOCS / "CLI_AGENT.md"
+AGENTS_DOC = REPO_ROOT / "AGENTS.md"
 RELAXATION_PLAYBOOK = DOCS / "CLI_AGENTS_DEEP" / "RELAXATION_PLAYBOOK.md"
 
 
@@ -64,3 +66,33 @@ class TestTheFieldRatioBandsAreStatedOnce:
     def test_the_agent_contract_points_at_the_table(self):
         """An agent reading only CLI_AGENT.md must still be able to reach the numbers."""
         assert "RELAXATION_PLAYBOOK.md" in CLI_AGENT_DOC.read_text()
+
+
+class TestTheAgentDocsAreReachable:
+    """The agent documentation is only worth writing if an agent can find it. The
+    entry points are `--help`, AGENTS.md, and the two README indexes.
+    """
+
+    @pytest.fixture(scope="class")
+    def top_level_help(self):
+        import subprocess
+        out = subprocess.run([sys.executable, "-m", "lunaNMR", "--help"],
+                             cwd=str(REPO_ROOT), capture_output=True, text=True)
+        assert out.returncode == 0, out.stderr
+        return out.stdout
+
+    @pytest.mark.parametrize("path", ["docs/CLI_AGENT.md", "docs/CLI_AGENTS_DEEP"])
+    def test_help_names_the_agent_docs(self, top_level_help, path):
+        """`python -m lunaNMR --help` is the one entry point every agent already runs."""
+        assert path in top_level_help
+
+    def test_agents_md_exists_and_names_both(self):
+        text = AGENTS_DOC.read_text()
+        assert "docs/CLI_AGENT.md" in text
+        assert "docs/CLI_AGENTS_DEEP" in text
+
+    def test_the_docs_index_lists_the_agent_reference(self):
+        assert "CLI_AGENT.md" in (DOCS / "README.md").read_text()
+
+    def test_the_project_readme_links_the_agent_reference(self):
+        assert "CLI_AGENT.md" in (REPO_ROOT / "README.md").read_text()

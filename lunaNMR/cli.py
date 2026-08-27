@@ -1282,6 +1282,18 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog='lunaNMR',
         description='LunaNMR command-line interface for headless NMR analysis.',
+        # `--help` is the one entry point every caller already runs, so it is where the
+        # documentation an agent needs before running anything has to be named.
+        epilog=(
+            'Documentation:\n'
+            '  docs/CLI.md                human reference for every subcommand and flag\n'
+            '  docs/CLI_AGENT.md          machine contract, output shapes, and the\n'
+            '                             silent-corruption gotchas -- read this before\n'
+            '                             driving the CLI programmatically\n'
+            '  docs/CLI_AGENTS_DEEP/      long-form runbooks: phase structure, physical\n'
+            '                             QC bands, and worked relaxation/affinity flows\n'
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument('--version', action='version', version=f'lunaNMR {_version()}')
     sub = parser.add_subparsers(dest='command', metavar='<subcommand>')

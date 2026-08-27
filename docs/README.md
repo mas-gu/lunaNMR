@@ -27,6 +27,8 @@ All detection/fitting parameters live behind the **Expert Mode** button (not nee
 | [lunaNMR_guide.html](lunaNMR_guide.html) | Complete GUI/feature reference |
 | [MULTI_SPECTRUM_GUIDE.md](MULTI_SPECTRUM_GUIDE.md) | Series integration workflow |
 | [CLI.md](CLI.md) | Headless command-line reference |
+| [CLI_AGENT.md](CLI_AGENT.md) | Machine contract for driving the CLI from an agent: JSON shapes, exit codes, silent-corruption gotchas |
+| [CLI_AGENTS_DEEP/](CLI_AGENTS_DEEP/) | Long-form agent runbooks — relaxation and affinity, with the physical QC bands |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System design and data flow |
 | [ALGORITHMS.md](ALGORITHMS.md) | Peak detection, clustering, PS2D fitting |
 
