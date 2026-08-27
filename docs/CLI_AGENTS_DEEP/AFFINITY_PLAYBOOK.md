@@ -30,7 +30,7 @@ titration points, and peak-list hygiene.
 | **peak-list registration** | shift ≈ 0.000, 0.000 | wrong list or mis-referenced. Symptom is Height 0 / R² ≈ 0.2 shoulder fits that read as "noisy data" |
 | **capture rate at the reference point** | >85% at zero titrant | peaks outside the search window. Judge **only** at the reference — a low rate further along a titration is exchange broadening, i.e. the experiment working |
 | **assignment hygiene** | no whitespace, no `dummy_*`, no duplicates | whitespace breaks exact-string merging silently |
-| **titration points parse** | one value per spectrum, ascending | a name whose trailing token is not numeric is **silently dropped**, not errored |
+| **titration points parse** | one value per spectrum, ascending | the trailing token needs a **decimal separator** (`_0o5`, `_2.4`), not merely digits — `sample_2.ft` and `ref_100.ft` do **not** parse and are **silently dropped**, not errored. Name points `_0o0`, `_0o5`, `_2o0`. |
 | **reference peak sanity** | every residue's I(0) comparable to its own series max | a reference orders of magnitude low rescales that residue entirely, and survives a `quality='Good'` label |
 
 **Capture collapse at high titrant is expected, not a fault.** The most strongly perturbed
