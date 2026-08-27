@@ -7,7 +7,7 @@ Headless access to the analysis pipeline. Every reasonable GUI analysis is scrip
 display required.
 
 ```bash
-python -m lunaNMR <subcommand> [flags]      # or the console script:  lunanmr <subcommand>
+python -m lunaNMR <subcommand> [flags]      # console script `lunanmr` needs `pip install -e .`
 python -m lunaNMR --version
 python -m lunaNMR --help
 ```

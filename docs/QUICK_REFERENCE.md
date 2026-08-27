@@ -87,7 +87,7 @@ Writes `series_results_*/`: `comprehensive_peak_tracking.csv` (wide), `series_an
 ## Headless CLI
 
 ```bash
-python -m lunaNMR <subcommand>          # or: lunanmr <subcommand>
+python -m lunaNMR <subcommand>          # `lunanmr` needs `pip install -e .`
 ```
 
 | Command | Purpose |

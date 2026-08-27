@@ -7,7 +7,7 @@ Scannable condensation of `docs/CLI.md` + `cli.py` for an agent. Run from `lunaN
 
 ## Invocation
 ```bash
-python -m lunaNMR <subcommand> [flags]   # == lunanmr <subcommand> [flags]
+python -m lunaNMR <subcommand> [flags]   # `lunanmr` only after `pip install -e .`
 ```
 No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every analysis subcommand accepts `--format {text,json}` and `--dry-run`.
 

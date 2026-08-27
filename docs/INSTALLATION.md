@@ -42,6 +42,19 @@ All runtime deps are in `requirements.txt`:
 pip install -r requirements.txt
 ```
 
+### The `lunanmr` command (optional)
+
+`python -m lunaNMR <subcommand>` works from the project directory with no extra step.
+The shorter `lunanmr <subcommand>` is a console script declared in `pyproject.toml`, and
+it exists only after an editable install:
+
+```bash
+pip install -e .        # from lunaNMR_v1o0/, adds `lunanmr` to PATH
+```
+
+Without it `which lunanmr` finds nothing, and every `lunanmr …` line in the docs must be
+read as `python -m lunaNMR …`.
+
 ### Troubleshooting
 
 - **`numba` wheel missing**: `pip install --upgrade pip`, retry. On Apple silicon use an arm64 Python.
