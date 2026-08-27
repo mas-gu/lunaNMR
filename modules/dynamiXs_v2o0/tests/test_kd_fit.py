@@ -388,6 +388,52 @@ class TestRunAnalysis:
         # could not do while the flag existed only in the JSON.
         assert 'reliable' in txt.lower()
 
+    def _tidy_at_precision(self, tmp_path, decimals):
+        """A CSP titration whose fitted positions carry `decimals` decimal places."""
+        from kd_models import csp_model
+        pts = [0.0, 10.0, 25.0, 60.0, 150.0, 300.0]
+        rows = []
+        for name, dd in (('R1', 0.25), ('R2', 0.18)):
+            dh = csp_model(np.array(pts), dd, 30.0, P0)
+            for p, d in zip(pts, dh):
+                rows.append((str(p), name, round(8.0 + d, decimals),
+                             round(120.0 + 5 * d, decimals), 1000.0, 2000.0))
+        df = pd.DataFrame(rows, columns=['spectrum_name', 'assignment',
+                                         'ppm_x', 'ppm_y', 'height', 'volume'])
+        csv = tmp_path / 'series_analysis_tidy.csv'
+        df.to_csv(csv, index=False)
+        return csv
+
+    def _run(self, csv, tmp_path, observables):
+        from kd_fit import run_kd_analysis_with_params
+        import json
+        result = run_kd_analysis_with_params({
+            'input_csv_file': str(csv), 'output_dir': str(tmp_path / f"o_{observables[0]}"),
+            'output_prefix': 'p', 'protein_conc': P0, 'alpha': 0.14,
+            'observables': observables, 'n_bootstrap': 0})
+        return json.loads(Path(result['json_file']).read_text()), result
+
+    def test_coarse_positions_warn_because_csp_cannot_survive_them(self, tmp_path):
+        """Series runs before positions were written to 4 decimals rounded them to
+        0.1 ppm. CSP is the difference between two positions, so a 0.1 ppm grid
+        quantises it at five times the significance threshold — and the fit still
+        returns a finite Kd with success=True and exit 0."""
+        data, _ = self._run(self._tidy_at_precision(tmp_path, 1), tmp_path, ['csp'])
+        assert data['metadata']['position_precision_warning']
+        assert any('precision' in w.lower() for w in data['metadata']['quality_warnings'])
+
+    def test_four_decimal_positions_do_not_warn(self, tmp_path):
+        data, _ = self._run(self._tidy_at_precision(tmp_path, 4), tmp_path, ['csp'])
+        assert not data['metadata']['position_precision_warning']
+
+    def test_an_intensity_only_fit_on_coarse_positions_is_fine(self, tmp_path):
+        """Intensity never reads a position, so the same CSV is perfectly valid for it.
+        Warning there would train the reader to ignore the warning."""
+        data, _ = self._run(self._tidy_at_precision(tmp_path, 1), tmp_path, ['intensity'])
+        assert not data['metadata']['position_precision_warning']
+        assert not [w for w in data['metadata']['quality_warnings']
+                    if 'precision' in w.lower()]
+
     def test_embeds_raw_series_per_residue(self, tmp_path):
         # The comparison view (arbitrary reference point) and exact-reopen need the
         # raw per-point positions/intensities, not just the point-0-relative obs.

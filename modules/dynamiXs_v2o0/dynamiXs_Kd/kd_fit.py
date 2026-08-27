@@ -329,6 +329,36 @@ def _shared_kd_err(res, n_params):
         return None
 
 
+# CSP is a difference of two positions, so the grid the positions sit on is the grid CSP
+# is quantised to. The trimmed CSP spread on a real dataset is ~0.02 ppm, so a 0.01 ppm
+# grid is already half the significance threshold and 0.1 ppm swamps it entirely.
+_CSP_POSITION_GRID_MAX = 0.01
+_POSITION_GRIDS = (0.1, 0.01, 0.001)
+# Below this many positions, "every value is a multiple of 0.1" is coincidence, not
+# evidence of rounding.
+_MIN_POSITIONS_TO_JUDGE = 12
+
+
+def position_grid(values, grids=_POSITION_GRIDS):
+    """The coarsest grid every position falls on, or None if finer than the ladder.
+
+    Series runs before positions were written to 4 decimals rounded them to 0.1 ppm.
+    Such a CSV still fits: the Kd is finite, success is True and the exit code is 0,
+    while the CSP it was derived from has been quantised away. Detecting it means
+    measuring the data rather than trusting its provenance.
+    """
+    arr = np.asarray([v for v in values], dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size < _MIN_POSITIONS_TO_JUDGE:
+        return None
+    for grid in grids:
+        # Compare against the grid itself, not an absolute epsilon: 8.2 stored as a
+        # float is not exactly a multiple of 0.1.
+        if np.all(np.abs(arr / grid - np.round(arr / grid)) < 1e-6):
+            return grid
+    return None
+
+
 def _resolvable_window(L):
     """The Kd range a titration has power to resolve: one decade below its lowest
     nonzero ligand concentration through one decade above its highest.
@@ -635,6 +665,23 @@ def run_kd_analysis_with_params(params, progress_callback=None):
     if csp_outlier_stats.get('verdict'):
         quality_warnings.append(csp_outlier_stats['verdict'])
 
+    # Only CSP reads positions, so an intensity-only fit on the same CSV is valid and
+    # must not be warned about — a warning that fires when nothing is wrong is one the
+    # reader learns to skip.
+    position_grid_ppm = None
+    if 'csp' in observables:
+        position_grid_ppm = position_grid(
+            [v for res in residues.values() for v in res.get('ppm_x', [])])
+        if position_grid_ppm is not None and position_grid_ppm >= _CSP_POSITION_GRID_MAX:
+            quality_warnings.append(
+                f"POSITION PRECISION: every fitted 1H position falls on a "
+                f"{position_grid_ppm:g} ppm grid, so the CSP derived from them is "
+                f"quantised at that step — comparable to or larger than the "
+                f"significance threshold itself. This is the signature of a series run "
+                f"from before positions were written to 4 decimals. The Kd below is "
+                f"finite and its fit reports success, but it is not measuring CSP. "
+                f"Re-run the series to get usable positions; intensity is unaffected.")
+
     # A residue can now miss the shared CSP fit for several separate reasons. Record which
     # one, per residue: otherwise a surprisingly small pool has its explanation spread
     # across three places and nothing says which gate removed what.
@@ -680,6 +727,11 @@ def run_kd_analysis_with_params(params, progress_callback=None):
                      'observables': observables, 'n_bootstrap': n_boot,
                      'n_excluded_dummy': n_excluded_dummy,
                      'csp_significance': csp_sig,
+                     # The measured grid, so a consumer can judge rather than re-derive.
+                     'position_grid_ppm': position_grid_ppm,
+                     'position_precision_warning': bool(
+                         position_grid_ppm is not None
+                         and position_grid_ppm >= _CSP_POSITION_GRID_MAX),
                      'csp_pool_excluded': csp_pool_excluded,
                      'quality_warnings': quality_warnings,
                      'csp_kd_outliers': {'excluded': csp_outliers,
