@@ -141,9 +141,13 @@ to tune — anything that fails to reproduce was never measured.
 ## Speed
 
 - `--dry-run` validates inputs and prints the plan without running.
-- Settings persist per dataset in `<input_dir>/<prefix>_kd_params.json` and are read back
-  automatically — concentrations, `conc_units`, and every threshold. Don't re-enter them,
-  and don't re-derive what a prior run already recorded.
+- Settings persist per dataset and are read back automatically — concentrations,
+  `conc_units`, `--p0`, `--alpha`, `--intensity-from` and every threshold, recorded as you
+  typed them. Don't re-enter them, and don't re-derive what a prior run already recorded.
+  A survey writes `<input_dir>/<prefix>_kd_params.json`; a fit writes
+  `<out>/data/<prefix>_kd_params.json`, which the next run finds when `--out` is the
+  conventional `<input_dir>/kd_analysis`. The run summary's `params_source` names the file
+  that was read, or `null` if none was — check it rather than assuming.
 - Independent datasets are independent processes: run them concurrently, don't queue them.
 - The survey is cheap (per-residue fits only, no global). Iterate on the selection there
   rather than re-running full fits.

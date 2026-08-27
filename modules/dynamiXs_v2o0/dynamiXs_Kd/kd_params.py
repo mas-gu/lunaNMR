@@ -123,13 +123,21 @@ def find_params_source(csv_path):
     """Locate a params source near an input titration CSV, or None. Search order:
     a sibling kd_params.json, then the newest *_kd_params.json beside the CSV, then
     inside a sibling 'kd_analysis' output folder (newest *_kd_params.json, else the
-    newest *_kd_fit_data.json)."""
+    newest *_kd_fit_data.json).
+
+    A run writes its machine-readable output under <out>/data/, so the kd_analysis
+    candidates are checked at both depths: the bare paths only ever match output
+    predating that layout, and dropping them would make an old analysis unreadable.
+    """
     d = os.path.dirname(os.path.abspath(csv_path))
+    analysis = os.path.join(d, "kd_analysis")
     candidates = [
         os.path.join(d, SIBLING_NAME),
         _newest(os.path.join(d, "*" + PARAMS_SUFFIX)),
-        _newest(os.path.join(d, "kd_analysis", "*" + PARAMS_SUFFIX)),
-        _newest(os.path.join(d, "kd_analysis", "*_kd_fit_data.json")),
+        _newest(os.path.join(analysis, "data", "*" + PARAMS_SUFFIX)),
+        _newest(os.path.join(analysis, "*" + PARAMS_SUFFIX)),
+        _newest(os.path.join(analysis, "data", "*_kd_fit_data.json")),
+        _newest(os.path.join(analysis, "*_kd_fit_data.json")),
     ]
     for c in candidates:
         if c and os.path.isfile(c):

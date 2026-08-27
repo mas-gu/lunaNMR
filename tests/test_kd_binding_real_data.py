@@ -1027,6 +1027,17 @@ class TestTheSurveyRecordsWhatTheFitNeeds:
         assert restated["metadata"]["concentrations"] == pytest.approx(
             silent["metadata"]["concentrations"])
 
+    def test_a_fit_into_the_conventional_folder_is_found_by_the_next_run(self, own_tidy):
+        """A run's own params file has to be reachable, not merely written. The
+        machine-readable output moved under <out>/data/, one level below the
+        kd_analysis/*_kd_params.json that find_params_source globs for, so a fit's
+        settings stopped being discoverable by the next fit."""
+        analysis = own_tidy.parent / "kd_analysis"
+        self._fit(own_tidy, analysis, ["--conc-units", "equivalents"])
+        inherited = self._fit(own_tidy, own_tidy.parent / "second", [])
+        assert inherited["metadata"]["concentrations"] == pytest.approx(
+            [0.0, 6.25, 12.5, 25.0, 50.0, 100.0, 150.0])
+
     def test_the_survey_records_the_thresholds_it_judged_with(self, own_tidy, tmp_path):
         """A threshold the survey used to reject residues, but does not record, makes
         the fit's pool disagree with the selection file the survey just wrote."""
