@@ -49,7 +49,7 @@ PySide6/Qt6 suite for NMR peak detection, Voigt profile fitting, and integration
 - **Dynamics (DynamiXs)**: T₁/T₂, methyl T₂ (bi-exponential), spectral density, model-free, CPMG.
 - **Parallel processing**: two-pass cluster-based, ~2.7× speedup.
 - **ML/statistics**: dual-path fit-parameter prediction with statistical fallback (optional CNN classifier).
-- **Headless CLI**: `python -m lunaNMR` with `series`, `dynamixs`, `kd`, `export`, `project`, `batch` subcommands — see [docs/CLI.md](docs/CLI.md).
+- **Headless CLI**: `python -m lunaNMR` — every analysis is scriptable with no display. Subcommand reference: [docs/CLI.md](docs/CLI.md); machine contract and gotchas for agents: [docs/CLI_AGENT.md](docs/CLI_AGENT.md).
 
 **File formats**: Bruker TopSpin (`.2ii`, `.2rr`), Varian/Agilent (`.fid`, `.ft`), NMRPipe (`.ft`, `.pipe`), SPARKY (`.ucsf`). Export: CSV, JSON, PNG, PDF, SVG, EPS.
 
@@ -106,7 +106,7 @@ lunaNMR_v1o0/
 ```bash
 python3 -m venv dev_env && source dev_env/bin/activate   # or dev_env\Scripts\activate on Windows
 pip install -r requirements.txt
-python -m pytest tests/
+make test        # all three test roots, headless (QT_QPA_PLATFORM=offscreen)
 ```
 
 Fork → feature branch → add tests → PR. PEP 8, NumPy-style docstrings.

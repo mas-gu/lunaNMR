@@ -72,7 +72,7 @@ Reports Python version, required packages, and GUI availability.
 ## 6. Launch
 
 - **GUI**: `python3 launch_lunaNMR.py` — opens the selector; choose **LunaNMR** (or **DynamiXs** if the optional module is present).
-- **Headless CLI**: `python -m lunaNMR <subcommand>` (`series`, `dynamixs`, `kd`, `export`, `project`, `batch`). See `CLI.md`.
+- **Headless CLI**: `python -m lunaNMR <subcommand>`. See [CLI.md](CLI.md) for the subcommand list and flags.
 
 ## 7. Sample Data
 

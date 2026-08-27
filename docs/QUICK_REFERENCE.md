@@ -92,8 +92,9 @@ python -m lunaNMR <subcommand>          # `lunanmr` needs `pip install -e .`
 
 | Command | Purpose |
 |---------|---------|
+| `diagnose` | Read-only pre-flight over a dataset before running anything |
 | `series` | Process a series/titration → intensity/position matrices |
-| `dynamixs t1t2 / methyl-t2 / hetnoe / density / modelfree` | Relaxation + model-free |
+| `dynamixs t1t2 / methyl-t2 / hetnoe / t1rho / density / modelfree` | Relaxation + model-free |
 | `kd` / `export kd` | Kd titration fit / figures from a fit JSON |
 | `project inventory / remove` | Inspect / prune a `.lunaNMR` bundle |
 | `batch` | Folder-wide detect + fit |
