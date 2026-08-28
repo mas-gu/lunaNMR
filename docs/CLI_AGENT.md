@@ -9,7 +9,7 @@ Scannable condensation of `docs/CLI.md` + `cli.py` for an agent. Run from `lunaN
 ```bash
 python -m lunaNMR <subcommand> [flags]   # `lunanmr` only after `pip install -e .`
 ```
-No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every analysis subcommand accepts `--format {text,json}` and `--dry-run`.
+No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every analysis subcommand accepts `--format {text,json}`, and every one that writes something also accepts `--dry-run`. **`diagnose` takes `--format` only** — it is read-only, so a dry-run has nothing to mean. **`project` and `batch` are outside this contract entirely** and take neither.
 
 ## Subcommands
 | Command | Does | Required inputs | Key outputs |

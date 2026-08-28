@@ -607,6 +607,20 @@ def _format_findings(findings):
     return lines
 
 
+def _findings_exit_code(findings, strict=False):
+    """0 when it is safe to run the pipeline, 1 when it is not.
+
+    FAIL always gates: `diagnose && series` exists so the shell stops there, and
+    returning 0 regardless made it sail past the exact failure the command is for.
+    WARN does not, by default -- it includes routine conditions like a folder with no
+    peak list, and a gate that fires on those gets deleted rather than heeded.
+    """
+    severities = {f.severity for f in findings}
+    if 'FAIL' in severities:
+        return 1
+    return 1 if (strict and 'WARN' in severities) else 0
+
+
 def _run_diagnose(args):
     """Read-only pre-flight over a whole dataset: registration, capture, delays, peak lists."""
     from lunaNMR.validation.spectra_check import check_dataset
@@ -626,7 +640,7 @@ def _run_diagnose(args):
     human.append('\n' + '=' * 72)
     human.extend(_format_findings(result['findings']))
     _emit(args, {'command': 'diagnose', **_serialise_checks(result)}, *human)
-    return 0
+    return _findings_exit_code(result['findings'], strict=args.strict)
 
 
 def _validate_series(parser, args):
@@ -653,7 +667,7 @@ def _run_series(args):
                    'peaks': args.peaks, 'peaks_exists': peaks_ok, 'mode': args.mode,
                    'peak_source': args.peak_source, 'parallel': args.parallel,
                    'output_dir': args.out, 'missing_inputs': missing}
-        deep_lines = []
+        deep_lines, deep_code = [], 0
         if getattr(args, 'deep', False) and nmr_files and peaks_ok:
             from lunaNMR.validation.spectra_check import check_experiment
             checks = check_experiment(os.path.dirname(nmr_files[0]), args.peaks,
@@ -661,6 +675,10 @@ def _run_series(args):
                                       series_mode=args.mode)
             summary['checks'] = _serialise_checks(checks)
             deep_lines = _format_experiment(checks) + _format_findings(checks['findings'])
+            # --deep runs the same checks as `diagnose`, so a FAIL means the same
+            # thing: do not run this series. A dry-run that reports one and exits 0
+            # is the gap `diagnose` had.
+            deep_code = _findings_exit_code(checks['findings'])
         _emit(args, summary,
               "[dry-run] series",
               f"  spectra found: {len(nmr_files)}",
@@ -668,7 +686,7 @@ def _run_series(args):
               f"  mode={args.mode} peak-source={args.peak_source} parallel={args.parallel}",
               f"  output: {args.out}",
               *deep_lines)
-        return 0 if not missing else 1
+        return 1 if missing else deep_code
 
     if not nmr_files:
         print(f"No spectrum files found in {args.spectra}", file=sys.stderr)
@@ -1448,9 +1466,13 @@ def build_parser():
     sub = parser.add_subparsers(dest='command', metavar='<subcommand>')
 
     # Shared flags for the analysis subcommands: output format + input validation.
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument('--format', choices=['text', 'json'], default='text',
-                        help='Run-summary output format (default: text)')
+    # Split because `diagnose` reads spectra, fits nothing and writes nothing: a
+    # --dry-run of a read-only command has nothing to mean, and it was accepted and
+    # silently ignored.
+    fmt = argparse.ArgumentParser(add_help=False)
+    fmt.add_argument('--format', choices=['text', 'json'], default='text',
+                     help='Run-summary output format (default: text)')
+    common = argparse.ArgumentParser(add_help=False, parents=[fmt])
     common.add_argument('--dry-run', action='store_true', dest='dry_run',
                         help='Validate inputs and print the plan without running')
 
@@ -1527,7 +1549,7 @@ def build_parser():
                         help='Use the two-pass parallel processor (~2.7x faster)')
     series.set_defaults(func=_run_series, _validate=_validate_series)
 
-    diagnose = sub.add_parser('diagnose', parents=[common],
+    diagnose = sub.add_parser('diagnose', parents=[fmt],
                               help='Read-only pre-flight over a dataset: registration, capture, '
                                    'delays, peak lists, and the cross-experiment residue set')
     diagnose.add_argument('root', help='Dataset root containing the experiment folders')
@@ -1536,6 +1558,8 @@ def build_parser():
                           help='Assess only the first and last spectrum of each experiment')
     diagnose.add_argument('--mode', choices=['time', 'titration'], default='time',
                           help='How filenames encode the series value (default: time)')
+    diagnose.add_argument('--strict', action='store_true',
+                          help='Also exit 1 on WARN findings (default: FAIL only)')
     diagnose.set_defaults(func=_run_diagnose)
 
     dx = sub.add_parser('dynamixs', help='Relaxation fitting: T1/T2 and methyl-T2')
