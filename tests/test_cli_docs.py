@@ -96,3 +96,118 @@ class TestTheAgentDocsAreReachable:
 
     def test_the_project_readme_links_the_agent_reference(self):
         assert "CLI_AGENT.md" in (REPO_ROOT / "README.md").read_text()
+
+
+# --------------------------------------------------------------- the generalised guard
+
+_CMD_LINE = re.compile(r"python -m lunaNMR\s+(.+)")
+# A flag token, excluding the shorthands the prose uses for families of flags:
+# `--f{1,2}-t{1,2}-units`, `--f2-*` and `--f2-...` each stand for several real flags, and
+# matching the fragment before the brace/star/ellipsis reports a flag nobody wrote. Flags
+# are written in backticks throughout these documents, so a trailing '.' is a placeholder
+# rather than the end of a sentence.
+_FLAG = re.compile(r"(?<![\w-])(--[a-z][a-z0-9-]*)(?![-{*.\w])")
+
+
+def _subcommand_tree(parser=None, prefix=()):
+    """Every subcommand path -> its parser, walked from build_parser()."""
+    import argparse
+    from lunaNMR.cli import build_parser
+    parser = parser or build_parser()
+    out = {' '.join(prefix): parser} if prefix else {}
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for name, sub in action.choices.items():
+                out.update(_subcommand_tree(sub, prefix + (name,)))
+    return out
+
+
+def _accepted_flags(parser):
+    return {opt for action in parser._actions
+            for opt in action.option_strings if opt.startswith('--')}
+
+
+def _batch_flags():
+    """`batch` is dispatched before argparse sees it, so build_parser() knows none of
+    its flags. They come from the parser it delegates to, which is the truth for it."""
+    from lunaNMR.batch_processing.cli_interface import CLIInterface
+    return _accepted_flags(CLIInterface().create_parser())
+
+
+def _command_lines():
+    """Every runnable `python -m lunaNMR ...` line in the agent-facing documents.
+
+    Continuation backslashes are joined, so a wrapped multi-line invocation is checked
+    as the single command an agent would paste.
+    """
+    lines = []
+    for doc in _agent_docs():
+        text = doc.read_text().replace('\\\n', ' ')
+        for raw in text.splitlines():
+            match = _CMD_LINE.search(raw)
+            if match:
+                lines.append((doc, match.group(1)))
+    return lines
+
+
+def _resolve(argv_text, tree):
+    """The longest subcommand path this command line starts with, or None."""
+    tokens = [t for t in argv_text.split() if not t.startswith('-')]
+    for depth in (3, 2, 1):
+        name = ' '.join(tokens[:depth])
+        if name in tree:
+            return name
+    return None
+
+
+class TestEveryDocumentedCommandIsReal:
+    """These documents are read by agents that run what they say verbatim, so a flag
+    that does not exist is a bug in the deliverable, not a typo.
+
+    What this catches: a flag on a runnable command line that its subcommand does not
+    accept; a flag named anywhere that no subcommand accepts; a subcommand nobody
+    documented. What it does NOT catch: a flag attributed to the wrong subcommand in
+    prose, when some other subcommand named in the same sentence does accept it -- that
+    was the `density`/`modelfree` `--no-parallel` claim, and it needs a reader.
+    """
+
+    def test_there_are_command_lines_to_check(self):
+        assert len(_command_lines()) > 10, "the extractor stopped matching"
+
+    def test_every_flag_on_a_command_line_is_accepted_by_that_subcommand(self):
+        tree = _subcommand_tree()
+        universal = {'--help'}
+        bad = []
+        for doc, line in _command_lines():
+            name = _resolve(line, tree)
+            if name is None:
+                continue                       # `--help`/`--version` only, nothing to bind
+            accepted = _accepted_flags(tree[name]) | universal
+            if name == 'batch':
+                accepted |= _batch_flags()
+            for flag in _FLAG.findall(line):
+                if flag not in accepted:
+                    bad.append(f"{doc.name}: `{name}` does not accept {flag}")
+        assert bad == [], "\n".join(bad)
+
+    def test_every_flag_mentioned_anywhere_exists_somewhere(self):
+        """Catches a flag that was renamed or removed, wherever it is written."""
+        tree = _subcommand_tree()
+        known = set().union(*(_accepted_flags(p) for p in tree.values()))
+        known |= _batch_flags() | {'--help', '--version'}
+        # Installation instructions quote pip's flags, not this CLI's.
+        pip_flags = {'--upgrade', '--user', '--editable'}
+        bad = sorted({f"{doc.name}: {flag}" for doc in _agent_docs()
+                      for flag in _FLAG.findall(doc.read_text())
+                      if flag not in known and flag not in pip_flags})
+        assert bad == [], "\n".join(bad)
+
+    def test_every_subcommand_is_documented(self):
+        """The direction the Kd-scoped version could not check: a subcommand nobody
+        wrote down may as well not exist."""
+        text = (DOCS / "CLI.md").read_text()
+        # Word-boundary, not substring: `dynamixs t1rho` is a substring of a typo'd
+        # `dynamixs t1rhoX`, so a plain `in` check certifies the misspelling.
+        missing = sorted(name for name in _subcommand_tree()
+                         if not re.search(r"\b" + re.escape(name) + r"\b", text))
+        assert missing == [], missing
