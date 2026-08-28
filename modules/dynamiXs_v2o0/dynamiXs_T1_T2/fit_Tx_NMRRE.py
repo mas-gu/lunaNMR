@@ -25,9 +25,9 @@ import re
 from pathlib import Path
 
 try:
-    from delay_parser import parse_delay_column
+    from delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
 except ImportError:  # imported as dynamiXs_T1_T2.fit_Tx_NMRRE (parent dir on path)
-    from dynamiXs_T1_T2.delay_parser import parse_delay_column
+    from dynamiXs_T1_T2.delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
 
 
 # A fitted time constant beyond this multiple of the longest delay means the decay
@@ -680,30 +680,31 @@ def main():
     # Detect format: LunaNMR Fit Series vs simple DynamiXs format
     header_row = raw_df.iloc[0].astype(str).tolist()
     lunaNMR_columns = {'Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y'}
+    # Columns whose header carries no delay: reported so a spectrum cannot go
+    # missing from a series without anyone noticing.
+    dropped_columns = []
     detected_lunaNMR_cols = [col for col in header_row if col in lunaNMR_columns]
 
     if detected_lunaNMR_cols:
         print(f"Detected LunaNMR Fit Series format (columns: {detected_lunaNMR_cols})")
-        delay_start_idx = 0
-        for i, col in enumerate(header_row):
-            if col not in lunaNMR_columns and parse_delay_column(col) is not None:
-                delay_start_idx = i
-                break
+        delay_start_idx = require_delay_start(header_row, lunaNMR_columns, input_csv_file)
         assignment_idx = header_row.index('Assignment') if 'Assignment' in header_row else 1
         print(f"  Using 'Assignment' column (index {assignment_idx}) for residue names")
         print(f"  Delay columns start at index {delay_start_idx}")
         residue_names = raw_df.iloc[1:, assignment_idx].to_numpy()
         # Parse delay columns - handles duplicates like "300_2" -> 300.0
         delay_headers = raw_df.iloc[0, delay_start_idx:].tolist()
-        x = np.array([parse_delay_column(col) for col in delay_headers])
-        y_data = raw_df.iloc[1:, delay_start_idx:].astype(float).to_numpy()
+        x, _keep, _dropped = parse_delay_columns(delay_headers)
+        dropped_columns.extend(_dropped)
+        y_data = raw_df.iloc[1:, delay_start_idx:].astype(float).to_numpy()[:, _keep]
     else:
         print("Detected simple DynamiXs format")
         residue_names = raw_df.iloc[1:, 0].to_numpy()  # Column 1 (residue names), skip header
         # Parse delay columns - handles duplicates like "300_2" -> 300.0
         delay_headers = raw_df.iloc[0, 1:].tolist()
-        x = np.array([parse_delay_column(col) for col in delay_headers])
-        y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()  # Values to fit (rows 2+, columns 2+)
+        x, _keep, _dropped = parse_delay_columns(delay_headers)
+        dropped_columns.extend(_dropped)
+        y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()[:, _keep]  # Values to fit (rows 2+, columns 2+)
 
     # Filter out dummy residues (case-insensitive)
     valid_mask = np.array([not str(name).lower().startswith('dummy') for name in residue_names])
@@ -812,30 +813,31 @@ def run_analysis_with_params(params, progress_callback=None):
     # Detect format: LunaNMR Fit Series vs simple DynamiXs format
     header_row = raw_df.iloc[0].astype(str).tolist()
     lunaNMR_columns = {'Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y'}
+    # Columns whose header carries no delay: reported so a spectrum cannot go
+    # missing from a series without anyone noticing.
+    dropped_columns = []
     detected_lunaNMR_cols = [col for col in header_row if col in lunaNMR_columns]
 
     if detected_lunaNMR_cols:
         print(f"Detected LunaNMR Fit Series format (columns: {detected_lunaNMR_cols})")
-        delay_start_idx = 0
-        for i, col in enumerate(header_row):
-            if col not in lunaNMR_columns and parse_delay_column(col) is not None:
-                delay_start_idx = i
-                break
+        delay_start_idx = require_delay_start(header_row, lunaNMR_columns, input_csv_file)
         assignment_idx = header_row.index('Assignment') if 'Assignment' in header_row else 1
         print(f"  Using 'Assignment' column (index {assignment_idx}) for residue names")
         print(f"  Delay columns start at index {delay_start_idx}")
         residue_names = raw_df.iloc[1:, assignment_idx].to_numpy()
         # Parse delay columns - handles duplicates like "300_2" -> 300.0
         delay_headers = raw_df.iloc[0, delay_start_idx:].tolist()
-        x = np.array([parse_delay_column(col) for col in delay_headers])
-        y_data = raw_df.iloc[1:, delay_start_idx:].astype(float).to_numpy()
+        x, _keep, _dropped = parse_delay_columns(delay_headers)
+        dropped_columns.extend(_dropped)
+        y_data = raw_df.iloc[1:, delay_start_idx:].astype(float).to_numpy()[:, _keep]
     else:
         print("Detected simple DynamiXs format")
         residue_names = raw_df.iloc[1:, 0].to_numpy()  # Column 1 (residue names), skip header
         # Parse delay columns - handles duplicates like "300_2" -> 300.0
         delay_headers = raw_df.iloc[0, 1:].tolist()
-        x = np.array([parse_delay_column(col) for col in delay_headers])
-        y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()  # Values to fit (rows 2+, columns 2+)
+        x, _keep, _dropped = parse_delay_columns(delay_headers)
+        dropped_columns.extend(_dropped)
+        y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()[:, _keep]  # Values to fit (rows 2+, columns 2+)
 
     # Filter out dummy residues (case-insensitive)
     valid_mask = np.array([not str(name).lower().startswith('dummy') for name in residue_names])
@@ -927,6 +929,7 @@ def run_analysis_with_params(params, progress_callback=None):
     # Return results summary
     return {
         'n_fitted': len(reliable),
+        'dropped_columns': dropped_columns,
         'n_excluded': n_excluded,
         'results_file': results_txt_file,
         'plots_prefix': output_prefix,

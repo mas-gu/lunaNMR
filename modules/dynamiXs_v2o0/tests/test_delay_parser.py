@@ -49,3 +49,36 @@ def test_existing_formats_still_parse():
     assert p("003_T2_ADDA_3ms") == 3.0     # embedded delay + unit
     assert p("..._5s") == 5000.0           # unit conversion
     assert p("no_number") is None
+
+
+def test_an_acquisition_index_is_not_a_delay():
+    """A trailing _<digits> with no unit, no decimal separator and no repeat marker is
+    an acquisition index, not a time. Parsing it produced a complete relaxation table
+    from delays nobody measured: three real spectra named
+    03_2D_NR_ATP_ref_noCa_001..003 read as 1, 2 and 3 ms, and the fit reported success.
+    """
+    from delay_parser import parse_delay_column as p
+    assert p("03_2D_NR_ATP_ref_noCa_001") is None
+    assert p("03_2D_NR_ATP_ref_noCa_002") is None
+    assert p("sample_2") is None
+    assert p("experiment_002") is None
+
+
+def test_a_descriptive_name_needs_a_unit_separator_or_repeat_marker():
+    """The three things that distinguish a delay from an index, kept explicit so the
+    rule survives a regex edit."""
+    from delay_parser import parse_delay_column as p
+    assert p("600_T2_A1_WT_102ms") == 102.0    # unit
+    assert p("600_T1_sample_0o3") == 0.3       # decimal separator ('o' for '.')
+    assert p("600_T2_sample_51b") == 51.0      # single-letter repeat marker
+    assert p("600_T2_sample_51") is None       # none of the three
+
+
+def test_a_series_produced_matrix_is_untouched():
+    """`series` normalises delays to bare numbers and marks repeats with _2, which take
+    the bare-number path. Tightening the descriptive-name branch must not reach them —
+    a real 600_T2 matrix is labelled 8, 17, ..., 271, 51_2, 102_2."""
+    from delay_parser import parse_delay_column as p
+    for col, expected in (("8", 8.0), ("271", 271.0), ("51_2", 51.0),
+                          ("102_2", 102.0), ("2400", 2400.0), ("0", 0.0)):
+        assert p(col) == expected, f"{col!r} -> {p(col)}"

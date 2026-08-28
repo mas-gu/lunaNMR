@@ -22,9 +22,9 @@ T2_LOWER_BOUND_MS = 0.1
 
 
 try:
-    from delay_parser import parse_delay_column
+    from delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
 except ImportError:  # imported as dynamiXs_T1_T2.fit_methyl_T2 (parent dir on path)
-    from dynamiXs_T1_T2.delay_parser import parse_delay_column
+    from dynamiXs_T1_T2.delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
 
 
 def biexp_decay(x, A, t2_a, t2_b):
@@ -495,30 +495,24 @@ def run_methyl_t2_analysis_with_params(params, progress_callback=None):
     header_row = raw_df.iloc[0].astype(str).tolist()
     lunaNMR_columns = {"Peak_Number", "Assignment", "Reference_X", "Reference_Y"}
     detected = [col for col in header_row if col in lunaNMR_columns]
+    # Columns whose header carries no delay: reported so a spectrum cannot go
+    # missing from a series without anyone noticing.
+    dropped_columns = []
 
     if detected:
-        delay_start_idx = None
-        for i, col in enumerate(header_row):
-            if col in lunaNMR_columns:
-                continue
-            if parse_delay_column(col) is not None:
-                delay_start_idx = i
-                break
-        if delay_start_idx is None:
-            raise ValueError(
-                f"Could not find a delay column in {input_csv_file}. "
-                f"Headers seen: {header_row[:12]}"
-            )
+        delay_start_idx = require_delay_start(header_row, lunaNMR_columns, input_csv_file)
         assignment_idx = header_row.index("Assignment") if "Assignment" in header_row else 1
         residue_names = raw_df.iloc[1:, assignment_idx].to_numpy()
         delay_headers = raw_df.iloc[0, delay_start_idx:].tolist()
-        x = np.array([parse_delay_column(col) for col in delay_headers])
-        y_data = raw_df.iloc[1:, delay_start_idx:].astype(float).to_numpy()
+        x, _keep, _dropped = parse_delay_columns(delay_headers)
+        dropped_columns.extend(_dropped)
+        y_data = raw_df.iloc[1:, delay_start_idx:].astype(float).to_numpy()[:, _keep]
     else:
         residue_names = raw_df.iloc[1:, 0].to_numpy()
         delay_headers = raw_df.iloc[0, 1:].tolist()
-        x = np.array([parse_delay_column(col) for col in delay_headers])
-        y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()
+        x, _keep, _dropped = parse_delay_columns(delay_headers)
+        dropped_columns.extend(_dropped)
+        y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()[:, _keep]
 
     valid_mask = np.array([not str(name).lower().startswith("dummy") for name in residue_names])
     n_dummies = int(np.sum(~valid_mask))
@@ -574,6 +568,7 @@ def run_methyl_t2_analysis_with_params(params, progress_callback=None):
 
     return {
         "n_fitted": len(successful),
+        "dropped_columns": dropped_columns,
         "n_total": total,
         "output_dir": os.path.dirname(output_prefix),
         "results_file": results_txt_file,
