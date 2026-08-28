@@ -112,6 +112,97 @@ def _add_modules_path(*parts):
     return path
 
 
+# Documented per-subcommand defaults for the delay units. They differ on purpose and are
+# NOT unified: on t1t2/methyl-t2 the value only labels the output, while on t1rho and
+# modelfree it rescales, so changing either default silently moves published numbers.
+# Kept as constants because the flags default to None -- the handler has to tell "the
+# user asked for seconds" from "the user said nothing", to know whether a sidecar may
+# supply the answer.
+_TIME_UNITS_DEFAULT = 's'          # dynamixs t1t2 / methyl-t2 (labels only)
+_T1RHO_TIME_UNITS_DEFAULT = 'ms'   # dynamixs t1rho (rescales)
+_MODELFREE_UNITS_DEFAULT = 'ms'    # dynamixs modelfree --f{1,2}-t{1,2}-units (rescales)
+
+_SIDECAR_NAME = 'series_metadata.json'
+
+
+def _series_sidecar(input_path):
+    """The `series` run-metadata written beside a matrix, or None.
+
+    `series` records the delay units it normalised to and which spectra had no
+    parseable delay. Both were previously re-asserted by hand on the command line
+    while the answer sat next to the input file.
+    """
+    import json
+    path = os.path.join(os.path.dirname(os.path.abspath(input_path)), _SIDECAR_NAME)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path) as fh:
+            meta = json.load(fh)
+    except (OSError, ValueError):
+        return None            # a damaged sidecar must not block a runnable input
+    if not isinstance(meta, dict):
+        return None
+    meta['path'] = path
+    return meta
+
+
+def _unparsed_spectra(sidecar):
+    """The spectra whose filename carried no delay, named rather than counted."""
+    return [c.get('spectrum') for c in (sidecar.get('columns') or [])
+            if c.get('value') is None]
+
+
+def _check_unparsed_delays(sidecar, allow):
+    """Refuse a relaxation fit whose series lost spectra to unparseable filenames.
+
+    Those columns carry no time, so they are dropped from the fit: the run measures
+    fewer points than were acquired and says so nowhere the caller is looking. Two
+    hetNOE planes are the legitimate case, hence the escape hatch.
+    """
+    n = int(sidecar.get('n_value_unparsed') or 0)
+    if not n or allow:
+        return
+    names = [s for s in _unparsed_spectra(sidecar) if s]
+    raise ValueError(
+        f"{n} spectrum(s) in this series have no parseable delay, so they carry no "
+        f"time and cannot be fitted: {', '.join(names) or 'see the sidecar'}. "
+        f"Recorded in {sidecar['path']}. Rename them with an explicit unit "
+        f"(_300ms, _2.4s, _2400us) and re-run `series`, or pass "
+        f"--allow-unparsed-delays to fit the remaining points without them."
+    )
+
+
+def _resolve_time_units(flag, sidecar, default, flag_name='--time-units'):
+    """Delay units: an explicit flag, else the sidecar's, else the documented default.
+
+    A flag that contradicts the sidecar is refused rather than preferred. One of the
+    two is wrong, and picking either way is how a T1 in seconds meets a T2 in
+    milliseconds and puts R1 out by 1000x.
+    """
+    recorded = (sidecar or {}).get('value_units')
+    if flag is None:
+        return recorded or default
+    if recorded and recorded != flag:
+        raise ValueError(
+            f"{flag_name} says {flag!r} but {sidecar['path']} records the delays as "
+            f"{recorded!r}. One of them is wrong; guessing puts R1 out by 1000x. "
+            f"Drop the flag to use the recorded units, or re-run `series` if the "
+            f"sidecar is stale."
+        )
+    return flag
+
+
+def _sidecar_summary(sidecar):
+    """The sidecar fields worth reporting: which file was read, the units it supplied,
+    and how many spectra it says had no delay. None when there was no sidecar, so a
+    consumer can tell "checked and clean" from "nothing to check against"."""
+    if not sidecar:
+        return None
+    return {'path': sidecar['path'], 'value_units': sidecar.get('value_units'),
+            'n_value_unparsed': int(sidecar.get('n_value_unparsed') or 0)}
+
+
 _PERSISTED_SETTINGS = ('conc_units', 'csp_sigma_multiple', 'kd_outlier_z',
                        'noise_quantile',
                        'dd_runaway_ratio', 'ref_max_ratio')
@@ -300,13 +391,17 @@ def _run_dynamixs_t1t2(args):
                         {'output_dir': args.out, 'experiment': args.exp})
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
     from fit_Tx_NMRRE import run_analysis_with_params
+    sidecar = _series_sidecar(args.input)
+    if sidecar:
+        _check_unparsed_delays(sidecar, args.allow_unparsed)
+    time_units = _resolve_time_units(args.time_units, sidecar, _TIME_UNITS_DEFAULT)
     os.makedirs(args.out, exist_ok=True)
     params = {
         'input_csv_file': args.input,
         'output_prefix': os.path.join(args.out, args.prefix),
         'results_txt_file': os.path.join(args.out, f"{args.prefix}_fit_results.txt"),
         'experiment_type': args.exp,
-        'time_units': args.time_units,
+        'time_units': time_units,
         'error_method': args.error_method,
         'n_bootstrap': args.bootstrap,
         'field_name': args.field_name,
@@ -316,7 +411,7 @@ def _run_dynamixs_t1t2(args):
     with _engine_stdout(args):
         result = run_analysis_with_params(params)
     human = [f"{args.exp} analysis complete: {result['n_fitted']} residues fitted, "
-             f"mean {args.exp} = {result['mean_t2']:.2f} {args.time_units}",
+             f"mean {args.exp} = {result['mean_t2']:.2f} {time_units}",
              f"  Results: {result['results_file']}"]
     if result.get('json_file'):
         human.append(f"  JSON:    {result['json_file']}")
@@ -326,6 +421,8 @@ def _run_dynamixs_t1t2(args):
                      f"too short to pin the time constant down for those")
     _emit(args,
           {'command': 'dynamixs t1t2', 'experiment': args.exp, 'n_fitted': result['n_fitted'],
+           'time_units': time_units, 'series_metadata': _sidecar_summary(sidecar),
+           'dropped_columns': result.get('dropped_columns') or [],
            'mean_t2': result['mean_t2'], 'results_file': result['results_file'],
            'json_file': result.get('json_file'),
            'baseline_fixed': result.get('baseline_fixed', True),
@@ -340,6 +437,10 @@ def _run_dynamixs_methyl(args):
         return _dry_run(args, [('input', args.input)], {'output_dir': args.out})
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
     from fit_methyl_T2 import run_methyl_t2_analysis_with_params
+    sidecar = _series_sidecar(args.input)
+    if sidecar:
+        _check_unparsed_delays(sidecar, args.allow_unparsed)
+    time_units = _resolve_time_units(args.time_units, sidecar, _TIME_UNITS_DEFAULT)
     os.makedirs(args.out, exist_ok=True)
     params = {
         'input_csv_file': args.input,
@@ -348,7 +449,7 @@ def _run_dynamixs_methyl(args):
         'json_folder': args.out,
         'field_name': args.field_name,
         'field_freq': args.field_freq,
-        'time_units': args.time_units,
+        'time_units': time_units,
         'error_method': args.error_method,
         'n_bootstrap': args.bootstrap,
     }
@@ -356,6 +457,8 @@ def _run_dynamixs_methyl(args):
         result = run_methyl_t2_analysis_with_params(params)
     _emit(args,
           {'command': 'dynamixs methyl-t2', 'n_fitted': result['n_fitted'],
+           'time_units': time_units, 'series_metadata': _sidecar_summary(sidecar),
+           'dropped_columns': result.get('dropped_columns') or [],
            'n_total': result['n_total'], 'results_file': result['results_file'],
            'json_file': result['json_file']},
           f"Methyl T2 analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted",
@@ -1087,6 +1190,17 @@ def _run_dynamixs_t1rho(args):
     from lunaNMR.utils.t1rho_calculator import r2_table_from_fits
     import pandas as pd
 
+    # Both series are fitted here, so both sidecars matter; they must agree with each
+    # other as well as with the flag, or the tilt correction mixes two time bases.
+    sidecars = {label: _series_sidecar(path)
+                for label, path in (('--input', args.input), ('--t1', args.t1))}
+    for label, sidecar in sidecars.items():
+        if sidecar:
+            _check_unparsed_delays(sidecar, args.allow_unparsed)
+    time_units = args.time_units
+    for label, sidecar in sidecars.items():
+        time_units = _resolve_time_units(time_units, sidecar, _T1RHO_TIME_UNITS_DEFAULT,
+                                         flag_name=f'--time-units (against {label})')
     os.makedirs(args.out, exist_ok=True)
 
     def _fit(input_csv, label):
@@ -1096,7 +1210,7 @@ def _run_dynamixs_t1rho(args):
             'output_prefix': os.path.join(args.out, f"{args.prefix}_{label}"),
             'results_txt_file': os.path.join(args.out, f"{args.prefix}_{label}_fit_results.txt"),
             'experiment_type': 'T2',
-            'time_units': args.time_units,
+            'time_units': time_units,
             'error_method': args.error_method,
             'n_bootstrap': args.bootstrap,
             'field_name': label,
@@ -1119,11 +1233,13 @@ def _run_dynamixs_t1rho(args):
     table = r2_table_from_fits(t1_fits, rho_fits, peak_list,
                                omega1_hz=args.omega1, carrier_ppm=args.carrier,
                                theta_deg=args.theta, spec_freq_mhz=args.field_freq,
-                               time_units=args.time_units)
+                               time_units=time_units)
     out_csv = os.path.join(args.out, f"{args.prefix}_r2_from_t1rho.csv")
     table.to_csv(out_csv, index=False)
     _emit(args,
           {'command': 'dynamixs t1rho', 'n_residues': len(table),
+           'time_units': time_units,
+           'series_metadata': {k: _sidecar_summary(v) for k, v in sidecars.items()},
            'n_t1_fitted': len(t1_fits), 'n_t1rho_fitted': len(rho_fits),
            'theta_nominal_deg': args.theta, 'omega1_hz': args.omega1,
            'r2_table': out_csv,
@@ -1228,6 +1344,24 @@ def _run_dynamixs_modelfree(args):
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
     from dynamiXs_integrated.integrated_analysis import (IntegratedAnalysisPipeline,
                                                          IntegratedAnalysisParameters)
+    # Each relaxation series carries its own units. `series` already recorded them, so
+    # the flag is only needed for hand-built tables -- and a flag that contradicts the
+    # sidecar is refused rather than believed: a T1 read as seconds against a T2 in
+    # milliseconds puts R1 out by 1000x, and nothing downstream notices.
+    units, sidecars = {}, {}
+    for field, exp, path in (('f1', 't1', args.f1_t1), ('f1', 't2', args.f1_t2),
+                             ('f2', 't1', args.f2_t1), ('f2', 't2', args.f2_t2)):
+        key = f'{field}_{exp}_units'
+        if not path:
+            units[key] = getattr(args, key) or _MODELFREE_UNITS_DEFAULT
+            continue
+        sidecar = _series_sidecar(path)
+        if sidecar:
+            _check_unparsed_delays(sidecar, args.allow_unparsed)
+            sidecars[f'{field}-{exp}'] = _sidecar_summary(sidecar)
+        units[key] = _resolve_time_units(getattr(args, key), sidecar,
+                                         _MODELFREE_UNITS_DEFAULT,
+                                         flag_name=f'--{field}-{exp}-units')
     out_dir = os.path.abspath(args.out)
     os.makedirs(out_dir, exist_ok=True)
     p = IntegratedAnalysisParameters()
@@ -1237,8 +1371,8 @@ def _run_dynamixs_modelfree(args):
     p.field1_noe_sat_file = os.path.abspath(args.f1_noe_sat)
     p.field1_noe_unsat_file = os.path.abspath(args.f1_noe_unsat)
     p.field1_freq_mhz = args.field1_freq
-    p.field1_t1_units = args.f1_t1_units
-    p.field1_t2_units = args.f1_t2_units
+    p.field1_t1_units = units['f1_t1_units']
+    p.field1_t2_units = units['f1_t2_units']
     p.enable_dual_field = args.dual
     if args.dual:
         p.field2_t1_file = os.path.abspath(args.f2_t1)
@@ -1247,8 +1381,8 @@ def _run_dynamixs_modelfree(args):
         p.field2_noe_sat_file = os.path.abspath(args.f2_noe_sat)
         p.field2_noe_unsat_file = os.path.abspath(args.f2_noe_unsat)
         p.field2_freq_mhz = args.field2_freq
-        p.field2_t1_units = args.f2_t1_units
-        p.field2_t2_units = args.f2_t2_units
+        p.field2_t1_units = units['f2_t1_units']
+        p.field2_t2_units = units['f2_t2_units']
     # Field count must match --dual (the density step branches on the method prefix);
     # keep only the user's 087/jwh variant preference.
     variant = 'jwh' if (args.method or '').endswith('jwh') else '087'
@@ -1279,6 +1413,7 @@ def _run_dynamixs_modelfree(args):
     out_files = result.get('output_files', {})
     _emit(args,
           {'command': 'dynamixs modelfree', 'method': result.get('method'),
+           'time_units': units, 'series_metadata': sidecars or None,
            'n_residues': result.get('n_residues'), 'n_successful': result.get('n_successful'),
            'output_files': out_files},
           f"Model-free complete: {result.get('n_successful')}/{result.get('n_residues')} residues",
@@ -1438,8 +1573,12 @@ def build_parser():
                        help='1H spectrometer frequency in MHz (default: 600)')
     t1rho.add_argument('--out', required=True, help='Output directory')
     t1rho.add_argument('--prefix', default='field1', help='Output filename prefix')
-    t1rho.add_argument('--time-units', choices=['ms', 's', 'us'], default='ms', dest='time_units',
-                       help='Units of the delay values (default: ms)')
+    t1rho.add_argument('--time-units', choices=['ms', 's', 'us'], default=None, dest='time_units',
+                       help='Units of the delay values (RESCALES the fitted rates). '
+                            'Default: taken from series_metadata.json beside the input, else ms')
+    t1rho.add_argument('--allow-unparsed-delays', action='store_true', dest='allow_unparsed',
+                       help='Fit anyway when the series sidecar records spectra whose '
+                            'filename carried no delay (those points are dropped)')
     t1rho.add_argument('--error-method', choices=['analytical', 'bootstrap'], default='analytical',
                        dest='error_method')
     t1rho.add_argument('--bootstrap', type=int, default=1000)
@@ -1481,9 +1620,14 @@ def build_parser():
     mf.add_argument('--f2-noe-unsat', dest='f2_noe_unsat', help='Field-2 NOE unsaturated (dual-field)')
     for f in ('f1', 'f2'):
         for exp in ('t1', 't2'):
-            mf.add_argument(f'--{f}-{exp}-units', choices=['ms', 's', 'us'], default='ms',
+            mf.add_argument(f'--{f}-{exp}-units', choices=['ms', 's', 'us'], default=None,
                             dest=f'{f}_{exp}_units',
-                            help=f'Delay units of the {f.upper()} {exp.upper()} series (default: ms)')
+                            help=f'Delay units of the {f.upper()} {exp.upper()} series '
+                                 f'(RESCALES the rates). Default: from that series\''
+                                 f' series_metadata.json, else ms')
+    mf.add_argument('--allow-unparsed-delays', action='store_true', dest='allow_unparsed',
+                    help='Fit anyway when a series sidecar records spectra whose '
+                         'filename carried no delay (those points are dropped)')
     mf.add_argument('--out', required=True, help='Output directory')
     mf.add_argument('--prefix', default='modelfree', help='Output prefix')
     mf.add_argument('--dual', action='store_true', help='Dual-field (needs the f2 files)')
@@ -1560,8 +1704,12 @@ def _add_relaxation_flags(p):
                    help='Field label used in the JSON filename (default: field1)')
     p.add_argument('--field-freq', type=float, default=600.0, dest='field_freq',
                    help='Spectrometer field frequency in MHz (default: 600)')
-    p.add_argument('--time-units', choices=['ms', 's', 'us'], default='s', dest='time_units',
-                   help='Units of the delay values (labels output; does not rescale). Default: s')
+    p.add_argument('--time-units', choices=['ms', 's', 'us'], default=None, dest='time_units',
+                   help='Units of the delay values (labels output; does not rescale). '
+                        'Default: taken from series_metadata.json beside the input, else s')
+    p.add_argument('--allow-unparsed-delays', action='store_true', dest='allow_unparsed',
+                   help='Fit anyway when the series sidecar records spectra whose '
+                        'filename carried no delay (those points are dropped)')
     p.add_argument('--error-method', choices=['analytical', 'bootstrap'], default='analytical',
                    dest='error_method', help='Error estimation method (default: analytical)')
     p.add_argument('--bootstrap', type=int, default=1000,

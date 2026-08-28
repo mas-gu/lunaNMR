@@ -42,7 +42,7 @@ def parse_delay_column(col_name):
             return None
         unit = (tail.group(2) or "").lower()
         # A trailing integer with no unit, no decimal separator and no letter marker
-        # is an acquisition index, not a time: '03_2D_NR_ATP_ref_noCa_001' is a
+        # is an acquisition index, not a time: '03_2D_sample_ref_001' is a
         # spectrum name, and reading it as 1 ms builds a relaxation table out of
         # delays nobody measured. Any one of the three marks a real delay --
         # '..._102ms', '..._0o3', '..._51b' -- and a matrix written by `series` is
@@ -90,7 +90,7 @@ def require_delay_start(header_row, reserved, input_file):
 
     The failure mode this replaces: with no delay column found, a caller that defaults
     the start index to 0 reads the assignment column as intensities and dies with
-    "could not convert string to float: '27cg1_DPI'" — a residue label, naming neither
+    "could not convert string to float: '<a residue label>'" — a residue label, naming neither
     the file nor the cause. A whole experiment can legitimately have no delays (two
     hetNOE planes, or spectra named by acquisition index rather than delay), so this is
     a routine input error and deserves a routine message.

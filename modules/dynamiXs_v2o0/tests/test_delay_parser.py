@@ -55,11 +55,11 @@ def test_an_acquisition_index_is_not_a_delay():
     """A trailing _<digits> with no unit, no decimal separator and no repeat marker is
     an acquisition index, not a time. Parsing it produced a complete relaxation table
     from delays nobody measured: three real spectra named
-    03_2D_NR_ATP_ref_noCa_001..003 read as 1, 2 and 3 ms, and the fit reported success.
+    03_2D_sample_ref_001..003 read as 1, 2 and 3 ms, and the fit reported success.
     """
     from delay_parser import parse_delay_column as p
-    assert p("03_2D_NR_ATP_ref_noCa_001") is None
-    assert p("03_2D_NR_ATP_ref_noCa_002") is None
+    assert p("03_2D_sample_ref_001") is None
+    assert p("03_2D_sample_ref_002") is None
     assert p("sample_2") is None
     assert p("experiment_002") is None
 
@@ -68,7 +68,7 @@ def test_a_descriptive_name_needs_a_unit_separator_or_repeat_marker():
     """The three things that distinguish a delay from an index, kept explicit so the
     rule survives a regex edit."""
     from delay_parser import parse_delay_column as p
-    assert p("600_T2_A1_WT_102ms") == 102.0    # unit
+    assert p("600_T2_sample_102ms") == 102.0    # unit
     assert p("600_T1_sample_0o3") == 0.3       # decimal separator ('o' for '.')
     assert p("600_T2_sample_51b") == 51.0      # single-letter repeat marker
     assert p("600_T2_sample_51") is None       # none of the three

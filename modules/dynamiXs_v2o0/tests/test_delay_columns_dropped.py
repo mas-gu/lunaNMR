@@ -78,15 +78,14 @@ class TestAnUnparseableColumnIsDropped:
 
 class TestAMatrixWithNoDelaysAtAll:
     """The limiting case, and the one real datasets hit: every spectrum in
-    data_test/methyl/NBD/ATP_series is named 03_2D_NR_ATP_ref_noCa_00N, so no column
+    a real methyl dataset is named 03_2D_sample_ref_00N, so no column
     carries a delay. It used to fit them as 1, 2 and 3 ms and report success.
     """
 
     def test_the_error_names_the_real_problem(self, tmp_path):
         """fit_Tx defaulted delay_start_idx to 0 when nothing parsed, so it tried to
         read the Assignment column as intensities and failed with 'could not convert
-        string to float: 27cg1_DPI' — a residue label, naming neither the file nor the
-        cause."""
+        string to float: <a residue label>' — naming neither the file nor the cause."""
         from fit_Tx_NMRRE import run_analysis_with_params
         csv = _matrix(tmp_path, ["ref_noCa_001", "ref_noCa_002", "ref_noCa_003", "ref_noCa_004"])
         with pytest.raises(ValueError, match="delay"):
