@@ -812,6 +812,7 @@ class TestADryRunAgreesWithTheRealRun:
         which names neither --dual nor the files it wanted."""
         from lunaNMR.cli import main
         assert main(["dynamixs", "modelfree", "--dual", *self._f1(tmp_path),
+                     "--field2-freq", "800",   # required with --dual; not what this tests
                      "--out", str(tmp_path / "o"), "--dry-run"]) == 1
         assert "--f2" in capsys.readouterr().err
 
@@ -924,6 +925,86 @@ class TestDynamixsModelfree:
         assert basic, "no spectral-density output written"
         df = pd.read_csv(basic[0])
         assert "S2" in df.columns and len(df) >= 1
+
+    def test_validation_warnings_are_not_discarded_under_json(self, tmp_path, monkeypatch):
+        """validate_relaxation_rates is the only check that catches a units error, and
+        it reports through the progress callback. Under --format json that callback was
+        a null lambda -- the mode both prompts prescribe, so the check ran into nothing.
+
+        R2 < R1 is unphysical for isotropic tumbling, so a T2 longer than T1 is a case
+        it must flag."""
+        from lunaNMR.cli import main
+        monkeypatch.chdir(tmp_path)
+        delays = [10, 30, 60, 100, 150]
+        self._matrix(tmp_path / "t1.csv", delays, 100.0)    # T1 shorter ...
+        self._matrix(tmp_path / "t2.csv", delays, 800.0)    # ... than T2: R2 < R1
+        self._noe(tmp_path / "sat.csv", 800)
+        self._noe(tmp_path / "unsat.csv", 1000)
+        argv = ["dynamixs", "modelfree",
+                "--f1-t1", str(tmp_path / "t1.csv"), "--f1-t2", str(tmp_path / "t2.csv"),
+                "--f1-noe-sat", str(tmp_path / "sat.csv"),
+                "--f1-noe-unsat", str(tmp_path / "unsat.csv"),
+                "--field1-freq", "600", "--out", str(tmp_path / "mf"),
+                "--format", "json"]
+        import contextlib, io
+        out_buf, err_buf = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+            code = main(argv)
+        assert code == 0, err_buf.getvalue()[-800:]
+        summary = json.loads(out_buf.getvalue())
+        assert "validation" in summary
+        assert summary["validation"]["r2_less_than_r1"] > 0
+
+    def test_the_validation_report_reaches_stderr_not_a_black_hole(self, tmp_path, monkeypatch):
+        from lunaNMR.cli import main
+        monkeypatch.chdir(tmp_path)
+        delays = [10, 30, 60, 100, 150]
+        self._matrix(tmp_path / "t1.csv", delays, 100.0)
+        self._matrix(tmp_path / "t2.csv", delays, 800.0)
+        self._noe(tmp_path / "sat.csv", 800)
+        self._noe(tmp_path / "unsat.csv", 1000)
+        import contextlib, io
+        err_buf = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err_buf):
+            main(["dynamixs", "modelfree",
+                  "--f1-t1", str(tmp_path / "t1.csv"), "--f1-t2", str(tmp_path / "t2.csv"),
+                  "--f1-noe-sat", str(tmp_path / "sat.csv"),
+                  "--f1-noe-unsat", str(tmp_path / "unsat.csv"),
+                  "--field1-freq", "600", "--out", str(tmp_path / "mf"),
+                  "--format", "json"])
+        assert "Validat" in err_buf.getvalue()
+
+    def test_dual_requires_the_second_field_frequency(self, tmp_path):
+        """--field2-freq defaults to 700, so an 800 MHz second field was analysed at
+        700 and surfaced as a tau_c mismatch that the QC table blames on the data. A
+        second field frequency is never a safe guess; there is no conventional value."""
+        from lunaNMR.cli import main
+        for name in ("t1", "t2", "sat", "unsat"):
+            (tmp_path / f"f1_{name}.csv").write_text("8,1000\n")
+            (tmp_path / f"f2_{name}.csv").write_text("8,1000\n")
+        argv = ["dynamixs", "modelfree", "--dual",
+                *sum([[f"--f1-{f}", str(tmp_path / f"f1_{n}.csv")]
+                      for f, n in (("t1", "t1"), ("t2", "t2"),
+                                   ("noe-sat", "sat"), ("noe-unsat", "unsat"))], []),
+                *sum([[f"--f2-{f}", str(tmp_path / f"f2_{n}.csv")]
+                      for f, n in (("t1", "t1"), ("t2", "t2"),
+                                   ("noe-sat", "sat"), ("noe-unsat", "unsat"))], []),
+                "--field1-freq", "600", "--out", str(tmp_path / "o"), "--dry-run"]
+        with pytest.raises(SystemExit) as exc:
+            main(argv)
+        assert exc.value.code == 2
+
+    def test_single_field_does_not_require_it(self, tmp_path):
+        """Only --dual reads a second frequency, so it must not become mandatory."""
+        from lunaNMR.cli import main
+        for name in ("t1", "t2", "sat", "unsat"):
+            (tmp_path / f"{name}.csv").write_text("8,1000\n")
+        assert main(["dynamixs", "modelfree",
+                     "--f1-t1", str(tmp_path / "t1.csv"), "--f1-t2", str(tmp_path / "t2.csv"),
+                     "--f1-noe-sat", str(tmp_path / "sat.csv"),
+                     "--f1-noe-unsat", str(tmp_path / "unsat.csv"),
+                     "--field1-freq", "600", "--out", str(tmp_path / "o"),
+                     "--dry-run"]) == 0
 
     def test_modelfree_t1_units_seconds(self, tmp_path, monkeypatch):
         # A T1 series labelled in seconds must be honoured via --f1-t1-units s.

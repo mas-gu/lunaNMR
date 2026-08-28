@@ -1335,6 +1335,9 @@ def _run_dynamixs_density(args):
     """Reduced spectral density mapping (Farrow 1995) from an R1/R2/hetNOE table."""
     if args.dual and not args.input2:
         raise ValueError("dual-field density needs a second table (--input2)")
+    if args.dual and args.field2_freq is None:
+        raise ValueError("dual-field density needs --field2-freq (the second "
+                         "spectrometer 1H frequency in MHz); there is no safe default")
     inputs = [('input', args.input)] + ([('input2', args.input2)] if args.dual else [])
     if args.dry_run:
         return _dry_run(args, inputs, {'output_dir': args.out})
@@ -1406,6 +1409,12 @@ def _validate_modelfree(parser, args):
             parser.error(f'--{field}-t2 and --{field}-r2-table are alternatives; give one')
     if not (args.f1_t2 or args.f1_r2_table):
         parser.error('one of --f1-t2 or --f1-r2-table is required')
+    # There is no conventional second field, so a default is a guess -- and analysing
+    # an 800 MHz dataset at 700 surfaces as a tau_c mismatch that the QC table blames
+    # on the data rather than on the flag.
+    if args.dual and args.field2_freq is None:
+        parser.error('--dual needs --field2-freq (the second spectrometer 1H frequency '
+                     'in MHz); there is no safe default for it')
 
 
 def _run_dynamixs_modelfree(args):
@@ -1482,7 +1491,12 @@ def _run_dynamixs_modelfree(args):
     p.output_dir = out_dir
     p.output_prefix = args.prefix
 
-    cb = (lambda *a, **k: None) if getattr(args, 'format', 'text') == 'json' else None
+    # Under --format json the engine's own prints already go to stderr via
+    # _engine_stdout, but this callback bypasses it. Nulling it discarded
+    # validate_relaxation_rates -- the only check that catches a units error -- in
+    # exactly the mode the runbooks tell an agent to use.
+    cb = ((lambda msg, *a, **k: print(msg, file=sys.stderr))
+          if getattr(args, 'format', 'text') == 'json' else None)
     # Run from the output dir: the single-field density plotter and the intermediate
     # fit-result txt files are written to the CWD with relative/hard-coded names.
     cwd = os.getcwd()
@@ -1496,6 +1510,10 @@ def _run_dynamixs_modelfree(args):
     _emit(args,
           {'command': 'dynamixs modelfree', 'method': result.get('method'),
            'time_units': units, 'series_metadata': sidecars or None,
+           # Counts per category, so a caller can threshold on them. The residue lists
+           # are in the human report; a summary that carries neither is the black hole.
+           'validation': result.get('validation_warnings') or {},
+           'residue_counts': result.get('residue_counts') or {},
            'n_residues': result.get('n_residues'), 'n_successful': result.get('n_successful'),
            'output_files': out_files},
           f"Model-free complete: {result.get('n_successful')}/{result.get('n_residues')} residues",
@@ -1808,8 +1826,9 @@ def _add_density_flags(p):
     """Physical/spectrometer flags shared by the density and modelfree subcommands."""
     p.add_argument('--field1-freq', type=float, default=600.0, dest='field1_freq',
                    help='Field-1 1H frequency in MHz (default: 600)')
-    p.add_argument('--field2-freq', type=float, default=700.0, dest='field2_freq',
-                   help='Field-2 1H frequency in MHz (default: 700)')
+    p.add_argument('--field2-freq', type=float, default=None, dest='field2_freq',
+                   help='Field-2 1H frequency in MHz. Required with --dual on modelfree; '
+                        'no default, because guessing it reads as a tau_c mismatch')
     p.add_argument('--rnh', type=float, default=1.015,
                    help='N-H bond length in Angstrom (default: 1.015)')
     p.add_argument('--csa', type=float, default=-172.0,

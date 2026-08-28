@@ -255,6 +255,8 @@ class IntegratedAnalysisPipeline:
         self.log_progress("ANALYSIS COMPLETE!")
         self.log_progress("=" * 60)
 
+        results['validation_warnings'] = getattr(self, 'validation_warnings', {})
+        results['residue_counts'] = getattr(self, 'residue_counts', {})
         self.final_results = results
         return results
 
@@ -367,15 +369,24 @@ class IntegratedAnalysisPipeline:
         }
 
     def _validate_datasets(self) -> str:
-        """Validate all datasets and return report"""
+        """Validate all datasets and return report.
+
+        The category counts are also kept on the instance: the report is a string that
+        goes to the progress callback, and a caller running headlessly has no other way
+        to learn that the only physical-plausibility check in the pipeline fired.
+        """
 
         # Validate Field 1
         warnings_field1 = validate_relaxation_rates(self.field1_results['merged_data'])
+        self.validation_warnings = {k: len(v) for k, v in warnings_field1.items()}
         check_minimum_residue_count(self.field1_results['merged_data'])
 
         # Validate Field 2 if present
         if self.params.enable_dual_field:
             warnings_field2 = validate_relaxation_rates(self.field2_results['merged_data'])
+            for key, residues in warnings_field2.items():
+                self.validation_warnings[key] = (self.validation_warnings.get(key, 0)
+                                                 + len(residues))
             check_minimum_residue_count(self.field2_results['merged_data'])
 
             # Check consistency between fields
@@ -414,6 +425,14 @@ class IntegratedAnalysisPipeline:
         )
         input_files['field1'] = field1_input
         self.log_progress(f"  ✓ Field 1 input created: {n_residues_f1} residues")
+        # The attrition is the interesting number. Merging is an intersection and the
+        # density step drops what it cannot weight, so the residue count reported at
+        # the end is already the survivors -- 40 of 200 reads as 40/40 unless the
+        # denominator each stage started from is carried out with it.
+        self.residue_counts = {
+            'field1_merged': len(self.field1_results['merged_data']),
+            'field1_density_input': int(n_residues_f1),
+        }
 
         # Field 2 if dual-field
         if self.params.enable_dual_field:
@@ -429,6 +448,9 @@ class IntegratedAnalysisPipeline:
             )
             input_files['field2'] = field2_input
             self.log_progress(f"  ✓ Field 2 input created: {n_residues_f2} residues")
+            self.residue_counts.update(
+                field2_merged=len(self.field2_results['merged_data']),
+                field2_density_input=int(n_residues_f2))
 
         return input_files
 
