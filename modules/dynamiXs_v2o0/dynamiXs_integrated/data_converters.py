@@ -133,10 +133,15 @@ def calculate_hetnoe_from_intensities(saturated_data: Dict[str, float],
         # Calculate hetNOE
         noe = I_sat / I_unsat
 
-        # Calculate error if provided
-        if saturated_errors is not None and unsaturated_errors is not None:
-            I_sat_err = saturated_errors.get(res_id, 0)
-            I_unsat_err = unsaturated_errors.get(res_id, 0)
+        # Calculate error if provided. `or`, not `and`: requiring both discarded the
+        # errors the caller did supply -- a 3-column saturated file paired with a
+        # 2-column unsaturated one fell back to the estimate below, which is ~3x
+        # tighter than a realistic per-plane floor and over-weights hetNOE in the
+        # model-free fit. Propagating one term understates the error, but it is
+        # measured rather than invented.
+        if saturated_errors is not None or unsaturated_errors is not None:
+            I_sat_err = (saturated_errors or {}).get(res_id, 0)
+            I_unsat_err = (unsaturated_errors or {}).get(res_id, 0)
 
             # Error propagation for ratio
             rel_err_sat = I_sat_err / I_sat if I_sat != 0 else 0

@@ -94,6 +94,47 @@ class TestR2Table:
             assert col in table.columns
 
 
+class TestAnUnmatchedResidueIsCounted:
+    """When a residue is not in --peaks, the tilt calculation falls back to the carrier
+    position. That zeroes the offset, so theta collapses to the nominal angle and the
+    per-residue correction -- the entire point of this subcommand -- silently does
+    nothing. A residue 22 ppm off carrier at 2 kHz tilts to ~56 deg, not 90, and its R2
+    lands ~40% above the uncorrected value, so the fallback is not a small error.
+    """
+
+    def _fits(self, peaks):
+        t1 = {n: {'value': 660.0, 'error': 10.0} for n, _, _ in peaks}
+        rho = {n: {'value': 80.0, 'error': 2.0} for n, _, _ in peaks}
+        return t1, rho
+
+    def test_a_complete_peak_list_reports_no_fallbacks(self):
+        peaks = _peaks(3)
+        t1, rho = self._fits(peaks)
+        pl = pd.DataFrame([{'residue': n, 'N_ppm': y} for n, _, y in peaks])
+        table = r2_table_from_fits(t1, rho, pl, omega1_hz=2000.0, carrier_ppm=118.0,
+                                   theta_deg=90.0, spec_freq_mhz=600.0)
+        assert table.attrs['n_shift_unmatched'] == 0
+
+    def test_a_missing_shift_is_counted_not_hidden(self):
+        peaks = _peaks(3)
+        t1, rho = self._fits(peaks)
+        partial = [{'residue': n, 'N_ppm': y} for n, _, y in peaks][:2]
+        table = r2_table_from_fits(t1, rho, pd.DataFrame(partial), omega1_hz=2000.0,
+                                   carrier_ppm=118.0, theta_deg=90.0, spec_freq_mhz=600.0)
+        assert table.attrs['n_shift_unmatched'] == 1
+        assert table.attrs['shift_unmatched']
+
+    def test_no_shift_matched_at_all_is_refused(self):
+        """Every theta is then the nominal one, so the table is the uncorrected answer
+        wearing a per-residue label. That is worse than no table."""
+        peaks = _peaks(3)
+        t1, rho = self._fits(peaks)
+        empty = pd.DataFrame({'residue': pd.Series(dtype=str), 'N_ppm': pd.Series(dtype=float)})
+        with pytest.raises(ValueError, match='tilt'):
+            r2_table_from_fits(t1, rho, empty, omega1_hz=2000.0, carrier_ppm=118.0,
+                               theta_deg=90.0, spec_freq_mhz=600.0)
+
+
 def _run(*argv):
     return subprocess.run([sys.executable, '-m', 'lunaNMR', *argv],
                           cwd=str(ROOT), capture_output=True, text=True)

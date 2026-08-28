@@ -133,6 +133,7 @@ def calculate_T2_from_T1rho(
 
     # Build result dataframe
     results = []
+    unmatched = []
 
     for residue in sorted(common_residues):
         # Get R1 and R1rho for this residue
@@ -152,8 +153,13 @@ def calculate_T2_from_T1rho(
             peak_row = peak_list[peak_list['residue'].str.startswith(residue_num + '.')]
 
         if len(peak_row) == 0:
-            # Use carrier position (assume on-resonance) if chemical shift not found
+            # No shift for this residue, so the offset from the carrier is unknown.
+            # Falling back to the carrier makes the offset zero, which collapses theta
+            # to the nominal angle and quietly turns the per-residue correction into no
+            # correction at all. Still done -- dropping the residue loses more -- but
+            # counted, so the caller can see how much of the table is uncorrected.
             residue_ppm = carrier_ppm
+            unmatched.append(str(residue))
         else:
             residue_ppm = peak_row[chemical_shift_column].iloc[0]
 
@@ -208,7 +214,18 @@ def calculate_T2_from_T1rho(
             'T2_err': T2_err
         })
 
-    return pd.DataFrame(results)
+    if unmatched and len(unmatched) == len(results):
+        raise ValueError(
+            f"No residue in the R1/R1rho data was found in the peak list, so every "
+            f"tilt angle fell back to the nominal {theta_deg} deg. The result would be "
+            f"the uncorrected R2 wearing a per-residue label. Check that the peak "
+            f"list's assignments match the relaxation matrices'."
+        )
+    table = pd.DataFrame(results)
+    # attrs, not columns: this is about the table, not about any one residue.
+    table.attrs['n_shift_unmatched'] = len(unmatched)
+    table.attrs['shift_unmatched'] = unmatched
+    return table
 
 
 def r2_table_from_fits(t1_fits, t1rho_fits, peak_list, *, omega1_hz, carrier_ppm,

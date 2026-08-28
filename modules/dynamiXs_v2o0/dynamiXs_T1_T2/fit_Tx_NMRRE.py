@@ -596,6 +596,10 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
             'baseline_fixed': bool(result.get('baseline_fixed', True)),
             'window_ratio': float(result.get('window_ratio', float('nan'))),
             'window_marginal': bool(result.get('window_marginal', False)),
+            # The fitter's own reliability verdict, the one the summary counts as
+            # n_fitted/n_excluded. Dropped here, it left consumers of the JSON with no
+            # way to tell a measured T from one the fitter had already rejected.
+            'success': bool(result.get('success', True)),
             'intensities': [float(val) for val in result['y']],
             'fit_curve': {
                 'time': [float(t) for t in fit_time_dense],

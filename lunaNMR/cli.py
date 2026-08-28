@@ -425,7 +425,8 @@ def _run_dynamixs_t1t2(args):
     }
     with _engine_stdout(args):
         result = run_analysis_with_params(params)
-    human = [f"{args.exp} analysis complete: {result['n_fitted']} residues fitted, "
+    n_total = result['n_fitted'] + result.get('n_excluded', 0)
+    human = [f"{args.exp} analysis complete: {result['n_fitted']}/{n_total} residues fitted, "
              f"mean {args.exp} = {result['mean_t2']:.2f} {time_units}",
              f"  Results: {result['results_file']}"]
     if result.get('json_file'):
@@ -438,6 +439,10 @@ def _run_dynamixs_t1t2(args):
           {'command': 'dynamixs t1t2', 'experiment': args.exp, 'n_fitted': result['n_fitted'],
            'time_units': time_units, 'series_metadata': _sidecar_summary(sidecar),
            'dropped_columns': result.get('dropped_columns') or [],
+           # n_fitted alone is not a rate. The engine already returns the excluded
+           # count; dropping it here left 40 survivors of 200 reading as 40.
+           'n_excluded': result.get('n_excluded', 0),
+           'n_total': result['n_fitted'] + result.get('n_excluded', 0),
            'mean_t2': result['mean_t2'], 'results_file': result['results_file'],
            'json_file': result.get('json_file'),
            'baseline_fixed': result.get('baseline_fixed', True),
@@ -719,7 +724,16 @@ def _run_series(args):
     os.makedirs(args.out, exist_ok=True)
     print(f"Processing {len(nmr_files)} spectra ({args.mode} mode, {args.peak_source} peaks)...",
           file=sys.stderr)
-    processor = MultiSpectrumProcessor(_default_series_params(parallel=args.parallel))
+    series_params = _default_series_params(parallel=args.parallel)
+    if args.peak_source == 'independent':
+        # Independent mode means a full detect+fit per spectrum, which is two options
+        # rather than one. The GUI sets both (series_integration_dialog, the
+        # independent_radio branch); the CLI accepted the same flag name and left them
+        # at their cascade defaults, so the two ran different algorithms in silence.
+        series_params['processing_options'].update(
+            rerun_adaptive_per_spectrum=True,
+            use_original_reference_for_detection=True)
+    processor = MultiSpectrumProcessor(series_params)
     with _engine_stdout(args):
         result = processor.process_nmr_series(
             nmr_files, reference_peaks, args.out,
@@ -1197,10 +1211,24 @@ def _run_dynamixs_hetnoe(args):
     out_pdf = os.path.join(args.out, f"{args.prefix}_hetnoe.pdf")
     with _engine_stdout(args):
         plot_hetnoe_vs_residue(noe, out_pdf, title=args.prefix)
+    # Which error columns were actually supplied decides whether the reported hetNOE
+    # error is measured or estimated, and the two differ by ~3x. A caller weighting the
+    # model-free fit by these needs to know which it got.
+    supplied = {(True, True): 'both', (True, False): 'sat',
+                (False, True): 'unsat', (False, False): 'none'}[
+                    (sat_e is not None, unsat_e is not None)]
     _emit(args,
           {'command': 'dynamixs hetnoe', 'n_residues': len(noe),
+           'errors_supplied': supplied,
+           'n_sat': len(sat_i), 'n_unsat': len(unsat_i),
+           'n_common': len(set(sat_i) & set(unsat_i)),
+           'n_dropped_nonpositive_ref': len(set(sat_i) & set(unsat_i)) - len(noe),
            'output': out_csv, 'plot': out_pdf},
-          f"hetNOE complete: {len(noe)} residues",
+          f"hetNOE complete: {len(noe)} residues "
+          f"({len(sat_i)} sat, {len(unsat_i)} unsat, errors: {supplied})",
+          *(["  NOTE: no error columns supplied — hetNOE errors are a flat 2% estimate, "
+             "~3x tighter than a realistic floor, which over-weights hetNOE downstream"]
+            if supplied == 'none' else []),
           f"  Output: {out_csv}",
           f"  Plot:   {out_pdf}")
     return 0
@@ -1258,8 +1286,13 @@ def _run_dynamixs_t1rho(args):
         with _engine_stdout(args):
             result = run_analysis_with_params(params)
         data = json.load(open(result['json_file']))
-        return ({str(f['residue']): {'value': f['t2'], 'error': f.get('t2_err', 0.0)}
-                 for f in data['fits']}, result)
+        # Keep only the residues the fitter itself judged reliable. It prints
+        # "unreliable (no decay in window), excluded" for the rest and leaves them out
+        # of n_fitted, but they were still in the JSON -- and the only downstream filter
+        # is finite-and-positive, which a T2 of 2.7e9 ms passes.
+        fits = {str(f['residue']): {'value': f['t2'], 'error': f.get('t2_err', 0.0)}
+                for f in data['fits'] if f.get('success', True)}
+        return fits, result
 
     t1_fits, t1_res = _fit(os.path.abspath(args.t1), 'T1')
     rho_fits, rho_res = _fit(os.path.abspath(args.input), 'T1rho')
@@ -1274,8 +1307,17 @@ def _run_dynamixs_t1rho(args):
                                time_units=time_units)
     out_csv = os.path.join(args.out, f"{args.prefix}_r2_from_t1rho.csv")
     table.to_csv(out_csv, index=False)
+    n_unmatched = int(table.attrs.get('n_shift_unmatched', 0))
+    if n_unmatched:
+        print(f"  WARNING: {n_unmatched}/{len(table)} residues had no 15N shift in "
+              f"--peaks, so their tilt angle fell back to the nominal "
+              f"{args.theta} deg (no per-residue correction): "
+              f"{', '.join(table.attrs.get('shift_unmatched', [])[:10])}",
+              file=sys.stderr)
     _emit(args,
           {'command': 'dynamixs t1rho', 'n_residues': len(table),
+           'n_shift_unmatched': n_unmatched,
+           'shift_unmatched': table.attrs.get('shift_unmatched', []),
            'time_units': time_units,
            'series_metadata': {k: _sidecar_summary(v) for k, v in sidecars.items()},
            'n_t1_fitted': len(t1_fits), 'n_t1rho_fitted': len(rho_fits),

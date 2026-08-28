@@ -299,6 +299,47 @@ class TestSeriesSubcommand:
         assert pd.read_csv(tidy).shape[0] > 0
 
 
+class TestIndependentModeMatchesTheGui:
+    """--peak-source independent names the GUI's Independent Mode, but the GUI sets two
+    processing options for it that the CLI left at their defaults. Same flag, different
+    algorithm, and neither side said so.
+    """
+
+    def _options_for(self, monkeypatch, tmp_path, peak_source):
+        """Capture the processing_options the CLI hands the processor."""
+        import lunaNMR.processors.multi_spectrum_processor as msp
+        captured = {}
+
+        class _Spy:
+            def __init__(self, params):
+                captured.update(params['processing_options'])
+
+            def process_nmr_series(self, *a, **kw):
+                raise SystemExit(0)      # stop before any fitting happens
+
+        monkeypatch.setattr(msp, 'MultiSpectrumProcessor', _Spy)
+        (tmp_path / "s_8ms.ft").write_bytes(b"")
+        peaks = tmp_path / "p.txt"
+        peaks.write_text("Assignment\tPosition_X\tPosition_Y\nK3\t8.0\t120.0\n")
+        from lunaNMR.cli import main
+        with pytest.raises(SystemExit):
+            main(["series", "--spectra", str(tmp_path), "--peaks", str(peaks),
+                  "--out", str(tmp_path / "o"), "--peak-source", peak_source])
+        return captured
+
+    def test_independent_reruns_adaptive_and_uses_the_original_reference(
+            self, monkeypatch, tmp_path):
+        opts = self._options_for(monkeypatch, tmp_path, "independent")
+        assert opts['rerun_adaptive_per_spectrum'] is True
+        assert opts['use_original_reference_for_detection'] is True
+
+    @pytest.mark.parametrize("source", ["reference", "cascade", "detected"])
+    def test_the_other_sources_are_unchanged(self, monkeypatch, tmp_path, source):
+        opts = self._options_for(monkeypatch, tmp_path, source)
+        assert opts['rerun_adaptive_per_spectrum'] is False
+        assert opts['use_original_reference_for_detection'] is False
+
+
 def _make_bundle(tmp_path):
     bundle = tmp_path / "proj.lunaNMR"
     (bundle / "fit_results" / "arrays").mkdir(parents=True)
