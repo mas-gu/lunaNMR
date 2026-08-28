@@ -70,15 +70,29 @@ def _engine_stdout(args):
         os.close(saved_fd)
 
 
+def _full_command(args):
+    """The full subcommand path, e.g. 'dynamixs density'.
+
+    argparse records the nested choice under its own dest, so a nested handler reported
+    only 'dynamixs' in a dry-run while its real run emitted 'dynamixs t1t2'. The one key
+    every summary carries has to discriminate, or it cannot be used to route.
+    """
+    parts = [getattr(args, 'command', None),
+             getattr(args, 'dynamixs_command', None),
+             getattr(args, 'export_command', None),
+             getattr(args, 'project_command', None)]
+    return ' '.join(p for p in parts if p)
+
+
 def _dry_run(args, inputs, planned):
     """Validate that required input paths exist and report the plan without running.
 
     `inputs` is a list of (label, path); `planned` a dict of planned outputs. Returns 0
     if every input exists, else 1.
     """
-    missing = [p for _, p in inputs if not os.path.exists(p)]
+    missing = [p for _, p in inputs if not p or not os.path.exists(p)]
     summary = {
-        'command': getattr(args, 'command', None),
+        'command': _full_command(args),
         'dry_run': True,
         'inputs': {label: path for label, path in inputs},
         'planned_outputs': planned,
@@ -86,7 +100,8 @@ def _dry_run(args, inputs, planned):
     }
     human = [f"[dry-run] {summary['command']}"]
     for label, path in inputs:
-        human.append(f"  input  {label}: {path} [{'OK' if os.path.exists(path) else 'MISSING'}]")
+        ok = bool(path) and os.path.exists(path)
+        human.append(f"  input  {label}: {path} [{'OK' if ok else 'MISSING'}]")
     for key, val in planned.items():
         human.append(f"  output {key}: {val}")
     _emit(args, summary, *human)
@@ -472,12 +487,17 @@ def _natural_key(text):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', text)]
 
 
-def _discover_spectra(spectra, extensions=('ft', 'ser', 'ft2', 'ft3', 'pipe', 'ucsf')):
+def _discover_spectra(spectra, extensions=None):
     """Resolve --spectra (a folder or a glob) to a naturally-sorted list of spectrum files.
 
-    `extensions` defaults to NMRFileManager.supported_nmr_formats (passed explicitly by
-    the series handler) so discovery never diverges from what the loader accepts.
+    `extensions` defaults to NMRFileManager.supported_nmr_formats, resolved at call time
+    rather than restated here: a literal default is a second list, and the one that used
+    to sit here had fallen behind by an extension, so NMRPipe 1D spectra were invisible
+    to every caller that took the default.
     """
+    if extensions is None:
+        from lunaNMR.utils.file_manager import NMRFileManager
+        extensions = NMRFileManager().supported_nmr_formats
     if os.path.isdir(spectra):
         files = []
         for ext in extensions:
@@ -1271,7 +1291,9 @@ def _run_dynamixs_t1rho(args):
 
 def _run_dynamixs_density(args):
     """Reduced spectral density mapping (Farrow 1995) from an R1/R2/hetNOE table."""
-    inputs = [('input', args.input)] + ([('input2', args.input2)] if args.dual and args.input2 else [])
+    if args.dual and not args.input2:
+        raise ValueError("dual-field density needs a second table (--input2)")
+    inputs = [('input', args.input)] + ([('input2', args.input2)] if args.dual else [])
     if args.dry_run:
         return _dry_run(args, inputs, {'output_dir': args.out})
     import matplotlib
@@ -1280,8 +1302,6 @@ def _run_dynamixs_density(args):
     _add_modules_path('dynamiXs_v2o0')
     if not os.path.isfile(args.input):
         raise FileNotFoundError(f"Input not found: {args.input}")
-    if args.dual and not args.input2:
-        raise ValueError("dual-field density needs a second table (--input2)")
     os.makedirs(args.out, exist_ok=True)
     r_nh_m = args.rnh * 1e-10       # Angstrom -> metre
     csa_n = args.csa * 1e-6         # ppm -> dimensionless
@@ -1352,10 +1372,12 @@ def _run_dynamixs_modelfree(args):
           ('f1-noe-sat', args.f1_noe_sat), ('f1-noe-unsat', args.f1_noe_unsat)]
     f2 = [('f2-t1', args.f2_t1), ('f2-t2', args.f2_t2 or args.f2_r2_table),
           ('f2-noe-sat', args.f2_noe_sat), ('f2-noe-unsat', args.f2_noe_unsat)]
+    if args.dual and not all(v for _, v in f2):
+        missing = ', '.join(f'--{label}' for label, value in f2 if not value)
+        raise ValueError(f"dual-field model-free needs all four --f2-* files; "
+                         f"missing: {missing}")
     if args.dry_run:
         return _dry_run(args, f1 + (f2 if args.dual else []), {'output_dir': args.out})
-    if args.dual and not all(v for _, v in f2):
-        raise ValueError("dual-field model-free needs all four --f2-* files")
     import matplotlib
     matplotlib.use('Agg')
     _add_modules_path('dynamiXs_v2o0')

@@ -243,7 +243,13 @@ def _subseries_scale(folder, spectrum_names, delays, peaks) -> Optional[Dict]:
 
 # ------------------------------------------------------------------------- entry points
 
-SPECTRUM_EXTENSIONS = ('ft', 'ft2', 'ft3', 'pipe', 'ucsf', 'ser')
+def _spectrum_extensions():
+    """What the loader accepts, so discovery here cannot drift from `series`."""
+    from lunaNMR.utils.file_manager import NMRFileManager
+    return tuple(NMRFileManager().supported_nmr_formats)
+
+
+SPECTRUM_EXTENSIONS = _spectrum_extensions()
 
 
 def find_spectra(folder) -> List[str]:

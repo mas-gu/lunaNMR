@@ -245,10 +245,10 @@ class TestSeriesHelpers:
         # Discovery must track NMRFileManager.supported_nmr_formats: include ucsf/pipe/ft3,
         # exclude fid (which the loader rejects).
         from lunaNMR.cli import _discover_spectra
-        for name in ("a.ucsf", "b.pipe", "c.ft2", "d.ft3", "junk.fid"):
+        for name in ("a.ucsf", "b.pipe", "c.ft2", "d.ft3", "e.ft1", "junk.fid"):
             (tmp_path / name).write_text("x")
         found = {os.path.basename(f) for f in _discover_spectra(str(tmp_path))}
-        assert {"a.ucsf", "b.pipe", "c.ft2", "d.ft3"} <= found
+        assert {"a.ucsf", "b.pipe", "c.ft2", "d.ft3", "e.ft1"} <= found
         assert "junk.fid" not in found
 
 
@@ -733,6 +733,56 @@ class TestDryRun:
         assert code == 0
         data = json.loads(buf.getvalue())
         assert data["dry_run"] is True
+
+
+class TestADryRunAgreesWithTheRealRun:
+    """A dry-run exists so a caller can find out whether the real run will work. One
+    that exits 0 where the real run exits 1 is worse than none: it certifies a command
+    that cannot run.
+    """
+
+    def _f1(self, tmp_path):
+        for name in ("t1", "t2", "sat", "unsat"):
+            (tmp_path / f"{name}.csv").write_text("8,1000\n51,500\n")
+        return ["--f1-t1", str(tmp_path / "t1.csv"), "--f1-t2", str(tmp_path / "t2.csv"),
+                "--f1-noe-sat", str(tmp_path / "sat.csv"),
+                "--f1-noe-unsat", str(tmp_path / "unsat.csv")]
+
+    def test_density_dual_without_input2_fails_both_ways(self, tmp_path):
+        """--dual needs --input2, but that was checked after the dry-run returned."""
+        from lunaNMR.cli import main
+        table = tmp_path / "f1.csv"
+        table.write_text("Residue,R1,R1err,R2,R2err,hetNOE,hetNOEerr\n1,1.0,0.1,10.0,0.5,0.8,0.02\n")
+        argv = ["dynamixs", "density", "--dual", "--input", str(table),
+                "--out", str(tmp_path / "o")]
+        assert main(argv + ["--dry-run"]) == main(argv) == 1
+
+    def test_density_dual_dry_run_names_the_missing_flag(self, tmp_path, capsys):
+        from lunaNMR.cli import main
+        table = tmp_path / "f1.csv"
+        table.write_text("Residue,R1,R1err,R2,R2err,hetNOE,hetNOEerr\n1,1.0,0.1,10.0,0.5,0.8,0.02\n")
+        main(["dynamixs", "density", "--dual", "--input", str(table),
+              "--out", str(tmp_path / "o"), "--dry-run"])
+        assert "--input2" in capsys.readouterr().err
+
+    def test_modelfree_dual_dry_run_names_the_missing_flags(self, tmp_path, capsys):
+        """It already exited 1, but by way of os.path.exists(None) raising TypeError:
+        'stat: path should be string, bytes, os.PathLike or integer, not NoneType' --
+        which names neither --dual nor the files it wanted."""
+        from lunaNMR.cli import main
+        assert main(["dynamixs", "modelfree", "--dual", *self._f1(tmp_path),
+                     "--out", str(tmp_path / "o"), "--dry-run"]) == 1
+        assert "--f2" in capsys.readouterr().err
+
+    def test_a_dry_run_plan_names_the_full_subcommand(self, tmp_path, capsys):
+        """The one universal key has to discriminate: nested handlers reported
+        'dynamixs' in dry-run and 'dynamixs density' in the real run."""
+        from lunaNMR.cli import main
+        table = tmp_path / "f1.csv"
+        table.write_text("Residue,R1,R1err,R2,R2err,hetNOE,hetNOEerr\n1,1.0,0.1,10.0,0.5,0.8,0.02\n")
+        main(["dynamixs", "density", "--input", str(table), "--out", str(tmp_path / "o"),
+              "--dry-run", "--format", "json"])
+        assert json.loads(capsys.readouterr().out)["command"] == "dynamixs density"
 
 
 class TestDynamixsHetnoe:
