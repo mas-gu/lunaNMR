@@ -65,9 +65,15 @@ python -m lunaNMR dynamixs modelfree [--dual] \
 ```
 
 `--dry-run` first. A matrix written by `series` is already normalised to ms (`_2.4s` becomes
-`2400.0`), so the `--f*-units` defaults are correct for it — the `series_metadata.json` written
-beside the matrices records `value_units` and confirms it. The units flags are for tables
-`series` did not write: a T1 in s beside a T2 in ms puts R1 out by 1000×.
+`2400.0`), and every relaxation subcommand now **reads that from `series_metadata.json`**
+rather than asking you: the units flags are for tables `series` did not write, which have no
+sidecar. A flag that contradicts the sidecar is refused rather than believed — a T1 in s
+beside a T2 in ms puts R1 out by 1000×, and neither value looks wrong afterwards.
+
+**`--time-units` does not mean the same thing everywhere.** On `t1t2`/`methyl-t2` it only
+*labels* the output; on `t1rho` and via `--f{1,2}-t{1,2}-units` on `modelfree` it **rescales**.
+The defaults differ to match (`s` vs `ms`) and are deliberately not unified, since changing
+either moves numbers that have already been published. The full table is in `CLI_AGENT.md`.
 
 Notes: symlink hetNOE planes to explicit `*_saturated.ft` / `*_unsaturated.ft` names before
 integrating, and keep NMRPipe intermediates (`test.ft`) out of the folder glob.

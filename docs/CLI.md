@@ -19,7 +19,27 @@ The CLI imports no Qt: `lunaNMR/__init__.py` is lazy, and matplotlib is forced t
 - `--format {text,json}` — machine-readable run summary on stdout (`json` stays clean even with
   multiprocessing-spawn workers).
 - `--dry-run` — validate inputs and print the plan without running; exits non-zero if an input
-  is missing.
+  is missing. Accepted by every subcommand that writes something. `diagnose` takes `--format`
+  only: it is read-only, so a dry-run has nothing to mean. `project` and `batch` take neither.
+
+### Exit codes
+
+| code | meaning |
+|---|---|
+| `0` | ran to completion |
+| `1` | bad input (missing file, malformed CSV/JSON, no parseable delay) — reported as `error: …` on stderr, no traceback; **or** a dry-run whose inputs are missing |
+| `2` | no subcommand, or an unrecognised flag (argparse; help goes to stderr) |
+
+Beyond that, some subcommands report *findings* through the exit code:
+
+- **`diagnose`** returns `1` when any finding is `FAIL`, so `diagnose && series` stops there.
+  `WARN` alone returns `0` — it covers routine cases like a folder with no peak list — unless
+  you pass `--strict`. `series --dry-run --deep` runs the same checks and gates the same way.
+- **`series`**, **`t1t2`**, **`methyl-t2`** return `1` when nothing fitted, **`t1rho`** when the
+  R2 table comes out empty.
+- **`hetnoe`**, **`density`**, **`modelfree`**, **`kd`**, **`export kd`** return `0` on any run
+  that completed, even with residues dropped. Check `n_fitted`/`n_successful` against the
+  matching total in the JSON summary; the exit code is not a partial-failure signal.
 
 ## Subcommands
 
