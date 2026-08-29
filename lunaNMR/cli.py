@@ -747,6 +747,69 @@ def _validate_series(parser, args):
                      'processing them)')
 
 
+def _merge_series_params(defaults, overrides, path):
+    """Deep-merge a tuning file over the default series parameters.
+
+    Every key is checked against the defaults. An unrecognised one is an error, not a
+    silently ignored setting: a knob that is accepted, does nothing, and lets the run
+    report success is the exact failure this surface exists to prevent, and a typo in
+    a JSON file is the easiest way to produce it.
+    """
+    import difflib
+    merged = {section: dict(values) for section, values in defaults.items()}
+    if not isinstance(overrides, dict):
+        raise ValueError(f"{path}: expected a JSON object of parameter sections, "
+                         f"got {type(overrides).__name__}")
+    for section, values in overrides.items():
+        if section not in merged:
+            close = difflib.get_close_matches(section, merged, n=1)
+            raise ValueError(f"{path}: unknown parameter section {section!r}"
+                             + (f" — did you mean {close[0]!r}?" if close else "")
+                             + f" Sections: {', '.join(sorted(merged))}")
+        if not isinstance(values, dict):
+            raise ValueError(f"{path}: section {section!r} must be an object of "
+                             f"key/value pairs, got {type(values).__name__}")
+        for key, value in values.items():
+            if key not in merged[section]:
+                close = difflib.get_close_matches(key, merged[section], n=1)
+                raise ValueError(
+                    f"{path}: unknown key {key!r} in {section!r}"
+                    + (f" — did you mean {close[0]!r}?" if close else "")
+                    + f". Known keys: {', '.join(sorted(merged[section]))}")
+            merged[section][key] = value
+    return merged
+
+
+def _load_series_params(args):
+    """The effective series parameters: defaults, then --params, then the flags.
+
+    The command line wins over the file. --parallel and --peak-source are what the
+    caller just typed; a stale tuning file must not quietly override them.
+    """
+    import json
+    params = _default_series_params(parallel=args.parallel)
+    if getattr(args, 'params', None):
+        if not os.path.isfile(args.params):
+            raise FileNotFoundError(f"--params file not found: {args.params}")
+        try:
+            with open(args.params) as fh:
+                overrides = json.load(fh)
+        except ValueError as exc:
+            raise ValueError(f"{args.params}: not valid JSON — {exc}")
+        params = _merge_series_params(params, overrides, args.params)
+        params['gui_params']['use_parallel_processing'] = args.parallel
+        params['processing_options']['use_parallel_processing'] = args.parallel
+    if args.peak_source == 'independent':
+        # Independent mode means a full detect+fit per spectrum, which is two options
+        # rather than one. The GUI sets both (series_integration_dialog, the
+        # independent_radio branch); the CLI accepted the same flag name and left them
+        # at their cascade defaults, so the two ran different algorithms in silence.
+        params['processing_options'].update(
+            rerun_adaptive_per_spectrum=True,
+            use_original_reference_for_detection=True)
+    return params
+
+
 def _run_series(args):
     """Wrap MultiSpectrumProcessor.process_nmr_series for a headless series/titration run."""
     import matplotlib
@@ -757,6 +820,9 @@ def _run_series(args):
     file_manager = NMRFileManager()
     nmr_files = _discover_spectra(args.spectra, file_manager.supported_nmr_formats)
 
+    # Validated before the dry-run returns: a plan that says "OK" for a run whose
+    # tuning file will be rejected is the dry-run contract breaking again.
+    _load_series_params(args)
     if args.dry_run:
         peaks_ok = os.path.exists(args.peaks)
         missing = ([] if nmr_files else ['spectra']) + ([] if peaks_ok else [args.peaks])
@@ -793,18 +859,10 @@ def _run_series(args):
         _emit_error(args, ValueError(f"Peak list is empty: {args.peaks}"))
         return 1
 
+    series_params = _load_series_params(args)
     os.makedirs(args.out, exist_ok=True)
     print(f"Processing {len(nmr_files)} spectra ({args.mode} mode, {args.peak_source} peaks)...",
           file=sys.stderr)
-    series_params = _default_series_params(parallel=args.parallel)
-    if args.peak_source == 'independent':
-        # Independent mode means a full detect+fit per spectrum, which is two options
-        # rather than one. The GUI sets both (series_integration_dialog, the
-        # independent_radio branch); the CLI accepted the same flag name and left them
-        # at their cascade defaults, so the two ran different algorithms in silence.
-        series_params['processing_options'].update(
-            rerun_adaptive_per_spectrum=True,
-            use_original_reference_for_detection=True)
     processor = MultiSpectrumProcessor(series_params)
     with _engine_stdout(args):
         result = processor.process_nmr_series(
@@ -834,7 +892,8 @@ def _run_series(args):
                if os.path.exists(os.path.join(output_folder, name))}
     _emit(args,
           {'command': 'series', 'spectra_fitted': n_success, 'spectra_total': len(results),
-           'output_folder': output_folder, 'outputs': outputs, 'parallel': args.parallel},
+           'output_folder': output_folder, 'outputs': outputs, 'parallel': args.parallel,
+           'params_file': getattr(args, 'params', None), 'params': series_params},
           f"Series analysis complete: {n_success}/{len(results)} spectra fitted",
           f"  Output: {output_folder}",
           *(f"  {name}" for name in sorted(outputs)))
@@ -1809,6 +1868,10 @@ def build_parser():
     series.add_argument('--peak-source', choices=['reference', 'cascade', 'detected', 'independent'],
                         default='reference', dest='peak_source',
                         help='Peak position source across spectra (default: reference)')
+    series.add_argument('--params', help='JSON file of series/fitting parameter '
+                        'overrides, deep-merged over the defaults. Unknown keys are '
+                        'refused. Command-line flags (--parallel, --peak-source) win '
+                        'over the file.')
     series.add_argument('--deep', action='store_true',
                         help='With --dry-run: also check registration, capture, delays and '
                              'the peak list against the spectra (reads them; seconds, not instant)')

@@ -15,7 +15,7 @@ No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every ana
 | Command | Does | Required inputs | Key outputs |
 |---|---|---|---|
 | `diagnose` | Read-only pre-flight over a dataset: registration, capture, delays, peak lists, cross-experiment residue set | `<root>` | stdout report / JSON |
-| `series` | Fit a multi-spectrum series/titration | `--spectra <dir/glob>` `--peaks` `--out` | `peak_intensity_matrix.csv`, `_volume_matrix`, `comprehensive_peak_tracking.csv`, `series_analysis_tidy.csv`, per-spectrum CSVs |
+| `series` | Fit a multi-spectrum series/titration | `--spectra <dir/glob>` `--peaks` `--out` `[--params tune.json]` | `peak_intensity_matrix.csv`, `_volume_matrix`, `comprehensive_peak_tracking.csv`, `series_analysis_tidy.csv`, per-spectrum CSVs |
 | `dynamixs t1t2` | Mono-exp T1/T2 fit | `--input <matrix.csv>` `--out` `--exp {T1,T2}` | `<prefix>_fit_results.txt` + JSON |
 | `dynamixs methyl-t2` | Bi-exp Tugarinov-Kay methyl T2 | `--input` `--out` | `<prefix>_fit_results.txt` + JSON |
 | `dynamixs hetnoe` | I_sat/I_unsat per residue | `--sat` `--unsat` `--out` | `<prefix>_hetnoe.csv`, `<prefix>_hetnoe.pdf` |

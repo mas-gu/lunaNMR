@@ -132,6 +132,18 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   parse in neither mode; those spectra get a stem-named column instead of a value.
 - `--peak-source reference` (default) holds list positions fixed across the series — correct for
   T1/T2/hetNOE.
+- `--params <file.json>` overrides the detection/fitting knobs this page tells you to tune,
+  deep-merged over the defaults so naming one key leaves the rest alone:
+  ```json
+  {"detection_params": {"search_window_x": 0.05},
+   "fitting_params":   {"min_r_squared": 0.8},
+   "gui_params":       {"max_peaks_fit": 120}}
+  ```
+  **An unknown key is refused, with a suggestion** — a knob that is accepted, does nothing and
+  still reports success is the failure mode this whole surface exists to prevent, and it is
+  checked during `--dry-run` too. Command-line flags (`--parallel`, `--peak-source`) win over
+  the file, so a stale tuning file cannot silently override what you just typed. The run
+  summary records the effective `params`.
 - Writes `peak_intensity_matrix.csv`, `_volume_matrix`, `comprehensive_peak_tracking.csv`,
   `series_analysis_tidy.csv`, `series_metadata.json`, per-spectrum CSVs.
 
