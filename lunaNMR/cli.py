@@ -142,7 +142,8 @@ def _full_command(args):
     parts = [getattr(args, 'command', None),
              getattr(args, 'dynamixs_command', None),
              getattr(args, 'export_command', None),
-             getattr(args, 'project_command', None)]
+             getattr(args, 'project_command', None),
+             getattr(args, 'peaks_command', None)]
     return ' '.join(p for p in parts if p)
 
 
@@ -1640,6 +1641,74 @@ def _run_dynamixs_modelfree(args):
     return 0
 
 
+def _run_peaks_shift(args):
+    """Apply a rigid offset to every position in a peak list.
+
+    `diagnose` measures this offset and stops there, but the error it reports is
+    usually rigid and therefore correctable: one list referenced against a slightly
+    different frame, not a wrong list. Without this the only headless remedy was to
+    re-pick the peaks.
+    """
+    from lunaNMR.utils.file_manager import NMRFileManager
+    if not os.path.isfile(args.peaks):
+        raise FileNotFoundError(f"Peak list not found: {args.peaks}")
+    if os.path.abspath(args.peaks) == os.path.abspath(args.out):
+        # The input is often the only copy of an assignment nobody wants to redo.
+        raise ValueError("--out is the same file as --peaks; write the shifted list "
+                         "somewhere else")
+
+    manager = NMRFileManager()
+    df = manager.load_peak_list(args.peaks)
+    if df is None or df.empty:
+        raise ValueError(f"No peaks could be read from {args.peaks}")
+
+    dx, dy, source = args.dx, args.dy, 'given'
+    if args.auto:
+        if not os.path.isfile(args.spectrum):
+            raise FileNotFoundError(f"--spectrum not found: {args.spectrum}")
+        from lunaNMR.validation.spectra_check import assess_registration
+        peaks = list(zip(df['Assignment'].astype(str),
+                         df['Position_X'].astype(float),
+                         df['Position_Y'].astype(float)))
+        with _engine_stdout(args):
+            # assess_registration maximises intensity at (position + d), so d is what
+            # the list must ADD to register. Applying it with the wrong sign doubles
+            # the error and looks identical to having worked.
+            dx, dy = assess_registration(args.spectrum, peaks, quick=args.quick)
+        source = 'measured'
+
+    shifted = df.copy()
+    shifted['Position_X'] = shifted['Position_X'].astype(float) + dx
+    shifted['Position_Y'] = shifted['Position_Y'].astype(float) + dy
+
+    summary = {'command': 'peaks shift', 'peaks': args.peaks, 'out': args.out,
+               'dx': float(dx), 'dy': float(dy), 'offset_source': source,
+               'n_peaks': len(shifted), 'dry_run': bool(args.dry_run)}
+    human = [f"{'[dry-run] ' if args.dry_run else ''}peaks shift "
+             f"({source}): dx={dx:+.4f} dy={dy:+.3f} ppm over {len(shifted)} peaks",
+             f"  in:  {args.peaks}",
+             f"  out: {args.out}" + (" (not written)" if args.dry_run else "")]
+    if not args.dry_run:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)) or '.', exist_ok=True)
+        # Tab-separated with 4 decimals: the format load_peak_list round-trips, and
+        # the precision CSP needs.
+        with open(args.out, 'w') as fh:
+            fh.write('Assignment\tPosition_X\tPosition_Y\n')
+            for _, row in shifted.iterrows():
+                fh.write(f"{row['Assignment']}\t{float(row['Position_X']):.4f}"
+                         f"\t{float(row['Position_Y']):.4f}\n")
+    _emit(args, summary, *human)
+    return 0
+
+
+def _validate_peaks_shift(parser, args):
+    if args.auto and not args.spectrum:
+        parser.error('--auto measures the offset against a spectrum, so it needs '
+                     '--spectrum')
+    if not args.auto and args.dx == 0.0 and args.dy == 0.0:
+        parser.error('give --dx/--dy, or --auto with --spectrum to measure them')
+
+
 def _run_batch(batch_argv):
     """Delegate to the existing batch CLI, passing through all of its flags."""
     from lunaNMR.batch_processing.cli_interface import CLIInterface
@@ -1763,6 +1832,27 @@ def build_parser():
     diagnose.add_argument('--strict', action='store_true',
                           help='Also exit 1 on WARN findings (default: FAIL only)')
     diagnose.set_defaults(func=_run_diagnose)
+
+    peaks_p = sub.add_parser('peaks', help='Peak-list utilities')
+    peaks_sub = peaks_p.add_subparsers(dest='peaks_command', metavar='<action>')
+    shift = peaks_sub.add_parser('shift', parents=[common],
+                                 help='Apply a rigid ppm offset to a peak list')
+    shift.add_argument('--peaks', required=True, help='Peak list to shift')
+    shift.add_argument('--out', required=True, help='Where to write the shifted list')
+    shift.add_argument('--dx', type=float, default=0.0,
+                       help='1H offset in ppm to add to every Position_X')
+    shift.add_argument('--dy', type=float, default=0.0,
+                       help='15N offset in ppm to add to every Position_Y')
+    shift.add_argument('--auto', action='store_true',
+                       help='Measure the offset against --spectrum instead of giving it')
+    shift.add_argument('--spectrum', help='Spectrum to register against (with --auto)')
+    shift.add_argument('--quick', action='store_true',
+                       help='Coarser registration grid when measuring: the 15N offset '
+                            'is quantised to 0.03 ppm instead of 0.015, so any smaller '
+                            'real offset is misreported — as zero, or as a full step, '
+                            'i.e. twice the truth. Use the full grid to correct one.')
+    shift.set_defaults(func=_run_peaks_shift, _validate=_validate_peaks_shift)
+    peaks_p.set_defaults(func=lambda a: (peaks_p.print_help(sys.stderr) or 2))
 
     dx = sub.add_parser('dynamixs', help='Relaxation fitting: T1/T2 and methyl-T2')
     dx_sub = dx.add_subparsers(dest='dynamixs_command', metavar='<kind>')

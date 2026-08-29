@@ -55,6 +55,7 @@ Beyond that, some subcommands report *findings* through the exit code:
 | `dynamixs modelfree` | Integrated pipeline: T1/T2 fit → hetNOE → density → Lipari-Szabo |
 | `kd` | Kd titration (CSP quadratic / intensity decay) |
 | `export kd` | CSP/intensity figures + summary from a saved Kd fit JSON |
+| `peaks shift` | Apply a rigid ppm offset to a peak list, measured or given |
 | `project inventory` / `remove` | Inspect / prune a `.lunaNMR` bundle |
 | `batch` | Folder-wide peak detect + Voigt/PS2D fit |
 
@@ -98,6 +99,25 @@ python -m lunaNMR series --spectra <dir> --peaks <list> --out <out> --dry-run --
 untouched. It reads the spectra, so it takes seconds rather than being instant — plain
 `--dry-run` is unchanged. The cross-experiment comparison is not available this way; that
 needs `diagnose`.
+
+### peaks shift
+```bash
+python -m lunaNMR peaks shift --peaks <list.txt> --out <shifted.txt> \
+    [--dx 0.0] [--dy 0.0] [--auto --spectrum <ref.ft>] [--quick]
+```
+`diagnose` measures a peak list's registration offset and stops there. This applies it.
+The error is usually rigid — one list referenced against a slightly different frame, not a
+wrong list — so a single offset corrects the whole file, and without this the only headless
+remedy was to re-pick every peak.
+
+`--auto` measures the offset against `--spectrum` with the same routine `diagnose` uses,
+then applies it; `--dx`/`--dy` give it explicitly. `--out` must differ from `--peaks`: the
+input is often the only copy of an assignment nobody wants to redo.
+
+**`--quick` is a resolution limit, not just a speed knob.** It quantises the ¹⁵N offset to
+0.03 ppm instead of 0.015, so a smaller real offset is misreported — as zero, or as a full
+step, i.e. twice the truth — and either reads as a confident measurement. Measure on the
+full grid before correcting anything.
 
 ### series
 ```bash
