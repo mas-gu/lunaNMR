@@ -92,3 +92,69 @@ class TestNonFiniteNumbersStayValidJson:
         assert "NaN" not in p.stdout, "bare NaN is not valid JSON"
         payload = json.loads(p.stdout)
         assert payload["mean_t2"] is None
+
+
+class TestStdoutStaysCleanUnderParallelism:
+    """`--format json` promises one object on stdout and nothing else. The guarantee is
+    made at the file-descriptor level (os.dup2), because worker processes inherit fd 1
+    and write past any Python-level redirect.
+
+    That is the cleverest thing in the CLI and nothing exercised it: the existing test
+    used capsys, which cannot observe a raw fd-1 write, on a single-process command. A
+    real subprocess with real workers is the only way to see it.
+    """
+
+    def test_a_parallel_series_run_emits_only_json(self, tmp_path):
+        data = REPO_ROOT / "data_example" / "2DHSQC"
+        spectra = sorted(data.glob("600_T1_0o*.ft"))
+        peaks = data / "600_assi.txt"
+        if len(spectra) < 2 or not peaks.exists():
+            pytest.skip("data_example/2DHSQC spectra not available")
+        p = _run("series", "--spectra", str(data), "--peaks", str(peaks),
+                 "--out", str(tmp_path / "out"), "--parallel", "--format", "json")
+        assert p.returncode == 0, p.stderr[-800:]
+        payload = json.loads(p.stdout)      # the whole of stdout, not a fragment of it
+        assert payload["ok"] is True
+        assert payload["command"] == "series"
+        assert payload["spectra_fitted"] >= 1
+        assert p.stderr.strip(), "engine chatter should be on stderr, not discarded"
+
+
+class TestTheTimeUnitsDefaultsArePinned:
+    """The three --time-units defaults differ deliberately: labels-only on t1t2 defaults
+    to s, the two that rescale default to ms. Nothing pinned them, so a tidy-up that
+    unified them would silently rescale published numbers -- and each flag now defaults
+    to None so the sidecar can supply the value, which makes the intended fallback
+    invisible in the parser.
+    """
+
+    @pytest.mark.parametrize("subcommand,expected", [
+        ("_TIME_UNITS_DEFAULT", "s"),
+        ("_T1RHO_TIME_UNITS_DEFAULT", "ms"),
+        ("_MODELFREE_UNITS_DEFAULT", "ms"),
+    ])
+    def test_the_documented_fallback(self, subcommand, expected):
+        import lunaNMR.cli as cli
+        assert getattr(cli, subcommand) == expected
+
+    @pytest.mark.parametrize("argv,dest", [
+        (["dynamixs", "t1t2"], "time_units"),
+        (["dynamixs", "methyl-t2"], "time_units"),
+        (["dynamixs", "t1rho"], "time_units"),
+        (["dynamixs", "modelfree"], "f1_t1_units"),
+    ])
+    def test_the_flag_itself_defaults_to_none(self, argv, dest):
+        """None, not the documented value: the handler must be able to tell 'the user
+        said nothing' from 'the user asked for this', or the sidecar can never win."""
+        import argparse
+        from lunaNMR.cli import build_parser
+        parser = build_parser()
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                sub = action.choices[argv[0]]
+                for a2 in sub._actions:
+                    if isinstance(a2, argparse._SubParsersAction):
+                        target = a2.choices[argv[1]]
+                        assert target.get_default(dest) is None
+                        return
+        pytest.fail("subcommand not found")

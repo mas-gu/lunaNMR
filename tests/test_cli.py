@@ -90,7 +90,7 @@ class TestKdSubcommand:
         # --out and --p0 are required; argparse should exit non-zero.
         with pytest.raises(SystemExit) as exc:
             main(["kd", "--input", "nope.csv"])
-        assert exc.value.code != 0
+        assert exc.value.code == 2
 
 
 class TestBatchDelegation:
@@ -193,7 +193,7 @@ class TestDynamixsMethyl:
 
     def test_dynamixs_requires_subcommand(self):
         from lunaNMR.cli import main
-        assert main(["dynamixs"]) != 0
+        assert main(["dynamixs"]) == 2
 
     @pytest.mark.filterwarnings("ignore:FigureCanvasAgg is non-interactive")
     def test_t1t2_reads_lunanmr_matrix_with_o_decimal_headers(self, tmp_path):
@@ -266,7 +266,7 @@ class TestSeriesSubcommand:
         from lunaNMR.cli import main
         with pytest.raises(SystemExit) as exc:
             main(["series", "--spectra", str(tmp_path), "--out", str(tmp_path / "o")])
-        assert exc.value.code != 0
+        assert exc.value.code == 2
 
     @pytest.mark.filterwarnings("ignore::RuntimeWarning")
     def test_series_returns_nonzero_when_no_spectra_processed(self, tmp_path):
@@ -362,7 +362,7 @@ class TestProjectSubcommand:
 
     def test_inventory_missing_bundle_errors(self, tmp_path):
         from lunaNMR.cli import main
-        assert main(["project", "inventory", str(tmp_path / "nope.lunaNMR")]) != 0
+        assert main(["project", "inventory", str(tmp_path / "nope.lunaNMR")]) == 1
 
     def test_remove_deletes_path(self, tmp_path):
         from lunaNMR.cli import main
@@ -377,12 +377,12 @@ class TestProjectSubcommand:
         bundle = _make_bundle(tmp_path)
         sibling = tmp_path / "secret.txt"
         sibling.write_text("keep")
-        assert main(["project", "remove", str(bundle), "../secret.txt"]) != 0
+        assert main(["project", "remove", str(bundle), "../secret.txt"]) == 1
         assert sibling.exists()
 
     def test_project_requires_subcommand(self):
         from lunaNMR.cli import main
-        assert main(["project"]) != 0
+        assert main(["project"]) == 2
 
 
 class TestExportKd:
@@ -586,7 +586,7 @@ class TestExportKd:
 
     def test_export_requires_subcommand(self):
         from lunaNMR.cli import main
-        assert main(["export"]) != 0
+        assert main(["export"]) == 2
 
 
 class TestIntensityPanelAxisSharing:
@@ -1075,10 +1075,10 @@ class TestDispatch:
 
     def test_no_subcommand_returns_nonzero(self):
         from lunaNMR.cli import main
-        assert main([]) != 0
+        assert main([]) == 2
 
     def test_unknown_subcommand_errors(self):
         from lunaNMR.cli import main
         with pytest.raises(SystemExit) as exc:
             main(["bogus"])
-        assert exc.value.code != 0
+        assert exc.value.code == 2

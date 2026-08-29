@@ -148,7 +148,13 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 ```
 
 ## Machine conventions
-- **`--format json`** → stdout is one JSON summary object, nothing else; all engine chatter goes to stderr (fd-level, so spawn workers stay clean). Parse stdout for `n_fitted`/`n_successful`, output paths, etc.
+- **`--format json`** → stdout is one JSON object, nothing else; all engine chatter goes to stderr (fd-level, so spawn workers stay clean). **`json.loads(proc.stdout)` is safe on failure too** — errors are reported in the same shape, so branch on `ok` rather than on the exit code alone:
+  ```json
+  {"ok": true,  "schema_version": 1, "command": "dynamixs t1t2", "n_fitted": 60, "…": "…"}
+  {"ok": false, "schema_version": 1, "command": "dynamixs t1t2",
+   "error": {"type": "FileNotFoundError", "message": "…"}}
+  ```
+  Every summary carries `ok`, `schema_version` and the full `command` path (`dynamixs t1t2`, not `dynamixs`) — including dry-runs, which add `dry_run: true`. Keys are only ever added within a `schema_version`, so read the ones you know and ignore the rest. **Non-finite numbers serialise as `null`**, not `NaN`: a run where nothing fitted stays parseable. `project` and `batch` have no `--format` flag and are outside this contract.
 - **`--dry-run`** → validates required inputs exist, prints the plan, runs nothing. Exit 1 if any input missing, else 0.
 - **`--parallel`** → `series` only (two-pass processor, ~2.7×). **`--no-parallel` → `density` only.** `modelfree` also parallelizes internally but hard-codes `use_multiprocessing=True`, so its CPU use cannot be bounded — `modelfree --no-parallel` exits 2 with `unrecognized arguments`.
 - **Exit codes:** `2` = no subcommand or an unrecognised flag. `1` = bad input (reported as `error: …` on stderr, no traceback), or a dry-run with a missing input. `diagnose` also returns `1` on any `FAIL` finding (`WARN` needs `--strict`), and so does `series --dry-run --deep`; `series`/`t1t2`/`methyl-t2` return `1` when nothing fit and `t1rho` when the R2 table is empty. `hetnoe`/`density`/`modelfree`/`kd`/`export kd` return `0` on any completed run even with residues dropped — check `n_fitted`/`n_successful` against its total, not the exit code. Full table: [`CLI.md`](CLI.md#exit-codes).
