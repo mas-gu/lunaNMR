@@ -55,6 +55,7 @@ Beyond that, some subcommands report *findings* through the exit code:
 | `dynamixs modelfree` | Integrated pipeline: T1/T2 fit → hetNOE → density → Lipari-Szabo |
 | `kd` | Kd titration (CSP quadratic / intensity decay) |
 | `export kd` | CSP/intensity figures + summary from a saved Kd fit JSON |
+| `integrate-1d` | Measure peaks across a 1D spectrum series |
 | `peaks shift` | Apply a rigid ppm offset to a peak list, measured or given |
 | `project inventory` / `export` / `remove` | Inspect / extract / prune a `.lunaNMR` bundle |
 | `batch` | Folder-wide peak detect + Voigt/PS2D fit |
@@ -114,6 +115,31 @@ cannot target, so it is worth seeing. Refuses a non-empty `--out` unless `--forc
 
 `project save` has no headless equivalent — `ProjectManager.save_project` reads the live
 main window throughout — but the read direction needs no session.
+
+### integrate-1d
+```bash
+python -m lunaNMR integrate-1d --spectra <folder> --out <dir> \
+    (--peaks 5.00,5.30 | --detect [--min-snr 10]) [--value area] [--prefix integration]
+```
+Measures each peak in every spectrum of a 1D series. Peaks are re-matched at each point
+within a drift window bounded by the peak's own linewidth, and matching is competitive —
+two peaks can never collapse onto one maximum, the failure that silently turns an
+intensity ratio into 1.0.
+
+Writes a wide `<prefix>_series.csv` (one row per spectrum, one column per peak) and a long
+`<prefix>_table.csv` carrying every observable per measurement.
+
+**Quantify with `area`, the region sum.** On the reference 53-point series a 1:1 conversion
+conserves to **6.4% for the region sum, 11.5% for height and 38% for the fitted area**.
+Height fails because a broadening peak loses height at constant area. The fitted area fails
+because a close neighbour caps the window at ~1.4 linewidths, leaving the σ/γ split
+unconstrained while the analytic area integrates tails the data never sampled — and
+**R² stays above 0.97 throughout without validating that extrapolation**, because it only
+measures the fit inside the window. Use `fit_area`, `r_squared` and `fwhm` diagnostically.
+
+The summary reports `quantitative_observable` and `diagnostic_observables` so a caller
+does not have to know this, and counts measurements where no maximum was found (those are
+read at the expected position rather than allowed to climb a neighbour's flank).
 
 ### peaks shift
 ```bash

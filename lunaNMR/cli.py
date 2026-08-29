@@ -1832,6 +1832,83 @@ def _validate_peaks_shift(parser, args):
         parser.error('give --dx/--dy, or --auto with --spectrum to measure them')
 
 
+# Which 1D number means what. On the reference 53-point series a 1:1 conversion
+# conserves to 6.4% for the region sum, 11.5% for height and 38% for the FITTED area: a
+# close neighbour caps the window at ~1.4 linewidths, leaving the sigma/gamma split
+# unconstrained while the analytic area integrates tails the data never sampled. R2 stays
+# above 0.97 throughout and does NOT validate that extrapolation. In the GUI a user sees
+# the fit; a CLI caller has only these numbers, so the output has to say which is which.
+_ONED_QUANTITATIVE = 'area'
+_ONED_DIAGNOSTIC = ('height', 'fit_area', 'r_squared', 'fwhm')
+
+
+def _run_integrate_1d(args):
+    """Measure peaks across a 1D spectrum series (modules/integration_1d_v1o0)."""
+    _add_modules_path('integration_1d_v1o0')
+    spectra_paths = _discover_spectra(args.spectra, ('ft1', 'ft', 'pipe'))
+    if args.dry_run:
+        return _dry_run(args, [('spectra', args.spectra if spectra_paths else '')],
+                        {'output_dir': args.out})
+    if not spectra_paths:
+        raise FileNotFoundError(f"No 1D spectra found in {args.spectra}")
+
+    from oned_series import load_series, integrate_series, write_series_csv
+    from oned_detector import detect_peaks
+
+    with _engine_stdout(args):
+        spectra = load_series(spectra_paths)
+        if args.detect:
+            found = detect_peaks(spectra[0], min_snr=args.min_snr)
+            peaks = [{'position': p['ppm'], 'assignment': f"peak_{i + 1}"}
+                     for i, p in enumerate(found)]
+        else:
+            peaks = [{'position': float(ppm), 'assignment': f"peak_{i + 1}"}
+                     for i, ppm in enumerate(args.peaks)]
+        if not peaks:
+            raise ValueError("No peaks to measure: --detect found none, and --peaks was "
+                             "not given")
+        table = integrate_series(spectra, peaks,
+                                 names=[os.path.basename(p) for p in spectra_paths])
+
+    os.makedirs(args.out, exist_ok=True)
+    series_csv = os.path.join(args.out, f"{args.prefix}_series.csv")
+    table_csv = os.path.join(args.out, f"{args.prefix}_table.csv")
+    with _engine_stdout(args):
+        write_series_csv(table, series_csv, value=args.value)
+    import csv as _csv
+    columns = ['point', 'spectrum', 'assignment', 'position', 'ppm', 'matched',
+               'height', 'area', 'fit_area', 'r_squared', 'fwhm', 'snr']
+    with open(table_csv, 'w', newline='') as fh:
+        writer = _csv.DictWriter(fh, fieldnames=columns, extrasaction='ignore')
+        writer.writeheader()
+        writer.writerows(table)
+
+    n_unmatched = sum(1 for row in table if not row.get('matched'))
+    _emit(args,
+          {'command': 'integrate-1d', 'n_spectra': len(spectra),
+           'n_peaks': len(peaks), 'n_rows': len(table),
+           'n_unmatched': n_unmatched,
+           'quantitative_observable': _ONED_QUANTITATIVE,
+           'diagnostic_observables': list(_ONED_DIAGNOSTIC),
+           'outputs': {'series': series_csv, 'table': table_csv}},
+          f"1D integration complete: {len(peaks)} peak(s) across {len(spectra)} spectra",
+          f"  Series: {series_csv}",
+          f"  Table:  {table_csv}",
+          *( [f"  NOTE: {n_unmatched} of {len(table)} measurements found no maximum and "
+              f"were read at the expected position"] if n_unmatched else []),
+          "  Quantify with `area` (the region sum). `height` moves with linewidth, and",
+          "  `fit_area` extrapolates tails the window never sampled when a neighbour",
+          "  caps it — R^2 measures the fit inside the window and does not validate that.",
+          "  Use `fit_area`, `r_squared` and `fwhm` diagnostically.")
+    return 0
+
+
+def _validate_integrate_1d(parser, args):
+    if not args.detect and not args.peaks:
+        parser.error('give --peaks <ppm,ppm,...> or --detect to find them in the first '
+                     'spectrum')
+
+
 def _run_batch(batch_argv):
     """Delegate to the existing batch CLI, passing through all of its flags."""
     from lunaNMR.batch_processing.cli_interface import CLIInterface
@@ -1959,6 +2036,23 @@ def build_parser():
     diagnose.add_argument('--strict', action='store_true',
                           help='Also exit 1 on WARN findings (default: FAIL only)')
     diagnose.set_defaults(func=_run_diagnose)
+
+    oned = sub.add_parser('integrate-1d', parents=[common],
+                          help='Measure peaks across a 1D spectrum series')
+    oned.add_argument('--spectra', required=True, help='Folder or glob of 1D spectra')
+    oned.add_argument('--out', required=True, help='Output directory')
+    oned.add_argument('--prefix', default='integration', help='Output filename prefix')
+    oned.add_argument('--peaks', type=lambda s: [float(x) for x in _str_list(s)],
+                      help='Comma-separated peak positions in ppm')
+    oned.add_argument('--detect', action='store_true',
+                      help='Detect peaks in the first spectrum instead of giving them')
+    oned.add_argument('--min-snr', type=float, default=10.0, dest='min_snr',
+                      help='Detection threshold in multiples of the noise (default: 10)')
+    oned.add_argument('--value', choices=['height', 'area', 'fit_area'], default='area',
+                      help='Observable for the wide series CSV. Default `area`, the '
+                           'region sum — the one that stays proportional when the '
+                           'linewidth changes')
+    oned.set_defaults(func=_run_integrate_1d, _validate=_validate_integrate_1d)
 
     peaks_p = sub.add_parser('peaks', help='Peak-list utilities')
     peaks_sub = peaks_p.add_subparsers(dest='peaks_command', metavar='<action>')
