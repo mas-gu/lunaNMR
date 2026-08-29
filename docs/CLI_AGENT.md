@@ -26,6 +26,7 @@ No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every ana
 | `export kd` | Figures + summary from a kd fit JSON | `--json` `--out` `[--kind curves,ref-bars,kd-bars,global-fit]` `[--prefix]` | `[prefix_]summary.csv`, `[prefix_]<obs>_fits.pdf` / per-residue PNGs (curves, per fitted obs), `[prefix_]<obs>_ref_vs_point.pdf` + `.csv` + `.json` (ref→point bars, both obs by default), `[prefix_]<obs>_kd_vs_residue.pdf` (per-residue Kd + global line, PDF only), `[prefix_]<obs>_global_fit.pdf` + `.csv` + `.json` (per-residue data + shared-Kd curve, R²(global) per panel) |
 | `peaks shift` | Apply a rigid ppm offset to a peak list (`--auto` measures it against a spectrum) | `--peaks` `--out` + `--dx/--dy` or `--auto --spectrum` | shifted peak list |
 | `project inventory` | List a bundle's contents | `<bundle.lunaNMR>` | stdout listing |
+| `project export` | Copy a bundle's contents to a plain folder | `<bundle.lunaNMR>` `--out` | copied tree + manifest |
 | `project remove` | Delete bundle-relative paths | `<bundle> <rel/path>…` | (mutates bundle) |
 | `batch` | Folder-wide detect + Voigt/PS2D fit | `<folder>` (flags pass through to `batch_processing`) | per-spectrum fit outputs |
 

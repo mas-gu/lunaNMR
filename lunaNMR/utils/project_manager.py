@@ -1396,10 +1396,13 @@ class ProjectManager:
         series_specs = []
         series_root = project_path / 'series_results'
         if series_root.is_dir():
+            # Files as well as directories: a run writes batch_results.json alongside
+            # its per-run folders, and enumerating only directories left it in no
+            # category -- invisible in the browser and untargetable by
+            # remove_bundle_paths, which takes the paths published here.
             for sub in sorted(series_root.iterdir()):
-                if sub.is_dir():
-                    series_specs.append((f'series_results/{sub.name}', sub.name,
-                                         [f'series_results/{sub.name}'], True))
+                series_specs.append((f'series_results/{sub.name}', sub.name,
+                                     [f'series_results/{sub.name}'], True))
         add('series_results', 'Series results', series_specs)
 
         dynamixs_specs = []

@@ -984,6 +984,70 @@ def _run_project_remove(args):
     return 0
 
 
+def _run_project_export(args):
+    """Copy a .lunaNMR bundle's contents into a plain folder.
+
+    A bundle is already a directory of CSV/JSON, so the value here is not conversion:
+    it is getting the analysis out of a bundle headlessly, completely, and with a
+    record of what came. `project save` stays out of reach — ProjectManager.save_project
+    reads self.main_window throughout — but the read direction needs no session.
+    """
+    import shutil
+    if not os.path.isdir(args.bundle):
+        raise FileNotFoundError(f"Not a project bundle: {args.bundle}")
+    root = os.path.abspath(args.bundle)
+    out = os.path.abspath(args.out)
+    if os.path.abspath(os.path.join(out, '')) .startswith(root + os.sep):
+        raise ValueError("--out is inside the bundle; export somewhere else")
+    if os.path.exists(out) and os.listdir(out) and not args.force:
+        raise ValueError(f"--out already exists and is not empty: {out} "
+                         f"(pass --force to write into it anyway)")
+
+    files = sorted(os.path.relpath(os.path.join(base, name), root)
+                   for base, _, names in os.walk(root) for name in names)
+    total = sum(os.path.getsize(os.path.join(root, rel)) for rel in files)
+
+    # Everything is copied, but the categories come from inventory() -- and inventory
+    # only enumerates DIRECTORIES under series_results/, so a loose file there is
+    # invisible to it. Naming those rather than absorbing them keeps a partial view
+    # from reading as a complete one.
+    categories = _project_manager().inventory(root)
+    classified = set()
+    for cat in categories:
+        for item in cat['items']:
+            for rel in item['paths']:
+                full = os.path.join(root, rel)
+                if os.path.isdir(full):
+                    classified.update(
+                        os.path.relpath(os.path.join(b, n), root)
+                        for b, _, ns in os.walk(full) for n in ns)
+                else:
+                    classified.add(rel)
+    unclassified = sorted(set(files) - classified)
+
+    summary = {'command': 'project export', 'bundle': root, 'out': out,
+               'n_files': len(files), 'bytes': total,
+               'categories': [c['label'] for c in categories],
+               'unclassified': unclassified, 'dry_run': bool(args.dry_run)}
+    human = [f"{'[dry-run] ' if args.dry_run else ''}project export: {len(files)} file(s), "
+             f"{_human_size(total)}",
+             f"  from: {root}",
+             f"  to:   {out}" + (" (not written)" if args.dry_run else ""),
+             *(f"  category: {c['label']}" for c in categories)]
+    if unclassified:
+        human.append(f"  NOTE: {len(unclassified)} file(s) are copied but not listed by "
+                     f"`project inventory`, so `project remove` cannot target them: "
+                     f"{', '.join(unclassified[:5])}")
+    if not args.dry_run:
+        os.makedirs(out, exist_ok=True)
+        for rel in files:
+            dest = os.path.join(out, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy2(os.path.join(root, rel), dest)
+    _emit(args, summary, *human)
+    return 0
+
+
 def _safe_name(text):
     """Filesystem-safe version of a residue label."""
     return re.sub(r'[^\w.+-]+', '_', str(text))
@@ -2062,6 +2126,13 @@ def build_parser():
                               help='List a bundle\'s contents by category')
     inv.add_argument('bundle', help='Path to a .lunaNMR bundle directory')
     inv.set_defaults(func=_run_project_inventory)
+    exp = proj_sub.add_parser('export', parents=[common],
+                              help='Copy a bundle\'s contents into a plain folder')
+    exp.add_argument('bundle', help='Path to a .lunaNMR bundle directory')
+    exp.add_argument('--out', required=True, help='Destination folder')
+    exp.add_argument('--force', action='store_true',
+                     help='Write into --out even if it already has files in it')
+    exp.set_defaults(func=_run_project_export)
     rm = proj_sub.add_parser('remove', parents=[common],
                              help='Delete bundle-relative paths from a bundle')
     rm.add_argument('bundle', help='Path to a .lunaNMR bundle directory')

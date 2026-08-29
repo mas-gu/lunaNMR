@@ -56,7 +56,7 @@ Beyond that, some subcommands report *findings* through the exit code:
 | `kd` | Kd titration (CSP quadratic / intensity decay) |
 | `export kd` | CSP/intensity figures + summary from a saved Kd fit JSON |
 | `peaks shift` | Apply a rigid ppm offset to a peak list, measured or given |
-| `project inventory` / `remove` | Inspect / prune a `.lunaNMR` bundle |
+| `project inventory` / `export` / `remove` | Inspect / extract / prune a `.lunaNMR` bundle |
 | `batch` | Folder-wide peak detect + Voigt/PS2D fit |
 
 ### diagnose
@@ -99,6 +99,21 @@ python -m lunaNMR series --spectra <dir> --peaks <list> --out <out> --dry-run --
 untouched. It reads the spectra, so it takes seconds rather than being instant — plain
 `--dry-run` is unchanged. The cross-experiment comparison is not available this way; that
 needs `diagnose`.
+
+### project export
+```bash
+python -m lunaNMR project export <bundle.lunaNMR> --out <folder> [--force] [--dry-run]
+```
+Copies a bundle's contents into a plain folder, so an analysis can be read without the
+app. A bundle is already a directory of CSV/JSON, so nothing is converted — the point is
+getting it out headlessly and completely.
+
+**Everything is copied**, and anything `project inventory` does not classify is *named* in
+the summary rather than absorbed: a file in no category is also a file `project remove`
+cannot target, so it is worth seeing. Refuses a non-empty `--out` unless `--force`.
+
+`project save` has no headless equivalent — `ProjectManager.save_project` reads the live
+main window throughout — but the read direction needs no session.
 
 ### peaks shift
 ```bash
