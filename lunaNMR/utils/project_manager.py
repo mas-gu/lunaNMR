@@ -1426,6 +1426,26 @@ class ProjectManager:
 
         return categories
 
+    def resolve_bundle_paths(self, project_path: Path,
+                             rel_paths: List[str]) -> List[Tuple[str, bool, int]]:
+        """What deleting `rel_paths` would touch: (rel, exists, size) per path.
+
+        Applies the same containment check as the deletion itself, so a preview
+        cannot accept a path the real run refuses. Deletion here is immediate and has
+        no undo, which is what makes a preview worth having.
+
+        Raises ValueError if a path resolves outside the bundle or is the bundle root.
+        """
+        project_path = Path(project_path).resolve()
+        resolved = []
+        for rel in rel_paths:
+            target = (project_path / rel).resolve()
+            if target == project_path or project_path not in target.parents:
+                raise ValueError(f"Refusing to delete path outside bundle: {rel}")
+            exists = target.exists()
+            resolved.append((rel, exists, self._path_size(target) if exists else 0))
+        return resolved
+
     def remove_bundle_paths(self, project_path: Path, rel_paths: List[str]) -> int:
         """Delete bundle-relative paths; return bytes freed.
 
@@ -1433,15 +1453,13 @@ class ProjectManager:
         root itself (guards against deleting unintended files).
         """
         import shutil
-        project_path = Path(project_path).resolve()
+        root = Path(project_path).resolve()
         freed = 0
-        for rel in rel_paths:
-            target = (project_path / rel).resolve()
-            if target == project_path or project_path not in target.parents:
-                raise ValueError(f"Refusing to delete path outside bundle: {rel}")
-            if not target.exists():
+        for rel, exists, size in self.resolve_bundle_paths(root, rel_paths):
+            if not exists:
                 continue
-            freed += self._path_size(target)
+            target = (root / rel).resolve()
+            freed += size
             if target.is_dir():
                 shutil.rmtree(target)
             else:

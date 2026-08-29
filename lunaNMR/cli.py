@@ -859,30 +859,68 @@ def _project_manager():
 
 def _run_project_inventory(args):
     if not os.path.isdir(args.bundle):
-        print(f"Not a project bundle: {args.bundle}", file=sys.stderr)
+        _emit_error(args, FileNotFoundError(f"Not a project bundle: {args.bundle}"))
         return 1
     categories = _project_manager().inventory(args.bundle)
-    if not categories:
-        print("(empty bundle — no recognized categories)")
-        return 0
-    for cat in categories:
-        print(f"{cat['label']}  [{_human_size(cat['size'])}]")
-        for item in cat['items']:
-            lock = '' if item['removable'] else '  (protected)'
-            print(f"  - {item['label']}  [{_human_size(item['size'])}]{lock}")
+
+    def _lines():
+        """The listing, with the bundle-relative paths `project remove` actually takes.
+
+        They were in the inventory data all along and only the English label was
+        printed, so there was no way to learn a valid argument from the tool itself.
+        """
+        if not categories:
+            return ["(empty bundle — no recognized categories)"]
+        out = []
+        for cat in categories:
+            out.append(f"{cat['label']}  [{_human_size(cat['size'])}]")
+            for item in cat['items']:
+                if item['removable']:
+                    out.append(f"  - {item['label']}  [{_human_size(item['size'])}]")
+                    out.append(f"      {' '.join(item['paths'])}")
+                else:
+                    out.append(f"  - {item['label']}  [{_human_size(item['size'])}]"
+                               f"  (protected)")
+        return out
+
+    _emit(args, {'command': 'project inventory', 'bundle': args.bundle,
+                 'categories': categories}, *_lines())
     return 0
 
 
 def _run_project_remove(args):
     if not os.path.isdir(args.bundle):
-        print(f"Not a project bundle: {args.bundle}", file=sys.stderr)
+        _emit_error(args, FileNotFoundError(f"Not a project bundle: {args.bundle}"))
         return 1
+    manager = _project_manager()
+    if args.dry_run:
+        # Deletion here is immediate and has no undo, so the preview must apply the
+        # same containment check the real run does -- a preview that accepts a path
+        # the run would refuse is worse than none.
+        try:
+            targets = manager.resolve_bundle_paths(args.bundle, args.paths)
+        except ValueError as exc:
+            _emit_error(args, exc)
+            return 1
+        _emit(args, {'command': 'project remove', 'dry_run': True,
+                     'bundle': args.bundle, 'paths': args.paths,
+                     'existing': [p for p, exists, _ in targets if exists],
+                     'missing': [p for p, exists, _ in targets if not exists],
+                     'would_free': sum(size for _, _, size in targets)},
+              f"[dry-run] project remove — nothing deleted",
+              *(f"  {'would remove' if exists else 'not present'}: {rel}"
+                f"{'  [' + _human_size(size) + ']' if exists else ''}"
+                for rel, exists, size in targets),
+              f"  would free {_human_size(sum(s for _, _, s in targets))}")
+        return 0
     try:
-        freed = _project_manager().remove_bundle_paths(args.bundle, args.paths)
+        freed = manager.remove_bundle_paths(args.bundle, args.paths)
     except ValueError as exc:
-        print(f"Refused: {exc}", file=sys.stderr)
+        _emit_error(args, exc)
         return 1
-    print(f"Removed {len(args.paths)} path(s), freed {_human_size(freed)}")
+    _emit(args, {'command': 'project remove', 'bundle': args.bundle,
+                 'paths': args.paths, 'freed': freed},
+          f"Removed {len(args.paths)} path(s), freed {_human_size(freed)}")
     return 0
 
 
@@ -1867,10 +1905,12 @@ def build_parser():
 
     proj = sub.add_parser('project', help='Inspect / prune a .lunaNMR project bundle')
     proj_sub = proj.add_subparsers(dest='project_command', metavar='<action>')
-    inv = proj_sub.add_parser('inventory', help='List a bundle\'s contents by category')
+    inv = proj_sub.add_parser('inventory', parents=[fmt],
+                              help='List a bundle\'s contents by category')
     inv.add_argument('bundle', help='Path to a .lunaNMR bundle directory')
     inv.set_defaults(func=_run_project_inventory)
-    rm = proj_sub.add_parser('remove', help='Delete bundle-relative paths from a bundle')
+    rm = proj_sub.add_parser('remove', parents=[common],
+                             help='Delete bundle-relative paths from a bundle')
     rm.add_argument('bundle', help='Path to a .lunaNMR bundle directory')
     rm.add_argument('paths', nargs='+', help='Bundle-relative path(s) to delete')
     rm.set_defaults(func=_run_project_remove)
