@@ -32,14 +32,76 @@ def _str_list(text):
     return [x.strip() for x in text.split(',') if x.strip() != '']
 
 
+def _choice_list(*allowed):
+    """A comma-separated list whose members are checked, since argparse's own `choices`
+    validates the whole string rather than the items inside it. A misspelling otherwise
+    reached the renderer and produced no figures without saying why."""
+    allowed_set = set(allowed)
+
+    def parse(text):
+        values = _str_list(text)
+        unknown = [v for v in values if v not in allowed_set]
+        if unknown:
+            raise argparse.ArgumentTypeError(
+                f"unknown value(s) {', '.join(unknown)}; choose from "
+                f"{', '.join(sorted(allowed_set))}")
+        return values
+    return parse
+
+
+# Bumped only when a key changes meaning or disappears. Additions do not bump it: a
+# consumer that reads the keys it knows keeps working across them.
+SCHEMA_VERSION = 1
+
+
+def _json_safe(obj):
+    """Replace non-finite floats with None.
+
+    json.dumps writes bare NaN and Infinity, which are not JSON — jq, Go and Rust all
+    reject them. `mean_t2` is NaN when nothing fitted, so the output became unparseable
+    on exactly the degenerate runs worth inspecting.
+    """
+    import math
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
 def _emit(args, summary, *human_lines):
-    """Print the run summary: a single JSON object under --format json, else human lines."""
+    """Print the run summary: a single JSON object under --format json, else human lines.
+
+    `ok`, `schema_version` and the full `command` are injected here rather than written
+    into every call site, so a summary cannot be added without them.
+    """
     import json
     if getattr(args, 'format', 'text') == 'json':
-        print(json.dumps(summary))
+        envelope = {'ok': True, 'schema_version': SCHEMA_VERSION,
+                    'command': _full_command(args)}
+        envelope.update(summary)
+        print(json.dumps(_json_safe(envelope), allow_nan=False))
     else:
         for line in human_lines:
             print(line)
+
+
+def _emit_error(args, exc):
+    """Report a failure in the caller's own format.
+
+    Under --format json the documented usage is `json.loads(proc.stdout)`; every failure
+    path wrote to stderr and left stdout empty, so that parse raised on every error and
+    the exception said nothing about the cause. Text mode keeps the bare stderr line.
+    """
+    import json
+    if getattr(args, 'format', 'text') == 'json':
+        print(json.dumps({'ok': False, 'schema_version': SCHEMA_VERSION,
+                          'command': _full_command(args),
+                          'error': {'type': type(exc).__name__, 'message': str(exc)}}))
+    else:
+        print(f"error: {exc}", file=sys.stderr)
 
 
 import contextlib
@@ -358,7 +420,16 @@ def _run_kd_survey(args):
 def _run_kd(args):
     """Wrap dynamiXs_Kd.kd_fit.run_kd_analysis_with_params for the CLI."""
     if args.dry_run:
-        return _dry_run(args, [('input', args.input)], {'output_dir': args.out})
+        # The survey writes its selection file beside the INPUT, not into --out, so a
+        # plan naming only --out sends the caller to the wrong place for the one file
+        # it is then told to edit.
+        planned = {'output_dir': args.out}
+        if args.survey:
+            planned['residues_file'] = os.path.join(
+                os.path.dirname(os.path.abspath(args.input)), f"{args.prefix}_residues.txt")
+            planned['survey_file'] = os.path.join(args.out, 'data',
+                                                  f"{args.prefix}_survey.csv")
+        return _dry_run(args, [('input', args.input)], planned)
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
     if args.survey:
         return _run_kd_survey(args)
@@ -714,11 +785,11 @@ def _run_series(args):
         return 1 if missing else deep_code
 
     if not nmr_files:
-        print(f"No spectrum files found in {args.spectra}", file=sys.stderr)
+        _emit_error(args, FileNotFoundError(f"No spectrum files found in {args.spectra}"))
         return 1
     reference_peaks = file_manager.load_peak_list(args.peaks)
     if reference_peaks.empty:
-        print(f"Peak list is empty: {args.peaks}", file=sys.stderr)
+        _emit_error(args, ValueError(f"Peak list is empty: {args.peaks}"))
         return 1
 
     os.makedirs(args.out, exist_ok=True)
@@ -747,15 +818,25 @@ def _run_series(args):
     results = getattr(result, 'results', None) or {}
     n_success = result.metadata.get('successful_spectra', 0)
     if not n_success:
-        print("Series produced no successful fits (all spectra failed or none loaded)",
-              file=sys.stderr)
+        _emit_error(args, RuntimeError(
+            f"Series produced no successful fits: 0 of {len(results)} spectra "
+            f"(all failed, or none loaded)"))
         return 1
     output_folder = result.metadata.get('output_folder', args.out)
+    # Naming them beats globbing for them, and series_analysis_tidy.csv is the only
+    # place per-peak fit quality reaches the series output — a caller that misses it
+    # has no way to gate residues.
+    outputs = {name: os.path.join(output_folder, name)
+               for name in ('peak_intensity_matrix.csv', 'peak_volume_matrix.csv',
+                            'peak_detected_matrix.csv', 'comprehensive_peak_tracking.csv',
+                            'series_analysis_tidy.csv', 'series_metadata.json')
+               if os.path.exists(os.path.join(output_folder, name))}
     _emit(args,
           {'command': 'series', 'spectra_fitted': n_success, 'spectra_total': len(results),
-           'output_folder': output_folder, 'parallel': args.parallel},
+           'output_folder': output_folder, 'outputs': outputs, 'parallel': args.parallel},
           f"Series analysis complete: {n_success}/{len(results)} spectra fitted",
-          f"  Output: {output_folder}")
+          f"  Output: {output_folder}",
+          *(f"  {name}" for name in sorted(outputs)))
     return 0
 
 
@@ -927,7 +1008,7 @@ def _run_export_kd(args):
     if args.dry_run:
         return _dry_run(args, [('json', args.json)], {'output_dir': args.out})
     if not os.path.isfile(args.json):
-        print(f"Fit JSON not found: {args.json}", file=sys.stderr)
+        _emit_error(args, FileNotFoundError(f"Fit JSON not found: {args.json}"))
         return 1
     import matplotlib
     matplotlib.use('Agg')
@@ -1569,7 +1650,8 @@ def build_parser():
                     help='Comma-separated ligand concentrations (default: CSV point labels)')
     kd.add_argument('--alpha', type=float, default=0.14,
                     help='CSP N/H scaling factor (default: 0.14)')
-    kd.add_argument('--observable', type=_str_list, default=['csp', 'intensity'],
+    kd.add_argument('--observable', type=_choice_list('csp', 'intensity'),
+                    default=['csp', 'intensity'],
                     help='Comma-separated observables to fit: csp,intensity (default: both)')
     kd.add_argument('--intensity-from', choices=['height', 'volume'], default='height',
                     dest='intensity_from', help='Intensity source for the ratio (default: height)')
@@ -1759,9 +1841,10 @@ def build_parser():
                                   help='CSP / intensity fit figures + summary from a kd fit JSON')
     ex_kd.add_argument('--json', required=True, help='kd fit JSON (…_kd_fit_data.json)')
     ex_kd.add_argument('--out', required=True, help='Output directory for figures + summary.csv')
-    ex_kd.add_argument('--observable', type=_str_list, default=None,
+    ex_kd.add_argument('--observable', type=_choice_list('csp', 'intensity'), default=None,
                        help='Comma-separated observables to render (default: those present)')
-    ex_kd.add_argument('--fig-format', type=_str_list, default=['pdf'], dest='fig_format',
+    ex_kd.add_argument('--fig-format', type=_choice_list('pdf', 'png'),
+                       default=['pdf'], dest='fig_format',
                        help='pdf (multi-page grid per observable) and/or png (one file per '
                             'residue); comma-separated for both, e.g. pdf,png (default: pdf)')
     ex_kd.add_argument('--per-page', type=int, default=20, dest='per_page',
@@ -1861,7 +1944,7 @@ def main(argv=None):
         # Expected bad-input failures from the wrapped engines (missing file, bad
         # concentrations, malformed CSV/JSON missing an expected column/key, an
         # unparseable delay label): report cleanly instead of dumping a traceback.
-        print(f"error: {exc}", file=sys.stderr)
+        _emit_error(args, exc)
         return 1
 
 

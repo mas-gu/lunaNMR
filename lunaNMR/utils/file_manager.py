@@ -23,7 +23,10 @@ warnings.filterwarnings('ignore')
 try:
     import nmrglue as ng
 except ImportError:
-    print("Warning: nmrglue not available - some features may be limited")
+    # stderr: this import happens outside the CLI's stdout guard, so on stdout it would
+    # prepend prose to the JSON summary and break `json.loads(proc.stdout)`.
+    import sys as _sys
+    print("Warning: nmrglue not available - some features may be limited", file=_sys.stderr)
     ng = None
 
 class NMRFileManager:
