@@ -79,7 +79,7 @@ Writes `series_results_*/`: `comprehensive_peak_tracking.csv` (wide), `series_an
 
 | Module | Purpose |
 |--------|---------|
-| **DynamiXs** | T₁/T₂, methyl T₂ (bi-exp), spectral density, model-free, CPMG |
+| **DynamiXs** | T₁/T₂, methyl T₂ (bi-exp), T₁ρ, spectral density, model-free |
 | **Kd / Titration** | Binding Kd — CSP (quadratic isotherm) + intensity decay |
 
 ---

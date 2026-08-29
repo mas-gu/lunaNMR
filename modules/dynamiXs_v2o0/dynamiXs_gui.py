@@ -4,7 +4,6 @@ DynamiXs v2.0 GUI - A comprehensive interface for NMR relaxation data analysis
 
 This GUI provides access to:
 - T1/T2 fitting analysis
-- CPMG relaxation dispersion
 - Spectral density function analysis
 - Data plotting and comparison tools
 - Data formatting utilities

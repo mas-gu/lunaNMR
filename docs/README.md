@@ -37,7 +37,7 @@ All detection/fitting parameters live behind the **Expert Mode** button (not nee
 ## Key Concepts
 
 ### Analysis Modules (Modules menu)
-- **DynamiXs Relaxation Analysis** — T₁/T₂, methyl T₂ (bi-exponential), spectral density, model-free, CPMG.
+- **DynamiXs Relaxation Analysis** — T₁/T₂, methyl T₂ (bi-exponential), T₁ρ, spectral density, model-free.
 - **Kd / Titration Analysis** — CSP (1:1 quadratic isotherm) and intensity exponential-decay binding fits.
 
 Both are scriptable headless (`python -m lunaNMR dynamixs …` / `kd`) — see [CLI.md](CLI.md).

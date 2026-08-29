@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/mas-gu/lunaNMR)
 
-PySide6/Qt6 suite for NMR peak detection, Voigt profile fitting, and integration — extended with binding-affinity (Kd / titration) fitting and protein dynamics (T₁/T₂, methyl T₂, spectral density, CPMG). Focus on automation: from automatic peak detection and overlap-aware multi-peak fitting through end-to-end batch processing of multi-spectrum datasets.
+PySide6/Qt6 suite for NMR peak detection, Voigt profile fitting, and integration — extended with binding-affinity (Kd / titration) fitting and protein dynamics (T₁/T₂, methyl T₂, spectral density, model-free). Focus on automation: from automatic peak detection and overlap-aware multi-peak fitting through end-to-end batch processing of multi-spectrum datasets.
 
 🌐 **[Landing page →](https://mas-gu.github.io/lunaNMR/)**
 
@@ -46,7 +46,7 @@ PySide6/Qt6 suite for NMR peak detection, Voigt profile fitting, and integration
 - **Quality assessment**: R², uncertainties (bootstrap / covariance), color-coded markers.
 - **Series workflows**: relaxation (T₁, T₂, hetNOE), titration, and multi-spectrum (temperature/pH) processing with automated peak tracking.
 - **Kd / titration**: CSP (quadratic 1:1 isotherm) and intensity-decay binding fits.
-- **Dynamics (DynamiXs)**: T₁/T₂, methyl T₂ (bi-exponential), spectral density, model-free, CPMG.
+- **Dynamics (DynamiXs)**: T₁/T₂, methyl T₂ (bi-exponential), T₁ρ, spectral density, model-free.
 - **Parallel processing**: two-pass cluster-based, ~2.7× speedup.
 - **ML/statistics**: dual-path fit-parameter prediction with statistical fallback (optional CNN classifier).
 - **Headless CLI**: `python -m lunaNMR` — every analysis is scriptable with no display. Subcommand reference: [docs/CLI.md](docs/CLI.md); machine contract and gotchas for agents: [docs/CLI_AGENT.md](docs/CLI_AGENT.md).
