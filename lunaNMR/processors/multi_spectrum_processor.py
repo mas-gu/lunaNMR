@@ -127,6 +127,12 @@ class MultiSpectrumProcessor:
 
     # Titration per-step tracking window = factor x reference-spectrum average
     # linewidth, capped (a backstop against a pathological linewidth estimate).
+    # How far above the noise a peak must still stand for its fitted POSITION to
+    # seed the next spectrum. Below this nothing in the data holds the peak where it
+    # is, so the optimizer moves it to whatever is nearby. 3x is the usual bar for
+    # calling a signal present at all.
+    SEED_NOISE_FLOOR_FACTOR = 3.0
+
     TITRATION_WINDOW_LW_FACTOR = 4.0
     TITRATION_WINDOW_CAP_F1 = 1.0   # 15N/13C (ppm)
     TITRATION_WINDOW_CAP_F2 = 0.2   # 1H (ppm)
@@ -203,15 +209,44 @@ class MultiSpectrumProcessor:
         if 'gui_params' in self.voigt_params:
             self.collect_training_data = self.voigt_params['gui_params'].get('collect_training_data', False)
 
-    def _carry_forward_seed(self, current, prior):
-        """Build the cascade seed: keep each successful fit, but for a failed peak
-        reuse its last-good entry from the prior seed so its position survives a
-        transient failure (n+5 fails -> seed stays at n+4, not back at the reference).
+    def _at_noise_floor(self, result, noise_level):
+        """True when this peak has no signal left to hold its position.
+
+        Height, or amplitude where the fitter reported that instead — the same
+        fallback the peak-table conversion makes.
+        """
+        if not noise_level or noise_level <= 0 or not result:
+            return False
+        height = result.get('height', result.get('amplitude'))
+        if height is None:
+            return False
+        return abs(height) <= self.SEED_NOISE_FLOOR_FACTOR * noise_level
+
+    def _carry_forward_seed(self, current, prior, noise_level=None):
+        """Build the cascade seed: keep each usable fit, but for a peak that cannot
+        vouch for its own position reuse its last-good entry from the prior seed, so
+        that position survives (n+5 fails -> seed stays at n+4, not back at reference).
+
+        Two ways to lose the vouch. The fit FAILED — the original case. Or the peak
+        has decayed into the noise, where the fit succeeds but means nothing: there is
+        nothing left holding the peak where it was, so the optimizer moves it to
+        whatever is nearby, reports a healthy R-squared, and hands the next spectrum a
+        position on another peak's maximum. Pass `noise_level` to catch the second;
+        without it only failures are carried, as before.
 
         Matched by LIST POSITION, not 'assignment': a failed fit is often just
         {'success': False, 'error': ...} with no assignment, so an assignment key
         never matches and the peak would silently reset to the reference. The
         results lists are peak-ordered and aligned, so the index is the reliable key.
+
+        The reported results keep their real values; the ONLY thing written back onto
+        them is `position_at_noise`. Replacing the reported position would turn an
+        undetermined peak into a confident "this residue did not move" — a zero CSP
+        that looks entirely reasonable and would never be questioned.
+
+        That flag is in-process only. Every output row is built by explicit key
+        selection, so it does not reach series_analysis_tidy.csv and a CSP measured
+        from that file cannot yet see which points were undetermined.
         """
         if not prior:
             return current
@@ -222,18 +257,28 @@ class MultiSpectrumProcessor:
             return current
         seed = []
         carried = 0
+        faded = 0
         for i, r in enumerate(current):
-            if r and r.get('success', False):
+            at_noise = self._at_noise_floor(r, noise_level)
+            if at_noise:
+                r['position_at_noise'] = True
+            if r and r.get('success', False) and not at_noise:
                 seed.append(r)
                 continue
             p = prior[i]
             if p is not None and self._same_peak(r, p):
                 seed.append(p)          # last-good position for this peak
-                carried += 1
+                if at_noise:
+                    faded += 1
+                else:
+                    carried += 1
             else:
                 seed.append(r)
         if carried:
             log_info(f"Cascade: kept last-good position for {carried} failed peak(s)")
+        if faded:
+            log_info(f"Cascade: {faded} peak(s) are at the noise floor; keeping their "
+                     f"previous position so the seed cannot follow them onto a neighbour")
         return seed
 
     def _same_peak(self, a, b):
@@ -246,6 +291,29 @@ class MultiSpectrumProcessor:
         if aa is not None and ba is not None:
             return str(aa) == str(ba)
         return True
+
+    def _titration_territories(self, peak_list, window_f1, window_f2):
+        """Per-peak position windows, keyed by assignment, or None if unreadable.
+
+        Sized here rather than in the fitter because the sizing needs every peak of
+        the spectrum: a cluster is fitted knowing only its own members, and the peak
+        a tracked peak is most likely to be stolen by may well sit in another one.
+        """
+        if peak_list is None or len(peak_list) == 0:
+            return None
+        if not {'Assignment', 'Position_X', 'Position_Y'}.issubset(peak_list.columns):
+            log_warning('Titration tracking: peak list carries no positions, so '
+                        'every peak keeps the shared per-step window')
+            return None
+
+        from lunaNMR.core.ps2d_territories import territory_margins
+
+        # Position_X is 1H (F2); Position_Y the indirect dimension (F1).
+        positions = [(float(row['Position_Y']), float(row['Position_X']))
+                     for _, row in peak_list.iterrows()]
+        margins = territory_margins(positions, window_f1, window_f2)
+        return {str(row['Assignment']): margin
+                for (_, row), margin in zip(peak_list.iterrows(), margins)}
 
     def _titration_window(self, fallback_f1, fallback_f2):
         """Per-step tracking window = factor x reference-spectrum average linewidth.
@@ -797,12 +865,19 @@ class MultiSpectrumProcessor:
                                                     cfg.titration_pos_margin_f2)
             self.integrator.titration_pos_margin_f1 = win_f1
             self.integrator.titration_pos_margin_f2 = win_f2
+            # Then narrow it per peak, so no two peaks can reach one position. The
+            # shared window alone is wider than the gap between clustered peaks
+            # (0.03 vs 0.04 ppm in 1H), which lets a peak cross to its neighbour in
+            # one step and report that neighbour's intensity under its own name.
+            self.integrator.titration_pos_margins = self._titration_territories(
+                self.integrator.peak_list, win_f1, win_f2)
             if spectrum_number == 2:
                 log_info(f"Titration mode: per-step window = {self.TITRATION_WINDOW_LW_FACTOR}x "
                          f"reference LW -> F1=±{win_f1:.3f} ppm, F2=±{win_f2:.3f} ppm")
         else:
             self.integrator.titration_pos_margin_f1 = None
             self.integrator.titration_pos_margin_f2 = None
+            self.integrator.titration_pos_margins = None
 
         # This calls _sync_parameters_to_integrator() internally, ensuring proper parameter flow
         # CRITICAL: Use integrator.peak_list which now contains DETECTED positions (not reference_peaks)
@@ -903,7 +978,8 @@ class MultiSpectrumProcessor:
         # the peak for the rest of the series. Only the seed is affected; the
         # reported results above keep the real (failed) values.
         self.previous_fitted_results = self._carry_forward_seed(
-            fitted_results, self.previous_fitted_results)
+            fitted_results, self.previous_fitted_results,
+            noise_level=getattr(self.integrator, 'noise_level', None))
 
         # Collect ML training data if enabled
         if self.collect_training_data and self.training_collector is not None:

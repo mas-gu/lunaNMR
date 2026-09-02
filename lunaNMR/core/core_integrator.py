@@ -353,6 +353,15 @@ class VoigtIntegrator(BaseIntegrator):
         # the relaxation config defaults). Set by the series processor.
         self.titration_pos_margin_f1 = None
         self.titration_pos_margin_f2 = None
+        # {assignment: (margin_f1, margin_f2)} narrowing that window per peak so no
+        # two peaks can reach one position. Also set by the series processor.
+        self.titration_pos_margins = None
+        # {assignment: (max_total_f1, max_total_f2)} capping how wide a peak may be
+        # fitted at THIS point of a series, from what it was at the previous one. A
+        # peak decaying into the noise otherwise broadens instead of fading, and the
+        # analytic volume of the broadened Voigt reads almost unchanged - measured on
+        # DNAJA1/HSPA8 73LysH, height 27% of the reference and volume 94% of it.
+        self.titration_lw_margins = None
 
         # Integration parameters (for integrated detection-fitting mode)
         self.integration_parameters = {
@@ -1972,6 +1981,50 @@ class VoigtIntegrator(BaseIntegrator):
         #print(f"   ✅ Fitted surface: min={np.min(fitted_surface):.2e}, max={np.max(fitted_surface):.2e}")
         return fitted_surface, individual_surfaces, baseline
 
+    def _growth_margins_for(self, peak_assignments):
+        """This cluster's per-peak linewidth caps, or None to use the learned bounds.
+
+        Stored by assignment for the same reason the position territories are: a
+        cluster sees only its own members, while the sizing is done over the whole
+        peak list from the previous point of the series.
+
+        Unlike the territories this is NOT all-or-nothing. A position margin is a
+        guarantee about the peaks as a set - one peak left on the shared window can
+        still reach a neighbour that gave up room for it - whereas a width cap is a
+        statement about one peak on its own, and capping the peaks we can inform is
+        strictly better than capping none. Peaks with no previous width fall back to
+        the learned bound, which is what `None` means here.
+        """
+        margins = getattr(self, 'titration_lw_margins', None)
+        if not margins or not peak_assignments:
+            return None
+        found = [margins.get(str(name)) for name in peak_assignments]
+        return found if any(m is not None for m in found) else None
+
+    def _territory_margins_for(self, peak_assignments):
+        """This cluster's per-peak position margins, or None to use the shared one.
+
+        Cascade tracking sizes a margin per peak so that no two peaks can reach one
+        position (ps2d_territories). They are stored by assignment because a cluster
+        sees only its own members, while the sizing needs the whole peak list.
+
+        All or nothing per cluster: a peak left on the shared margin can still reach
+        a neighbour that gave up room for it, so a partial set is not a weaker
+        guarantee, it is none.
+        """
+        territories = getattr(self, 'titration_pos_margins', None)
+        if not territories or not peak_assignments:
+            return None
+
+        margins = [territories.get(str(name)) for name in peak_assignments]
+        if any(margin is None for margin in margins):
+            missing = [str(name) for name, margin in zip(peak_assignments, margins)
+                       if margin is None]
+            log_warning(f"No tracking territory for {', '.join(missing)}; this "
+                        f"cluster falls back to the shared position margin")
+            return None
+        return margins
+
     def fit_overlap_group_2d(self, overlap_group, assignment="Unknown", peak_assignments=None,
                              fix_positions=False, fix_linewidths=False, reference_positions=None,
                              reference_linewidths=None):
@@ -2299,7 +2352,14 @@ class VoigtIntegrator(BaseIntegrator):
             # Titration tracking: wider per-step position freedom so the fit can
             # follow a moving peak (None = relaxation config defaults).
             pos_margin_f1=getattr(self, 'titration_pos_margin_f1', None),
-            pos_margin_f2=getattr(self, 'titration_pos_margin_f2', None)
+            pos_margin_f2=getattr(self, 'titration_pos_margin_f2', None),
+            # One margin per peak, narrow enough that no two peaks of the cluster
+            # can reach the same position - so the optimiser cannot put two of
+            # them on one maximum, and neither can take the other's identity.
+            pos_margins=self._territory_margins_for(peak_assignments),
+            # How much wider than the previous point of the series this peak may be
+            # fitted. Bounds the TOTAL FWHM, which is what the volume depends on.
+            lw_margins=self._growth_margins_for(peak_assignments)
         )
 
         # Denormalize fitted intensities AND derived quantities
@@ -2309,6 +2369,11 @@ class VoigtIntegrator(BaseIntegrator):
             for peak in result['peaks']:
                 peak['intensity'] *= max_intensity
                 peak['volume'] *= max_intensity      # Volume = intensity for normalized Voigt
+                # The MEASURED volume is a sum over the same normalized data, so it
+                # carries the same factor. Missed here it would come back orders of
+                # magnitude below the analytic one and read as a broken peak.
+                if peak.get('region_volume') is not None:
+                    peak['region_volume'] *= max_intensity
                 peak['height'] *= max_intensity      # Height scales linearly with intensity
                 peak['amplitude'] *= max_intensity   # Amplitude = height
 

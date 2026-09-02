@@ -29,7 +29,7 @@ Version: 1.0
 """
 
 import numpy as np
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import sys
 
 # Import building blocks
@@ -98,6 +98,144 @@ def calculate_peak_height(lw_lor_f1: float, lw_gau_f1: float,
     height = intensity * fade_f1_center * fade_f2_center / (sigma_f1 * sigma_f2 * 2.0 * np.pi)
 
     return height
+
+
+def region_sum_volumes(f1_grid, f2_grid, data, mask, params, n_peaks,
+                       model_function=None):
+    """Volume measured by summing the DATA over the peak's region, per peak.
+
+    `volume` elsewhere in this module is the analytic integral of the fitted Voigt over
+    all space, so it is `height x width_F1 x width_F2` to within a shape factor. When a
+    peak weakens the width stops being determined by the data - the chi-squared surface
+    goes flat in that direction - but it still multiplies straight into the answer.
+    Measured on a real titration, the last point of two peaks came back 2.4x and 2.9x
+    what their heights imply, on every peak, and neither R-squared (a shape correlation)
+    nor the residual detected it.
+
+    This asks the spectrum instead:
+
+      1. a PLANE is fitted to the region outside `mask` and subtracted. A point whose
+         resonance has gone is a tilted sheet; removing the plane leaves nothing to sum,
+         which is the truth. Without this the ramp itself would be reported as volume.
+      2. the corrected data inside `mask` is summed and scaled by the ppm area of one
+         grid cell, so the result is an integral in the same units as `volume`.
+      3. the total is apportioned between cluster members by each fitted model's
+         integral over the SAME mask - the one job only a model can do. The parts
+         therefore always add up to what was actually measured: a model can SHIFT
+         signal between peaks but never create it.
+
+         By each model's TOTAL mass, not point by point. Point-by-point weighting
+         sounds more careful and is worse for the normal case: it gives the data in an
+         overlap to whichever model dominates there, so a weak peak loses the part of
+         its own tail that lies under a loud neighbour - measured 12% low on a 9:1
+         pair. Apportioning by mass recovers each peak's true integral, overlapped
+         tails included, whenever the models describe the data. It is less good when
+         they do not: signal the model never accounted for is shared out by mass
+         rather than credited where it sits.
+
+    Reported BESIDE the analytic volume, never instead of it: for an isolated peak with
+    good signal the analytic integral is the better estimator, weighting every point
+    through the model and recovering the real tails where a sum truncates them. Their
+    ratio is the diagnostic.
+
+    :return: list of one volume per peak, `None` for a peak that cannot be measured -
+        an empty mask, or a model with no intensity to apportion by. Never a guess.
+    """
+    if model_function is None:
+        model_function = multi_voigt_profile_2d
+
+    mask = np.asarray(mask, dtype=bool)
+    if mask.ndim != data.ndim or not mask.any():
+        return [None] * n_peaks
+
+    # One cell's area in ppm^2. F1 runs down axis 0 and F2 across axis 1, as
+    # `np.meshgrid(f2, f1)` leaves them.
+    def _step(grid, axis):
+        if grid.shape[axis] < 2:
+            return 0.0
+        return float(np.median(np.abs(np.diff(grid, axis=axis))))
+
+    cell = _step(f1_grid, 0) * _step(f2_grid, 1)
+    if not cell > 0:
+        return [None] * n_peaks
+
+    finite = np.isfinite(data)
+    inside = mask & finite
+    if not inside.any():
+        return [None] * n_peaks
+
+    # A PLANE, not a constant: the failure this exists to catch is a linear ramp across
+    # the region, and a constant baseline cannot remove one.
+    outside = (~mask) & finite
+    baseline = np.zeros_like(data, dtype=float)
+    if outside.sum() >= 3:
+        design = np.column_stack([np.ones(outside.sum()),
+                                  f1_grid[outside].ravel(),
+                                  f2_grid[outside].ravel()])
+        try:
+            coefficients, *_ = np.linalg.lstsq(design, data[outside].ravel(), rcond=None)
+            baseline = (coefficients[0] + coefficients[1] * f1_grid
+                        + coefficients[2] * f2_grid)
+        except np.linalg.LinAlgError:                        # pragma: no cover
+            baseline = np.zeros_like(data, dtype=float)
+
+
+    total = float(np.sum((data - baseline)[inside])) * cell
+
+    stride = len(params) // n_peaks
+    shares = []
+    for index in range(n_peaks):
+        single = np.array(params[index * stride:(index + 1) * stride], dtype=float)
+        model = np.asarray(model_function(f1_grid, f2_grid, single, 1))
+        shares.append(float(np.sum(np.abs(model[inside]))))
+
+    whole = sum(shares)
+    if not whole > 0:
+        return [None] * n_peaks
+    return [total * share / whole for share in shares]
+
+
+def cap_linewidth_totals(params, n_peaks, caps_f1, caps_f2):
+    """Hold each peak's TOTAL linewidth at or below its cap, in place.
+
+    The quantity a volume depends on is `lw_lor + lw_gau`, and it is also the quantity
+    the learned statistics are built from - `collect_linewidth_statistics` takes the
+    median and MAD of the sum. Applying that bound to each component instead, as a box
+    bound must, permits a total of twice it.
+
+    A box bound cannot express a sum, so the sum is enforced by projection: the pair is
+    scaled down together. That leaves the lor/gau RATIO exactly where the fit put it,
+    which matters because the ratio is the degenerate direction - in a window a few
+    linewidths wide the total is stiff and the split is soft, and capping must not be
+    what decides it.
+
+    A peak already inside its cap is untouched, so a fit that was never pathological
+    comes back bit-identical.
+
+    :param caps_f1: per peak, the maximum total F1 FWHM, or None for no cap
+    :param caps_f2: the same for F2
+    :return: (params, capped) - `capped` says whether any peak was actually scaled, so
+        a caller can re-derive what depended on the width and leave an untouched fit
+        bit-identical.
+    """
+    capped = False
+    if not n_peaks:
+        return params, capped
+    stride = len(params) // n_peaks          # NPAR_VOIGT is local to the methods below
+    for index in range(n_peaks):
+        offset = index * stride
+        for cap, lorentzian, gaussian in ((caps_f1[index], offset + 1, offset + 2),
+                                          (caps_f2[index], offset + 4, offset + 5)):
+            if cap is None or not np.isfinite(cap) or cap <= 0:
+                continue
+            total = params[lorentzian] + params[gaussian]
+            if total <= cap or total <= 0:
+                continue
+            scale = cap / total
+            params[lorentzian] *= scale
+            params[gaussian] *= scale
+            capped = True
+    return params, capped
 
 
 class Ps2dMultiPeakFitter2D:
@@ -539,7 +677,9 @@ class Ps2dMultiPeakFitter2D:
                           peak_assignments: List[str] = None,
                           noise_level: float = None,
                           pos_margin_f1: float = None,
-                          pos_margin_f2: float = None) -> Dict:
+                          pos_margin_f2: float = None,
+                          pos_margins: List[Tuple[float, float]] = None,
+                          lw_margins: List[Tuple[float, float]] = None) -> Dict:
         """
         Fit multiple overlapping 2D Voigt peaks simultaneously
 
@@ -573,6 +713,11 @@ class Ps2dMultiPeakFitter2D:
             If provided, position bounds are clipped to stay within max_drift of original reference.
         peak_assignments : list of str, optional
             Assignment names for each peak, needed for reference_positions lookup.
+        pos_margins : list of (float, float), optional
+            One (F1, F2) position margin per peak, replacing the shared margin above
+            and taken exactly - no adaptive floor is applied. Cascade tracking sizes
+            these so that no two peaks can reach the same position; see
+            ps2d_territories.territory_margins.
 
         Returns:
         --------
@@ -689,6 +834,14 @@ class Ps2dMultiPeakFitter2D:
         eff_pos_margin_f1 = pos_margin_f1 if pos_margin_f1 is not None else config.pos_margin_f1
         eff_pos_margin_f2 = pos_margin_f2 if pos_margin_f2 is not None else config.pos_margin_f2
 
+        # A per-peak margin is taken EXACTLY, without the adaptive floor the shared
+        # margin gets below. It is a territory: the caller has sized it so that no
+        # two peaks can reach one position, and widening any of them would let two
+        # territories overlap again - which is the whole thing they prevent.
+        if pos_margins is not None and len(pos_margins) != n_peaks:
+            raise ValueError(f'pos_margins has {len(pos_margins)} entries for '
+                             f'{n_peaks} peaks')
+
         # ====================================================================
         # ADAPTIVE LINEWIDTH BOUNDS (PASS1 → PASS2 Learning)
         # ====================================================================
@@ -763,6 +916,33 @@ class Ps2dMultiPeakFitter2D:
             absolute_max_lw_f1 = config.max_linewidth_f1
             absolute_max_lw_f2 = config.max_linewidth_f2
 
+        # ====================================================================
+        # LINEWIDTH TOTALS: the cap is on the SUM, and may be tightened per peak
+        # ====================================================================
+        # absolute_max_lw_* is derived from statistics taken over TOTALS
+        # (collect_linewidth_statistics sums the two components), so it is a cap on the
+        # total. It stays the per-component box bound below, so one component may still
+        # carry the whole width; cap_linewidth_totals enforces the sum.
+        #
+        # lw_margins only ever TIGHTENS it. A series fits each point from the previous
+        # one's result, and a peak decaying into the noise otherwise broadens instead
+        # of fading: measured on DNAJA1/HSPA8 73LysH, the height fell to 27% of the
+        # reference while both totals grew ~1.7x in a single step and the reported
+        # volume came back to 94%. Per-step growth over that series ran 1.00, 1.02,
+        # 1.03, 1.15, 1.37, 1.22 - one jump, which an absolute cap does not catch.
+        lw_caps_f1, lw_caps_f2 = [], []
+        for i in range(n_peaks):
+            cap_f1, cap_f2 = absolute_max_lw_f1, absolute_max_lw_f2
+            # A per-peak entry may be None: a width cap informs one peak on its own,
+            # so the peaks that have a previous width are capped and the rest keep the
+            # learned bound, rather than the whole cluster falling back.
+            if lw_margins is not None and i < len(lw_margins) \
+                    and lw_margins[i] is not None:
+                cap_f1 = min(cap_f1, float(lw_margins[i][0]))
+                cap_f2 = min(cap_f2, float(lw_margins[i][1]))
+            lw_caps_f1.append(cap_f1)
+            lw_caps_f2.append(cap_f2)
+
         # Calculate cluster-wide intensity bounds to prevent artificial constraints
         # Root cause: Per-peak bounds from contaminated 1D cross-sections can trap peaks
         # Solution: Use max initial intensity across cluster to set bounds for all peaks
@@ -779,7 +959,10 @@ class Ps2dMultiPeakFitter2D:
             # FIXED 2025-10-13: lw_gau_f1 IS the Gaussian FWHM (not half-width)
             #fwhm_f1 = peak['lw_gau_f1']  # NEW: lw_gau IS the FWHM (no compensation needed)
             fwhm_f1 = 2.0 * peak['lw_gau_f1']  # OLD: Compensated for FWHM/2 storage bug
-            pos_f1_margin = max(0.04 * fwhm_f1, eff_pos_margin_f1)  # Nucleus-adaptive minimum #GM max(1.5
+            if pos_margins is not None:
+                pos_f1_margin = float(pos_margins[i][0])
+            else:
+                pos_f1_margin = max(0.04 * fwhm_f1, eff_pos_margin_f1)  # Nucleus-adaptive minimum #GM max(1.5
             lower_bounds.append(peak['pos_f1'] - pos_f1_margin)
             upper_bounds.append(peak['pos_f1'] + pos_f1_margin)
 
@@ -792,7 +975,10 @@ class Ps2dMultiPeakFitter2D:
             # FIXED 2025-10-13: lw_gau_f2 IS the Gaussian FWHM (not half-width)
             #fwhm_f2 = peak['lw_gau_f2']  # NEW: lw_gau IS the FWHM (no compensation needed)
             fwhm_f2 = 2.0 * peak['lw_gau_f2']  # OLD: Compensated for FWHM/2 storage bug
-            pos_f2_margin = max(0.04 * fwhm_f2, eff_pos_margin_f2)  # Nucleus-adaptive minimum #GM max(1.5
+            if pos_margins is not None:
+                pos_f2_margin = float(pos_margins[i][1])
+            else:
+                pos_f2_margin = max(0.04 * fwhm_f2, eff_pos_margin_f2)  # Nucleus-adaptive minimum #GM max(1.5
             lower_bounds.append(peak['pos_f2'] - pos_f2_margin)
             upper_bounds.append(peak['pos_f2'] + pos_f2_margin)
 
@@ -877,6 +1063,7 @@ class Ps2dMultiPeakFitter2D:
 
         # Validate and clip initial parameters
         params = np.clip(params, bounds[0], bounds[1])
+        params, _ = cap_linewidth_totals(params, n_peaks, lw_caps_f1, lw_caps_f2)
 
         # DIAGNOSTIC: Log initial intensity values before any fitting
         #if self.verbose:
@@ -915,7 +1102,17 @@ class Ps2dMultiPeakFitter2D:
         # ====================================================================
         # STAGE 1: Fix positions, float linewidths + intensities
         # ====================================================================
-        if not fix_linewidths:
+        # fix_linewidths used to skip this stage OUTRIGHT. The stage fits linewidths
+        # AND INTENSITIES, so gating the whole of it on one of the two threw the
+        # intensity fit away with the linewidth fit - a weak peak then carried its
+        # initial intensity GUESS into Stages 2-4 and failed to converge. Measured on a
+        # T1 series: the 2000 ms point, the weakest, dropped from 3 fitted peaks to 2
+        # the moment linewidths were held.
+        #
+        # The stage now always runs; fix_linewidths adds the four linewidth parameters
+        # to the fixed set instead, which is what the flag has always meant to a user
+        # ticking "hold the linewidths" and what fixed_params already exists to express.
+        if True:
             #if self.verbose:
             #    print("\nStage 1: Linewidth + intensity fit (positions fixed)")
             #    if self.lg_penalty_weight > 0.0 and has_tooclose:
@@ -932,13 +1129,19 @@ class Ps2dMultiPeakFitter2D:
             #        print(f"      Peaks sufficiently separated: independent intensities allowed")
             #    sys.stdout.flush()
 
-            # Fix only positions
+            # Positions always; linewidths too when the caller holds them. Intensity
+            # is the one thing this stage must always be free to fit.
             fixed_stage1 = {}
             for i in range(n_peaks):
                 offset = i * NPAR_VOIGT
                 fixed_stage1[offset + 0] = params[offset + 0]  # Fix pos_f1
                 fixed_stage1[offset + 3] = params[offset + 3]  # Fix pos_f2
                 fixed_stage1[offset + 7] = 0.0  # Fix spare
+                if fix_linewidths:
+                    fixed_stage1[offset + 1] = params[offset + 1]  # lw_lor_f1
+                    fixed_stage1[offset + 2] = params[offset + 2]  # lw_gau_f1
+                    fixed_stage1[offset + 4] = params[offset + 4]  # lw_lor_f2
+                    fixed_stage1[offset + 5] = params[offset + 5]  # lw_gau_f2
 
             # Stage 1: Apply constraints via penalty functions (true soft constraints)
             # Both L/G ratio and intensity ratio penalties integrated into objective
@@ -1018,6 +1221,9 @@ class Ps2dMultiPeakFitter2D:
 
             total_iterations += info['iterations']
 
+        params, _ = cap_linewidth_totals(params, n_peaks,
+                                         lw_caps_f1, lw_caps_f2)
+
         # ====================================================================
         # STAGE 2: Float positions (if allowed)
         # ====================================================================
@@ -1053,6 +1259,9 @@ class Ps2dMultiPeakFitter2D:
             )
 
             total_iterations += info['iterations']
+
+        params, _ = cap_linewidth_totals(params, n_peaks,
+                                         lw_caps_f1, lw_caps_f2)
 
         # ====================================================================
         # STAGE 3: Final global refinement
@@ -1171,6 +1380,13 @@ class Ps2dMultiPeakFitter2D:
             for param_idx, fixed_value in fixed_stage4.items():
                 params[param_idx] = fixed_value
 
+        # Nothing optimises after Stage 4, so a cap that fires from here on leaves the
+        # intensity describing a width the fit no longer has. Tracked and repaired
+        # below rather than at each site, because the intensity-ratio and L/G blocks
+        # in between may move the widths again.
+        params, width_capped = cap_linewidth_totals(params, n_peaks,
+                                                    lw_caps_f1, lw_caps_f2)
+
         # ====================================================================
         # INTENSITY RATIO CONSTRAINT: Apply after Stage 4 if enabled
         # ====================================================================
@@ -1239,6 +1455,63 @@ class Ps2dMultiPeakFitter2D:
 
         final_success = formal_convergence or pragmatic_r2_success or chi2_reduction_success
 
+        # ====================================================================
+        # FINAL WIDTH CAP: re-derive the intensity, do not freeze it
+        # ====================================================================
+        # Narrowing a peak AFTER the last optimisation and leaving `intensity` alone
+        # reports a model nothing fitted: intensity IS the volume, so the volume comes
+        # back unchanged while the height rises to keep the same area in a narrower
+        # profile. Measured on DNAJA1/HSPA8 73LysH: F1 total 0.2670 -> 0.2438, volume
+        # bit-identical at 1.539e9, height +32%, residual 3.0% -> 11.6%.
+        #
+        # So when the cap actually bites, the intensities are refitted against the data
+        # with every position and linewidth held - a well-posed problem, one free
+        # parameter per peak, and the only one left after the widths are decided. A fit
+        # the cap did not touch skips this entirely and stays bit-identical.
+        params, capped = cap_linewidth_totals(params, n_peaks,
+                                              lw_caps_f1, lw_caps_f2)
+        if capped or width_capped:
+            fixed_intensity_only = {}
+            for i in range(n_peaks):
+                offset = i * NPAR_VOIGT
+                for shift in (0, 1, 2, 3, 4, 5, 7):     # everything but intensity
+                    fixed_intensity_only[offset + shift] = params[offset + shift]
+            try:
+                # `cov` is deliberately NOT replaced. This refit floats one parameter
+                # per peak, so its covariance carries no variance for the positions or
+                # the linewidths, and the errors downstream are computed over the full
+                # parameter block. Keeping Stage 4's covariance means a capped peak's
+                # reported error describes the UNCONSTRAINED fit - it does not know the
+                # width was held - which overstates the freedom rather than inventing
+                # a certainty the constraint did not earn.
+                params, _, info = self.optimizer.fit(
+                    func=model_function,
+                    jacobian=jacobian_function,
+                    x=f1_flat,
+                    y=y_flat_masked,
+                    p0=params,
+                    bounds=bounds,
+                    fixed_params=fixed_intensity_only
+                )
+                total_iterations += info['iterations']
+            except Exception as error:                   # pragma: no cover
+                # A refit that fails leaves the capped widths with the pre-cap
+                # intensity, which is the defect above - so say so rather than
+                # reporting the numbers as if they were fitted together.
+                print(f"   ⚠️  intensity refit after the width cap failed: {error}")
+
+        # Measured beside the analytic integral, from the same mask the fit used.
+        try:
+            region_volumes = region_sum_volumes(f1_grid, f2_grid, intensity,
+                                                data_mask if data_mask is not None
+                                                else np.ones(intensity.shape, dtype=bool),
+                                                params, n_peaks)
+            # NOT `model_function`: inside this function that name is a curve_fit-style
+            # closure taking varargs, while region_sum_volumes wants the grid model.
+        except Exception as error:                           # pragma: no cover
+            print(f"   ⚠️  region-sum volume unavailable: {error}")
+            region_volumes = [None] * n_peaks
+
         # Extract fitted peaks and calculate derived quantities
         fitted_peaks = []
         for i in range(n_peaks):
@@ -1262,6 +1535,7 @@ class Ps2dMultiPeakFitter2D:
             amplitude = height
 
             fitted_peaks.append({
+                'region_volume': region_volumes[i],
                 'pos_f1': params[offset + 0],
                 'lw_lor_f1': lw_lor_f1,
                 'lw_gau_f1': lw_gau_f1,

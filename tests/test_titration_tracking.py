@@ -159,6 +159,77 @@ class TestCarryForwardSeed:
         assert self._proc()._carry_forward_seed(current, prior) is current
 
 
+class TestSeedHeldAtTheNoiseFloor:
+    """A peak whose own signal has gone must not move the cascade.
+
+    Carry-forward only ever saw FAILED fits. A peak that has decayed into the noise
+    fits successfully - onto whatever is nearby, because nothing is left holding it
+    where it was - and then seeds the next spectrum at another peak's maximum.
+    """
+
+    @staticmethod
+    def _proc():
+        return MultiSpectrumProcessor.__new__(MultiSpectrumProcessor)
+
+    def test_a_faded_peak_seeds_from_its_last_good_position(self):
+        prior = [{'assignment': 'A', 'success': True, 'ppm_x': 8.00, 'height': 4e6}]
+        current = [{'assignment': 'A', 'success': True, 'ppm_x': 8.04, 'height': 1.2e4}]
+
+        seed = self._proc()._carry_forward_seed(current, prior, noise_level=1e4)
+
+        assert seed[0]['ppm_x'] == 8.00, 'the cascade followed a peak fitted to noise'
+
+    def test_the_reported_fit_is_flagged_but_not_rewritten(self):
+        """Only the seed is corrected. Replacing the reported position would turn an
+        undetermined peak into a confident 'this residue did not move', which reads as
+        a real zero CSP and would never be questioned. The flag records which points
+        those were; it is in-process only and does not reach the output CSVs."""
+        prior = [{'assignment': 'A', 'success': True, 'ppm_x': 8.00, 'height': 4e6}]
+        current = [{'assignment': 'A', 'success': True, 'ppm_x': 8.04, 'height': 1.2e4}]
+
+        self._proc()._carry_forward_seed(current, prior, noise_level=1e4)
+
+        assert current[0]['ppm_x'] == 8.04 and current[0]['height'] == 1.2e4
+        assert current[0]['position_at_noise'] is True
+
+    def test_a_peak_still_above_the_noise_seeds_from_its_own_fit(self):
+        prior = [{'assignment': 'A', 'success': True, 'ppm_x': 8.00, 'height': 4e6}]
+        current = [{'assignment': 'A', 'success': True, 'ppm_x': 8.04, 'height': 5e4}]
+
+        seed = self._proc()._carry_forward_seed(current, prior, noise_level=1e4)
+
+        assert seed[0]['ppm_x'] == 8.04
+        assert 'position_at_noise' not in current[0]
+
+    def test_without_a_noise_level_nothing_is_held(self):
+        """The default, and every existing caller. Holding on a guess would freeze
+        peaks that are perfectly well determined."""
+        prior = [{'assignment': 'A', 'success': True, 'ppm_x': 8.00, 'height': 4e6}]
+        current = [{'assignment': 'A', 'success': True, 'ppm_x': 8.04, 'height': 1.0}]
+
+        assert self._proc()._carry_forward_seed(current, prior)[0]['ppm_x'] == 8.04
+        assert self._proc()._carry_forward_seed(
+            current, prior, noise_level=0)[0]['ppm_x'] == 8.04
+
+    def test_amplitude_stands_in_for_a_missing_height(self):
+        """Results carry one or the other; the conversion to the peak table already
+        falls back this way."""
+        prior = [{'assignment': 'A', 'success': True, 'ppm_x': 8.00, 'height': 4e6}]
+        current = [{'assignment': 'A', 'success': True, 'ppm_x': 8.04, 'amplitude': 1.0}]
+
+        seed = self._proc()._carry_forward_seed(current, prior, noise_level=1e4)
+
+        assert seed[0]['ppm_x'] == 8.00
+
+    def test_a_faded_peak_with_no_prior_keeps_its_own_fit(self):
+        """Nothing to hold. Inventing a position would be worse than a poor one."""
+        current = [{'assignment': 'A', 'success': True, 'ppm_x': 8.04, 'height': 1.0}]
+
+        seed = self._proc()._carry_forward_seed(current, None, noise_level=1e4)
+
+        assert seed[0]['ppm_x'] == 8.04
+
+
 class TestFailedFitFallback:
     """A failed fit in cascade/titration mode reports the n-1 seed position and
     the intensity sampled there, instead of collapsing to the reference position
