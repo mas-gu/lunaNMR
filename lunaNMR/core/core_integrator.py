@@ -277,6 +277,17 @@ except ImportError as e:
             log_warning("Using fallback peak detection - limited functionality")
             return []
 
+# How many grid points either side of a picked coordinate to look for a seed height
+# when the sample under it is non-positive. Two survives a single bad sample without
+# reaching a neighbour - a peak picked onto the wrong maximum is a different problem.
+SEED_RADIUS = 2
+
+# The last-resort seed, as a fraction of the region's own maximum. Relative to the data
+# because the spectrum's intensity units are arbitrary and an absolute constant in them
+# means nothing.
+SEED_FLOOR_FRACTION = 1.0e-3
+
+
 class VoigtIntegrator(BaseIntegrator):
     """Enhanced NMR integrator with Voigt profile fitting capabilities"""
 
@@ -2226,8 +2237,35 @@ class VoigtIntegrator(BaseIntegrator):
                 # Use peak picker's measurement directly (no 0.8 scaling needed)
                 initial_intensity = detected_intensity
             else:
-                # Fallback: re-measure from grid (original behavior)
+                # Fallback: re-measure from the grid. One sample must not decide this.
+                #
+                # The seed feeds the whole CLUSTER's intensity interval,
+                # [max_initial * 0.001, max_initial * 5.0] in fit_multi_peak_2d, so a
+                # seed wrong by N orders puts the answer outside the box the optimiser
+                # may search. It then converges immediately against a bound, and
+                # formal_convergence reports that as success. A noise dip, a dispersive
+                # wiggle or a coordinate a few ppb out is enough to make that sample
+                # non-positive: measured on a real titration, 4 of 69 picked points at
+                # the reference and 13 of 69 at the 2:1 point. One cluster had both
+                # members floored, giving normalised bounds nine orders of magnitude
+                # from the truth at R-squared 0.0208.
+                #
+                # A local maximum survives a bad sample without reaching a neighbour,
+                # which is a different problem. Where the neighbourhood holds nothing
+                # either, the fallback is a fraction of the region rather than 100.0 -
+                # an absolute constant in the spectrum's own arbitrary units.
+                #
+                # A POSITIVE sample is left exactly as it was: it was never the defect,
+                # and a seed 2.2x larger was enough to turn a passing fit into a failure.
                 local_intensity = region['intensity'][y_idx, x_idx]
+                if local_intensity <= 0:
+                    y_lo, y_hi = max(y_idx - SEED_RADIUS, 0), y_idx + SEED_RADIUS + 1
+                    x_lo, x_hi = max(x_idx - SEED_RADIUS, 0), x_idx + SEED_RADIUS + 1
+                    neighbourhood = region['intensity'][y_lo:y_hi, x_lo:x_hi]
+                    local_intensity = float(np.max(neighbourhood)) if neighbourhood.size else 0.0
+                    if local_intensity <= 0:
+                        local_intensity = SEED_FLOOR_FRACTION * float(
+                            np.max(np.abs(region['intensity'])))
                 initial_intensity = max(local_intensity * 0.8, 100.0)
 
             initial_peaks.append({
