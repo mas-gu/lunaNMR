@@ -493,6 +493,7 @@ class Ps2dStyleLevenbergMarquardt:
         n_free = len(free_indices)
 
         chi2_old = np.inf
+        final_chi2 = np.inf      # chi2 of the parameters currently held
         done_count = 0
         stagnant_iterations = 0  # Track consecutive rejected steps
         slow_progress_iterations = 0  # Track consecutive slow-progress iterations
@@ -562,6 +563,7 @@ class Ps2dStyleLevenbergMarquardt:
             if chi2_new < chi2:
                 # ACCEPT step
                 params = params_new
+                final_chi2 = chi2_new
                 lam *= self.lambda_down  # Decrease damping
                 chi2_old = chi2
                 stagnant_iterations = 0  # Reset stagnation counter
@@ -591,7 +593,7 @@ class Ps2dStyleLevenbergMarquardt:
             else:
                 # REJECT step
                 lam *= self.lambda_up  # Increase damping
-                chi2 = chi2_old  # Keep old chi2
+                final_chi2 = chi2      # params did not move; this is their chi2
                 stagnant_iterations += 1
 
                 # Early exit if completely stuck
@@ -625,7 +627,7 @@ class Ps2dStyleLevenbergMarquardt:
         info = {
             'success': done_count >= self.ndone,
             'iterations': iteration + 1,
-            'final_chi2': chi2,
+            'final_chi2': final_chi2,
             'final_lambda': lam,
             'message': f'Converged in {iteration+1} iterations' if done_count >= self.ndone else 'Max iterations reached'
         }

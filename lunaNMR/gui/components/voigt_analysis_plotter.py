@@ -39,6 +39,90 @@ from scipy.special import wofz
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibMultiAxesWidget
 
 
+# The default Axes3D cage is heavier than the data drawn inside it: three filled panes,
+# a grid on all three, near-black axis lines. These strip it back to what carries depth.
+# Ported from the CcpNmr PS2D plugin, where each decision was measured against a render.
+
+# Mid-luminance component colours, legible on a light and a dark scheme alike. The
+# mapping from assignment to colour is unchanged - a residue keeps one colour across its
+# label, its fit-region ellipse and every spectrum of a series, which is what makes an
+# eight-peak cluster's windows tellable apart.
+COMPONENT_COLOURS = ['#4C78A8', '#E4894F', '#57A055', '#9A6FA0',
+                     '#4FA3A0', '#B79A20', '#D1615D', '#8C6D57']
+
+# How far each neutral moves from the scheme's foreground towards its background.
+# Nothing is pure black: the data mesh is the quiet substrate under the fit, and the
+# furniture is quieter still.
+NEUTRAL_FRACTIONS = {'data': 0.18, 'text': 0.15, 'muted': 0.55, 'faint': 0.80}
+
+# Ticks per 3D axis. Nine 1H labels at 0.01 ppm spacing overlap into a grey smear at
+# most pane widths.
+TICKS_PER_AXIS = 4
+FONT_TICK = 8
+
+
+def _blend(colour, towards, fraction):
+    """`colour` moved `fraction` of the way towards `towards`, as a hex string."""
+    from matplotlib.colors import to_rgb, to_hex
+    start, end = np.array(to_rgb(colour)), np.array(to_rgb(towards))
+    return to_hex(start + (end - start) * float(fraction))
+
+
+def furniture_colours(scheme):
+    """The neutrals for one colour preset, derived rather than declared.
+
+    A neutral has to be legible against what is actually behind it, and a preset on
+    black needs the opposite treatment from one on white. Both are obtained by blending
+    the scheme's own experimental colour - which the preset already chose to read
+    against its background - towards that background.
+    """
+    background = scheme.get('background', 'white')
+    foreground = scheme.get('experimental', {}).get('color', 'black')
+    return {name: _blend(foreground, background, fraction)
+            for name, fraction in NEUTRAL_FRACTIONS.items()}
+
+
+def style_3d_furniture(axes, scheme):
+    """Strip a 3D axes back to what carries depth.
+
+    The grid goes ENTIRELY rather than being softened. Each axis draws its grid on the
+    floor AND on the two back walls, and with the panes unfilled the wall lines have
+    nothing behind them - they render as vertical grey strokes hanging in the air beside
+    the surface. mplot3d offers no way to ask for the floor alone, and the axis lines
+    and ticks carry the depth on their own.
+    """
+    colours = furniture_colours(scheme)
+    axes.grid(False)
+    for axis in (axes.xaxis, axes.yaxis, axes.zaxis):
+        axis.pane.fill = False
+        axis.pane.set_edgecolor('none')
+        # The Line2D, not _axinfo['axisline']: Axis3D builds its line from that dict in
+        # __init__ and never reads it again, so updating the dict leaves the axes drawn
+        # in the default near-black with nothing on screen to say the restyle failed.
+        axis.line.set_color(colours['muted'])
+        axis.line.set_linewidth(0.8)
+        axis.set_major_locator(MaxNLocator(TICKS_PER_AXIS))
+    axes.tick_params(labelsize=FONT_TICK, colors=colours['muted'],
+                     width=0.6, length=2, pad=1)
+    return colours
+
+
+def indirect_axis_label():
+    """Name the indirect nucleus instead of guessing it.
+
+    The label was the literal '15N/13C Chemical Shift (ppm)' - a guess printed on the
+    axis whose whole job is to say what is being measured. ps2d_config knows which
+    nucleus the fit was configured for.
+    """
+    try:
+        from lunaNMR.core.ps2d_config import get_ps2d_config
+        nucleus = get_ps2d_config().nucleus_type
+    except Exception:
+        return 'F1 (ppm)'
+    pretty = {'15N': '$^{15}$N', '13C': '$^{13}$C'}.get(nucleus)
+    return f'{pretty} Chemical Shift (ppm)' if pretty else f'{nucleus} Chemical Shift (ppm)'
+
+
 def _to_scalar(value):
     """Convert value to scalar, handling lists from JSON deserialization."""
     if value is None:
@@ -427,7 +511,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         individual_surfaces = result.get('individual_surfaces', [])
         all_peaks = result.get('all_peaks', [])
         if individual_surfaces:
-            colors = ['orange', 'purple', 'brown', 'pink', 'olive']
+            colors = COMPONENT_COLOURS
             for i, surf in enumerate(individual_surfaces):
                 component_slice = surf[:, f2_idx]
                 # Use assignment-based color for consistency across spectra
@@ -452,7 +536,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
                               color='blue', linewidth=2, label='Fit')
 
         if individual_surfaces:
-            colors = ['orange', 'purple', 'brown', 'pink', 'olive']
+            colors = COMPONENT_COLOURS
             for i, surf in enumerate(individual_surfaces):
                 component_slice = surf[f1_idx, :]
                 # Use assignment-based color for consistency across spectra
@@ -531,7 +615,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
                          f'X-Dimension Fit - {assignment}')
 
         # Plot Y-dimension fit (bottom)
-        self._plot_1d_fit(ax_y, y_fit, '¹⁵N/¹³C Chemical Shift (ppm)',
+        self._plot_1d_fit(ax_y, y_fit, indirect_axis_label(),
                          f'Y-Dimension Fit - {assignment}')
 
         # Set overall title
@@ -639,7 +723,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         ax_exp.contour(f2_ppm, f1_ppm, experimental, levels=levels,
                        colors='blue', linewidths=0.5, alpha=0.5)
         ax_exp.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
-        ax_exp.set_ylabel('¹⁵N/¹³C Chemical Shift (ppm)', fontsize=9)
+        ax_exp.set_ylabel(indirect_axis_label(), fontsize=9)
         ax_exp.set_title(f'Experimental - {assignment}', fontsize=9, fontweight='bold')
         ax_exp.invert_xaxis()
         ax_exp.invert_yaxis()
@@ -656,7 +740,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
         # Plot 2: Individual Fitted Peaks (top right) - Multi-color visualization
         individual_surfaces = voigt_result.get('individual_surfaces', None)
-        colors = ['red', 'orange', 'purple', 'brown', 'pink', 'olive', 'cyan', 'magenta']
+        colors = COMPONENT_COLOURS
 
         # Convert individual surfaces from lists to numpy arrays (may be lists from JSON)
         if individual_surfaces is not None:
@@ -692,7 +776,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             ax_fit.set_title(f'Fitted (R²={r_squared:.3f})', fontsize=9, fontweight='bold')
 
         ax_fit.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
-        ax_fit.set_ylabel('¹⁵N/¹³C Chemical Shift (ppm)', fontsize=9)
+        ax_fit.set_ylabel(indirect_axis_label(), fontsize=9)
         ax_fit.invert_xaxis()
         ax_fit.invert_yaxis()
         ax_fit.grid(True, alpha=0.3)
@@ -731,7 +815,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             ax_res.plot(_to_scalar(peak['pos_f2']), _to_scalar(peak['pos_f1']), 'k+', markersize=8, markeredgewidth=1.5)
 
         ax_res.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
-        ax_res.set_ylabel('¹⁵N/¹³C Chemical Shift (ppm)', fontsize=9)
+        ax_res.set_ylabel(indirect_axis_label(), fontsize=9)
         ax_res.set_title('Fit Quality (Residual %)', fontsize=9, fontweight='bold')
         ax_res.invert_xaxis()
         ax_res.invert_yaxis()
@@ -913,13 +997,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         # Get current color scheme
         scheme = self.color_presets[self.current_color_scheme]
 
-        # Set 3D background pane colors from preset
-        ax_data.xaxis.pane.set_facecolor(scheme['pane']['facecolor'])
-        ax_data.yaxis.pane.set_facecolor(scheme['pane']['facecolor'])
-        ax_data.zaxis.pane.set_facecolor(scheme['pane']['facecolor'])
-        ax_data.xaxis.pane.set_alpha(scheme['pane']['alpha'])
-        ax_data.yaxis.pane.set_alpha(scheme['pane']['alpha'])
-        ax_data.zaxis.pane.set_alpha(scheme['pane']['alpha'])
+        # The cage, stripped back to what carries depth - unfilled panes, no grid,
+        # quiet axis lines. See style_3d_furniture for why the grid goes entirely.
+        style_3d_furniture(ax_data, scheme)
 
         self.ax_resid = None
 
@@ -927,13 +1007,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             ax_resid = self.figure.add_subplot(gs[1, 0], projection='3d')
             self.ax_resid = ax_resid
 
-            # Set 3D background pane colors for residuals panel
-            ax_resid.xaxis.pane.set_facecolor(scheme['pane']['facecolor'])
-            ax_resid.yaxis.pane.set_facecolor(scheme['pane']['facecolor'])
-            ax_resid.zaxis.pane.set_facecolor(scheme['pane']['facecolor'])
-            ax_resid.xaxis.pane.set_alpha(scheme['pane']['alpha'])
-            ax_resid.yaxis.pane.set_alpha(scheme['pane']['alpha'])
-            ax_resid.zaxis.pane.set_alpha(scheme['pane']['alpha'])
+            style_3d_furniture(ax_resid, scheme)
 
         if self.show_cross_sections:
             if self.residual_mode == 'separate':
@@ -944,7 +1018,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
                 self.ax_f2_cross = self.figure.add_subplot(gs[1, 1])
 
         # Panel 1: Experimental data + Individual fitted peaks
-        colors = ['red', 'orange', 'purple', 'brown', 'pink', 'olive', 'cyan', 'magenta']
+        colors = COMPONENT_COLOURS
 
         # Adaptive alpha scaling for individual peaks
         n_peaks = len(individual_surfaces) if individual_surfaces is not None else 0
@@ -1102,7 +1176,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
         # Configure axes
         ax_data.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
-        ax_data.set_ylabel('¹⁵N/¹³C Chemical Shift (ppm)', fontsize=9)
+        ax_data.set_ylabel(indirect_axis_label(), fontsize=9)
         ax_data.set_zlabel('Intensity', fontsize=9)
         ax_data.invert_xaxis()
         ax_data.invert_yaxis()
@@ -1160,7 +1234,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
             # Configure axes
             self.ax_resid.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
-            self.ax_resid.set_ylabel('¹⁵N/¹³C Chemical Shift (ppm)', fontsize=9)
+            self.ax_resid.set_ylabel(indirect_axis_label(), fontsize=9)
             self.ax_resid.set_zlabel('Residuals', fontsize=9)
             self.ax_resid.invert_xaxis()
             self.ax_resid.invert_yaxis()

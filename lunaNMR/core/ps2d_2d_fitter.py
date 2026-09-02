@@ -100,6 +100,83 @@ def calculate_peak_height(lw_lor_f1: float, lw_gau_f1: float,
     return height
 
 
+# How the region sum finds its baseline. Both guards exist because "the box minus the
+# ellipses" is not background: the box is a bounding rectangle over the whole cluster,
+# so what is left over is spectrum - the peak's own tails, and any peak that clustering
+# assigned elsewhere. Plain least squares treats all of it as baseline and subtracts it.
+#
+# Measured. Across ~800 signal-free patches of three real spectra a plane fitted to pure
+# noise spans at most 2.70 sigma, so there is no tilt in that data to remove at all; and
+# on 55 well-fit isolated peaks the plane cost a mean |ln(measured/expected)| of 0.119
+# against 0.037 for subtracting nothing. On a 15N T1 cluster where 29% of the outside
+# points stand above 5 sigma it cost 31% of the volume. Worst of all it does not cancel
+# in a series, which is where a ratio would otherwise save it: over a real titration the
+# plane's effect on one isolated peak ranged 0.30x to 1.10x, and on another it drove the
+# reported volume NEGATIVE at the last point.
+BASELINE_CLIP_SIGMAS = 3.0
+BASELINE_TILT_SIGMAS = 3.0
+BASELINE_MIN_POINTS = 8
+BASELINE_CLIP_ROUNDS = 5
+
+
+def _fit_plane(f1_grid, f2_grid, data, points):
+    """Least-squares plane through `points`, evaluated over the whole grid."""
+    design = np.column_stack([np.ones(int(points.sum())),
+                              f1_grid[points].ravel(),
+                              f2_grid[points].ravel()])
+    try:
+        coefficients, *_ = np.linalg.lstsq(design, data[points].ravel(), rcond=None)
+    except np.linalg.LinAlgError:                            # pragma: no cover
+        return None
+    return coefficients[0] + coefficients[1] * f1_grid + coefficients[2] * f2_grid
+
+
+def baseline_plane(f1_grid, f2_grid, data, outside):
+    """The background under this region: a plane, or nothing at all.
+
+    Two things have to be true before a tilt is subtracted, and each is a separate
+    failure of the plain fit.
+
+    CONTAMINATION. A point standing well above the current baseline is signal, not
+    background, so it is dropped and the plane refitted. The noise is taken from the
+    RESIDUALS rather than the raw values, because the raw spread of the outside points
+    is the tilt itself and would scale the threshold with the thing being measured.
+
+    ABSENCE. A plane fitted to noise is never flat, so what survives has to be big
+    enough to be a tilt rather than sampling. Below that, what the plane is describing
+    is the peak's own tails, and subtracting it biases every volume low.
+
+    :return: the baseline over the whole grid; all zeros when there is none to remove.
+    """
+    zero = np.zeros_like(data, dtype=float)
+    if int(outside.sum()) < BASELINE_MIN_POINTS:
+        return zero
+
+    keep = outside.copy()
+    plane = _fit_plane(f1_grid, f2_grid, data, keep)
+    if plane is None:
+        return zero
+
+    sigma = 0.0
+    for _ in range(BASELINE_CLIP_ROUNDS):
+        residual = (data - plane)[outside]
+        sigma = 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
+        if not sigma > 0:
+            break
+        nxt = outside & ((data - plane) <= BASELINE_CLIP_SIGMAS * sigma)
+        if int(nxt.sum()) < BASELINE_MIN_POINTS or np.array_equal(nxt, keep):
+            break
+        keep = nxt
+        refitted = _fit_plane(f1_grid, f2_grid, data, keep)
+        if refitted is None:                                 # pragma: no cover
+            break
+        plane = refitted
+
+    span = float(plane.max() - plane.min())
+    if span < BASELINE_TILT_SIGMAS * sigma:
+        return zero
+    return plane
+
 def region_sum_volumes(f1_grid, f2_grid, data, mask, params, n_peaks,
                        model_function=None):
     """Volume measured by summing the DATA over the peak's region, per peak.
@@ -165,19 +242,11 @@ def region_sum_volumes(f1_grid, f2_grid, data, mask, params, n_peaks,
         return [None] * n_peaks
 
     # A PLANE, not a constant: the failure this exists to catch is a linear ramp across
-    # the region, and a constant baseline cannot remove one.
+    # the region, and a constant baseline cannot remove one. But only when there IS one
+    # - see baseline_plane, which refuses a tilt it cannot tell from noise and drops the
+    # signal that "the box minus the ellipses" leaves in the background set.
     outside = (~mask) & finite
-    baseline = np.zeros_like(data, dtype=float)
-    if outside.sum() >= 3:
-        design = np.column_stack([np.ones(outside.sum()),
-                                  f1_grid[outside].ravel(),
-                                  f2_grid[outside].ravel()])
-        try:
-            coefficients, *_ = np.linalg.lstsq(design, data[outside].ravel(), rcond=None)
-            baseline = (coefficients[0] + coefficients[1] * f1_grid
-                        + coefficients[2] * f2_grid)
-        except np.linalg.LinAlgError:                        # pragma: no cover
-            baseline = np.zeros_like(data, dtype=float)
+    baseline = baseline_plane(f1_grid, f2_grid, data, outside)
 
 
     total = float(np.sum((data - baseline)[inside])) * cell
@@ -193,6 +262,21 @@ def region_sum_volumes(f1_grid, f2_grid, data, mask, params, n_peaks,
     if not whole > 0:
         return [None] * n_peaks
     return [total * share / whole for share in shares]
+
+
+def _bound_fraction(value, lower, upper):
+    """Where `value` sits in [lower, upper], in log space: 0.0 floor, 1.0 ceiling.
+
+    Dimensionless on purpose - the caller sees a denormalised intensity but these
+    bounds are in the fitter's normalised units, and a ratio survives that. None when
+    the interval is not a positive range to sit in.
+    """
+    if not (lower > 0 and upper > lower and value > 0):
+        return None
+    span = np.log(upper) - np.log(lower)
+    if span <= 0:
+        return None
+    return float((np.log(value) - np.log(lower)) / span)
 
 
 def cap_linewidth_totals(params, n_peaks, caps_f1, caps_f2):
@@ -1494,6 +1578,8 @@ class Ps2dMultiPeakFitter2D:
                     fixed_params=fixed_intensity_only
                 )
                 total_iterations += info['iterations']
+                y_fit_2d = multi_voigt_profile_2d(
+                    f1_grid, f2_grid, params, n_peaks).reshape(f1_grid.shape)
             except Exception as error:                   # pragma: no cover
                 # A refit that fails leaves the capped widths with the pre-cap
                 # intensity, which is the defect above - so say so rather than
@@ -1536,6 +1622,13 @@ class Ps2dMultiPeakFitter2D:
 
             fitted_peaks.append({
                 'region_volume': region_volumes[i],
+                'pos_bounds_f1': (float(bounds[0][offset + 0]),
+                                  float(bounds[1][offset + 0])),
+                'pos_bounds_f2': (float(bounds[0][offset + 3]),
+                                  float(bounds[1][offset + 3])),
+                'intensity_fraction': _bound_fraction(
+                    params[offset + 6], bounds[0][offset + 6],
+                    bounds[1][offset + 6]),
                 'pos_f1': params[offset + 0],
                 'lw_lor_f1': lw_lor_f1,
                 'lw_gau_f1': lw_gau_f1,
