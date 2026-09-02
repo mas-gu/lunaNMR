@@ -115,3 +115,24 @@ def test_a_weak_cluster_member_pins_on_the_floor_its_neighbours_set():
     assert min(fractions) < max(fractions), (
         'the empty member must be distinguishable from the real one, which the '
         'cluster R-squared cannot do')
+
+
+def test_a_pinned_fit_is_reported_as_pinned():
+    """`peak_reached_a_bound` turns the boxes the fit reports into the two questions a
+    caller actually has. Reported, never gated on - what to do with a peak held at a
+    bound is the caller's decision, and a fading peak is still a measurement."""
+    from lunaNMR.core.core_integrator import peak_reached_a_bound
+
+    settled = {'pos_f1': 121.5, 'pos_bounds_f1': (121.4, 121.6),
+               'pos_f2': 7.70, 'pos_bounds_f2': (7.69, 7.71),
+               'intensity_fraction': 0.5}
+    assert peak_reached_a_bound(settled) == (False, False)
+
+    onWall = dict(settled, pos_f1=121.4)
+    assert peak_reached_a_bound(onWall)[0] is True
+
+    onFloor = dict(settled, intensity_fraction=0.0)
+    assert peak_reached_a_bound(onFloor)[1] is True
+
+    # Silence is not "no": a fit that did not report its box says nothing either way.
+    assert peak_reached_a_bound({'intensity_fraction': None}) == (None, None)

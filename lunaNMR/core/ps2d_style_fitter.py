@@ -66,7 +66,7 @@ CONV_TOL = 1e-4           # Convergence tolerance
 NDONE = 2                 # Must converge for 1 consecutive iteration
 SLOW_PROGRESS_TOL = 1e-5 # Slow progress threshold: Δχ²/χ² < 1e-5 (0.001%)
 SLOW_PROGRESS_LIMIT = 15 # Exit after 15 consecutive slow-progress iterations
-STAGNATION_LIMIT = 150   # Exit after N consecutive rejected steps (was hardcoded as 50)
+STAGNATION_LIMIT = 150   # Give up after this many consecutive rejected steps
 PROGRESS_PRINT_INTERVAL = 200  # Print progress every N iterations (was 50)
 
 # Derivative step multiplier for numerical derivatives
@@ -373,12 +373,17 @@ class Ps2dStyleLevenbergMarquardt:
     """
     Levenberg-Marquardt optimizer with EXACT  implementation
 
-    Key differences from scipy.optimize.curve_fit:
-    1. ADDITIVE damping: α + λ·I (not multiplicative α·(1+λ))
-    2. Larger initial λ = 0.001 (vs scipy's ~0.01)
-    3. Aggressive damping updates: 10× up, 0.1× down
-    4. Gauss-Jordan matrix solver (vs LU decomposition)
-    5. Specific convergence criterion
+    Differences from scipy.optimize.curve_fit, as the constants above actually set
+    them:
+    1. ADDITIVE damping: alpha + lambda*I, not multiplicative alpha*(1+lambda).
+       lambda starts at LAMBDA_INIT (1e-4) and is compared against the SMALLEST
+       diagonal of the normal matrix, not the largest - which is the direction a
+       Gauss-Newton step blows up in. It is load-bearing: at lambda = 0, 120 of 121
+       converged stages stagnate instead, at 2.06x the chi-squared.
+    2. LAMBDA_UP / LAMBDA_DOWN are 5.0 and 0.2, not 10 and 0.1.
+    3. numpy's solve, not Gauss-Jordan.
+    4. Convergence is CONV_TOL relative over NDONE accepted steps, with separate
+       slow-progress and stagnation exits.
     """
 
     def __init__(self,
@@ -577,7 +582,6 @@ class Ps2dStyleLevenbergMarquardt:
                 if done_count >= self.ndone:
                     break  # Converged!
 
-                # Slow progress detection (added 2025-10-08)
                 # Detect when making minimal progress over many iterations
                 if iteration > 10:  # Skip first few iterations
                     relative_improvement = abs(chi2_new - chi2) / max(abs(chi2), 1e-10)

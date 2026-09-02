@@ -287,6 +287,55 @@ SEED_RADIUS = 2
 # means nothing.
 SEED_FLOOR_FRACTION = 1.0e-3
 
+# How close to a bound counts as resting on it, as a fraction of the box's own width.
+# The optimiser reaches a bound by np.clip, so a pinned parameter lands exactly on it;
+# anything above floating-point noise would do.
+BOUND_TOLERANCE = 1.0e-6
+
+
+def peak_reached_a_bound(peak, tolerance=BOUND_TOLERANCE):
+    """Did this fit stop on a wall rather than on a minimum?
+
+    A fit held at a bound is indistinguishable, in the numbers it returns, from one
+    that found a minimum - same shape of result, same success flag, an error bar that
+    describes freedom the parameter did not have. Two walls matter here and they have
+    different causes:
+
+    POSITION. A seed further from the peak than pos_margin allows can never reach it,
+    and the LINEWIDTH stretches to cover the gap, so the volume is wrong too. Measured
+    on a 15N T1 reference against a peak list ~0.11 ppm out in 15N: every peak sat at
+    exactly its two margins, R-squared 0.09 to 0.65, all reported successful, one at
+    R-squared 0.9255. Correcting the seed gave lwF1 0.3891 against 0.4674 and a height
+    26% higher.
+
+    INTENSITY. The floor is CLUSTER-RELATIVE - 0.1% of the brightest member's seed - so
+    a weak member among bright ones is driven onto it and stays. Its volume is then a
+    product of its neighbours' seeds and its own seeded linewidths, carrying nothing
+    from the data at its own position. Measured on a real cluster: one member at
+    fraction 0.0000 under a cluster R-squared of 0.9884 that its two healthy neighbours
+    carried. R-squared is per cluster and cannot see it; nor can the mask residual.
+
+    :return: (position_pinned, intensity_pinned); either is None when the fit did not
+        report the box, which is not the same as "no".
+    """
+    position = None
+    for key, value in (('pos_bounds_f1', peak.get('pos_f1')),
+                       ('pos_bounds_f2', peak.get('pos_f2'))):
+        box = peak.get(key)
+        if box is None or value is None:
+            continue
+        lower, upper = box
+        span = upper - lower
+        if span <= 0:
+            continue
+        position = bool(position) or bool(
+            min(value - lower, upper - value) <= tolerance * span)
+
+    fraction = peak.get('intensity_fraction')
+    intensity = (None if fraction is None
+                 else bool(min(fraction, 1.0 - fraction) <= tolerance))
+    return position, intensity
+
 
 class VoigtIntegrator(BaseIntegrator):
     """Enhanced NMR integrator with Voigt profile fitting capabilities"""
@@ -2212,25 +2261,23 @@ class VoigtIntegrator(BaseIntegrator):
             # ====================================================================
             # Skip if we already have reference linewidths set directly
             if not use_reference_linewidths:
-                # FIXED 2025-10-13: Correct FWHM storage convention
-                # Bug: Was storing FWHM/2 in lw_gau, but rest of codebase expects full FWHM
-                # The variable lw_gau_f1 should contain the Gaussian FWHM, not half of it
-                # Use nucleus-adaptive minimum constraints from centralized config
-
-                # NEW (CORRECT): Store full FWHM in lw_gau, small Lorentzian initial guess
-                #lw_gau_f1 = max(fwhm_f1, config.min_linewidth_f1)  # lw_gau IS the Gaussian FWHM
-                #lw_lor_f1 = max(fwhm_f1 / 10.0, config.min_linewidth_f1 / 5.0)  # Start with small Lorentzian
-                #lw_gau_f2 = max(fwhm_f2, config.min_linewidth_f2)  # lw_gau IS the Gaussian FWHM
-                #lw_lor_f2 = max(fwhm_f2 / 10.0, config.min_linewidth_f2 / 5.0)  # Start with small Lorentzian
-
-                # OLD (BUG - COMMENTED OUT): Stored FWHM/2, causing confusion throughout codebase
-                # Convert FWHM to Gaussian/Lorentzian components (assume 50/50 mix)
-                # For Voigt: FWHM ≈ 0.5346*fL + sqrt(0.2166*fL² + fG²)
-                # Approximate: set lw_gau ≈ fwhm/2, lw_lor ≈ fwhm/2
-                lw_gau_f1 = max(fwhm_f1 / 2.0, config.min_linewidth_f1)  # BUG: Stores FWHM/2
-                lw_lor_f1 = max(fwhm_f1 / 25.0, config.min_linewidth_f1) #/2#10
-                lw_gau_f2 = max(fwhm_f2 / 2.0, config.min_linewidth_f2)  # BUG: Stores FWHM/2
-                lw_lor_f2 = max(fwhm_f2 / 25.0, config.min_linewidth_f2) #10
+                # The measured FWHM is split across the two components rather than
+                # stored in one: the Gaussian carries half of it, the Lorentzian a
+                # twenty-fifth, both floored at the nucleus minimum. The sum is
+                # therefore about 0.54 x the FWHM that was measured, and the sites
+                # reading it back multiply lw_gau by 2 to recover an estimate.
+                #
+                # This is a SEED, and the fit is insensitive to it: switching every
+                # site to store the full FWHM moves the median volume by a factor of
+                # 1.000000 and no R-squared >= 0.85 peak by more than 1.8%, because
+                # the intensity-only stage absorbs a seed error whose median is 7.1x.
+                # The floor is what does the work - at 15N defaults min_linewidth_f1
+                # (0.05) exceeds fwhm/25 for any realistic width, so lw_lor_f1 starts
+                # at the floor rather than at a fraction of the measurement.
+                lw_gau_f1 = max(fwhm_f1 / 2.0, config.min_linewidth_f1)
+                lw_lor_f1 = max(fwhm_f1 / 25.0, config.min_linewidth_f1)
+                lw_gau_f2 = max(fwhm_f2 / 2.0, config.min_linewidth_f2)
+                lw_lor_f2 = max(fwhm_f2 / 25.0, config.min_linewidth_f2)
 
             # Use detected intensity if available, otherwise fall back to re-measurement
             if detected_intensity is not None and detected_intensity > 0:
@@ -2317,11 +2364,10 @@ class VoigtIntegrator(BaseIntegrator):
         SQRT_8LN2 = 2.3548200450309493  # 2 * sqrt(2 * ln(2))
         for peak in initial_peaks:
             # Convert FWHM to sigma (Gaussian width parameter)
-            # FIXED 2025-10-13: lw_gau IS the Gaussian FWHM (not half-width)
-            #fwhm_f1 = peak['lw_gau_f1']  # NEW: lw_gau IS the FWHM (no compensation needed)
-            #fwhm_f2 = peak['lw_gau_f2']  # NEW: lw_gau IS the FWHM (no compensation needed)
-            fwhm_f1 = 2.0 * peak['lw_gau_f1']  # OLD: Compensated for FWHM/2 storage bug
-            fwhm_f2 = 2.0 * peak['lw_gau_f2']  # OLD: Compensated for FWHM/2 storage bug
+            # lw_gau holds half the measured FWHM (see the seeding above), so the
+            # width is recovered by doubling it.
+            fwhm_f1 = 2.0 * peak['lw_gau_f1']
+            fwhm_f2 = 2.0 * peak['lw_gau_f2']
             sigma_f1 = fwhm_f1 / SQRT_8LN2
             sigma_f2 = fwhm_f2 / SQRT_8LN2
 
@@ -2573,6 +2619,12 @@ class VoigtIntegrator(BaseIntegrator):
                     'formal_convergence': result_2d.get('formal_convergence', False),
                     'pragmatic_acceptance': result_2d.get('pragmatic_acceptance', False),
                     'chi2_reduction_success': result_2d.get('chi2_reduction_success', False),
+                    # Whether this fit stopped on a wall. Neither is visible in
+                    # `success` or in R-squared - see peak_reached_a_bound. Reported,
+                    # not gated on: what to do with a peak held at a bound is the
+                    # caller's decision, and a fading peak is still a measurement.
+                    'position_pinned': peak_reached_a_bound(target_peak)[0],
+                    'intensity_pinned': peak_reached_a_bound(target_peak)[1],
                     # 2D visualization data
                     'region_2d': region_2d,
                     'fitted_2d_surface': fitted_2d_surface,

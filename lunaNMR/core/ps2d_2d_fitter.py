@@ -1040,34 +1040,32 @@ class Ps2dMultiPeakFitter2D:
             peak = initial_peaks[i]
 
             # F1 position bounds - constrain to ~1 linewidth of movement
-            # FIXED 2025-10-13: lw_gau_f1 IS the Gaussian FWHM (not half-width)
-            #fwhm_f1 = peak['lw_gau_f1']  # NEW: lw_gau IS the FWHM (no compensation needed)
-            fwhm_f1 = 2.0 * peak['lw_gau_f1']  # OLD: Compensated for FWHM/2 storage bug
+            # lw_gau holds half the seeded FWHM (core_integrator sets it), so the
+            # width is recovered by doubling it.
+            fwhm_f1 = 2.0 * peak['lw_gau_f1']
             if pos_margins is not None:
                 pos_f1_margin = float(pos_margins[i][0])
             else:
-                pos_f1_margin = max(0.04 * fwhm_f1, eff_pos_margin_f1)  # Nucleus-adaptive minimum #GM max(1.5
+                pos_f1_margin = max(0.04 * fwhm_f1, eff_pos_margin_f1)
             lower_bounds.append(peak['pos_f1'] - pos_f1_margin)
             upper_bounds.append(peak['pos_f1'] + pos_f1_margin)
 
-            # F1 linewidths - absolute bounds for all peaks (cluster bounds temporarily disabled)
-            # TODO: Re-enable cluster-specific bounds after testing
+            # F1 linewidths: one absolute interval for every peak, not a per-peak one
+            # scaled to its own seed. A per-peak bound would tie a weak member's width
+            # to a guess made from contaminated cross-sections.
             lower_bounds.extend([absolute_min_lw_f1, absolute_min_lw_f1])  # Lor, Gau
             upper_bounds.extend([absolute_max_lw_f1, absolute_max_lw_f1])  # Lor, Gau
 
             # F2 position bounds - constrain to ~1 linewidth of movement
-            # FIXED 2025-10-13: lw_gau_f2 IS the Gaussian FWHM (not half-width)
-            #fwhm_f2 = peak['lw_gau_f2']  # NEW: lw_gau IS the FWHM (no compensation needed)
-            fwhm_f2 = 2.0 * peak['lw_gau_f2']  # OLD: Compensated for FWHM/2 storage bug
+            fwhm_f2 = 2.0 * peak['lw_gau_f2']
             if pos_margins is not None:
                 pos_f2_margin = float(pos_margins[i][1])
             else:
-                pos_f2_margin = max(0.04 * fwhm_f2, eff_pos_margin_f2)  # Nucleus-adaptive minimum #GM max(1.5
+                pos_f2_margin = max(0.04 * fwhm_f2, eff_pos_margin_f2)
             lower_bounds.append(peak['pos_f2'] - pos_f2_margin)
             upper_bounds.append(peak['pos_f2'] + pos_f2_margin)
 
-            # F2 linewidths - absolute bounds for all peaks (cluster bounds temporarily disabled)
-            # TODO: Re-enable cluster-specific bounds after testing
+            # F2 linewidths: as F1 above.
             lower_bounds.extend([absolute_min_lw_f2, absolute_min_lw_f2])  # Lor, Gau
             upper_bounds.extend([absolute_max_lw_f2, absolute_max_lw_f2])  # Lor, Gau
 
