@@ -119,6 +119,32 @@ def measure_repeat_scale(intensity_matrix, columns) -> Optional[Dict[str, Any]]:
                 needs_normalisation=abs(ratio - 1.0) > 0.05)
 
 
+# Every column of series_analysis_tidy.csv, and what a peak that lacks it gets.
+# Built by explicit selection rather than from the peak dict, so a field the fitter
+# adds does not silently change the file's shape - but that also means a field the
+# ANALYSIS needs has to be named here or it never leaves the pipeline. The three bound
+# flags were exactly that: computed on every fit, stopping at this boundary.
+#
+# They default to None, not False. A peak that did not report them is UNKNOWN, and a
+# reader that cannot tell unknown from "not pinned" would silently treat a legacy
+# series as clean. See lunaNMR.utils.quality_categories.usable_points.
+TIDY_COLUMNS = {
+    'spectrum_name': '',
+    'assignment': 'Unknown',
+    'peak_number': 0,
+    'ppm_x': 0.0,
+    'ppm_y': 0.0,
+    'height': 0.0,
+    'volume': 0.0,
+    'snr': 0.0,
+    'quality': 'Unknown',
+    'r_squared': 0.0,
+    'detection_sigma': None,
+    'position_pinned': None,
+    'intensity_pinned': None,
+}
+
+
 class MultiSpectrumProcessor:
     """
     Completely independent multi-spectrum processor.
@@ -1126,18 +1152,9 @@ class MultiSpectrumProcessor:
             # Use the standardized integration results
             integration_results = result_data.get('integration_results', [])
             for peak in integration_results:
-                row = {
-                    'spectrum_name': spectrum_header,
-                    'assignment': peak.get('assignment', 'Unknown'),
-                    'peak_number': peak.get('peak_number', 0),
-                    'ppm_x': peak.get('ppm_x', 0.0),
-                    'ppm_y': peak.get('ppm_y', 0.0),
-                    'height': peak.get('height', 0.0),
-                    'volume': peak.get('volume', 0.0),
-                    'snr': peak.get('snr', 0.0),
-                    'quality': peak.get('quality', 'Unknown'),
-                    'r_squared': peak.get('r_squared', 0.0)
-                }
+                row = {name: peak.get(name, default)
+                       for name, default in TIDY_COLUMNS.items()}
+                row['spectrum_name'] = spectrum_header
                 tidy_data.append(row)
 
         if not tidy_data:
@@ -1502,6 +1519,13 @@ class MultiSpectrumProcessor:
                 fallback = self._failed_fit_fallback(i)
                 if fallback is not None:
                     peak_data.update(fallback)
+
+            # Whether this fit stopped on a wall, and how far above the noise it
+            # stands. Carried explicitly like every other field: this converter builds
+            # peak_data from scratch, so anything not named here is dropped - which is
+            # where these three were lost, arriving in the tidy CSV as empty columns.
+            for _flag in ('detection_sigma', 'position_pinned', 'intensity_pinned'):
+                peak_data[_flag] = fit_result.get(_flag)
 
             standardized_results.append(peak_data)
 

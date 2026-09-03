@@ -227,7 +227,67 @@ def categorize_quality_legacy(r_squared: float) -> str:
     return categorizer.categorize_r_squared(r_squared)
 
 # Export key functions for easy importing
+# ---------------------------------------------------------------------------
+# Which points of a series carry a measurement
+# ---------------------------------------------------------------------------
+# Below this many sigma a peak is not detected. The same floor holdPositionsAtNoise
+# uses; 3 sigma is the usual bar for calling a signal present at all.
+DETECTION_SIGMA_FLOOR = 3.0
+
+# Observables that need a POSITION. A peak that has decayed has none, so it cannot
+# contribute a chemical-shift perturbation - but it still contributes an intensity.
+POSITION_OBSERVABLES = ('csp', 'shift', 'position')
+
+
+def usable_points(frame, observable):
+    """The rows of a series that carry a measurement of `observable`.
+
+    Two states look identical in a series and need opposite handling, which is the
+    whole reason this exists.
+
+    A residue whose peak has DECAYED reports a near-zero intensity, and that zero IS
+    the measurement: dropping it from an I/I0 series invents a plateau that is not
+    there. It has no position, though, so it cannot contribute a CSP.
+
+    A residue whose FIT FAILED - pinned on a position or an intensity bound - reports a
+    number that came from the bound rather than from the data. For the intensity floor,
+    which is cluster-relative (0.1% of the brightest member's seed), that number is a
+    product of its NEIGHBOURS' seeds and its own seeded linewidths, carrying nothing
+    from the data at its own position. It is not a measurement of anything and is
+    dropped from every observable.
+
+    Neither state is visible in `success` or in R-squared. `success` is an OR whose
+    first arm is the optimiser's "chi2 stopped changing", true immediately on flat
+    noise; R-squared is per CLUSTER, so a member with nothing at its position rides the
+    one its healthy neighbours earn - measured, 0.58 sigma under a cluster R-squared of
+    0.9884.
+
+    A row from before these flags existed carries NaN. It is kept: refusing every
+    legacy series would be worse than the risk it represents, and the flags are absent
+    rather than negative. Re-run the series to get the filter.
+
+    :param frame: a DataFrame of series rows, one per (spectrum, peak)
+    :param observable: what is being measured; see POSITION_OBSERVABLES
+    :return: the subset of `frame` that can be used, index preserved
+    """
+    keep = frame.index == frame.index                 # all True, right length
+    for column in ('position_pinned', 'intensity_pinned'):
+        if column in frame:
+            # `== True` and not truthiness: NaN must not read as pinned, and None
+            # must not read as "not pinned" by accident either - both are unknown,
+            # and unknown is kept.
+            keep &= ~(frame[column].fillna(False).astype(bool))
+
+    if str(observable).lower() in POSITION_OBSERVABLES and 'detection_sigma' in frame:
+        detected = frame['detection_sigma'] >= DETECTION_SIGMA_FLOOR
+        keep &= detected | frame['detection_sigma'].isna()
+
+    return frame[keep]
+
+
 __all__ = [
+    'usable_points',
+    'DETECTION_SIGMA_FLOOR',
     'QualityCategorizer',
     'QualityThresholds',
     'get_quality_categorizer',

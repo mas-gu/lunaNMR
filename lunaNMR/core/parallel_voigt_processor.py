@@ -1732,6 +1732,13 @@ def _parallel_cluster_worker(cluster_task):
                             'formal_convergence': group_result.get('formal_convergence', False),
                             'pragmatic_acceptance': group_result.get('pragmatic_acceptance', False),
                             'chi2_reduction_success': group_result.get('chi2_reduction_success', False),
+                            # Whether this fit stopped on a wall, and how far above the
+                            # noise it stands. Stamped on the peak by fit_overlap_group_2d;
+                            # copied here because a field that is not named at every one of
+                            # these sites reaches the tidy CSV as an empty column.
+                            'detection_sigma': best_match.get('detection_sigma'),
+                            'position_pinned': best_match.get('position_pinned'),
+                            'intensity_pinned': best_match.get('intensity_pinned'),
                             # 2D visualization data
                             'region_2d': region_2d,
                             'fitted_2d_surface': fitted_2d_surface,

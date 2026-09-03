@@ -10,6 +10,13 @@ from kd_models import compute_csp, REF_MAX_RATIO, reference_usable
 
 
 
+
+# Below this many sigma a peak is not detected. The same floor the series pipeline
+# uses for holding a position at the noise; 3 sigma is the usual bar for calling a
+# signal present at all.
+DETECTION_SIGMA_FLOOR = 3.0
+
+
 def _to_point(label):
     """Parse a spectrum_name/point label to a float order key, or None.
 
@@ -57,9 +64,35 @@ def load_titration_tidy(csv_path):
     points = sorted(df['_pt'].unique())
 
     cols = ['ppm_x', 'ppm_y', 'height', 'volume']
+    positional = ['ppm_x', 'ppm_y']
     failed = (df['quality'].astype(str).str.strip().str.lower() == 'failed'
               if 'quality' in df.columns else pd.Series(False, index=df.index))
-    df.loc[failed, [c for c in cols if c in df.columns]] = np.nan
+
+    # A value taken from a BOUND is not a measurement of anything. The intensity floor
+    # is cluster-relative - 0.1% of the brightest member's seed - so a weak member of a
+    # bright cluster pinned there reports a product of its NEIGHBOURS' seeds and its
+    # own seeded linewidths, carrying nothing from the data at its own position. A
+    # pinned position means the fit could not reach the peak, and the linewidth
+    # stretched to cover the gap, so the intensity is wrong too. Both are blanked
+    # everywhere, exactly like a failed fit.
+    pinned = pd.Series(False, index=df.index)
+    for column in ('position_pinned', 'intensity_pinned'):
+        if column in df.columns:
+            # fillna(False), not truthiness: a legacy CSV has no such column at all
+            # and a legacy ROW carries NaN. Absent is not the same as pinned, and
+            # refusing every series written before these existed would be worse than
+            # the risk. Re-run the series to get the filter.
+            pinned |= df[column].fillna(False).astype(bool)
+    df.loc[failed | pinned, [c for c in cols if c in df.columns]] = np.nan
+
+    # A peak that has DECAYED is the opposite case and needs the opposite treatment.
+    # Its intensity is the measurement - blanking it invents a plateau that is not
+    # there, which is the whole point of an I/I0 series - but it has no position, so
+    # it cannot contribute a chemical-shift perturbation. Only the ppm columns go.
+    if 'detection_sigma' in df.columns:
+        sigma = df['detection_sigma']
+        undetected = sigma.notna() & (sigma < DETECTION_SIGMA_FLOOR)
+        df.loc[undetected, [c for c in positional if c in df.columns]] = np.nan
 
     residues = {}
     for assignment, g in df.groupby('assignment'):

@@ -2451,6 +2451,13 @@ class VoigtIntegrator(BaseIntegrator):
         # so they must ALL be scaled back to original units
         if result['success']:
             for peak in result['peaks']:
+                # Stamped HERE, once, rather than re-derived by every consumer: this
+                # is the only scope holding both the boxes the fit reports and the
+                # spectrum's noise. Four separate sites copy fields out of a 2D result
+                # onto a peak record, and a flag added to only one of them reaches the
+                # tidy CSV as an empty column - which is exactly what happened.
+                peak['position_pinned'], peak['intensity_pinned'] = \
+                    peak_reached_a_bound(peak)
                 peak['intensity'] *= max_intensity
                 peak['volume'] *= max_intensity      # Volume = intensity for normalized Voigt
                 # The MEASURED volume is a sum over the same normalized data, so it
@@ -2459,6 +2466,11 @@ class VoigtIntegrator(BaseIntegrator):
                 if peak.get('region_volume') is not None:
                     peak['region_volume'] *= max_intensity
                 peak['height'] *= max_intensity      # Height scales linearly with intensity
+                # None, never 0.0, without a noise estimate: 0.0 would sort to the top
+                # of the column a reader scans for trouble.
+                peak['detection_sigma'] = (abs(peak['height']) / self.noise_level
+                                           if getattr(self, 'noise_level', None)
+                                           else None)
                 peak['amplitude'] *= max_intensity   # Amplitude = height
 
         if result['success']:
@@ -2623,8 +2635,9 @@ class VoigtIntegrator(BaseIntegrator):
                     # `success` or in R-squared - see peak_reached_a_bound. Reported,
                     # not gated on: what to do with a peak held at a bound is the
                     # caller's decision, and a fading peak is still a measurement.
-                    'position_pinned': peak_reached_a_bound(target_peak)[0],
-                    'intensity_pinned': peak_reached_a_bound(target_peak)[1],
+                    'position_pinned': target_peak.get('position_pinned'),
+                    'intensity_pinned': target_peak.get('intensity_pinned'),
+                    'detection_sigma': target_peak.get('detection_sigma'),
                     # 2D visualization data
                     'region_2d': region_2d,
                     'fitted_2d_surface': fitted_2d_surface,
@@ -4546,6 +4559,11 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
                 result['pragmatic_acceptance'] = voigt2d_result['pragmatic_acceptance']
             if 'chi2_reduction_success' in voigt2d_result:
                 result['chi2_reduction_success'] = voigt2d_result['chi2_reduction_success']
+            # The bound flags travel with them; without this they reach the tidy CSV
+            # as empty columns and every filter downstream reads "unknown".
+            for _key in ('detection_sigma', 'position_pinned', 'intensity_pinned'):
+                if _key in voigt2d_result:
+                    result[_key] = voigt2d_result[_key]
 
             return result
 
