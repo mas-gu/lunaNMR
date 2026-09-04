@@ -90,6 +90,35 @@ GUI **Fix Positions**→skip Stage 2; **Fix Linewidths**→skip Stage 1. Stages 
 
 **Failed peaks** stored with placeholders (`fitted=False, r_squared=0, intensity=0, quality='Failed'`) to keep 1:1 peak_list↔results index mapping for the Navigator.
 
+### What acceptance cannot tell you
+
+`success` is `formal_convergence OR r² > 0.2 OR chi² reduced 100×`, and the first arm is the optimiser's own `done_count >= ndone` — "χ² stopped changing" — which is **true immediately on flat noise**. Three positions chosen in genuinely empty regions of a real spectrum all returned `success=True`; at the weakest point of a real titration, 34 of 68 successful fits sat below three sigma.
+
+R² does not cover the gap either. It is a squared **Pearson correlation** (shape only, blind to a fit whose every intensity is twice too large) and it is computed **per cluster**, so a member with nothing at its position rides the R² its healthy neighbours earn — measured, 0.58σ under a cluster R² of 0.9884.
+
+Each fitted peak therefore carries three further fields, stamped once in `fit_overlap_group_2d`:
+
+| field | meaning | `None` when |
+|---|---|---|
+| `detection_sigma` | fitted height ÷ noise σ | the spectrum has no noise estimate |
+| `position_pinned` | the fitted position rests on its bound — the seed was further out than `pos_margin` allows, and the **linewidth stretched** to cover the gap, so the volume is wrong too | the fit did not report its box |
+| `intensity_pinned` | the fitted intensity rests on its interval's edge. That floor is **cluster-relative** (`max_initial_intensity * 0.001`), so such a value is a product of its **neighbours'** seeds and its own seeded linewidths | as above |
+
+`None` is not `False`: silence about a bound is not a denial of one.
+
+### Zero is information, and only sometimes
+
+Two states look identical in a series — both report a near-zero height — and they need opposite handling:
+
+| | CSP / positions | I/I₀ (T1, T2, titration) |
+|---|---|---|
+| peak genuinely **decayed** below the noise | **exclude** — there is no position to measure a shift from | **KEEP — zero is the measurement** |
+| fit **failed**, pinned on either bound | exclude | **exclude** — the value came from a bound, not from data |
+
+Dropping a decayed residue from an intensity series fabricates a plateau that is not there; keeping a bound-pinned one publishes its neighbours' seeds as a measurement. `quality_categories.usable_points(frame, observable)` is this table as code, and `dynamiXs_Kd/kd_input.load_titration_tidy` applies it — blanking every column for a bound, and only the ppm columns for a decay.
+
+**These flags cross three boundaries and each drops silently**: the four sites that copy fields out of a 2D result onto a peak record (only one is on the series path), `multi_spectrum_processor.TIDY_COLUMNS` (the single list every tidy row is built from), and `_convert_to_integration_format` (which rebuilds `peak_data` from scratch and drops anything it does not name). A field must be present at all three or it reaches `series_analysis_tidy.csv` as an empty column.
+
 ---
 
 ## 5. Parameter Management
