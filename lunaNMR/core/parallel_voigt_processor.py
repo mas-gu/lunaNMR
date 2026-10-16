@@ -1408,13 +1408,13 @@ def _test_parallel_worker(_test_data):
 
 def _create_skipped_peak_result(peak_x, peak_y, assignment, peak_number, skip_reason, detected_intensity=0):
     """
-    Create a standardized result for peaks that are skipped due to low/negative intensity.
+    Create a standardized result for peaks that are skipped because their intensity is below the S/N threshold.
 
     Args:
         peak_x, peak_y: Peak position
         assignment: Peak assignment string
         peak_number: Peak number in list
-        skip_reason: Why the peak was skipped ('negative_intensity' or 'below_snr_threshold')
+        skip_reason: Why the peak was skipped ('below_snr_threshold')
         detected_intensity: The detected intensity value (for logging)
 
     Returns:
@@ -1453,7 +1453,7 @@ def _create_skipped_peak_result(peak_x, peak_y, assignment, peak_number, skip_re
 
 def _should_skip_peak(detected_intensity, noise_level, snr_threshold):
     """
-    Check if a peak should be skipped due to low/negative intensity.
+    Check if a peak should be skipped because its intensity is below the S/N threshold.
 
     Returns:
         tuple: (should_skip: bool, reason: str or None)
@@ -1461,11 +1461,12 @@ def _should_skip_peak(detected_intensity, noise_level, snr_threshold):
     if detected_intensity is None:
         return False, None  # No intensity info, proceed with fitting
 
-    if detected_intensity <= 0:
-        return True, 'negative_intensity'
-
+    # The MAGNITUDE against the noise: a negative peak (hetNOE saturated plane, edited
+    # 13C-HSQC, folded) is signal too. Skipping it reported height 0.0 with no bound
+    # flags, which every analysis kept as a measured zero; fitted, it reports the bound
+    # it stopped on and is excluded - the same answer sequential mode gives.
     if noise_level is not None and noise_level > 0:
-        if detected_intensity < noise_level * snr_threshold:
+        if abs(detected_intensity) < noise_level * snr_threshold:
             return True, 'below_snr_threshold'
 
     return False, None
@@ -1518,7 +1519,7 @@ def _parallel_cluster_worker(cluster_task):
             if cluster_dicts:
                 detected_intensity = cluster_dicts[0].get('intensity')
 
-            # Pre-check: Skip fitting if intensity is negative or below SNR threshold
+            # Pre-check: Skip fitting if |intensity| is below the SNR threshold
             should_skip, skip_reason = _should_skip_peak(detected_intensity, noise_level, snr_threshold)
 
             if should_skip:
@@ -1571,7 +1572,7 @@ def _parallel_cluster_worker(cluster_task):
                 # The optimizer can still adjust linewidths to find the best fit
                 # fix_linewidths remains as set by GUI (user choice)
 
-            # Pre-check: If ALL peaks in cluster have negative/low SNR intensity, skip entire cluster
+            # Pre-check: If ALL peaks in cluster are below the SNR threshold, skip entire cluster
             all_skip = True
             skip_reasons = []
             for idx, peak_dict in enumerate(cluster_dicts):
@@ -1591,7 +1592,7 @@ def _parallel_cluster_worker(cluster_task):
                     peak_number = cluster_peak_numbers[idx]
                     detected_intensity = cluster_dicts[idx].get('intensity', 0)
                     # Find the skip reason for this peak
-                    skip_reason = 'negative_intensity'  # default
+                    skip_reason = 'below_snr_threshold'  # default
                     for sr_idx, sr_reason, sr_int in skip_reasons:
                         if sr_idx == idx:
                             skip_reason = sr_reason
