@@ -174,7 +174,7 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 
 ## Output file shapes (what you parse back)
 
-- **`series` matrices**: `Peak_Number,Assignment,Reference_X,Reference_Y` + one column per spectrum, labelled with the parsed delay (`8`, `2400`, `102_2`) or, when none parses, the filename stem (`hetnoe_600_saturated`). Per spectrum, so one folder can carry both kinds. In `peak_intensity_matrix.csv` and `peak_volume_matrix.csv` an **empty cell** is a point whose fit stopped on a bound; a decayed point keeps its (low) value. `comprehensive_peak_tracking.csv` keeps every value and marks those points in a `{point}_Bound_Pinned` column.
+- **`series` matrices**: `Peak_Number,Assignment,Reference_X,Reference_Y` + one column per spectrum, labelled with the parsed delay (`8`, `2400`, `102_2`) or, when none parses, the filename stem (`hetnoe_600_saturated`). Per spectrum, so one folder can carry both kinds. In `peak_intensity_matrix.csv` and `peak_volume_matrix.csv` an **empty cell** is a point whose fit stopped on its intensity floor; a decayed or position-pinned point keeps its value. `comprehensive_peak_tracking.csv` keeps every value and marks the bounds in `{point}_Position_Pinned` and `{point}_Intensity_Pinned` columns.
 - **`series_analysis_tidy.csv`**: `spectrum_name`, `assignment`, `peak_number`, `ppm_x`, `ppm_y`, `height`, `volume`, `snr`, `quality`, `r_squared`, `detection_sigma`, `position_pinned`, `intensity_pinned`. **The only place per-peak fit quality reaches the series output** — gate residues here, the matrices are intensities only.
   - `position_pinned` / `intensity_pinned`: the fit stopped on its position margin / its intensity floor. The reported height, volume and (for a position pin) linewidth came from the bound, not the data.
   - `detection_sigma`: fitted height ÷ spectrum noise. Below 3 the peak is not detected at that point.
@@ -213,12 +213,13 @@ python -m lunaNMR <cmd> ... --format json --dry-run
   | state | flag | CSP / positions | I/I₀ (T1, T2, titration intensity) |
   |---|---|---|---|
   | peak decayed below noise | `detection_sigma` < 3 | exclude — no position to shift from | **keep — zero is the measurement** |
-  | fit stopped on a bound | `position_pinned` or `intensity_pinned` | exclude | exclude — the number came from the bound |
+  | fit stopped on its intensity floor | `intensity_pinned` | exclude | exclude — the number came from the bound |
+  | position stopped on its margin | `position_pinned` | exclude — the position is the margin | **keep** — the height does not depend on it |
 
   Dropping a decayed point from an intensity series invents a plateau; keeping a pinned one publishes the neighbours' seeds as data. What the pipeline does for you, point-wise (a residue keeps its other points):
-  - `series` writes a pinned point as an **empty cell** in the intensity and volume matrices, and the relaxation fitters (`t1t2`, `methyl-t2`, `t1rho`, `modelfree`) skip empty cells. A residue left with fewer measured points than free parameters is reported as a failed fit.
+  - `series` writes an intensity-pinned point as an **empty cell** in the intensity and volume matrices, and the relaxation fitters (`t1t2`, `methyl-t2`, `t1rho`, `modelfree`) skip empty cells. A residue left with fewer measured points than free parameters is reported as a failed fit.
   - `kd` on the tidy CSV applies the whole table, including dropping undetected points from CSP. On a matrix it gets the blanked intensities but no positions.
-  - `kd` on `comprehensive_peak_tracking.csv` drops pinned points, but that file has no `detection_sigma`, so undetected points still enter CSP — use the tidy CSV.
+  - `kd` on `comprehensive_peak_tracking.csv` applies both bound flags, but that file has no `detection_sigma`, so undetected points still enter CSP — use the tidy CSV.
   - A series written before this behaviour has no empty cells: re-run `series`.
 - **CSP needs a fresh series run.** Older series output rounded positions to 0.1 ppm; CSP needs 4-decimal precision. Re-run `series` before `kd` CSP. Intensity fits work on existing data.
 - **Kd is always bounded ≥ 0** internally (unbounded lands on a degenerate negative-Kd minimum). Don't post-process assuming otherwise.

@@ -79,8 +79,9 @@ Notes: symlink hetNOE planes to explicit `*_saturated.ft` / `*_unsaturated.ft` n
 integrating, and keep NMRPipe intermediates (`test.ft`) out of the folder glob.
 Filter fits on finite `T`, `T > 0`, `T_err < T`.
 
-**An empty matrix cell is a fit that stopped on a bound.** `series` blanks those points
-(`position_pinned`/`intensity_pinned` in `series_analysis_tidy.csv`), and the fitters skip
+**An empty matrix cell is a fit that stopped on its intensity floor.** `series` blanks those
+points (`intensity_pinned` in `series_analysis_tidy.csv`; a `position_pinned` point keeps its
+intensity, which does not depend on it), and the fitters skip
 them and fit the residue on the rest. Report how many points each residue lost: a residue
 fitted on a few points of a long series is weakly determined, whatever its R². Do **not**
 drop a point yourself because its `detection_sigma` is below 3: in a decay that low

@@ -113,9 +113,10 @@ Two states look identical in a series — both report a near-zero height — and
 | | CSP / positions | I/I₀ (T1, T2, titration) |
 |---|---|---|
 | peak genuinely **decayed** below the noise | **exclude** — there is no position to measure a shift from | **KEEP — zero is the measurement** |
-| fit **failed**, pinned on either bound | exclude | **exclude** — the value came from a bound, not from data |
+| fit stopped on its **intensity floor** | exclude | **exclude** — the value came from a bound, not from data |
+| **position** stopped on its margin | exclude — the position is the margin | **keep** — the height does not depend on it |
 
-Dropping a decayed residue from an intensity series fabricates a plateau that is not there; keeping a bound-pinned one publishes its neighbours' seeds as a measurement. `quality_categories.usable_points(frame, observable)` is this table as code, and `dynamiXs_Kd/kd_input.load_titration_tidy` applies it — blanking every column for a bound, and only the ppm columns for a decay.
+Dropping a decayed residue from an intensity series fabricates a plateau that is not there; keeping one on its intensity floor publishes its neighbours' seeds as a measurement. A pinned position is kept for intensity because, measured on KRASB 600 hetNOE, most sit on the 0.020 ppm ¹⁵N margin (a quarter of one ¹⁵N point): widened to 0.05 ppm, the freed peaks' heights moved by a median 0.0%. `quality_categories.usable_points(frame, observable)` is this table as code, and `dynamiXs_Kd/kd_input.load_titration_tidy` applies it — blanking every column for the intensity floor, and only the ppm columns for a decay or a pinned position.
 
 **These flags cross three boundaries and each drops silently**: the four sites that copy fields out of a 2D result onto a peak record (only one is on the series path), `multi_spectrum_processor.TIDY_COLUMNS` (the single list every tidy row is built from), and `_convert_to_integration_format` (which rebuilds `peak_data` from scratch and drops anything it does not name). A field must be present at all three or it reaches `series_analysis_tidy.csv` as an empty column.
 
