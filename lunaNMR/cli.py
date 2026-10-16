@@ -810,6 +810,13 @@ def _load_series_params(args):
     return params
 
 
+# The files a series run writes that the JSON summary names.
+SERIES_OUTPUTS = ('peak_intensity_matrix.csv', 'peak_volume_matrix.csv',
+                  'peak_detection_matrix.csv', 'peak_intensity_detected_matrix.csv',
+                  'comprehensive_peak_tracking.csv', 'series_analysis_tidy.csv',
+                  'series_metadata.json')
+
+
 def _run_series(args):
     """Wrap MultiSpectrumProcessor.process_nmr_series for a headless series/titration run."""
     import matplotlib
@@ -886,9 +893,7 @@ def _run_series(args):
     # place per-peak fit quality reaches the series output — a caller that misses it
     # has no way to gate residues.
     outputs = {name: os.path.join(output_folder, name)
-               for name in ('peak_intensity_matrix.csv', 'peak_volume_matrix.csv',
-                            'peak_detected_matrix.csv', 'comprehensive_peak_tracking.csv',
-                            'series_analysis_tidy.csv', 'series_metadata.json')
+               for name in SERIES_OUTPUTS
                if os.path.exists(os.path.join(output_folder, name))}
     _emit(args,
           {'command': 'series', 'spectra_fitted': n_success, 'spectra_total': len(results),

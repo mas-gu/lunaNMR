@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 from lmfit import Model
 # One definition of the fit conventions, shared with the single-core fitter.
 from fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
-                          MARGINAL_TMAX_OVER_T, _is_reliable_t2)
+                          MARGINAL_TMAX_OVER_T, _is_reliable_t2, measured_points)
 import pandas as pd
 import multiprocessing
 from multiprocessing import Pool, cpu_count
@@ -164,8 +164,12 @@ def fit_single_residue_parallel(args):
         if idx % 10 == 0:
             print(f"Processing residue {idx+1}/{total}: {residue_name}")
 
-        x = np.asarray(x, dtype=float)
-        y = np.asarray(y, dtype=float)
+        x_all = np.asarray(x, dtype=float)
+        y_all = np.asarray(y, dtype=float)
+        x, y = measured_points(x_all, y_all)
+        n_free = 3 if fit_baseline else 2
+        if len(y) < n_free:
+            raise ValueError(f"{len(y)} measured points, need {n_free}")
 
         # Data-driven initial guesses (fixed A=5/t2=100 fail to converge when the
         # amplitude or time-scale differ by orders of magnitude).
@@ -242,8 +246,8 @@ def fit_single_residue_parallel(args):
             'A_err': a_err,
             't2_err': t2_err,
             'C_err': c_err,
-            'x': x,
-            'y': y,
+            'x': x_all,
+            'y': y_all,
             'result': result,
             'success': reliable,
             'idx': idx

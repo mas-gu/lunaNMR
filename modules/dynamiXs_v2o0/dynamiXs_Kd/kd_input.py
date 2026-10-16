@@ -132,11 +132,17 @@ def load_titration_tracking(csv_path):
         if not a or a.lower() in ('nan', 'dummy', ''):
             continue
         rec = {'points': list(points)}
+        # A point whose fit stopped on a bound carries a number taken from the bound, not
+        # the data: blanked in every column, as load_titration_tidy does. The flag is
+        # written as '1.0'/'0.0'; a file from before it existed has no such column.
+        pinned = [f'{lbl}_Bound_Pinned' in df.columns and pd.notna(row[f'{lbl}_Bound_Pinned'])
+                  and float(row[f'{lbl}_Bound_Pinned']) != 0.0 for lbl in labels]
         for suffix, key in col_map:
             vals = []
-            for lbl in labels:
+            for lbl, is_pinned in zip(labels, pinned):
                 col = f'{lbl}_{suffix}'
-                vals.append(float(row[col]) if col in df.columns and pd.notna(row[col]) else np.nan)
+                usable = col in df.columns and pd.notna(row[col]) and not is_pinned
+                vals.append(float(row[col]) if usable else np.nan)
             rec[key] = vals
         residues[a] = rec
     return points, residues

@@ -76,6 +76,19 @@ FIT_BASELINE_BY_DEFAULT = False
 MARGINAL_TMAX_OVER_T = 2.0
 
 
+def measured_points(x, y):
+    """The (x, y) points that carry a measurement.
+
+    A series writes an empty cell - NaN here - where a fit stopped on a bound, because
+    the number there came from the bound rather than the data. Only that point is lost;
+    the residue is fitted on the rest. lmfit would otherwise abort on the NaN.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    keep = np.isfinite(y)
+    return x[keep], y[keep]
+
+
 def exp_decay(x, A, t2, C=0.0):
     """Mono-exponential decay with baseline offset: I(t) = A * exp(-t/t2) + C."""
     return A * np.exp(-x / t2) + C
@@ -356,8 +369,26 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
     -------
     dict : Fitting results
     """
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
+    x_all = np.asarray(x, dtype=float)
+    y_all = np.asarray(y, dtype=float)
+    x, y = measured_points(x_all, y_all)
+
+    n_free = 3 if fit_baseline else 2
+    if len(y) < n_free:
+        print(f"Fitting residue: {residue_name}  ->  {len(y)} measured points, "
+              f"need {n_free}, excluded")
+        return {
+            'residue': residue_name,
+            'A': np.nan, 't2': np.nan, 'C': np.nan,
+            'A_err': np.nan, 't2_err': np.nan, 'C_err': np.nan,
+            'baseline_fixed': not bool(fit_baseline),
+            'window_ratio': np.nan,
+            'window_marginal': False,
+            'x': x_all,
+            'y': y_all,
+            'result': None,
+            'success': False
+        }
 
     # Data-driven initial guesses (fixed defaults like A=5/t2=100 fail to converge
     # when the amplitude or time-scale differs by orders of magnitude, e.g. real
@@ -430,8 +461,8 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
         'baseline_fixed': not bool(fit_baseline),
         'window_ratio': window_ratio,
         'window_marginal': window_marginal,
-        'x': x,
-        'y': y,
+        'x': x_all,
+        'y': y_all,
         'result': result,
         'success': success
     }

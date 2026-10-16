@@ -23,8 +23,10 @@ T2_LOWER_BOUND_MS = 0.1
 
 try:
     from delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
+    from fit_Tx_NMRRE import measured_points
 except ImportError:  # imported as dynamiXs_T1_T2.fit_methyl_T2 (parent dir on path)
     from dynamiXs_T1_T2.delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
+    from dynamiXs_T1_T2.fit_Tx_NMRRE import measured_points
 
 
 def biexp_decay(x, A, t2_a, t2_b):
@@ -220,8 +222,11 @@ def fit_single_residue_methyl(x, y, residue_name,
     """
     print(f"Fitting methyl residue: {residue_name}")
 
-    x = np.asarray(x, dtype=float)
-    y = np.asarray(y, dtype=float)
+    x_all = np.asarray(x, dtype=float)
+    y_all = np.asarray(y, dtype=float)
+    x, y = measured_points(x_all, y_all)
+    if len(y) < 3:
+        raise ValueError(f"{residue_name}: {len(y)} measured points, need 3")
 
     span = float(np.max(y) - np.min(y))
     if initial_A is None:
@@ -353,7 +358,7 @@ def fit_single_residue_methyl(x, y, residue_name,
         "t2_b_err": float(t2_b_err),
         "eta_err": float(eta_err),
         "bi_exp_unidentifiable": bi_exp_unidentifiable,
-        "x": x, "y": y,
+        "x": x_all, "y": y_all,
         "result": result,
     }
 

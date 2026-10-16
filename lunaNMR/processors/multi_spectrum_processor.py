@@ -145,6 +145,16 @@ TIDY_COLUMNS = {
 }
 
 
+def _stopped_on_a_bound(peak: Dict[str, Any]) -> bool:
+    """True when the fit reported reaching its position margin or intensity floor.
+
+    An unreported flag (None, or NaN from an older run) is unknown and reads as False:
+    unknown is kept, as in quality_categories.usable_points.
+    """
+    return any(bool(peak.get(flag)) for flag in ('position_pinned', 'intensity_pinned')
+               if peak.get(flag) is not None and pd.notna(peak.get(flag)))
+
+
 class MultiSpectrumProcessor:
     """
     Completely independent multi-spectrum processor.
@@ -1676,6 +1686,7 @@ class MultiSpectrumProcessor:
                             peak_row[f'{spectrum_key}_Position_X'] = peak.get('Position_X', 0.0)
                             peak_row[f'{spectrum_key}_Position_Y'] = peak.get('Position_Y', 0.0)
                             peak_row[f'{spectrum_key}_R_Squared'] = peak.get('R_Squared', 0.0)
+                            peak_row[f'{spectrum_key}_Bound_Pinned'] = _stopped_on_a_bound(peak)
 
                             # Add detected intensity and linewidth information
                             peak_row[f'{spectrum_key}_Detected_Intensity'] = peak.get('detected_intensity', 0.0)
@@ -1694,6 +1705,7 @@ class MultiSpectrumProcessor:
                     peak_row[f'{spectrum_key}_Position_X'] = 0.0
                     peak_row[f'{spectrum_key}_Position_Y'] = 0.0
                     peak_row[f'{spectrum_key}_R_Squared'] = 0.0
+                    peak_row[f'{spectrum_key}_Bound_Pinned'] = False
                     peak_row[f'{spectrum_key}_Detected_Intensity'] = 0.0
                     peak_row[f'{spectrum_key}_LW_X'] = 0.0
                     peak_row[f'{spectrum_key}_LW_Y'] = 0.0
@@ -1743,14 +1755,30 @@ class MultiSpectrumProcessor:
 
         return df_formatted
 
+    @staticmethod
+    def _fitted_matrix(tracking_df: pd.DataFrame, suffix: str) -> pd.DataFrame:
+        """One column per spectrum of a fitted quantity (`suffix`: '_Height', '_Volume').
+
+        A point whose fit stopped on a bound is left EMPTY. The relaxation analyses read
+        only the matrices, which carry no flags, so a value taken from a bound - for the
+        cluster-relative intensity floor, a product of the neighbours' seeds - would be
+        fitted as a decay point. A decayed peak is not touched: its low value is the
+        measurement.
+        """
+        matrix = tracking_df[['Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y']].copy()
+        for col in tracking_df.columns:
+            if col.endswith(suffix):
+                spectrum_name = col[:-len(suffix)]
+                values = tracking_df[col].astype(float)
+                pinned_col = f'{spectrum_name}_Bound_Pinned'
+                if pinned_col in tracking_df:
+                    values = values.mask(tracking_df[pinned_col].astype(bool))
+                matrix[spectrum_name] = values
+        return matrix
+
     def _create_intensity_matrix(self, tracking_df: pd.DataFrame):
         """Create peak intensity matrix file"""
-        intensity_data = tracking_df[['Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y']].copy()
-
-        for col in tracking_df.columns:
-            if col.endswith('_Height'):
-                spectrum_name = col.replace('_Height', '')
-                intensity_data[spectrum_name] = tracking_df[col]
+        intensity_data = self._fitted_matrix(tracking_df, '_Height')
 
         intensity_file = os.path.join(self.output_folder, "peak_intensity_matrix.csv")
         # Format with 3 decimals for Reference_X/Y, 1 decimal for other columns
@@ -1790,12 +1818,7 @@ class MultiSpectrumProcessor:
 
     def _create_volume_matrix(self, tracking_df: pd.DataFrame):
         """Create peak volume matrix file"""
-        volume_data = tracking_df[['Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y']].copy()
-
-        for col in tracking_df.columns:
-            if col.endswith('_Volume'):
-                spectrum_name = col.replace('_Volume', '')
-                volume_data[spectrum_name] = tracking_df[col]
+        volume_data = self._fitted_matrix(tracking_df, '_Volume')
 
         volume_file = os.path.join(self.output_folder, "peak_volume_matrix.csv")
         # Format with 3 decimals for Reference_X/Y, 1 decimal for other columns
