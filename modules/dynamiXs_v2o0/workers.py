@@ -1126,8 +1126,8 @@ class SpectraProcessingWorker(AnalysisWorker):
             for residue in sorted(sat_data.keys(), key=lambda x: int(x) if x.isdigit() else 0):
                 if residue in unsat_data and unsat_data[residue] > 0:
                     ratio = sat_data[residue] / unsat_data[residue]
-                    # Estimate 2% error
-                    error = ratio * 0.02
+                    # Estimate 2% error; abs, as a negative hetNOE is real data
+                    error = abs(ratio) * 0.02
                     f.write(f"{residue},{ratio:.5f},{error:.5f}\n")
 
         return output_file

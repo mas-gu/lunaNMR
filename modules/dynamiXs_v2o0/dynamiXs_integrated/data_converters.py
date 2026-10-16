@@ -147,10 +147,12 @@ def calculate_hetnoe_from_intensities(saturated_data: Dict[str, float],
             rel_err_sat = I_sat_err / I_sat if I_sat != 0 else 0
             rel_err_unsat = I_unsat_err / I_unsat if I_unsat != 0 else 0
 
-            noe_err = noe * np.sqrt(rel_err_sat**2 + rel_err_unsat**2)
+            # abs(noe): a flexible residue's saturated peak is negative, and an error
+            # bar is a magnitude.
+            noe_err = abs(noe) * np.sqrt(rel_err_sat**2 + rel_err_unsat**2)
         else:
             # Estimate 2% error if not provided (typical for well-measured peaks)
-            noe_err = noe * 0.02
+            noe_err = abs(noe) * 0.02
 
         noe_values[res_id] = {
             'value': noe,
