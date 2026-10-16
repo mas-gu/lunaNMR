@@ -79,6 +79,14 @@ Notes: symlink hetNOE planes to explicit `*_saturated.ft` / `*_unsaturated.ft` n
 integrating, and keep NMRPipe intermediates (`test.ft`) out of the folder glob.
 Filter fits on finite `T`, `T > 0`, `T_err < T`.
 
+**An empty matrix cell is a fit that stopped on a bound.** `series` blanks those points
+(`position_pinned`/`intensity_pinned` in `series_analysis_tidy.csv`), and the fitters skip
+them and fit the residue on the rest. Report how many points each residue lost: a residue
+fitted on a few points of a long series is weakly determined, whatever its R². Do **not**
+drop a point yourself because its `detection_sigma` is below 3: in a decay that low
+intensity is the measurement, and removing it invents a plateau. The two states and their
+handling are tabulated in `CLI_AGENT.md`.
+
 To act on one sub-series alone — cross-normalising a re-acquired tail, say — read the
 column → spectrum map from `series_metadata.json`. Matrix columns are delays, not filenames,
 and which of two files at the same delay owns the bare label rather than the `_2` one follows

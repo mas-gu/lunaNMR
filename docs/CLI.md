@@ -224,6 +224,16 @@ owns it.
 `quality` (`Excellent`/`Good`/`Fair`/`Poor`/`Failed`) and `r_squared`, one row per
 (spectrum × peak). Gate residues from there.
 
+The same file carries `detection_sigma` (height ÷ noise), `position_pinned` and
+`intensity_pinned` (the fit stopped on a bound). Neither `quality` nor `r_squared` can see
+those states. A decayed peak (`detection_sigma` < 3) keeps its intensity — zero is the
+measurement in a decay — but has no position for a CSP; a pinned fit is no measurement at
+all, so `series` writes it as an empty cell in `peak_intensity_matrix.csv` and
+`peak_volume_matrix.csv`, and the relaxation fitters skip empty cells. `kd` applies the full
+rule when its input is the tidy CSV; on `comprehensive_peak_tracking.csv` it drops pinned
+points but cannot see undetected ones. The table and the reasons are in
+[CLI_AGENT.md](CLI_AGENT.md) under Gotchas.
+
 **hetNOE folders:** two planes are not a delay series, so the columns come out as the
 filename stems. Name (or symlink) the planes explicitly — `*_saturated.ft` /
 `*_unsaturated.ft` — before integrating, and decide which is which by measuring the intensity

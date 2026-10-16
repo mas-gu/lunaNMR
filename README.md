@@ -43,13 +43,14 @@ PySide6/Qt6 suite for NMR peak detection, Voigt profile fitting, and integration
 - **Voigt fitting**: Gaussian + Lorentzian lineshapes, ArPLS baseline correction, multi-peak deconvolution with simultaneous fitting of overlapping peaks.
 - **2D simultaneous multi-peak fitting (PS2D)**: closely-spaced peaks auto-routed to 2D Levenberg-Marquardt deconvolution.
 - **Peak detection**: network-based clustering with prominence analysis, no manual seeding required.
-- **Quality assessment**: R², uncertainties (bootstrap / covariance), color-coded markers.
+- **Quality assessment**: R², uncertainties (bootstrap / covariance), color-coded markers — plus per-peak flags for what R² cannot see: a fit that stopped on a position or intensity bound, and a peak below the detection floor.
 - **Series workflows**: relaxation (T₁, T₂, hetNOE), titration, and multi-spectrum (temperature/pH) processing with automated peak tracking.
 - **Kd / titration**: CSP (quadratic 1:1 isotherm) and intensity-decay binding fits.
 - **Dynamics (DynamiXs)**: T₁/T₂, methyl T₂ (bi-exponential), T₁ρ, spectral density, model-free.
+- **1D integration**: peak picking on a 1D spectrum, then height / region-sum / Voigt-area measurement across a series.
 - **Parallel processing**: two-pass cluster-based, ~2.7× speedup.
 - **ML/statistics**: dual-path fit-parameter prediction with statistical fallback (optional CNN classifier).
-- **Headless CLI**: `python -m lunaNMR` — every analysis is scriptable with no display. Subcommand reference: [docs/CLI.md](docs/CLI.md); machine contract and gotchas for agents: [docs/CLI_AGENT.md](docs/CLI_AGENT.md).
+- **Headless CLI**: `python -m lunaNMR` — every analysis is scriptable with no display. Subcommand reference: [docs/CLI.md](docs/CLI.md).
 
 **File formats**: Bruker TopSpin (`.2ii`, `.2rr`), Varian/Agilent (`.fid`, `.ft`), NMRPipe (`.ft`, `.pipe`), SPARKY (`.ucsf`). Export: CSV, JSON, PNG, PDF, SVG, EPS.
 
@@ -71,6 +72,35 @@ Requires **numba** (2D multi-peak fitting) and **PySide6** (GUI). `torch`/`torch
 
 ---
 
+## Driving LunaNMR from an Agent
+
+Everything the GUI does is reachable through one headless CLI, built to be run by an AI
+coding agent as well as by hand: `--format json` puts a single summary object on stdout,
+`--dry-run` validates inputs and prints the plan, and exit codes are fixed.
+
+| Subcommand | Does |
+|---|---|
+| `diagnose` | Read-only pre-flight: peak-list registration, capture rate, delay parsing, hetNOE plane identity, cross-experiment residue sets |
+| `series` | Fit a relaxation series or titration (`--params` takes a tuning JSON) |
+| `dynamixs t1t2` / `methyl-t2` / `t1rho` / `hetnoe` / `density` / `modelfree` | Relaxation analyses |
+| `kd`, `export kd` | Kd titration (CSP / intensity) and its figures |
+| `integrate-1d` | 1D peak integration across a series |
+| `peaks shift` | Apply the registration offset `diagnose` measured |
+| `project inventory` / `export` / `remove` | Inspect, copy out, or prune a `.lunaNMR` bundle |
+| `batch` | Folder-wide detect + fit |
+
+Start with **[AGENTS.md](AGENTS.md)**, then:
+
+- [docs/CLI_AGENT.md](docs/CLI_AGENT.md) — the machine contract: JSON output shapes, exit codes, input/output file shapes, and the gotchas.
+- [docs/CLI_AGENTS_DEEP/](docs/CLI_AGENTS_DEEP/) — step-by-step guides (playbooks) and prompts for relaxation and affinity, with the physical QC bands.
+
+Most failure modes here exit 0 rather than raising: a wrong peak list gives zero heights,
+a mislabelled concentration unit gives a confident Kd wrong by a constant factor, and a fit
+pinned on a bound reports a plausible height at a healthy R². Run `diagnose` before
+anything else, and gate residues on the flags in `series_analysis_tidy.csv`, not on R².
+
+---
+
 ## Package Structure
 
 ```
@@ -85,9 +115,12 @@ lunaNMR_v1o0/
 │   ├── ml/                    # ML/statistics parameter prediction
 │   ├── integrators/           # specialized integrators
 │   ├── utils/                 # config, project bundles, output routing
-│   └── validation/            # installation verification
-├── modules/dynamiXs_v2o0/     # DynamiXs (dynamics) + Kd / titration
-└── docs/                      # CLI.md, ARCHITECTURE.md, ALGORITHMS.md, guide
+│   └── validation/            # installation verification + `diagnose` pre-flight checks
+├── modules/
+│   ├── dynamiXs_v2o0/         # DynamiXs (dynamics) + Kd / titration
+│   └── integration_1d_v1o0/   # 1D peak integration across a series
+├── AGENTS.md                  # entry point for agents driving the CLI
+└── docs/                      # CLI.md, CLI_AGENT.md, CLI_AGENTS_DEEP/, ARCHITECTURE.md, ALGORITHMS.md, guide
 ```
 
 ---

@@ -97,6 +97,23 @@ class TestTheAgentDocsAreReachable:
     def test_the_project_readme_links_the_agent_reference(self):
         assert "CLI_AGENT.md" in (REPO_ROOT / "README.md").read_text()
 
+    def test_the_project_readme_links_the_agent_entry_point(self):
+        """GitHub renders README.md, not AGENTS.md: an agent landing on the repo page
+        reaches the entry point only if the README names it."""
+        assert "AGENTS.md" in (REPO_ROOT / "README.md").read_text()
+
+
+class TestTheTidyContractMatchesTheWriter:
+    """CLI_AGENT.md tells an agent which columns to gate on in series_analysis_tidy.csv.
+    A column the writer adds and the contract omits is one no agent will ever read --
+    which is how the bound flags went unused by every documented workflow."""
+
+    def test_every_tidy_column_is_named_in_the_agent_contract(self):
+        from lunaNMR.processors.multi_spectrum_processor import TIDY_COLUMNS
+        text = CLI_AGENT_DOC.read_text()
+        missing = [c for c in TIDY_COLUMNS if f"`{c}`" not in text]
+        assert missing == [], f"CLI_AGENT.md does not name tidy columns: {missing}"
+
 
 # --------------------------------------------------------------- the generalised guard
 

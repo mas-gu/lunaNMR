@@ -19,8 +19,8 @@ python -m lunaNMR --help          # `lunanmr` also works after `pip install -e .
 The gotchas are the point. Most failure modes here are **not** exceptions — a wrong peak
 list produces zero heights and R²≈0.2 fits that read as noisy data; a mislabelled
 concentration unit produces a confident Kd wrong by a constant factor; an unparseable delay
-produces a complete relaxation table built on times never measured. Each is documented, and
-each exits 0.
+produces a complete relaxation table built on times never measured; a fit pinned on a bound
+reports a plausible height at its cluster's healthy R². Each is documented, and each exits 0.
 
 ## Before a real run
 

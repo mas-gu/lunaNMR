@@ -62,7 +62,7 @@ python -m lunaNMR series --spectra <exp_dir> --peaks <its_own_list.txt> \
 ```
 Matrix columns are series values (ms), not filenames. **`series_metadata.json`** beside the matrices maps every column → spectrum → value; read it rather than inferring. The relaxation subcommands read it too: they take the delay units from it, and **refuse to run when `n_value_unparsed > 0`** (naming the spectra) unless you pass `--allow-unparsed-delays`.
 
-**4. Build the hetNOE inputs.** Split the hetNOE matrix's two columns into headerless `residue,intensity,error` files. **Write the third column** — without it the error defaults to a flat `noe*0.02` (≈0.016), ~3× too tight, which over-weights hetNOE and fakes tight S² errors; a realistic floor is ~0.044 relative per plane → hetNOE_err ≈ 0.05. Gate residues using `series_analysis_tidy.csv`'s `quality` (both planes Excellent/Good, both intensities > 0, ratio in −0.2…1.05).
+**4. Build the hetNOE inputs.** Split the hetNOE matrix's two columns into headerless `residue,intensity,error` files. **Write the third column** — without it the error defaults to a flat `noe*0.02` (≈0.016), ~3× too tight, which over-weights hetNOE and fakes tight S² errors; a realistic floor is ~0.044 relative per plane → hetNOE_err ≈ 0.05. Gate residues using `series_analysis_tidy.csv` (both planes Excellent/Good, neither plane `position_pinned` or `intensity_pinned`, both intensities > 0, ratio in −0.2…1.05).
 
 **5. Fit T1/T2** — usually unnecessary. `modelfree` refits the matrices internally and already writes `<prefix>_field{1,2}_T{1,2}_fit_results.txt` (per-residue T and T_err), the `_fig{1,2,3}.pdf` decay plots, and R1/R2 in `<prefix>_spectral_density_basic.csv`. Run `t1t2` separately only for a different `--error-method`, or to apply your own fit filter before deciding which residues to keep:
 ```bash
@@ -168,14 +168,17 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 - **Relaxation matrix** (`t1t2/methyl-t2 --input`): a series `peak_intensity_matrix.csv` / `comprehensive_peak_tracking.csv`; delay columns parsed by `parse_delay_column`. A **bare** column (`8`, `2400`, `102_2`) is a delay in ms — that is what `series` writes, having already normalised the unit away. A **descriptive** column needs one of three marks to be read as a delay: an explicit unit (`..._300ms`), a decimal separator (`..._0o3`), or a single-letter repeat marker (`..._51b`). A descriptive column ending in a plain integer (`..._001`) is an acquisition index and is **dropped**, not read as 1 ms; the run reports it in `dropped_columns`, and refuses outright if no column carries a delay at all.
 - **hetNOE sat/unsat** (`--sat`/`--unsat`, modelfree `--f{1,2}-noe-*`): headerless `residue,intensity[,error]`. Split from the hetNOE series matrix's two columns — which are the plane **filename stems**, not `…_sat`/`…_unsat`, unless you named the files that way. **Supply the error column:** with only two columns the hetNOE error falls back to a flat `noe * 0.02` (≈0.016 at hetNOE 0.78), ~3× tighter than a realistic ~0.044-per-plane floor gives (≈0.05), which over-weights hetNOE in the model-free fit.
 - **Density table** (`density --input`): `Residue,R1,R1err,R2,R2err,hetNOE,hetNOEerr`.
-- **Kd input** (`kd --input`): `series_analysis_tidy.csv`, `comprehensive_peak_tracking.csv`, or an intensity matrix (intensity-only, no CSP). Ligand conc from CSV point labels unless `--conc` overrides.
+- **Kd input** (`kd --input`): `series_analysis_tidy.csv` (**preferred** — the only input with both bound-pinned and undetected points filtered), `comprehensive_peak_tracking.csv`, or an intensity matrix (intensity-only, no CSP). Ligand conc from CSV point labels unless `--conc` overrides.
 - **Titration spectra** (`series --mode titration`): the point value is a trailing `_<value>` where the value carries a **decimal separator** — `o` or `.` (`_0o0`, `_0o5`, `_2.4`), optionally followed by an extension. **Digits alone do not parse**: `sample_2.ft`, `ref_100.ft` and `experiment_002.ft` all yield no value and are silently dropped from the series. This is stricter than the time-mode delay parser, which keys off the unit (`ms`/`s`/`us`) instead.
 - **Kd fit JSON** (`export kd --json`): the self-contained `…_kd_fit_data.json` from `kd` (embeds per-point series + `metadata.protein_conc`; `metadata.name` records the `kd --prefix` used to create it, but `export kd` does **not** read it — pass `export kd --prefix` explicitly to prefix figures/summary.csv, independent of the JSON's own filename).
 
 ## Output file shapes (what you parse back)
 
-- **`series` matrices**: `Peak_Number,Assignment,Reference_X,Reference_Y` + one column per spectrum, labelled with the parsed delay (`8`, `2400`, `102_2`) or, when none parses, the filename stem (`hetnoe_600_saturated`). Per spectrum, so one folder can carry both kinds.
-- **`series_analysis_tidy.csv`**: `spectrum_name, assignment, peak_number, ppm_x, ppm_y, height, volume, snr, quality, r_squared`. **The only place per-peak fit quality reaches the series output** — gate residues here, the matrices are intensities only.
+- **`series` matrices**: `Peak_Number,Assignment,Reference_X,Reference_Y` + one column per spectrum, labelled with the parsed delay (`8`, `2400`, `102_2`) or, when none parses, the filename stem (`hetnoe_600_saturated`). Per spectrum, so one folder can carry both kinds. In `peak_intensity_matrix.csv` and `peak_volume_matrix.csv` an **empty cell** is a point whose fit stopped on a bound; a decayed point keeps its (low) value. `comprehensive_peak_tracking.csv` keeps every value and marks those points in a `{point}_Bound_Pinned` column.
+- **`series_analysis_tidy.csv`**: `spectrum_name`, `assignment`, `peak_number`, `ppm_x`, `ppm_y`, `height`, `volume`, `snr`, `quality`, `r_squared`, `detection_sigma`, `position_pinned`, `intensity_pinned`. **The only place per-peak fit quality reaches the series output** — gate residues here, the matrices are intensities only.
+  - `position_pinned` / `intensity_pinned`: the fit stopped on its position margin / its intensity floor. The reported height, volume and (for a position pin) linewidth came from the bound, not the data.
+  - `detection_sigma`: fitted height ÷ spectrum noise. Below 3 the peak is not detected at that point.
+  - All three are **empty** (not `False`) in a series written before they existed. Empty means unknown, not clean — re-run `series` to get them.
 - **`per_spectrum_results/<original_filename>.csv`**: `…,Detected_Intensity,Height,Volume,LW_X,LW_Y,R_Squared,Quality`. The only output where the filename→data link survives.
 - **`series_metadata.json`**: **the column → spectrum → delay map**; nothing else carries it. `value` is `null` when the filename had no parseable delay — that column is named after the file stem instead, and `n_value_unparsed` counts them. `repeat_scale` is measured on the fitted intensities and **reported, never applied**. **It is `null` when the series has no repeat acquisitions** — the common case — and absent entirely when no intensity matrix was produced, so `if 'repeat_scale' in meta:` is True with a `null` payload and crashes on `['ratio']`. Use `meta.get('repeat_scale') or {}`.
   ```json
@@ -205,6 +208,18 @@ python -m lunaNMR <cmd> ... --format json --dry-run
   The defaults are deliberately not unified: changing either would silently move numbers
   that have already been published. A T1 in seconds against a T2 in ms puts R1 out by
   1000×, which is what the rescaling rows exist to prevent.
+- **`quality`, `r_squared` and `success` cannot say "there is no peak here".** `success` is true on flat noise, and R² is per *cluster*, so a member with nothing at its position rides its neighbours' R² (measured: 0.58σ under a cluster R² of 0.9884). The bound flags in `series_analysis_tidy.csv` are what tell the two near-zero states apart, and they need **opposite** handling:
+
+  | state | flag | CSP / positions | I/I₀ (T1, T2, titration intensity) |
+  |---|---|---|---|
+  | peak decayed below noise | `detection_sigma` < 3 | exclude — no position to shift from | **keep — zero is the measurement** |
+  | fit stopped on a bound | `position_pinned` or `intensity_pinned` | exclude | exclude — the number came from the bound |
+
+  Dropping a decayed point from an intensity series invents a plateau; keeping a pinned one publishes the neighbours' seeds as data. What the pipeline does for you, point-wise (a residue keeps its other points):
+  - `series` writes a pinned point as an **empty cell** in the intensity and volume matrices, and the relaxation fitters (`t1t2`, `methyl-t2`, `t1rho`, `modelfree`) skip empty cells. A residue left with fewer measured points than free parameters is reported as a failed fit.
+  - `kd` on the tidy CSV applies the whole table, including dropping undetected points from CSP. On a matrix it gets the blanked intensities but no positions.
+  - `kd` on `comprehensive_peak_tracking.csv` drops pinned points, but that file has no `detection_sigma`, so undetected points still enter CSP — use the tidy CSV.
+  - A series written before this behaviour has no empty cells: re-run `series`.
 - **CSP needs a fresh series run.** Older series output rounded positions to 0.1 ppm; CSP needs 4-decimal precision. Re-run `series` before `kd` CSP. Intensity fits work on existing data.
 - **Kd is always bounded ≥ 0** internally (unbounded lands on a degenerate negative-Kd minimum). Don't post-process assuming otherwise.
 - **Non-finite fit values serialize to JSON `null`.** A degenerate Kd fit (e.g. only 3 points) is `success=true` with finite `Kd` but `Kd_err`/`r_squared` = `null`. Treat `Kd`/`Kd_err`/`r_squared` as possibly `None` — legitimate, not a failure.
