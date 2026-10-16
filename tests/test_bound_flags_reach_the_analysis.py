@@ -49,7 +49,7 @@ class TestUsablePoints:
 
     def test_a_pinned_position_is_dropped_for_csp_and_kept_for_intensity(self):
         """A position on its margin is not a shift anyone measured. The height does not
-        depend on it: on KRASB 600 hetNOE, widening the 15N margin from 0.020 to 0.05
+        depend on it: on a 600 MHz hetNOE pair, widening the 15N margin from 0.020 to 0.05
         ppm moved the freed peaks' heights by a median 0.0%."""
         from lunaNMR.utils.quality_categories import usable_points
         rows = self._frame([

@@ -63,7 +63,7 @@ class TestOneErrorColumnIsBetterThanNone:
 
 
 class TestANegativeNoeHasAPositiveError:
-    """A flexible residue's saturated peak is NEGATIVE: KRASB 600 residue 33 is -47.7
+    """A flexible residue's saturated peak is NEGATIVE: on a 600 MHz pair, residue 33 is -47.7
     sigma in the saturated plane and +31.8 sigma in the unsaturated one. Multiplying
     the relative error by the signed hetNOE gave a negative error, which reached the CSV
     and then made the QC plot raise "'yerr' must not contain negative values".

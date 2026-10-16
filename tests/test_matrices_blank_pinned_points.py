@@ -7,7 +7,7 @@ height taken from the intensity floor - cluster-relative, so a product of the
 NEIGHBOURS' seeds - would otherwise be fitted as a decay point. Blanking it is
 point-wise: the residue keeps every other point.
 
-A position that stopped on its margin is not blanked here. Measured on KRASB 600 hetNOE,
+A position that stopped on its margin is not blanked here. Measured on a 600 MHz hetNOE pair,
 most such peaks stop on the 0.020 ppm 15N margin, a quarter of one 15N point; widened
 to 0.05 ppm the freed peaks' heights moved by a median 0.0% (q10-q90 -3% to +5%).
 Blanking them halved the hetNOE residue set (82 -> 41).

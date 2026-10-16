@@ -2,7 +2,7 @@
 # ABOUTME: Skipping it wrote height 0.0 with no bound flags, which the analyses kept as data.
 
 """
-Measured on KRASB 600 hetNOE: residue 33 is -47.7 sigma in the saturated plane. The
+Measured on a 600 MHz hetNOE pair: residue 33 is -47.7 sigma in the saturated plane. The
 parallel pre-check skipped it as 'negative_intensity' and reported height 0.0 with blank
 flags; blank reads as a legacy row, so the matrix carried 0.0 and `dynamixs hetnoe`
 published hetNOE 0.0 +/- 0.0. Sequential mode fitted the same peak, reported it pinned on
@@ -11,7 +11,7 @@ its intensity floor, and the point was blanked. The two modes must agree.
 
 from lunaNMR.core.parallel_voigt_processor import _should_skip_peak
 
-SAT_SIGMA = 7.58e4          # KRASB 600 saturated plane, MAD sigma
+SAT_SIGMA = 7.58e4          # 600 MHz saturated plane, MAD sigma
 RESIDUE_33_SAT = -3614098.0  # signed sample at residue 33, -47.7 sigma
 
 

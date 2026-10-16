@@ -256,7 +256,7 @@ def usable_points(frame, observable):
     is not a measurement of anything and is dropped from every observable.
 
     A residue whose POSITION stopped on its margin has no measured position, so it is
-    dropped from the position observables. Its intensity is kept: on KRASB 600 hetNOE
+    dropped from the position observables. Its intensity is kept: on a 600 MHz hetNOE pair
     most such peaks sit on the 0.020 ppm 15N margin, a quarter of one 15N point, and
     widening it to 0.05 ppm moved the freed peaks' heights by a median 0.0%.
 
