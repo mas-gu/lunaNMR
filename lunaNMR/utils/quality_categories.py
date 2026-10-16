@@ -249,12 +249,16 @@ def usable_points(frame, observable):
     the measurement: dropping it from an I/I0 series invents a plateau that is not
     there. It has no position, though, so it cannot contribute a CSP.
 
-    A residue whose FIT FAILED - pinned on a position or an intensity bound - reports a
-    number that came from the bound rather than from the data. For the intensity floor,
-    which is cluster-relative (0.1% of the brightest member's seed), that number is a
-    product of its NEIGHBOURS' seeds and its own seeded linewidths, carrying nothing
-    from the data at its own position. It is not a measurement of anything and is
-    dropped from every observable.
+    A residue whose fit stopped on its INTENSITY floor reports a number that came from
+    the bound rather than from the data. The floor is cluster-relative (0.1% of the
+    brightest member's seed), so that number is a product of its NEIGHBOURS' seeds and
+    its own seeded linewidths, carrying nothing from the data at its own position. It
+    is not a measurement of anything and is dropped from every observable.
+
+    A residue whose POSITION stopped on its margin has no measured position, so it is
+    dropped from the position observables. Its intensity is kept: on KRASB 600 hetNOE
+    most such peaks sit on the 0.020 ppm 15N margin, a quarter of one 15N point, and
+    widening it to 0.05 ppm moved the freed peaks' heights by a median 0.0%.
 
     Neither state is visible in `success` or in R-squared. `success` is an OR whose
     first arm is the optimiser's "chi2 stopped changing", true immediately on flat
@@ -271,14 +275,16 @@ def usable_points(frame, observable):
     :return: the subset of `frame` that can be used, index preserved
     """
     keep = frame.index == frame.index                 # all True, right length
-    for column in ('position_pinned', 'intensity_pinned'):
+    positional = str(observable).lower() in POSITION_OBSERVABLES
+    columns = ('position_pinned', 'intensity_pinned') if positional else ('intensity_pinned',)
+    for column in columns:
         if column in frame:
             # `== True` and not truthiness: NaN must not read as pinned, and None
             # must not read as "not pinned" by accident either - both are unknown,
             # and unknown is kept.
             keep &= ~(frame[column].fillna(False).astype(bool))
 
-    if str(observable).lower() in POSITION_OBSERVABLES and 'detection_sigma' in frame:
+    if positional and 'detection_sigma' in frame:
         detected = frame['detection_sigma'] >= DETECTION_SIGMA_FLOOR
         keep &= detected | frame['detection_sigma'].isna()
 

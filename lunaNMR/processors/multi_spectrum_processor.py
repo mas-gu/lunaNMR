@@ -145,14 +145,14 @@ TIDY_COLUMNS = {
 }
 
 
-def _stopped_on_a_bound(peak: Dict[str, Any]) -> bool:
-    """True when the fit reported reaching its position margin or intensity floor.
+def _reported_pinned(peak: Dict[str, Any], flag: str) -> bool:
+    """True when the fit reported `flag` ('position_pinned' or 'intensity_pinned').
 
     An unreported flag (None, or NaN from an older run) is unknown and reads as False:
     unknown is kept, as in quality_categories.usable_points.
     """
-    return any(bool(peak.get(flag)) for flag in ('position_pinned', 'intensity_pinned')
-               if peak.get(flag) is not None and pd.notna(peak.get(flag)))
+    value = peak.get(flag)
+    return value is not None and pd.notna(value) and bool(value)
 
 
 class MultiSpectrumProcessor:
@@ -1686,7 +1686,8 @@ class MultiSpectrumProcessor:
                             peak_row[f'{spectrum_key}_Position_X'] = peak.get('Position_X', 0.0)
                             peak_row[f'{spectrum_key}_Position_Y'] = peak.get('Position_Y', 0.0)
                             peak_row[f'{spectrum_key}_R_Squared'] = peak.get('R_Squared', 0.0)
-                            peak_row[f'{spectrum_key}_Bound_Pinned'] = _stopped_on_a_bound(peak)
+                            peak_row[f'{spectrum_key}_Position_Pinned'] = _reported_pinned(peak, 'position_pinned')
+                            peak_row[f'{spectrum_key}_Intensity_Pinned'] = _reported_pinned(peak, 'intensity_pinned')
 
                             # Add detected intensity and linewidth information
                             peak_row[f'{spectrum_key}_Detected_Intensity'] = peak.get('detected_intensity', 0.0)
@@ -1705,7 +1706,8 @@ class MultiSpectrumProcessor:
                     peak_row[f'{spectrum_key}_Position_X'] = 0.0
                     peak_row[f'{spectrum_key}_Position_Y'] = 0.0
                     peak_row[f'{spectrum_key}_R_Squared'] = 0.0
-                    peak_row[f'{spectrum_key}_Bound_Pinned'] = False
+                    peak_row[f'{spectrum_key}_Position_Pinned'] = False
+                    peak_row[f'{spectrum_key}_Intensity_Pinned'] = False
                     peak_row[f'{spectrum_key}_Detected_Intensity'] = 0.0
                     peak_row[f'{spectrum_key}_LW_X'] = 0.0
                     peak_row[f'{spectrum_key}_LW_Y'] = 0.0
@@ -1759,18 +1761,19 @@ class MultiSpectrumProcessor:
     def _fitted_matrix(tracking_df: pd.DataFrame, suffix: str) -> pd.DataFrame:
         """One column per spectrum of a fitted quantity (`suffix`: '_Height', '_Volume').
 
-        A point whose fit stopped on a bound is left EMPTY. The relaxation analyses read
-        only the matrices, which carry no flags, so a value taken from a bound - for the
-        cluster-relative intensity floor, a product of the neighbours' seeds - would be
-        fitted as a decay point. A decayed peak is not touched: its low value is the
-        measurement.
+        A point whose fit stopped on its intensity floor is left EMPTY. The relaxation
+        analyses read only the matrices, which carry no flags, so a value taken from that
+        floor - cluster-relative, a product of the neighbours' seeds - would be fitted as
+        a decay point. A decayed peak is not touched: its low value is the measurement.
+        Nor is a position pinned on its margin: the intensity does not depend on it (see
+        quality_categories.usable_points).
         """
         matrix = tracking_df[['Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y']].copy()
         for col in tracking_df.columns:
             if col.endswith(suffix):
                 spectrum_name = col[:-len(suffix)]
                 values = tracking_df[col].astype(float)
-                pinned_col = f'{spectrum_name}_Bound_Pinned'
+                pinned_col = f'{spectrum_name}_Intensity_Pinned'
                 if pinned_col in tracking_df:
                     values = values.mask(tracking_df[pinned_col].astype(bool))
                 matrix[spectrum_name] = values

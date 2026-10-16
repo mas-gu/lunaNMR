@@ -47,6 +47,20 @@ class TestUsablePoints:
             assert list(kept.assignment) == ['A1'], (
                 f'{observable}: a value taken from a bound is not a measurement')
 
+    def test_a_pinned_position_is_dropped_for_csp_and_kept_for_intensity(self):
+        """A position on its margin is not a shift anyone measured. The height does not
+        depend on it: on KRASB 600 hetNOE, widening the 15N margin from 0.020 to 0.05
+        ppm moved the freed peaks' heights by a median 0.0%."""
+        from lunaNMR.utils.quality_categories import usable_points
+        rows = self._frame([
+            {'assignment': 'A1', 'height': 1.0e9, 'detection_sigma': 40.0,
+             'position_pinned': False, 'intensity_pinned': False},
+            {'assignment': 'A2', 'height': 7.0e8, 'detection_sigma': 30.0,
+             'position_pinned': True, 'intensity_pinned': False},
+        ])
+        assert list(usable_points(rows, 'intensity').assignment) == ['A1', 'A2']
+        assert list(usable_points(rows, 'csp').assignment) == ['A1']
+
     def test_a_decayed_peak_is_kept_for_intensity_and_dropped_for_csp(self):
         """The distinction the whole filter exists for."""
         from lunaNMR.utils.quality_categories import usable_points

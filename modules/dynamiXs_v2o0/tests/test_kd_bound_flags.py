@@ -68,6 +68,18 @@ def test_a_bound_pinned_point_is_blanked_everywhere(tmp_path):
         assert pd.isna(a1[key][1]), f'{key} survived a bound-pinned point'
 
 
+def test_a_position_pinned_point_keeps_its_intensity_and_loses_its_position(tmp_path):
+    """The position is the margin, not a shift; the intensity does not depend on it."""
+    path = _csv(tmp_path, [_row(0.0, 'A1'),
+                           _row(1.0, 'A1', height=7.0e8, volume=1.4e9,
+                                position_pinned=True)])
+    _, residues = load_titration_tidy(path)
+    a1 = residues['A1']
+    assert a1['height'][1] == pytest.approx(7.0e8)
+    assert a1['volume'][1] == pytest.approx(1.4e9)
+    assert pd.isna(a1['ppm_x'][1]) and pd.isna(a1['ppm_y'][1])
+
+
 def test_a_legacy_csv_without_the_flags_still_loads(tmp_path):
     """A series run before the flags existed has no such columns at all. Refusing it
     would be worse than the risk; the flags are absent, not negative."""

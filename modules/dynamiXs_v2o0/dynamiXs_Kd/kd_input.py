@@ -68,22 +68,24 @@ def load_titration_tidy(csv_path):
     failed = (df['quality'].astype(str).str.strip().str.lower() == 'failed'
               if 'quality' in df.columns else pd.Series(False, index=df.index))
 
-    # A value taken from a BOUND is not a measurement of anything. The intensity floor
+    # A value taken from the INTENSITY floor is not a measurement of anything. The floor
     # is cluster-relative - 0.1% of the brightest member's seed - so a weak member of a
     # bright cluster pinned there reports a product of its NEIGHBOURS' seeds and its
-    # own seeded linewidths, carrying nothing from the data at its own position. A
-    # pinned position means the fit could not reach the peak, and the linewidth
-    # stretched to cover the gap, so the intensity is wrong too. Both are blanked
-    # everywhere, exactly like a failed fit.
-    pinned = pd.Series(False, index=df.index)
-    for column in ('position_pinned', 'intensity_pinned'):
-        if column in df.columns:
-            # fillna(False), not truthiness: a legacy CSV has no such column at all
-            # and a legacy ROW carries NaN. Absent is not the same as pinned, and
-            # refusing every series written before these existed would be worse than
-            # the risk. Re-run the series to get the filter.
-            pinned |= df[column].fillna(False).astype(bool)
-    df.loc[failed | pinned, [c for c in cols if c in df.columns]] = np.nan
+    # own seeded linewidths, carrying nothing from the data at its own position. It is
+    # blanked everywhere, exactly like a failed fit. A POSITION pinned on its margin is
+    # not a measured shift, so only the ppm columns go; the intensity does not depend
+    # on it (lunaNMR.utils.quality_categories.usable_points has the measurement).
+    def _flag(column):
+        # fillna(False), not truthiness: a legacy CSV has no such column at all and a
+        # legacy ROW carries NaN. Absent is not the same as pinned, and refusing every
+        # series written before these existed would be worse than the risk. Re-run
+        # the series to get the filter.
+        if column not in df.columns:
+            return pd.Series(False, index=df.index)
+        return df[column].fillna(False).astype(bool)
+
+    df.loc[failed | _flag('intensity_pinned'), [c for c in cols if c in df.columns]] = np.nan
+    df.loc[_flag('position_pinned'), [c for c in positional if c in df.columns]] = np.nan
 
     # A peak that has DECAYED is the opposite case and needs the opposite treatment.
     # Its intensity is the measurement - blanking it invents a plateau that is not
@@ -132,15 +134,19 @@ def load_titration_tracking(csv_path):
         if not a or a.lower() in ('nan', 'dummy', ''):
             continue
         rec = {'points': list(points)}
-        # A point whose fit stopped on a bound carries a number taken from the bound, not
-        # the data: blanked in every column, as load_titration_tidy does. The flag is
-        # written as '1.0'/'0.0'; a file from before it existed has no such column.
-        pinned = [f'{lbl}_Bound_Pinned' in df.columns and pd.notna(row[f'{lbl}_Bound_Pinned'])
-                  and float(row[f'{lbl}_Bound_Pinned']) != 0.0 for lbl in labels]
+        # As load_titration_tidy: a point on its intensity floor is blanked in every
+        # column, a position on its margin only in the position columns. The flags are
+        # written as '1.0'/'0.0'; a file from before they existed has no such columns.
+        def _pinned(lbl, flag):
+            col = f'{lbl}_{flag}_Pinned'
+            return col in df.columns and pd.notna(row[col]) and float(row[col]) != 0.0
+
         for suffix, key in col_map:
             vals = []
-            for lbl, is_pinned in zip(labels, pinned):
+            for lbl in labels:
                 col = f'{lbl}_{suffix}'
+                is_pinned = (_pinned(lbl, 'Intensity')
+                             or (suffix.startswith('Position') and _pinned(lbl, 'Position')))
                 usable = col in df.columns and pd.notna(row[col]) and not is_pinned
                 vals.append(float(row[col]) if usable else np.nan)
             rec[key] = vals
