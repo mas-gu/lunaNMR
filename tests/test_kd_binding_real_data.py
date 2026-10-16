@@ -26,8 +26,8 @@ DNAJA1_ROWS = 69
 DNAJA1_REAL = 68
 ERDJ6_REAL = 60
 
-# D36 loses 5 of its 7 points, leaving too few to fit a three-parameter decay.
-UNFITTABLE_RESIDUE = "D36"
+# 48IleH fails at 5 of its 7 points, leaving too few to fit a three-parameter decay.
+UNFITTABLE_RESIDUE = "48IleH"
 # The intensity model has three free parameters (I0, I_inf, Kd).
 MIN_POINTS = 4
 
@@ -67,6 +67,19 @@ def _series(tmp_dir, dataset, peaks_name):
 def dnaja1_tidy(tmp_path_factory):
     _require(DNAJA1)
     return _series(tmp_path_factory.mktemp("dnaja1"), DNAJA1, "DNAJA1.txt")
+
+
+@pytest.fixture(scope="session")
+def dnaja1_tidy_unflagged(dnaja1_tidy, tmp_path_factory):
+    """The same series without the bound and detection flags, as a series written
+    before those existed is. On the flagged series every broken reference is also
+    pinned on a bound and is blanked before the reference-ratio check can see it, so
+    only here does that check - and its threshold - decide anything."""
+    out = tmp_path_factory.mktemp("dnaja1_unflagged") / dnaja1_tidy.name
+    pd.read_csv(dnaja1_tidy).drop(
+        columns=["detection_sigma", "position_pinned", "intensity_pinned"]).to_csv(
+        out, index=False)
+    return out
 
 
 @pytest.fixture
@@ -163,7 +176,7 @@ class TestFailedPointsAreExcluded:
         assert lost and sum(lost.values()) > 0
 
     def test_a_residue_left_with_too_few_points_says_so(self, dnaja1_tidy, tmp_path):
-        """D36 keeps 2 of 7 points — fewer than the model's free parameters. Failing
+        """48IleH keeps 2 of 7 points — fewer than the model's free parameters. Failing
         with a stated reason is correct; silently returning a fit would not be."""
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
         fit = _by_residue(data)[UNFITTABLE_RESIDUE]["intensity"]
@@ -185,16 +198,21 @@ class TestTheGlobalPoolIsAuditable:
 
 
 class TestReferencePointIntegrity:
-    """I/I0 divides by the zero-equivalent point. intensity_ratio_series rejects a
-    reference of <= 0 but nothing else, so a failed reference silently rescales the
-    whole residue: I48 has a reference height of 430.4 against a series median of
-    3.4e+11 and its ratios reach 3.8e+07."""
+    """I/I0 divides by the zero-equivalent point, so a broken reference silently
+    rescales the whole residue: 29LeuH has a reference height of 3.3e+08 against its
+    own series maximum of 1.7e+10, 51 times lower."""
+
+    @staticmethod
+    def _reference_shortfall(df):
+        """Each residue's series maximum over its own reference height."""
+        ref = df[df["spectrum_name"] == 0.0].set_index("assignment")["height"]
+        return df.groupby("assignment")["height"].max() / ref
 
     def test_the_series_really_does_contain_a_broken_reference(self, dnaja1_tidy):
         """Guards the premise for the assertions below."""
+        from kd_models import REF_MAX_RATIO
         df = pd.read_csv(dnaja1_tidy)
-        ref = df[df["spectrum_name"] == 0.0]
-        assert (ref["height"] < 1e3).any()
+        assert (self._reference_shortfall(df) > REF_MAX_RATIO).any()
 
     def test_an_intensity_ratio_never_exceeds_one_by_orders_of_magnitude(
             self, dnaja1_tidy, tmp_path):
@@ -207,19 +225,21 @@ class TestReferencePointIntegrity:
 
     def test_a_failed_reference_point_is_not_used_as_a_denominator(
             self, dnaja1_tidy, tmp_path):
-        """I48's reference is quality='Failed'; the residue cannot be normalised."""
+        """29LeuH's reference is 51x below its own series; it cannot be normalised."""
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
-        fit = _by_residue(data).get("I48", {}).get("intensity") or {}
+        fit = _by_residue(data)["29LeuH"]["intensity"]
         assert not fit.get("success")
 
     def test_quality_labels_alone_do_not_catch_this(self, dnaja1_tidy):
-        """T5 (height 3.0) and E43 (height 409.0) are labelled 'Good' at the reference
-        point, so filtering on quality='Failed' is necessary but not sufficient."""
+        """29LeuH is labelled 'Excellent' at the reference point while sitting 51x below
+        its own series, so filtering on quality='Failed' is necessary but not
+        sufficient."""
+        from kd_models import REF_MAX_RATIO
         df = pd.read_csv(dnaja1_tidy)
-        ref = df[df["spectrum_name"] == 0.0]
-        tiny_but_good = ref[(ref["height"] < 1e3)
-                            & (ref["quality"].astype(str).str.lower() != "failed")]
-        assert not tiny_but_good.empty
+        ref = df[df["spectrum_name"] == 0.0].set_index("assignment")
+        broken = self._reference_shortfall(df) > REF_MAX_RATIO
+        labelled_fine = ref["quality"].astype(str).str.lower() != "failed"
+        assert (broken & labelled_fine).any()
 
 
 class TestNonPositiveIntensitiesAreRejected:
@@ -228,8 +248,8 @@ class TestNonPositiveIntensitiesAreRejected:
     every point, not only the reference — excluded, never clamped to zero."""
 
     def test_a_negative_height_is_excluded_rather_than_clamped(self, dnaja1_tidy, tmp_path):
-        """D36 at 0.125 eq has height -3.163e+09. Excluding says 'not measured';
-        clamping to zero would claim the intensity was measured as zero."""
+        """A negative height is the series' sentinel for a failed fit. Excluding says
+        'not measured'; clamping to zero would claim it was measured as zero."""
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
         for res, f in _by_residue(data).items():
             fit = f.get("intensity") or {}
@@ -273,40 +293,40 @@ class TestResidueSelection:
     """--residues is how the human's step-4 choice reaches the fitter."""
 
     def test_only_the_listed_residues_are_fitted(self, dnaja1_tidy, tmp_path):
-        sel = _selection_file(tmp_path, ["K3", "E4", "T5"])
+        sel = _selection_file(tmp_path, ["3LysH", "4GluH", "5ThrH"])
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd", extra=["--residues", str(sel)])
-        assert set(_by_residue(data)) == {"K3", "E4", "T5"}
+        assert set(_by_residue(data)) == {"3LysH", "4GluH", "5ThrH"}
 
     def test_an_inline_list_works_too(self, dnaja1_tidy, tmp_path):
-        data, _ = _fit(dnaja1_tidy, tmp_path / "kd", extra=["--residues", "K3,E4"])
-        assert set(_by_residue(data)) == {"K3", "E4"}
+        data, _ = _fit(dnaja1_tidy, tmp_path / "kd", extra=["--residues", "3LysH,4GluH"])
+        assert set(_by_residue(data)) == {"3LysH", "4GluH"}
 
     def test_the_global_pool_is_drawn_only_from_the_selection(self, dnaja1_tidy, tmp_path):
-        sel = _selection_file(tmp_path, ["K24", "K44", "K28", "E4", "E74", "G42"])
+        sel = _selection_file(tmp_path, ["24LysH", "44LysH", "28LysH", "4GluH", "74GluH", "42GlyH"])
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd", extra=["--residues", str(sel)])
         pooled = set(data["global"]["csp"].get("residues") or [])
-        assert pooled <= {"K24", "K44", "K28", "E4", "E74", "G42"}
+        assert pooled <= {"24LysH", "44LysH", "28LysH", "4GluH", "74GluH", "42GlyH"}
 
     def test_a_commented_residue_is_left_out(self, dnaja1_tidy, tmp_path):
-        sel = _selection_file(tmp_path, ["K3", "# E41 excluded: dd_max runaway", "E4"])
+        sel = _selection_file(tmp_path, ["3LysH", "# 41GluH excluded: dd_max runaway", "4GluH"])
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd", extra=["--residues", str(sel)])
-        assert set(_by_residue(data)) == {"K3", "E4"}
+        assert set(_by_residue(data)) == {"3LysH", "4GluH"}
 
     def test_uncommenting_puts_it_back(self, dnaja1_tidy, tmp_path):
         """The round trip is the whole point: the file is the human's working document."""
         sel = tmp_path / "residues.txt"
 
-        sel.write_text("K3\n# E4\nT5\n")
+        sel.write_text("3LysH\n# 4GluH\n5ThrH\n")
         without, _ = _fit(dnaja1_tidy, tmp_path / "kd_without", extra=["--residues", str(sel)])
-        assert "E4" not in _by_residue(without)
+        assert "4GluH" not in _by_residue(without)
 
-        sel.write_text("K3\nE4\nT5\n")
+        sel.write_text("3LysH\n4GluH\n5ThrH\n")
         with_it, _ = _fit(dnaja1_tidy, tmp_path / "kd_with", extra=["--residues", str(sel)])
-        assert "E4" in _by_residue(with_it)
+        assert "4GluH" in _by_residue(with_it)
 
     def test_an_unknown_residue_is_a_clean_error_naming_it(self, dnaja1_tidy, tmp_path, capsys):
         from lunaNMR.cli import main
-        sel = _selection_file(tmp_path, ["K3", "Z999"])
+        sel = _selection_file(tmp_path, ["3LysH", "Z999"])
         code = main(["kd", "--input", str(dnaja1_tidy), "--out", str(tmp_path / "kd"),
                      "--prefix", "t", "--p0", P0, "--conc", CONC,
                      "--residues", str(sel)])
@@ -315,7 +335,7 @@ class TestResidueSelection:
 
     def test_an_empty_selection_is_an_error_not_a_success(self, dnaja1_tidy, tmp_path):
         from lunaNMR.cli import main
-        sel = _selection_file(tmp_path, ["# K3", "# E4"])
+        sel = _selection_file(tmp_path, ["# 3LysH", "# 4GluH"])
         code = main(["kd", "--input", str(dnaja1_tidy), "--out", str(tmp_path / "kd"),
                      "--prefix", "t", "--p0", P0, "--conc", CONC,
                      "--residues", str(sel)])
@@ -374,7 +394,7 @@ class TestSurvey:
     def test_a_selection_does_not_restrict_the_survey(self, own_tidy, tmp_path):
         """--survey is what produces a selection, so it cannot honour one."""
         from lunaNMR.cli import main
-        sel = _selection_file(tmp_path, ["K3"])
+        sel = _selection_file(tmp_path, ["3LysH"])
         out = tmp_path / "survey"
         assert main(["kd", "--survey", "--input", str(own_tidy), "--out", str(out),
                      "--prefix", "P", "--p0", P0, "--conc", CONC,
@@ -723,7 +743,7 @@ class TestSurveyMergesRatherThanClobbers:
         assert unfitted[selected], "reported with no reason given"
 
     def test_a_half_fitted_residue_is_reported(self, own_tidy, tmp_path):
-        """T5, E43 and L29 fit for CSP and fail for intensity. Without them the CSP and
+        """36AspH fits for intensity and fails for CSP. Without it the CSP and
         intensity pools differ in size with nothing to explain the difference."""
         data, _ = _fit(own_tidy, tmp_path / "kd")
         unfitted = data["metadata"]["unfitted"]
@@ -746,7 +766,7 @@ class TestSurveyMergesRatherThanClobbers:
     def test_nothing_is_reported_unfitted_when_everything_selected_fits(
             self, own_tidy, tmp_path):
         """The dict must stay empty on a clean selection, or it reads as noise."""
-        sel = _selection_file(tmp_path, ["K24", "K44", "E4"])
+        sel = _selection_file(tmp_path, ["24LysH", "44LysH", "4GluH"])
         data, _ = _fit(own_tidy, tmp_path / "kd", extra=["--residues", str(sel)])
         assert data["metadata"].get("unfitted", {}) == {}
 
@@ -848,30 +868,31 @@ class TestThresholdsArePersistedAndOverridable:
         reasons = pd.read_csv(out / "data" / "P_survey.csv")["reasons"].fillna("")
         return int(reasons.str.contains(needle).sum())
 
-    def test_the_default_reference_threshold_is_applied(self, dnaja1_tidy, tmp_path):
-        """At 10.0 the four broken references on DNAJA1 are caught."""
-        tidy = self._own_copy(dnaja1_tidy, tmp_path)
+    def test_the_default_reference_threshold_is_applied(
+            self, dnaja1_tidy_unflagged, tmp_path):
+        """At 10.0 the one broken reference on DNAJA1, 29LeuH, is caught."""
+        tidy = self._own_copy(dnaja1_tidy_unflagged, tmp_path)
         out = self._survey(tidy, tmp_path / "survey")
-        assert self._flagged(out, "reference") == 4
+        assert self._flagged(out, "reference") == 1
 
-    def test_a_flag_loosens_the_reference_threshold(self, dnaja1_tidy, tmp_path):
-        """L29 sits at 49.87, so a threshold above it lets exactly L29 through."""
-        tidy = self._own_copy(dnaja1_tidy, tmp_path)
+    def test_a_flag_loosens_the_reference_threshold(self, dnaja1_tidy_unflagged, tmp_path):
+        """29LeuH sits at 50.8, so a threshold above it lets 29LeuH through."""
+        tidy = self._own_copy(dnaja1_tidy_unflagged, tmp_path)
         out = self._survey(tidy, tmp_path / "survey", extra=["--ref-max-ratio", "100"])
-        assert self._flagged(out, "reference") == 3
+        assert self._flagged(out, "reference") == 0
 
-    def test_a_persisted_value_beats_the_default(self, dnaja1_tidy, tmp_path):
-        tidy = self._own_copy(dnaja1_tidy, tmp_path)
+    def test_a_persisted_value_beats_the_default(self, dnaja1_tidy_unflagged, tmp_path):
+        tidy = self._own_copy(dnaja1_tidy_unflagged, tmp_path)
         self._persist(tidy, ref_max_ratio=100.0)
         out = self._survey(tidy, tmp_path / "survey")
-        assert self._flagged(out, "reference") == 3
+        assert self._flagged(out, "reference") == 0
 
-    def test_a_flag_beats_a_persisted_value(self, dnaja1_tidy, tmp_path):
+    def test_a_flag_beats_a_persisted_value(self, dnaja1_tidy_unflagged, tmp_path):
         """The precedence chain's weak link: flag > persisted > default."""
-        tidy = self._own_copy(dnaja1_tidy, tmp_path)
+        tidy = self._own_copy(dnaja1_tidy_unflagged, tmp_path)
         self._persist(tidy, ref_max_ratio=100.0)
         out = self._survey(tidy, tmp_path / "survey", extra=["--ref-max-ratio", "10"])
-        assert self._flagged(out, "reference") == 4
+        assert self._flagged(out, "reference") == 1
 
     def test_the_plateau_threshold_is_applied(self, dnaja1_tidy, tmp_path):
         """12 of 69 residues exceed a dd_max ratio of 10 on DNAJA1; raising it flags fewer."""
@@ -889,12 +910,12 @@ class TestThresholdsArePersistedAndOverridable:
         assert self._flagged(high, "noise floor") > self._flagged(low, "noise floor")
 
     def test_the_fit_uses_the_same_reference_threshold_as_the_survey(
-            self, dnaja1_tidy, tmp_path):
+            self, dnaja1_tidy_unflagged, tmp_path):
         """A dataset judged at one threshold and fitted at another is the asymmetry that
         would let the survey clear a residue the fit then silently drops."""
-        loose, _ = _fit(dnaja1_tidy, tmp_path / "loose",
+        loose, _ = _fit(dnaja1_tidy_unflagged, tmp_path / "loose",
                         extra=["--ref-max-ratio", "1e12"])
-        tight, _ = _fit(dnaja1_tidy, tmp_path / "tight",
+        tight, _ = _fit(dnaja1_tidy_unflagged, tmp_path / "tight",
                         extra=["--ref-max-ratio", "10"])
         assert len(tight["metadata"]["unfitted"]) > len(loose["metadata"]["unfitted"])
 
@@ -1049,10 +1070,10 @@ class TestTheSurveyRecordsWhatTheFitNeeds:
 
 # Measured at the last titration point, top 10% trimmed so the binders do not set the
 # threshold meant to identify them. Untrimmed sigma is materially larger.
-DNAJA1_SIGMA_TRIMMED = 0.0202
-DNAJA1_SIGMA_UNTRIMMED = 0.0288
-DNAJA1_SIGNIFICANT = 25
-DNAJA1_MEASURED = 53
+DNAJA1_SIGMA_TRIMMED = 0.0131
+DNAJA1_SIGMA_UNTRIMMED = 0.0216
+DNAJA1_SIGNIFICANT = 10
+DNAJA1_MEASURED = 29
 
 
 class TestCspSignificanceCutoff:
@@ -1254,9 +1275,12 @@ class TestOlderFitJsonsStillExport:
 
 
 def _seq_key(name):
-    """Residue number, so K3 precedes K10. A plain string sort puts K10 first."""
-    match = re.match(r"([A-Za-z]+)(\d+)", str(name))
-    return (int(match.group(2)), match.group(1)) if match else (10**9, str(name))
+    """Residue number, so K3 precedes K10. A plain string sort puts K10 first.
+
+    The first run of digits anywhere in the name, as kd_models.residue_sort_key reads
+    it: '3LysH' and 'K3' are both residue 3."""
+    match = re.search(r"\d+", str(name))
+    return (int(match.group()), str(name)) if match else (10**9, str(name))
 
 
 def _in_sequence_order(names):
@@ -1315,7 +1339,7 @@ class TestOrderingSurvivesADecadeBoundary:
     luck, so the property has to be pinned where a string sort actually differs."""
 
     @staticmethod
-    def _tidy(tmp_path, residues=("K3", "K10", "K11", "K2")):
+    def _tidy(tmp_path, residues=("3LysH", "K10", "K11", "K2")):
         rows = ["spectrum_name,assignment,peak_number,ppm_x,ppm_y,height,volume,snr,quality,r_squared"]
         for point_index, point in enumerate((0.0, 6.25, 12.5, 25.0, 50.0, 100.0, 150.0)):
             for peak, name in enumerate(residues):
@@ -1329,11 +1353,11 @@ class TestOrderingSurvivesADecadeBoundary:
     def test_a_two_digit_residue_does_not_sort_before_a_one_digit_one(self, tmp_path):
         data, _ = _fit(self._tidy(tmp_path), tmp_path / "kd")
         names = [f["residue"] for f in data["fits"]]
-        assert names == ["K2", "K3", "K10", "K11"]
+        assert names == ["K2", "3LysH", "K10", "K11"]
 
     def test_a_string_sort_would_have_failed_this(self):
         """Guards the fixture: if these ever sort the same way, the test proves nothing."""
-        names = ["K3", "K10", "K11", "K2"]
+        names = ["3LysH", "K10", "K11", "K2"]
         assert sorted(names) != sorted(names, key=_seq_key)
 
 
@@ -1365,12 +1389,12 @@ class TestKdOutlierExclusion:
     def test_extreme_residues_are_excluded(self, dnaja1_tidy, tmp_path):
         assert self._block(_fit(dnaja1_tidy, tmp_path / "kd")[0])["excluded"]
 
-    def test_a_spread_based_test_would_have_sheltered_them(self, dnaja1_tidy, tmp_path):
+    def test_a_spread_based_test_would_have_sheltered_them(self, erdj6_tidy, tmp_path):
         """Why physics runs before statistics. The implausible values inflate the spread
-        enough to sit inside it: on this population mean/2-sigma shelters E20 and K23,
-        and only the credible window catches them."""
+        enough to sit inside it: on ERDJ6 mean/2-sigma shelters all four - Q19 and D71
+        near zero, F37 and N39 near 3.5e+04 - and only the credible window catches them."""
         import statistics
-        data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
+        data, _ = _fit(erdj6_tidy, tmp_path / "kd")
         excluded = set(self._block(data)["excluded"])
         assert excluded, "no outliers to test the comparison against"
         by_residue = _by_residue(data)
@@ -1533,19 +1557,19 @@ class TestPhysicsGatesBeforeStatistics:
 
     def test_residues_outside_the_window_are_excluded(self, dnaja1_tidy, tmp_path):
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
-        assert {"E20", "E41", "K23"} <= set(self._block(data)["excluded"])
+        assert "20GluH" in self._block(data)["excluded"]
 
     def test_the_reason_names_the_window_not_a_z_score(self, dnaja1_tidy, tmp_path):
         """Window and z are different claims and must not read the same."""
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
         reasons = data["metadata"]["csp_pool_excluded"]
-        for residue in ("E20", "E41", "K23"):
+        for residue in ("20GluH",):
             assert "resolve" in str(reasons[residue]), reasons[residue]
 
     def test_a_window_exclusion_carries_no_z_score(self, dnaja1_tidy, tmp_path):
         """They were never scored, so reporting a z would invent a measurement."""
         block = self._block(_fit(dnaja1_tidy, tmp_path / "kd")[0])
-        for residue in ("E20", "E41", "K23"):
+        for residue in ("20GluH",):
             assert block["excluded"][residue] is None
 
     def test_the_centre_is_measured_on_survivors(self, dnaja1_tidy, tmp_path):
@@ -1658,9 +1682,11 @@ class TestTheFigureAndTheFitAgreeOnAUsableReference:
         assert kd_input.REF_MAX_RATIO is models.REF_MAX_RATIO
         assert kd_input.reference_usable is models.reference_usable
 
-    def test_the_two_paths_agree_on_the_same_residues(self, dnaja1_tidy, tmp_path):
-        """The property that matters is agreement, not that each behaves in isolation."""
-        data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
+    def test_the_two_paths_agree_on_the_same_residues(self, dnaja1_tidy_unflagged, tmp_path):
+        """The property that matters is agreement, not that each behaves in isolation.
+        Unflagged, because on the flagged series the broken reference is blanked as
+        bound-pinned and neither path ever sees it."""
+        data, _ = _fit(dnaja1_tidy_unflagged, tmp_path / "kd")
         dropped_by_fit = {r for r, f in _by_residue(data).items()
                           if not (f.get("intensity") or {}).get("success")}
         assert dropped_by_fit, "no residue was dropped, so agreement is untested here"
