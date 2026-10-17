@@ -3598,8 +3598,8 @@ class VoigtIntegrator(BaseIntegrator):
                         'assignment': assignment,
                         'ppm_x': detected_peak['x_ppm'],
                         'ppm_y': detected_peak['y_ppm'],
-                        'x_point': detected_peak['indices'][1],
-                        'y_point': detected_peak['indices'][0],
+                        'x_point': detected_peak['indices'][0],
+                        'y_point': detected_peak['indices'][1],
                         'intensity': detected_peak['intensity'],
                         'snr': detected_peak['snr'],
                         'detected': True,
@@ -3673,9 +3673,9 @@ class VoigtIntegrator(BaseIntegrator):
     def _add_dummy_peaks(self, all_detected_peaks, used_peaks, matched_peaks):
         """Add unmatched peaks near user peaks as dummy peaks.
 
-        Filters:
-        1. Intensity > 0
-        2. Intensity >= 10th percentile of successfully matched peaks
+        Filters, on the magnitude so a negative peak is treated as a positive one:
+        1. Intensity != 0
+        2. |Intensity| >= 10th percentile of successfully matched peaks
         3. Within 3× PS2D overlap radius of at least one user peak
 
         Args:
@@ -3690,8 +3690,8 @@ class VoigtIntegrator(BaseIntegrator):
 
         # Calculate intensity threshold: 10th percentile of successfully matched peaks
         matched_intensities = [
-            p['intensity'] for p in matched_peaks
-            if p.get('detected', False) and p.get('intensity', 0) > 0
+            abs(p['intensity']) for p in matched_peaks
+            if p.get('detected', False) and p.get('intensity', 0) != 0
         ]
 
         if not matched_intensities:
@@ -3722,12 +3722,12 @@ class VoigtIntegrator(BaseIntegrator):
 
             intensity = detected_peak.get('intensity', 0)
 
-            # Filter 1: Intensity > 0
-            if intensity <= 0:
+            # Filter 1: Intensity != 0
+            if intensity == 0:
                 continue
 
-            # Filter 2: Intensity >= 10th percentile threshold
-            if intensity < intensity_threshold:
+            # Filter 2: |Intensity| >= 10th percentile threshold
+            if abs(intensity) < intensity_threshold:
                 continue
 
             # Filter 3: Within 2× overlap radius of at least one user peak
@@ -3751,8 +3751,8 @@ class VoigtIntegrator(BaseIntegrator):
                 'assignment': f'dummy_{dummy_count:03d}',
                 'ppm_x': peak_x,
                 'ppm_y': peak_y,
-                'x_point': detected_peak['indices'][1],
-                'y_point': detected_peak['indices'][0],
+                'x_point': detected_peak['indices'][0],
+                'y_point': detected_peak['indices'][1],
                 'intensity': intensity,
                 'snr': detected_peak.get('snr', 0),
                 'detected': True,
@@ -3931,7 +3931,7 @@ class VoigtIntegrator(BaseIntegrator):
 
             # Apply expected count cutoff
             if len(detected_peaks) > self.expected_peak_count:
-                detected_peaks.sort(key=lambda p: p['intensity'], reverse=True)
+                detected_peaks.sort(key=lambda p: abs(p['intensity']), reverse=True)
                 detected_peaks = detected_peaks[:self.expected_peak_count]
                 log_info(f"Applied count cutoff: {self.expected_peak_count} peaks")
 
@@ -4099,12 +4099,13 @@ class VoigtIntegrator(BaseIntegrator):
         # Extract search region
         search_region = self.nmr_data[y_start:y_end, x_start:x_end]
 
-        # Define intensity range for "top contour"
-        intensity_min = peak_max * (1.0 - intensity_band)
-        intensity_max = peak_max * (1.0 + intensity_band)
+        # Define intensity range for "top contour", on the magnitude so a negative
+        # peak's extremum is its top
+        intensity_min = abs(peak_max) * (1.0 - intensity_band)
+        intensity_max = abs(peak_max) * (1.0 + intensity_band)
 
         # Find all pixels within intensity band
-        mask = (search_region >= intensity_min) & (search_region <= intensity_max)
+        mask = (np.abs(search_region) >= intensity_min) & (np.abs(search_region) <= intensity_max)
 
         if not np.any(mask):
             # Fallback to original position
@@ -4186,11 +4187,14 @@ class VoigtIntegrator(BaseIntegrator):
         return final_x, final_y
 
     def _detect_peaks_by_threshold(self, signal_threshold):
-        """Detect peaks using signal threshold"""
-        from scipy.ndimage import maximum_filter, label
+        """Detect peaks whose magnitude exceeds signal_threshold. A negative peak (saturated
+        hetNOE, edited HSQC, folded) is found as a positive one is, and keeps its sign."""
+        from scipy.ndimage import maximum_filter, minimum_filter, label
+
+        magnitude = np.abs(self.nmr_data)
 
         # Apply threshold to identify peak regions
-        peak_mask = self.nmr_data > signal_threshold
+        peak_mask = magnitude > signal_threshold
 
         if self.manual_detection_region is not None:
             # Manual region: full override of automatic filtering
@@ -4219,8 +4223,11 @@ class VoigtIntegrator(BaseIntegrator):
             y_valid = (self.ppm_y_axis >= y_min_edge + Y_EDGE_MARGIN) & (self.ppm_y_axis <= y_max_edge - Y_EDGE_MARGIN)
             peak_mask = peak_mask & y_valid[:, np.newaxis]
 
-        # Use local maxima to find individual peaks
-        local_maxima = maximum_filter(self.nmr_data, size=3) == self.nmr_data
+        # Local extrema of each sign: maxima of the positive peaks, minima of the
+        # negative ones. On the magnitude a positive lobe would hide a negative one beside it.
+        local_maxima = np.where(self.nmr_data > 0,
+                                maximum_filter(self.nmr_data, size=3) == self.nmr_data,
+                                minimum_filter(self.nmr_data, size=3) == self.nmr_data)
         peak_candidates = peak_mask & local_maxima
 
         # Find connected components (individual peaks)
@@ -4236,8 +4243,8 @@ class VoigtIntegrator(BaseIntegrator):
             if len(peak_indices[0]) == 0:
                 continue
 
-            # Find peak maximum within region
-            region_intensities = self.nmr_data[peak_indices]
+            # Find peak extremum within region
+            region_intensities = magnitude[peak_indices]
             max_idx = np.argmax(region_intensities)
 
             y_idx = peak_indices[0][max_idx]
@@ -4277,7 +4284,7 @@ class VoigtIntegrator(BaseIntegrator):
 
             # Calculate S/N ratio
             noise_level = self._estimate_noise_level_advanced()
-            snr = intensity / noise_level if noise_level > 0 else 0
+            snr = abs(intensity) / noise_level if noise_level > 0 else 0
 
             # Apply minimum separation filter
             min_separation = self.sn_detection_params['peak_separation']

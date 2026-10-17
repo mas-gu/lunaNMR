@@ -102,11 +102,14 @@ def assess_registration(path, peaks: Sequence[Tuple[str, float, float]],
 
 
 def _capture(path, peaks) -> Dict:
-    """How many listed peaks have a real local maximum within the search window."""
-    from scipy.ndimage import maximum_filter
+    """How many listed peaks have a real local extremum within the search window: a
+    maximum above the threshold, or a minimum below its negative, as the pipeline detects."""
+    from scipy.ndimage import maximum_filter, minimum_filter
     _, data, uy, ux = _read(path)
     noise = estimate_noise(data)
-    local = (data == maximum_filter(data, size=5)) & (data > _DETECT_SNR * noise)
+    magnitude = np.abs(data)
+    local = (((data == maximum_filter(data, size=5)) & (data > _DETECT_SNR * noise))
+             | ((data == minimum_filter(data, size=5)) & (data < -_DETECT_SNR * noise)))
     iy, ix = np.where(local)
     found_y = np.array([uy.ppm(i) for i in iy])
     found_x = np.array([ux.ppm(i) for i in ix])
@@ -114,8 +117,8 @@ def _capture(path, peaks) -> Dict:
                    if ((np.abs(found_x - x) <= SEARCH_WINDOW)
                        & (np.abs(found_y - y) <= SEARCH_WINDOW)).any())
     snr = np.array([
-        data[max(0, uy(y, 'ppm') - 3):uy(y, 'ppm') + 4,
-             max(0, ux(x, 'ppm') - 3):ux(x, 'ppm') + 4].max() / noise
+        magnitude[max(0, uy(y, 'ppm') - 3):uy(y, 'ppm') + 4,
+                  max(0, ux(x, 'ppm') - 3):ux(x, 'ppm') + 4].max() / noise
         for _, x, y in peaks])
     return dict(captured=captured, n_peaks=len(peaks), noise=noise,
                 median_snr=float(np.median(snr)), weak=int((snr < _DETECT_SNR).sum()))
