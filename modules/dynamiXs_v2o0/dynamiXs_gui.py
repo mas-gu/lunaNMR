@@ -629,9 +629,7 @@ class T1T2FittingPage(BasePage):
         # Output settings
         self.output_dir = None
 
-        # T1rho mode files (legacy)
-        self.t1_results_file = None
-        self.t1rho_results_file = None
+        # Peak list for the T1rho -> T2 conversion
         self.peak_list_file = None
 
         # Field 2 enabled state
@@ -1554,119 +1552,6 @@ class T1T2FittingPage(BasePage):
             self.analysis_combo.setCurrentIndex(index)
         self._start_analysis()
 
-    def _start_t1rho_analysis_for_field(self, field_name: str):
-        """Start T1ρ → T2 calculation for a specific field."""
-        # Use the T1 results file from the field
-        t1_file = getattr(self, f"{field_name}_t1_file", None)
-        t1rho_file = getattr(self, f"{field_name}_t1rho_file", None)
-
-        if not t1_file:
-            show_error(self, "Error", f"Please select a T1 data file for {field_name.replace('field', 'Field ')}.")
-            return
-        if not t1rho_file:
-            show_error(self, "Error", f"Please select a T1ρ data file for {field_name.replace('field', 'Field ')}.")
-            return
-        if not self.peak_list_file:
-            show_error(self, "Error", "Please select a peak list file for T1ρ → T2 calculation.")
-            return
-
-        # Store for legacy method
-        self.t1_results_file = t1_file
-        self.t1rho_results_file = t1rho_file
-
-        # Call the existing T1rho analysis method
-        self._start_t1rho_analysis_from_csv()
-
-    def _start_t1rho_analysis(self):
-        """Start T1ρ → T2 calculation from pre-fitted CSV results."""
-        self._start_t1rho_analysis_from_csv()
-
-    def _start_t1rho_analysis_from_csv(self):
-        """Start T1ρ → T2 calculation from pre-fitted CSV results."""
-        # Validate inputs
-        if not self.t1_results_file:
-            show_error(self, "Error", "Please select a T1 results file.")
-            return
-        if not self.t1rho_results_file:
-            show_error(self, "Error", "Please select a T1ρ results file.")
-            return
-        if not self.peak_list_file:
-            show_error(self, "Error", "Please select a peak list file.")
-            return
-
-        self.results_text.appendPlainText("Starting T1ρ → T2 calculation (from CSV)...")
-        self.results_text.appendPlainText(f"  T1 file: {os.path.basename(self.t1_results_file)}")
-        self.results_text.appendPlainText(f"  T1ρ file: {os.path.basename(self.t1rho_results_file)}")
-        self.results_text.appendPlainText(f"  Peak list: {os.path.basename(self.peak_list_file)}")
-        self.results_text.appendPlainText(f"  θ = {self.field1_theta_spin.value()}°, ω₁ = {self.field1_omega1_spin.value()} Hz")
-
-        try:
-            import pandas as pd
-            _ensure_lunaNMR_path()
-            from lunaNMR.utils.t1rho_calculator import calculate_T2_from_T1rho
-
-            # Load data files
-            self.results_text.appendPlainText("\nLoading data files...")
-
-            r1_data = self._load_relaxation_results(self.t1_results_file)
-            r1rho_data = self._load_relaxation_results(self.t1rho_results_file)
-            peak_list = self._load_peak_list(self.peak_list_file)
-
-            # Normalize column names (handle common variations)
-            r1_data = self._normalize_relaxation_columns(r1_data, 'R1')
-            r1rho_data = self._normalize_relaxation_columns(r1rho_data, 'R1rho')
-
-            # Get spectrometer frequency from peak list or use default
-            # TODO: Extract from spectrum metadata if available
-            spec_freq_mhz = 600.0  # Default, could add UI field later
-
-            # Detect carrier from peak list (middle of chemical shift range)
-            if 'N_ppm' in peak_list.columns:
-                carrier_ppm = peak_list['N_ppm'].mean()
-            elif '15N' in peak_list.columns:
-                carrier_ppm = peak_list['15N'].mean()
-            else:
-                carrier_ppm = 118.0  # Default
-                self.results_text.appendPlainText(f"  Warning: No 15N chemical shift column found, using default carrier = {carrier_ppm} ppm")
-
-            self.results_text.appendPlainText(f"  Carrier = {carrier_ppm:.1f} ppm (center of peak list)")
-            self.results_text.appendPlainText(f"  Spectrometer = {spec_freq_mhz} MHz")
-
-            # Calculate T2
-            self.results_text.appendPlainText("\nCalculating T2 from T1 and T1ρ...")
-
-            result = calculate_T2_from_T1rho(
-                r1_data=r1_data,
-                r1rho_data=r1rho_data,
-                theta_deg=self.field1_theta_spin.value(),
-                omega1_hz=self.field1_omega1_spin.value(),
-                carrier_ppm=carrier_ppm,
-                spec_freq_mhz=spec_freq_mhz,
-                peak_list=peak_list
-            )
-
-            # Save results
-            output_file = os.path.join(
-                self.main_window.current_dir,
-                f"{self.prefix_edit.text()}_T2_from_T1rho.csv"
-            )
-            result.to_csv(output_file, index=False)
-
-            # Display summary
-            self.results_text.appendPlainText(f"\nCalculation completed successfully!")
-            self.results_text.appendPlainText(f"  Residues processed: {len(result)}")
-            self.results_text.appendPlainText(f"  Mean T2: {result['T2'].mean():.1f} ± {result['T2'].std():.1f} ms")
-            self.results_text.appendPlainText(f"  Results saved to: {output_file}")
-
-            # Show first few results
-            self.results_text.appendPlainText("\nFirst 10 residues:")
-            self.results_text.appendPlainText(result[['residue', 'T2', 'T2_err', 'theta']].head(10).to_string())
-
-        except Exception as e:
-            self.results_text.appendPlainText(f"\nError during T1ρ → T2 calculation:\n{str(e)}")
-            import traceback
-            self.results_text.appendPlainText(traceback.format_exc())
-
     def _calculate_t2_from_t1rho(self):
         """Calculate T2 from the T1 and T1ρ fit results of every field that has both.
 
@@ -2173,30 +2058,6 @@ class T1T2FittingPage(BasePage):
 
         # Update field displays (handles both series and file paths)
         self._update_field_displays()
-
-    def _browse_t1_file(self):
-        """Browse for T1 results CSV file."""
-        filename = open_file_dialog(
-            self,
-            title="Select T1 Results CSV File",
-            directory=self.main_window.current_dir,
-            filter="CSV files (*.csv);;All files (*.*)"
-        )
-        if filename:
-            self.t1_results_file = filename
-            self.t1_file_display.setText(os.path.basename(filename))
-
-    def _browse_t1rho_file(self):
-        """Browse for T1ρ results CSV file."""
-        filename = open_file_dialog(
-            self,
-            title="Select T1ρ Results CSV File",
-            directory=self.main_window.current_dir,
-            filter="CSV files (*.csv);;All files (*.*)"
-        )
-        if filename:
-            self.t1rho_results_file = filename
-            self.t1rho_file_display.setText(os.path.basename(filename))
 
     def _browse_peak_list_file(self):
         """Browse for peak list file."""
