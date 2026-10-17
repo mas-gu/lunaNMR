@@ -57,7 +57,7 @@ Beyond that, some subcommands report *findings* through the exit code:
 | `export kd` | CSP/intensity figures + summary from a saved Kd fit JSON |
 | `integrate-1d` | Measure peaks across a 1D spectrum series |
 | `peaks shift` | Apply a rigid ppm offset to a peak list, measured or given |
-| `project inventory` / `export` / `remove` | Inspect / extract / prune a `.lunaNMR` bundle |
+| `project build` / `inventory` / `export` / `remove` | Build / inspect / extract / prune a `.lunaNMR` bundle |
 | `batch` | Folder-wide peak detect + Voigt/PS2D fit |
 
 ### diagnose
@@ -113,8 +113,23 @@ getting it out headlessly and completely.
 the summary rather than absorbed: a file in no category is also a file `project remove`
 cannot target, so it is worth seeing. Refuses a non-empty `--out` unless `--force`.
 
-`project save` has no headless equivalent — `ProjectManager.save_project` reads the live
-main window throughout — but the read direction needs no session.
+### project build
+```bash
+python -m lunaNMR project build <run_dir> --out <bundle.lunaNMR> [--spectrum <file>] [--peaks <file>]
+```
+Turns an automated run's output folders into a project the GUI opens. Under `<run_dir>` it
+takes every series (`batch_results.json`, written by `series`) and every Kd fit
+(`<prefix>_kd_fit_data.json`, written by `kd`), wherever they sit. A Kd fit whose prefix
+matches a series' folder name is linked to that series' tidy CSV.
+
+It saves through `ProjectManager.save_project` itself, handed a stand-in main window, so
+the bundle is exactly what the GUI would have saved. The GUI reopens the first series'
+reference spectrum and the peak list it was fitted against unless `--spectrum`/`--peaks`
+say otherwise. Both are **referenced by absolute path, not copied**: the bundle needs the
+data where it was. Refuses an existing `--out`. Not yet included: DynamiXs analyses.
+
+A series bundle is large - ~80 MB for 7 spectra - because each fit's surfaces and region
+grids are stored whole.
 
 ### integrate-1d
 ```bash
@@ -367,6 +382,7 @@ need the embedded per-point `series` + ≥2 points (both present in any `kd`-pro
 
 ### project
 ```bash
+python -m lunaNMR project build <run_dir> --out <bundle.lunaNMR>
 python -m lunaNMR project inventory <bundle.lunaNMR>
 python -m lunaNMR project remove <bundle.lunaNMR> <rel/path> [<rel/path> ...]
 ```

@@ -20,6 +20,107 @@ def _safe_bundle_name(name: str) -> str:
     return safe or 'analysis'
 
 
+def json_default(obj):
+    """JSON `default` for the numpy, Path and test-mock values a bundle carries."""
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
+    if isinstance(obj, Path):
+        return str(obj)
+    # Handle mock objects (for testing) - serialize as None
+    if hasattr(obj, '_mock_name'):
+        return None
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+
+def _serialize_metadata(metadata: dict) -> dict:
+    """Serialize metadata, converting datetime objects to ISO strings."""
+    serialized = {}
+    for key, value in metadata.items():
+        if hasattr(value, 'isoformat'):  # datetime object
+            serialized[key] = value.isoformat()
+        else:
+            serialized[key] = value
+    return serialized
+
+
+def _serialize_spectrum_result(result: dict) -> dict:
+    """Serialize a single spectrum result.
+
+    Handles numpy arrays and scalars in integration_results.
+    """
+    serialized = {}
+    for key, value in result.items():
+        if isinstance(value, np.ndarray):
+            serialized[key] = value.tolist()
+        elif isinstance(value, list):
+            # Handle integration_results list
+            serialized[key] = [
+                _serialize_integration_result(r) if isinstance(r, dict) else r
+                for r in value
+            ]
+        elif isinstance(value, (np.integer, np.floating)):
+            serialized[key] = float(value) if isinstance(value, np.floating) else int(value)
+        else:
+            serialized[key] = value
+    return serialized
+
+
+def _serialize_integration_result(result: dict) -> dict:
+    """Serialize a single integration result dict."""
+    serialized = {}
+    for key, value in result.items():
+        if isinstance(value, np.ndarray):
+            serialized[key] = value.tolist()
+        elif isinstance(value, (np.integer, np.floating)):
+            serialized[key] = float(value) if isinstance(value, np.floating) else int(value)
+        else:
+            serialized[key] = value
+    return serialized
+
+
+def write_batch_results(batch_results, path) -> None:
+    """Write one series' BatchResults as the bundle's batch_results.json.
+
+    The single writer of that file: the GUI's project save and the headless `series`
+    command both go through it, so a bundle built from a run's output folders carries
+    exactly what the GUI would have saved.
+    """
+    data = {
+        'results': {name: _serialize_spectrum_result(result)
+                    for name, result in getattr(batch_results, 'results', {}).items()},
+        'metadata': _serialize_metadata(getattr(batch_results, 'metadata', {}) or {}),
+        'statistics': getattr(batch_results, 'statistics', {}),
+        'errors': getattr(batch_results, 'errors', []),
+        'series_mode': getattr(batch_results, 'series_mode', 'time'),
+    }
+    with open(path, 'w') as f:
+        json.dump(data, f, default=json_default)
+
+
+def batch_results_from_dict(data: dict, deserialize_result=None):
+    """BatchResults from the contents of a batch_results.json.
+
+    :param deserialize_result: applied to each spectrum's result; the GUI loader turns
+        serialized region arrays back into numpy, a headless re-save needs nothing.
+    """
+    from lunaNMR.processors.multi_spectrum_processor import BatchResults
+    batch_results = BatchResults()
+    batch_results.metadata = data.get('metadata', {})
+    batch_results.statistics = data.get('statistics', {})
+    batch_results.errors = data.get('errors', [])
+    batch_results.series_mode = data.get('series_mode', 'time')
+    for name, result in data.get('results', {}).items():
+        batch_results.results[name] = (deserialize_result(result) if deserialize_result
+                                       else result)
+    return batch_results
+
+
 class ProjectManager:
     """Manages save/load of lunaNMR project bundles.
 
@@ -738,20 +839,7 @@ class ProjectManager:
 
     def _json_serializer(self, obj):
         """Custom JSON serializer for non-standard types."""
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, (np.bool_, bool)):
-            return bool(obj)
-        if isinstance(obj, Path):
-            return str(obj)
-        # Handle mock objects (for testing) - serialize as None
-        if hasattr(obj, '_mock_name'):
-            return None
-        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+        return json_default(obj)
 
     def _get_safe_attr(self, attr_name: str, default=None):
         """Get attribute from main_window, returning default for mock objects."""
@@ -833,24 +921,7 @@ class ProjectManager:
             series_subdir = series_dir / series_name
             series_subdir.mkdir(exist_ok=True)
 
-            # Build serializable data structure
-            data = {
-                'results': {},
-                'metadata': self._serialize_metadata(batch_results.metadata if hasattr(batch_results, 'metadata') else {}),
-                'statistics': batch_results.statistics if hasattr(batch_results, 'statistics') else {},
-                'errors': batch_results.errors if hasattr(batch_results, 'errors') else [],
-                'series_mode': getattr(batch_results, 'series_mode', 'time'),
-            }
-
-            # Serialize each spectrum result
-            if hasattr(batch_results, 'results'):
-                for name, result in batch_results.results.items():
-                    data['results'][name] = self._serialize_spectrum_result(result)
-
-            # Write to JSON (compact format for faster saving)
-            batch_file = series_subdir / "batch_results.json"
-            with open(batch_file, 'w') as f:
-                json.dump(data, f, default=self._json_serializer)
+            write_batch_results(batch_results, series_subdir / "batch_results.json")
 
             # Copy the tidy CSV into the bundle so the project is self-contained:
             # a moved/renamed source run folder still resolves for Kd/titration input.
@@ -888,49 +959,6 @@ class ProjectManager:
         if src and Path(src).exists():
             shutil.copy2(src, series_subdir / "series_analysis_tidy.csv")
 
-    def _serialize_metadata(self, metadata: dict) -> dict:
-        """Serialize metadata, converting datetime objects to ISO strings."""
-        serialized = {}
-        for key, value in metadata.items():
-            if hasattr(value, 'isoformat'):  # datetime object
-                serialized[key] = value.isoformat()
-            else:
-                serialized[key] = value
-        return serialized
-
-    def _serialize_spectrum_result(self, result: dict) -> dict:
-        """Serialize a single spectrum result.
-
-        Handles numpy arrays and scalars in integration_results.
-        """
-        serialized = {}
-        for key, value in result.items():
-            if isinstance(value, np.ndarray):
-                serialized[key] = value.tolist()
-            elif isinstance(value, list):
-                # Handle integration_results list
-                serialized[key] = [
-                    self._serialize_integration_result(r) if isinstance(r, dict) else r
-                    for r in value
-                ]
-            elif isinstance(value, (np.integer, np.floating)):
-                serialized[key] = float(value) if isinstance(value, np.floating) else int(value)
-            else:
-                serialized[key] = value
-        return serialized
-
-    def _serialize_integration_result(self, result: dict) -> dict:
-        """Serialize a single integration result dict."""
-        serialized = {}
-        for key, value in result.items():
-            if isinstance(value, np.ndarray):
-                serialized[key] = value.tolist()
-            elif isinstance(value, (np.integer, np.floating)):
-                serialized[key] = float(value) if isinstance(value, np.floating) else int(value)
-            else:
-                serialized[key] = value
-        return serialized
-
     def _load_series_results(self, bundle_path: Path) -> bool:
         """Load series integration results (multiple series) and reconstruct BatchResults.
 
@@ -941,8 +969,6 @@ class ProjectManager:
 
         if not series_dir.exists():
             return True  # No series results to load
-
-        from lunaNMR.processors.multi_spectrum_processor import BatchResults
 
         # Initialize saved_series dict
         self.main_window.saved_series = {}
@@ -967,16 +993,8 @@ class ProjectManager:
                     data = json.load(f)
 
                 # Reconstruct BatchResults object
-                batch_results = BatchResults()
-                batch_results.metadata = data.get('metadata', {})
+                batch_results = batch_results_from_dict(data, self._deserialize_spectrum_result)
                 batch_results.metadata['series_name'] = series_name
-                batch_results.statistics = data.get('statistics', {})
-                batch_results.errors = data.get('errors', [])
-                batch_results.series_mode = data.get('series_mode', 'time')
-
-                # Restore results dict
-                for name, result in data.get('results', {}).items():
-                    batch_results.results[name] = self._deserialize_spectrum_result(result)
 
                 # Add to saved_series
                 self.main_window.saved_series[series_name] = batch_results
@@ -996,14 +1014,7 @@ class ProjectManager:
                 with open(batch_file, 'r') as f:
                     data = json.load(f)
 
-                batch_results = BatchResults()
-                batch_results.metadata = data.get('metadata', {})
-                batch_results.statistics = data.get('statistics', {})
-                batch_results.errors = data.get('errors', [])
-                batch_results.series_mode = data.get('series_mode', 'time')
-
-                for name, result in data.get('results', {}).items():
-                    batch_results.results[name] = self._deserialize_spectrum_result(result)
+                batch_results = batch_results_from_dict(data, self._deserialize_spectrum_result)
 
                 # Store in both places
                 self.main_window.batch_results = batch_results

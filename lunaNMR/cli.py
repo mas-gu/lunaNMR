@@ -814,7 +814,7 @@ def _load_series_params(args):
 SERIES_OUTPUTS = ('peak_intensity_matrix.csv', 'peak_volume_matrix.csv',
                   'peak_detection_matrix.csv', 'peak_intensity_detected_matrix.csv',
                   'comprehensive_peak_tracking.csv', 'series_analysis_tidy.csv',
-                  'series_metadata.json')
+                  'series_metadata.json', 'batch_results.json')
 
 
 def _run_series(args):
@@ -889,6 +889,11 @@ def _run_series(args):
             f"(all failed, or none loaded)"))
         return 1
     output_folder = result.metadata.get('output_folder', args.out)
+    # The series as the GUI holds it, for `project build`. The peak list is recorded
+    # because nothing else in the output says which one the series was fitted against.
+    from lunaNMR.utils.project_manager import write_batch_results
+    result.metadata['peak_list_file'] = os.path.abspath(args.peaks)
+    write_batch_results(result, os.path.join(output_folder, 'batch_results.json'))
     # Naming them beats globbing for them, and series_analysis_tidy.csv is the only
     # place per-peak fit quality reaches the series output — a caller that misses it
     # has no way to gate residues.
@@ -920,6 +925,31 @@ def _project_manager():
     import types
     from lunaNMR.utils.project_manager import ProjectManager
     return ProjectManager(types.SimpleNamespace())
+
+
+def _run_project_build(args):
+    """Assemble a .lunaNMR bundle from an automated run's output folders."""
+    from lunaNMR.utils.project_builder import build_project
+    if not os.path.isdir(args.run_dir):
+        _emit_error(args, FileNotFoundError(f"Not a run folder: {args.run_dir}"))
+        return 1
+    if os.path.exists(args.out):
+        _emit_error(args, FileExistsError(
+            f"{args.out} exists; a build never overwrites a bundle"))
+        return 1
+    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
+    try:
+        built = build_project(args.run_dir, args.out, spectrum=args.spectrum, peaks=args.peaks)
+    except ValueError as error:
+        _emit_error(args, error)
+        return 1
+    _emit(args, {'command': 'project build', 'bundle': os.path.abspath(args.out), **built},
+          f"Built {args.out}",
+          f"  spectrum : {built['spectrum']}",
+          f"  peaks    : {built['peaks']}",
+          f"  series   : {', '.join(built['series']) or '(none)'}",
+          f"  Kd       : {', '.join(built['kd']) or '(none)'}")
+    return 0
 
 
 def _run_project_inventory(args):
@@ -2219,7 +2249,7 @@ def build_parser():
     ex_kd.set_defaults(func=_run_export_kd)
     export.set_defaults(func=lambda a: (export.print_help(sys.stderr) or 2))
 
-    proj = sub.add_parser('project', help='Inspect / prune a .lunaNMR project bundle')
+    proj = sub.add_parser('project', help='Build / inspect / prune a .lunaNMR project bundle')
     proj_sub = proj.add_subparsers(dest='project_command', metavar='<action>')
     inv = proj_sub.add_parser('inventory', parents=[fmt],
                               help='List a bundle\'s contents by category')
@@ -2237,6 +2267,15 @@ def build_parser():
     rm.add_argument('bundle', help='Path to a .lunaNMR bundle directory')
     rm.add_argument('paths', nargs='+', help='Bundle-relative path(s) to delete')
     rm.set_defaults(func=_run_project_remove)
+    build = proj_sub.add_parser('build', parents=[common],
+                                help='Assemble a bundle from an automated run\'s outputs')
+    build.add_argument('run_dir', help='Run folder holding series/ and kd/ output')
+    build.add_argument('--out', required=True, help='Bundle to create (.lunaNMR)')
+    build.add_argument('--spectrum', help='Spectrum to reopen (default: the first '
+                                          'series\' reference spectrum)')
+    build.add_argument('--peaks', help='Peak list to show (default: the one that '
+                                       'series was fitted with)')
+    build.set_defaults(func=_run_project_build)
     proj.set_defaults(func=lambda a: (proj.print_help(sys.stderr) or 2))
 
     # `batch` is intercepted in main() before argparse so the batch CLI owns all of its
