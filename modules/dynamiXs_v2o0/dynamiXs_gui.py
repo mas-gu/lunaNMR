@@ -1712,7 +1712,7 @@ class T1T2FittingPage(BasePage):
     def _convert_t1rho_field(self, field, t1_file, t1rho_file):
         """Convert one field's T1 + T1ρ fits to T2, and hold it as that field's T2."""
         _ensure_lunaNMR_path()
-        from lunaNMR.utils.t1rho_calculator import calculate_T2_from_T1rho
+        from lunaNMR.utils.t1rho_calculator import calculate_T2_from_T1rho, write_t2_fit_results
 
         theta = getattr(self, f'{field}_theta_spin').value()
         omega1 = getattr(self, f'{field}_omega1_spin').value()
@@ -1743,15 +1743,7 @@ class T1T2FittingPage(BasePage):
 
         # Also create a fit_results.txt format for compatibility with View Results
         results_txt_file = os.path.join(self.output_dir, f"{field}_T2_from_T1rho_fit_results.txt")
-        with open(results_txt_file, 'w') as f:
-            # T2-from-T1rho is a derived quantity, not a direct fit:
-            # no offset C is available, so emit NaN for C / C_err.
-            f.write("Residue\tA\tT2\tC\tA_err\tT2_err\tC_err\tSuccess\n")
-            for _, row in result.iterrows():
-                f.write(
-                    f"{row['residue']}\t1.0\t{row['T2']:.3f}\tNaN\t"
-                    f"0.0\t{row['T2_err']:.3f}\tNaN\tYes\n"
-                )
+        write_t2_fit_results(result, results_txt_file)
 
         # Store in session as T2 result (derived)
         self.session_results[field]['t2'] = {

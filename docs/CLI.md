@@ -126,9 +126,11 @@ takes, wherever they sit:
 - every DynamiXs run, from the `<prefix>_dynamixs.json` record each `dynamixs` command
   writes beside its outputs (command, absolute inputs, parameters, summary). All
   `dynamixs t1t2` fits become ONE T1/T2 analysis - the GUI page holds both fields, field 1
-  the lower frequency - and each `dynamixs modelfree` and `dynamixs methyl-t2` run its
-  own. `hetnoe`, `t1rho` and `density` have no page to reopen in and are listed as not
-  bundled. Runs made before the record existed carry none and are not found.
+  the lower frequency. A `dynamixs t1rho` run joins that analysis: it fills its field's
+  T1rho slot with the field's tilt, spin-lock field and carrier, and its T1 fit and
+  derived T2 fill their slots only where no `t1t2` fit did. Each `modelfree`,
+  `methyl-t2`, `hetnoe` and `density` run becomes its own analysis, on the page of that
+  name. Runs made before the record existed carry none and are not found.
 
 It saves through `ProjectManager.save_project` itself, handed a stand-in main window, so
 the bundle is exactly what the GUI would have saved. The GUI reopens the first series'

@@ -88,7 +88,7 @@ DYNAMIXS_RECORD_SUFFIX = '_dynamixs.json'
 
 # DynamiXs dialog stack indices (dynamixs_dialog: menu, t1t2, spectral, plotting,
 # integrated, methyl_t2).
-T1T2_PAGE, INTEGRATED_PAGE, METHYL_T2_PAGE = 1, 4, 5
+T1T2_PAGE, SPECTRAL_PAGE, INTEGRATED_PAGE, METHYL_T2_PAGE, HETNOE_PAGE = 1, 2, 4, 5, 6
 
 
 def find_dynamixs_records(run_dir):
@@ -112,8 +112,8 @@ def _analysis_state(name, page_index, analysis_type, page_key, page_state, recor
             page_key: page_state}
 
 
-def t1t2_analysis(records, name, staging):
-    """ONE T1/T2 page analysis from a run's `dynamixs t1t2` records.
+def t1t2_analysis(records, name, staging, t1rho_records=()):
+    """ONE T1/T2 page analysis from a run's `dynamixs t1t2` and `dynamixs t1rho` records.
 
     The GUI page holds both fields and every experiment together; the CLI fits each one
     separately, into its own folder and often on the same default --prefix. Field 1 is
@@ -122,10 +122,17 @@ def t1t2_analysis(records, name, staging):
     project save copies one folder per page as it does for the GUI, and no experiment
     can land on another's file.
 
+    A `t1rho` run fills its field's T1rho slot and brings the field's acquisition
+    parameters (tilt, spin-lock field, carrier) and peak list. It also fitted a T1 and
+    derived a T2; each fills its slot only where no `t1t2` fit did - a fit outranks a
+    refit, and a measured T2 a derived one.
+
     :raises ValueError: for more than two fields - the page holds two - or one
         experiment fitted twice, of which the page can show only one
     """
-    freqs = sorted({float(r['args']['field_freq']) for r in records})
+    from lunaNMR.utils.t1rho_calculator import write_t2_fit_results
+    all_records = list(records) + list(t1rho_records)
+    freqs = sorted({float(r['args']['field_freq']) for r in all_records})
     if len(freqs) > 2:
         raise ValueError(f"{len(freqs)} fields of T1/T2 fits ({freqs}); the T1/T2 page "
                          f"holds two")
@@ -142,28 +149,57 @@ def t1t2_analysis(records, name, staging):
     if len(freqs) == 2:
         page['field2_freq'] = freqs[1]
     refs, source = {}, {}
-    for record in records:
-        args, summary = record['args'], record['summary']
-        freq, exp = float(args['field_freq']), args['exp'].lower()
-        field = field_of[freq]
+
+    def fill(record, field, exp, results_file, json_file, input_file):
         key = f'{field}_{exp}'
         if key in source:
-            raise ValueError(f"{args['exp']} at {freq:g} MHz was fitted twice - "
+            raise ValueError(f"{exp.upper()} for {field} came from two runs - "
                              f"{source[key]} and {record['record_file']}; the T1/T2 page "
                              f"holds one. Build from a folder holding the one to keep.")
         source[key] = record['record_file']
         json_dir = staging / f'json_{key}'
         json_dir.mkdir()
-        if summary.get('json_file'):
-            shutil.copy2(summary['json_file'], json_dir)
-        results = staging / f"{key}_{Path(summary['results_file']).name}"
-        shutil.copy2(summary['results_file'], results)
+        if json_file:
+            shutil.copy2(json_file, json_dir)
+        results = staging / f"{key}_{Path(results_file).name}"
+        shutil.copy2(results_file, results)
         session[field][exp] = {'output_dir': str(staging), 'json_folder': str(json_dir),
                                'results_file': str(results),
-                               'n_fitted': summary.get('n_fitted'), 'frequency_mhz': freq}
+                               'n_fitted': record['summary'].get('n_fitted'),
+                               'frequency_mhz': float(record['args']['field_freq'])}
         page['fitted_experiments'].append(key)
-        page[f'{key}_file'] = refs[f'{key}_file'] = args['input']
-    return {'state': _analysis_state(name, T1T2_PAGE, 't1t2', 't1t2', page, records),
+        page[f'{key}_file'] = refs[f'{key}_file'] = input_file
+
+    for record in records:
+        args, summary = record['args'], record['summary']
+        fill(record, field_of[float(args['field_freq'])], args['exp'].lower(),
+             summary['results_file'], summary.get('json_file'), args['input'])
+
+    for record in t1rho_records:
+        args, summary = record['args'], record['summary']
+        field = field_of[float(args['field_freq'])]
+        fill(record, field, 't1rho', summary['t1rho_results'], summary.get('t1rho_json'),
+             args['input'])
+        if session[field]['t1'] is None:
+            fill(record, field, 't1', summary['t1_results'], summary.get('t1_json'),
+                 args['t1'])
+        if session[field]['t2'] is None:
+            table = staging / f'{field}_T2_from_T1rho.csv'
+            shutil.copy2(summary['r2_table'], table)
+            results = staging / f'{field}_T2_from_T1rho_fit_results.txt'
+            write_t2_fit_results(pd.read_csv(table, dtype={'residue': str}), results)
+            session[field]['t2'] = {'output_dir': str(staging), 'json_folder': None,
+                                    'results_file': str(results),
+                                    'n_fitted': summary.get('n_residues'),
+                                    'frequency_mhz': float(args['field_freq']),
+                                    'derived_from': 't1rho'}
+            page['fitted_experiments'].append(f'{field}_t2')
+        prefix = '' if field == 'field1' else 'field2_'
+        page[f'{prefix}theta_angle'] = args['theta']
+        page[f'{prefix}omega1'] = args['omega1']
+        page[f'{field}_carrier'] = args['carrier']
+        page['peak_list_file'] = refs['peak_list_file'] = args['peaks']
+    return {'state': _analysis_state(name, T1T2_PAGE, 't1t2', 't1t2', page, all_records),
             'file_refs': {'t1t2': refs}}
 
 
@@ -221,6 +257,45 @@ def methyl_t2_analysis(record, name):
             'file_refs': {'methyl_t2': {'input_file': args['input']}}}
 
 
+def hetnoe_analysis(record, name):
+    """A hetNOE page analysis from one `dynamixs hetnoe` record: its two intensity files,
+    and the results file it wrote in its own output folder."""
+    args, summary = record['args'], record['summary']
+    page = {'mode': 1, 'sat_file': args['sat'], 'unsat_file': args['unsat'],
+            'output_dir': args['out'], 'prefix': args['prefix'],
+            'last_results_file': summary['output']}
+    return {'state': _analysis_state(name, HETNOE_PAGE, 'hetnoe', 'hetnoe', page, [record]),
+            'file_refs': {'hetnoe': {'sat_file': args['sat'], 'unsat_file': args['unsat']}}}
+
+
+def density_analysis(record, name):
+    """A spectral-density page analysis from one `dynamixs density` record.
+
+    The page has no viewer of its own: it holds the inputs, the parameters and the
+    detailed results file the run wrote.
+    """
+    args, summary = record['args'], record['summary']
+    # A dual-field run writes _basic and _detailed tables, a single-field one _results.
+    tables = [o for o in summary.get('outputs', []) if o.endswith('.csv')]
+    detailed = next((o for o in tables if '_detailed' in Path(o).name),
+                    tables[0] if tables else None)
+    page = {'session_results': {'analysis_complete': True, 'results_prefix': args['prefix'],
+                                'output_dir': args['out'], 'results_file': detailed},
+            'input_file1': args['input'], 'input_file2': args.get('input2'),
+            'output_dir': args['out'],
+            'mode': 'dual_field' if args.get('dual') else 'single_field',
+            'use_087': bool(args.get('use_087')),
+            'field1_freq': args.get('field1_freq'), 'field2_freq': args.get('field2_freq'),
+            'rnh_angstrom': args.get('rnh'), 'csa_ppm': args.get('csa'),
+            'monte_carlo': bool(args.get('monte_carlo')), 'n_samples': args.get('n_samples'),
+            'prefix': args['prefix']}
+    page = {k: v for k, v in page.items() if v is not None}
+    refs = {k: page[k] for k in ('input_file1', 'input_file2') if k in page}
+    return {'state': _analysis_state(name, SPECTRAL_PAGE, 'spectral_density', 'spectral',
+                                     page, [record]),
+            'file_refs': {'spectral': refs}}
+
+
 def dynamixs_analyses(run_dir, staging):
     """{name: {state, file_refs}} for every DynamiXs analysis the run's records hold.
 
@@ -232,11 +307,14 @@ def dynamixs_analyses(run_dir, staging):
     records = find_dynamixs_records(run_dir)
     analyses, skipped = {}, []
     t1t2 = [r for r in records if r['command'] == 'dynamixs t1t2']
-    if t1t2:
+    t1rho = [r for r in records if r['command'] == 'dynamixs t1rho']
+    if t1t2 or t1rho:
         name = f'{Path(run_dir).name}_T1T2'
-        analyses[name] = t1t2_analysis(t1t2, name, Path(staging) / name)
+        analyses[name] = t1t2_analysis(t1t2, name, Path(staging) / name, t1rho)
     per_run = {'dynamixs modelfree': ('modelfree', modelfree_analysis),
-               'dynamixs methyl-t2': ('methylT2', methyl_t2_analysis)}
+               'dynamixs methyl-t2': ('methylT2', methyl_t2_analysis),
+               'dynamixs hetnoe': ('hetNOE', hetnoe_analysis),
+               'dynamixs density': ('spectralDensity', density_analysis)}
     for record in records:
         if record['command'] in per_run:
             suffix, build = per_run[record['command']]
@@ -245,7 +323,7 @@ def dynamixs_analyses(run_dir, staging):
                 place = Path(record['record_file']).parent.relative_to(run_dir)
                 name = '_'.join(place.parts) + f'_{suffix}'
             analyses[name] = build(record, name)
-        elif record['command'] != 'dynamixs t1t2':
+        elif record['command'] not in ('dynamixs t1t2', 'dynamixs t1rho'):
             skipped.append(f"{record['command']} ({record['args'].get('prefix')})")
     return analyses, skipped
 

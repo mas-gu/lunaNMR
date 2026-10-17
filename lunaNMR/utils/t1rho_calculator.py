@@ -263,3 +263,17 @@ def r2_table_from_fits(t1_fits, t1rho_fits, peak_list, *, omega1_hz, carrier_ppm
         r1_data=r1, r1rho_data=r1rho, theta_deg=theta_deg, omega1_hz=omega1_hz,
         carrier_ppm=carrier_ppm, spec_freq_mhz=spec_freq_mhz, peak_list=peaks,
         chemical_shift_column='N_ppm')
+
+
+def write_t2_fit_results(table, path):
+    """Write a T2-from-T1rho table as a fit-results file - the format the DynamiXs
+    T1/T2 page's results viewer reads for any T2.
+
+    T2-from-T1rho is a derived quantity, not a direct fit: no offset C is available, so
+    C and C_err are written as NaN, the amplitude as 1.
+    """
+    with open(path, 'w') as f:
+        f.write("Residue\tA\tT2\tC\tA_err\tT2_err\tC_err\tSuccess\n")
+        for _, row in table.iterrows():
+            f.write(f"{row['residue']}\t1.0\t{row['T2']:.3f}\tNaN\t"
+                    f"0.0\t{row['T2_err']:.3f}\tNaN\tYes\n")

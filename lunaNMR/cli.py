@@ -1611,9 +1611,8 @@ def _run_dynamixs_t1rho(args):
             'input_csv_file': input_csv,
             'output_prefix': os.path.join(args.out, f"{args.prefix}_{label}"),
             'results_txt_file': os.path.join(args.out, f"{args.prefix}_{label}_fit_results.txt"),
-            # The label names the output - the results column, the JSON's
-            # experiment_type and its filename. As 'T2' for both, the T1 fit read as a
-            # T2 fit and the T1rho fit's JSON overwrote it.
+            # The label names the output - the results column and the JSON's
+            # experiment_type. As 'T2' for both, the T1 fit read as a T2 fit.
             'experiment_type': label,
             'time_units': time_units,
             'error_method': args.error_method,
@@ -1662,7 +1661,8 @@ def _run_dynamixs_t1rho(args):
            'n_t1_fitted': len(t1_fits), 'n_t1rho_fitted': len(rho_fits),
            'theta_nominal_deg': args.theta, 'omega1_hz': args.omega1,
            'r2_table': out_csv,
-           't1_results': t1_res['results_file'], 't1rho_results': rho_res['results_file']}),
+           't1_results': t1_res['results_file'], 't1rho_results': rho_res['results_file'],
+           't1_json': t1_res.get('json_file'), 't1rho_json': rho_res.get('json_file')}),
           f"T1rho complete: R2 derived for {len(table)} residues",
           f"  theta (nominal): {args.theta} deg, omega1: {args.omega1} Hz "
           f"(per-residue tilt applied)",

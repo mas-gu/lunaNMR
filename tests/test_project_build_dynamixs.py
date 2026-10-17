@@ -54,6 +54,18 @@ def run_dir(tmp_path_factory):
                  "--out", str(run / "modelfree" / "dual"), "--prefix", "dual"]) == 0
     assert main(["dynamixs", "methyl-t2", "--input", str(METHYL),
                  "--out", str(run / "fits" / "NBD_methyl"), "--prefix", "NBD"]) == 0
+    assert main(["dynamixs", "hetnoe", "--sat", str(NOE / "f600_noe_sat.csv"),
+                 "--unsat", str(NOE / "f600_noe_unsat.csv"),
+                 "--out", str(run / "hetnoe" / "f600"), "--prefix", "f600"]) == 0
+    # The model-free run above leaves the per-field spectral-density table it built in
+    # the module's shared temp folder; taken straight away, it is this run's own data.
+    density_in = run / "density" / "f600_input.csv"
+    density_in.parent.mkdir()
+    shutil.copy(Path(__file__).resolve().parents[1] / "modules" / "dynamiXs_v2o0" / "temp"
+                / "dual_field1_input.csv", density_in)
+    assert main(["dynamixs", "density", "--input", str(density_in), "--field1-freq", "600",
+                 "--out", str(run / "density" / "f600"), "--prefix", "f600",
+                 "--no-plot"]) == 0
     # A second model-free record of the same prefix, elsewhere in the run: both must be
     # bundled, not the later one over the earlier.
     shutil.copytree(run / "modelfree" / "dual", run / "modelfree" / "dual_rerun")
@@ -101,6 +113,8 @@ T1T2 = "JA1run0_T1T2"
 MODELFREE = "dual_modelfree"
 MODELFREE_RERUN = "modelfree_dual_rerun_modelfree"
 METHYL_T2 = "NBD_methylT2"
+HETNOE = "f600_hetNOE"
+DENSITY = "f600_spectralDensity"
 
 
 def test_each_command_records_what_it_ran(run_dir):
@@ -112,7 +126,33 @@ def test_each_command_records_what_it_ran(run_dir):
 
 
 def test_the_four_fits_become_one_t1t2_analysis_and_modelfree_its_own(loaded):
-    assert set(loaded.dynamixs_analyses) == {T1T2, MODELFREE, MODELFREE_RERUN, METHYL_T2}
+    assert set(loaded.dynamixs_analyses) == {T1T2, MODELFREE, MODELFREE_RERUN, METHYL_T2,
+                                             HETNOE, DENSITY}
+
+
+def test_the_hetnoe_page_reopens_its_results_from_the_bundle(app, loaded, bundle):
+    dialog = _dialog(app, loaded, HETNOE)
+    try:
+        page = dialog.hetnoe_page
+        assert dialog.stack.currentWidget() is page
+        assert page.sat_file == str(NOE / "f600_noe_sat.csv")
+        assert _inside(page.last_results_file, bundle)
+        assert page.results_table.rowCount() > 0
+    finally:
+        dialog.deleteLater()
+
+
+def test_the_spectral_density_page_reopens_from_the_bundle(app, loaded, bundle):
+    dialog = _dialog(app, loaded, DENSITY)
+    try:
+        page = dialog.spectral_page
+        assert dialog.stack.currentWidget() is page
+        assert page.prefix_edit.text() == "f600"
+        assert page.field1_spin.value() == 600
+        results = page.session_results["results_file"]
+        assert _inside(results, bundle) and Path(results).exists()
+    finally:
+        dialog.deleteLater()
 
 
 def test_the_methyl_t2_page_reopens_its_fits_from_the_bundle(app, loaded, bundle):
