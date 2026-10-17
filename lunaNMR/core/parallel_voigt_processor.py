@@ -1085,8 +1085,7 @@ class ParallelVoigtProcessor:
         return {
             'peak_detection_threshold': getattr(self.original_fitter, 'peak_threshold', 0.1),
             'multipeak_threshold': getattr(self.original_fitter, 'multipeak_threshold', 0.3),
-            'noise_level': getattr(self.original_fitter, 'noise_level', None),
-            'intensity_snr_threshold': 3.0  # Skip fitting if detected_intensity < noise_level * this
+            'noise_level': getattr(self.original_fitter, 'noise_level', None)
         }
         
     def _create_cluster_tasks(self, clusters, peak_metadata, peak_list, shared_context):
@@ -1406,72 +1405,6 @@ def _test_parallel_worker(_test_data):
     return "test_success"
 
 
-def _create_skipped_peak_result(peak_x, peak_y, assignment, peak_number, skip_reason, detected_intensity=0):
-    """
-    Create a standardized result for peaks that are skipped because their intensity is below the S/N threshold.
-
-    Args:
-        peak_x, peak_y: Peak position
-        assignment: Peak assignment string
-        peak_number: Peak number in list
-        skip_reason: Why the peak was skipped ('below_snr_threshold')
-        detected_intensity: The detected intensity value (for logging)
-
-    Returns:
-        Dict with standardized skipped peak result
-    """
-    return {
-        'assignment': assignment,
-        'peak_number': peak_number,
-        'peak_position': (peak_x, peak_y),
-        'peak_x': peak_x,
-        'peak_y': peak_y,
-        'intensity': 0.0,
-        'height': 0.0,
-        'volume': 0.0,
-        'detected_intensity': detected_intensity,
-        'r_squared': 0.0,
-        'avg_r_squared': 0.0,
-        'center_x': peak_x,
-        'center_y': peak_y,
-        'sigma_x': 0.0,
-        'gamma_x': 0.0,
-        'sigma_y': 0.0,
-        'gamma_y': 0.0,
-        'lw_x': 0.0,
-        'lw_y': 0.0,
-        'fitting_quality': 'Skipped',
-        'quality': 'Skipped',
-        'success': False,
-        'fitted': False,
-        'method': 'skipped',
-        'skip_reason': skip_reason,
-        'processing_mode': 'parallel',
-        'cluster_size': 1
-    }
-
-
-def _should_skip_peak(detected_intensity, noise_level, snr_threshold):
-    """
-    Check if a peak should be skipped because its intensity is below the S/N threshold.
-
-    Returns:
-        tuple: (should_skip: bool, reason: str or None)
-    """
-    if detected_intensity is None:
-        return False, None  # No intensity info, proceed with fitting
-
-    # The MAGNITUDE against the noise: a negative peak (hetNOE saturated plane, edited
-    # 13C-HSQC, folded) is signal too. Skipping it reported height 0.0 with no bound
-    # flags, which every analysis kept as a measured zero; fitted, it reports the bound
-    # it stopped on and is excluded - the same answer sequential mode gives.
-    if noise_level is not None and noise_level > 0:
-        if abs(detected_intensity) < noise_level * snr_threshold:
-            return True, 'below_snr_threshold'
-
-    return False, None
-
-
 def _parallel_cluster_worker(cluster_task):
     """
     Worker function that fits ONE cluster (IDENTICAL logic to sequential mode).
@@ -1503,58 +1436,38 @@ def _parallel_cluster_worker(cluster_task):
 
         peak_results = []
 
-        # Extract intensity thresholds for skip check
-        validation_thresholds = cluster_task['shared_context'].get('validation_thresholds', {})
-        noise_level = validation_thresholds.get('noise_level')
-        snr_threshold = validation_thresholds.get('intensity_snr_threshold', 3.0)
-
         if cluster_size == 1:
             # Isolated peak - standard 1D fitting (IDENTICAL to sequential)
             peak_x, peak_y = cluster_task['cluster_positions'][0]
             assignment = cluster_assignments[0]
             peak_number = cluster_peak_numbers[0]
 
-            # Get detected intensity from original peak data
-            detected_intensity = None
-            if cluster_dicts:
-                detected_intensity = cluster_dicts[0].get('intensity')
+            # Fit using enhanced_peak_fitting (routes through consensus or standard 1D)
+            result = worker_integrator.enhanced_peak_fitting(
+                peak_x, peak_y, assignment,
+                all_peaks_context=cluster_task['shared_context']['all_peaks_context']
+            )
 
-            # Pre-check: Skip fitting if |intensity| is below the SNR threshold
-            should_skip, skip_reason = _should_skip_peak(detected_intensity, noise_level, snr_threshold)
+            if result:
+                result['peak_number'] = peak_number
+                result['processing_mode'] = 'parallel'
+                result['cluster_size'] = 1
 
-            if should_skip:
-                # Return skipped result - don't waste time fitting noise
-                result = _create_skipped_peak_result(
-                    peak_x, peak_y, assignment, peak_number, skip_reason, detected_intensity
-                )
+                # Add detection fields from original peak data (cluster_dicts)
+                if cluster_dicts:
+                    orig_peak = cluster_dicts[0]
+                    result['detected'] = orig_peak.get('detected', True)
+                    result['detection_quality'] = orig_peak.get('detection_quality', 'Matched')
+                    result['distance_from_reference'] = orig_peak.get('distance_from_reference', 0)
+                    result['distance_from_reference_x'] = orig_peak.get('distance_from_reference_x', 0)
+                    result['distance_from_reference_y'] = orig_peak.get('distance_from_reference_y', 0)
+                    result['distance_from_reference_elliptical'] = orig_peak.get('distance_from_reference_elliptical', 0)
+                    result['reference_retained'] = orig_peak.get('reference_retained', False)
+                    # Copy detected_intensity if not already set by enhanced_peak_fitting
+                    if result.get('detected_intensity') is None:
+                        result['detected_intensity'] = orig_peak.get('intensity')
+
                 peak_results.append(result)
-            else:
-                # Fit using enhanced_peak_fitting (routes through consensus or standard 1D)
-                result = worker_integrator.enhanced_peak_fitting(
-                    peak_x, peak_y, assignment,
-                    all_peaks_context=cluster_task['shared_context']['all_peaks_context']
-                )
-
-                if result:
-                    result['peak_number'] = peak_number
-                    result['processing_mode'] = 'parallel'
-                    result['cluster_size'] = 1
-
-                    # Add detection fields from original peak data (cluster_dicts)
-                    if cluster_dicts:
-                        orig_peak = cluster_dicts[0]
-                        result['detected'] = orig_peak.get('detected', True)
-                        result['detection_quality'] = orig_peak.get('detection_quality', 'Matched')
-                        result['distance_from_reference'] = orig_peak.get('distance_from_reference', 0)
-                        result['distance_from_reference_x'] = orig_peak.get('distance_from_reference_x', 0)
-                        result['distance_from_reference_y'] = orig_peak.get('distance_from_reference_y', 0)
-                        result['distance_from_reference_elliptical'] = orig_peak.get('distance_from_reference_elliptical', 0)
-                        result['reference_retained'] = orig_peak.get('reference_retained', False)
-                        # Copy detected_intensity if not already set by enhanced_peak_fitting
-                        if result.get('detected_intensity') is None:
-                            result['detected_intensity'] = orig_peak.get('intensity')
-
-                    peak_results.append(result)
 
         else:
             # Overlap group - 2D simultaneous fitting (IDENTICAL to sequential)
@@ -1571,50 +1484,6 @@ def _parallel_cluster_worker(cluster_task):
                 # Reference linewidths are used as initial guesses, NOT fixed constraints
                 # The optimizer can still adjust linewidths to find the best fit
                 # fix_linewidths remains as set by GUI (user choice)
-
-            # Pre-check: If ALL peaks in cluster are below the SNR threshold, skip entire cluster
-            all_skip = True
-            skip_reasons = []
-            for idx, peak_dict in enumerate(cluster_dicts):
-                detected_intensity = peak_dict.get('intensity')
-                should_skip, skip_reason = _should_skip_peak(detected_intensity, noise_level, snr_threshold)
-                if not should_skip:
-                    all_skip = False
-                    break
-                skip_reasons.append((idx, skip_reason, detected_intensity))
-
-            if all_skip:
-                # All peaks in cluster are noise - skip entire cluster
-                cluster_positions = cluster_task['cluster_positions']
-                for idx in range(len(cluster_dicts)):
-                    peak_x, peak_y = cluster_positions[idx]
-                    assignment = cluster_assignments[idx]
-                    peak_number = cluster_peak_numbers[idx]
-                    detected_intensity = cluster_dicts[idx].get('intensity', 0)
-                    # Find the skip reason for this peak
-                    skip_reason = 'below_snr_threshold'  # default
-                    for sr_idx, sr_reason, sr_int in skip_reasons:
-                        if sr_idx == idx:
-                            skip_reason = sr_reason
-                            break
-                    result = _create_skipped_peak_result(
-                        peak_x, peak_y, assignment, peak_number, skip_reason, detected_intensity
-                    )
-                    result['cluster_size'] = cluster_size
-                    result['cluster_idx'] = cluster_task['cluster_idx']
-                    peak_results.append(result)
-
-                # Return early - don't waste time on 2D fitting
-                return {
-                    'success': True,
-                    'task_id': cluster_task['task_id'],
-                    'cluster_idx': cluster_task['cluster_idx'],
-                    'cluster_size': cluster_size,
-                    'peaks_fitted': 0,
-                    'peaks_skipped': len(peak_results),
-                    'r_squared': 0.0,
-                    'peak_results': peak_results
-                }
 
             # Call fit_overlap_group_2d() (SAME AS SEQUENTIAL!)
             group_result = worker_integrator.fit_overlap_group_2d(

@@ -2661,6 +2661,13 @@ class VoigtIntegrator(BaseIntegrator):
                         detected_intensity = peak_dict.get('intensity')
                         break
 
+                # A near-noise peak's R-squared is ~0 by construction - a held shape
+                # against noise - so it cannot say the fit failed; the fit was solved.
+                # Labelled Failed, its measured near-zero intensity was dropped as one.
+                quality = self._assign_quality_from_r2(result_2d['r_squared'])
+                if quality == 'Failed' and target_peak.get('near_noise'):
+                    quality = 'Poor'
+
                 # Extract 2D region data for proper 2D contour visualization
                 region_2d = self.extract_2d_region_for_overlap_group(overlap_group)
 
@@ -2691,8 +2698,8 @@ class VoigtIntegrator(BaseIntegrator):
                         'success': True,
                         'method': '2d_simultaneous'
                     },
-                    'fitting_quality': self._assign_quality_from_r2(result_2d['r_squared']),
-                    'quality': self._assign_quality_from_r2(result_2d['r_squared']),
+                    'fitting_quality': quality,
+                    'quality': quality,
                     'avg_r_squared': result_2d['r_squared'],
                     'method': '2d_simultaneous_multi_peak',
                     'overlap_group_size': len(overlap_group),

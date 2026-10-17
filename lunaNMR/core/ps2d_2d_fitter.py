@@ -1665,6 +1665,8 @@ class Ps2dMultiPeakFitter2D:
                                   float(bounds[1][offset + 0])),
                 'pos_bounds_f2': (float(bounds[0][offset + 3]),
                                   float(bounds[1][offset + 3])),
+                # Fitted inside the noise: shape held, intensity of either sign
+                'near_noise': i in weak_peak_indices,
                 'intensity_fraction': _bound_fraction(
                     params[offset + 6], bounds[0][offset + 6],
                     bounds[1][offset + 6]),

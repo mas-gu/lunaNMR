@@ -3202,6 +3202,9 @@ class EnhancedVoigtFitter:
             self.nmr_data = parent_integrator.nmr_data
             self.ppm_x_axis = parent_integrator.ppm_x_axis
             self.ppm_y_axis = parent_integrator.ppm_y_axis
+            # The workers read the noise from here. Without it every parallel fit judged
+            # each peak's sign, and its detection sigma, against no noise at all.
+            self.noise_level = getattr(parent_integrator, 'noise_level', None)
 
         from lunaNMR.core.parallel_voigt_processor import ParallelVoigtProcessor
 

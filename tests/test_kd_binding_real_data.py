@@ -145,7 +145,8 @@ class TestDummyResiduesAreExcluded:
 
 class TestFailedPointsAreExcluded:
     """The series pipeline already labels unusable fits quality='Failed' and writes a
-    0.1 height sentinel (once, a negative one). The Kd path consumes them unfiltered."""
+    0.1 height sentinel. The Kd path consumes them unfiltered. A negative height is no
+    longer a sentinel: a peak inside the noise is fitted with a signed intensity."""
 
     def test_the_series_really_does_label_them(self, dnaja1_tidy):
         """Guards the premise: if this stops holding, the tests below are meaningless."""
@@ -153,7 +154,8 @@ class TestFailedPointsAreExcluded:
         failed = df[df["quality"].astype(str).str.lower() == "failed"]
         assert len(failed) > 0
         assert (failed["snr"] == 0).all()
-        assert (df[df["height"] < 0]["quality"].astype(str).str.lower() == "failed").all()
+        negative = df[df["height"] < 0]["quality"].astype(str).str.lower()
+        assert (negative != "failed").any(), "a measured negative height is not a failure"
 
     def test_failed_points_do_not_reach_the_fit(self, dnaja1_tidy, tmp_path):
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
@@ -868,31 +870,36 @@ class TestThresholdsArePersistedAndOverridable:
         reasons = pd.read_csv(out / "data" / "P_survey.csv")["reasons"].fillna("")
         return int(reasons.str.contains(needle).sum())
 
+    # 43GluH and 5ThrH have their reference inside the noise, fitted negative. A
+    # non-positive reference is unusable at any ratio threshold (kd_models), so only
+    # 29LeuH - 50.8x short of its own series - moves with the threshold.
+    NOISE_REFERENCES = 2
+
     def test_the_default_reference_threshold_is_applied(
             self, dnaja1_tidy_unflagged, tmp_path):
-        """At 10.0 the one broken reference on DNAJA1, 29LeuH, is caught."""
+        """At 10.0 the one broken-ratio reference on DNAJA1, 29LeuH, is caught."""
         tidy = self._own_copy(dnaja1_tidy_unflagged, tmp_path)
         out = self._survey(tidy, tmp_path / "survey")
-        assert self._flagged(out, "reference") == 1
+        assert self._flagged(out, "reference") == self.NOISE_REFERENCES + 1
 
     def test_a_flag_loosens_the_reference_threshold(self, dnaja1_tidy_unflagged, tmp_path):
         """29LeuH sits at 50.8, so a threshold above it lets 29LeuH through."""
         tidy = self._own_copy(dnaja1_tidy_unflagged, tmp_path)
         out = self._survey(tidy, tmp_path / "survey", extra=["--ref-max-ratio", "100"])
-        assert self._flagged(out, "reference") == 0
+        assert self._flagged(out, "reference") == self.NOISE_REFERENCES
 
     def test_a_persisted_value_beats_the_default(self, dnaja1_tidy_unflagged, tmp_path):
         tidy = self._own_copy(dnaja1_tidy_unflagged, tmp_path)
         self._persist(tidy, ref_max_ratio=100.0)
         out = self._survey(tidy, tmp_path / "survey")
-        assert self._flagged(out, "reference") == 0
+        assert self._flagged(out, "reference") == self.NOISE_REFERENCES
 
     def test_a_flag_beats_a_persisted_value(self, dnaja1_tidy_unflagged, tmp_path):
         """The precedence chain's weak link: flag > persisted > default."""
         tidy = self._own_copy(dnaja1_tidy_unflagged, tmp_path)
         self._persist(tidy, ref_max_ratio=100.0)
         out = self._survey(tidy, tmp_path / "survey", extra=["--ref-max-ratio", "10"])
-        assert self._flagged(out, "reference") == 1
+        assert self._flagged(out, "reference") == self.NOISE_REFERENCES + 1
 
     def test_the_plateau_threshold_is_applied(self, dnaja1_tidy, tmp_path):
         """12 of 69 residues exceed a dd_max ratio of 10 on DNAJA1; raising it flags fewer."""
@@ -1073,7 +1080,7 @@ class TestTheSurveyRecordsWhatTheFitNeeds:
 DNAJA1_SIGMA_TRIMMED = 0.0131
 DNAJA1_SIGMA_UNTRIMMED = 0.0216
 DNAJA1_SIGNIFICANT = 10
-DNAJA1_MEASURED = 29
+DNAJA1_MEASURED = 30
 
 
 class TestCspSignificanceCutoff:
