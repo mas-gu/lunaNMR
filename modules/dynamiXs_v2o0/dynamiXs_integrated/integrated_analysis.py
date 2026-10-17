@@ -16,6 +16,7 @@ Date: 2025-01-23
 
 import sys
 import os
+import tempfile
 from pathlib import Path
 from typing import Dict, Tuple, Optional, Callable
 import pandas as pd
@@ -145,7 +146,7 @@ class IntegratedAnalysisParameters:
         self.monte_carlo_iterations = 50
 
         # Output
-        self.output_dir = None  # Output directory (if None, uses temp/)
+        self.output_dir = None  # Output directory (if None, a fresh private temp folder)
         self.output_prefix = 'integrated_analysis'
         self.save_intermediate_files = True
         self.json_folder = None  # Folder for JSON fit data (for visualization)
@@ -174,9 +175,14 @@ class IntegratedAnalysisPipeline:
         self.field2_results = {}
         self.final_results = None
 
-        # Create temp directory
-        self.temp_dir = Path(__file__).parent.parent / 'temp'
-        self.temp_dir.mkdir(exist_ok=True)
+        # This run's own folder for its intermediates - the output folder, else a fresh
+        # private one. A folder inside the module, shared by every run, let two runs on
+        # one prefix overwrite each other's spectral-density inputs mid-run.
+        if params.output_dir:
+            self.work_dir = Path(params.output_dir)
+            self.work_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            self.work_dir = Path(tempfile.mkdtemp(prefix='dynamixs_'))
 
     def log_progress(self, message: str):
         """Log progress message"""
@@ -413,7 +419,7 @@ class IntegratedAnalysisPipeline:
         input_files = {}
 
         # Field 1
-        field1_input = str(self.temp_dir / f"{self.params.output_prefix}_field1_input.csv")
+        field1_input = str(self.work_dir / f"{self.params.output_prefix}_field1_input.csv")
         n_residues_f1 = create_spectral_density_input_csv(
             r1_data={k: {'value': v['R1'], 'error': v['R1_err']}
                     for k, v in self.field1_results['merged_data'].items()},
@@ -436,7 +442,7 @@ class IntegratedAnalysisPipeline:
 
         # Field 2 if dual-field
         if self.params.enable_dual_field:
-            field2_input = str(self.temp_dir / f"{self.params.output_prefix}_field2_input.csv")
+            field2_input = str(self.work_dir / f"{self.params.output_prefix}_field2_input.csv")
             n_residues_f2 = create_spectral_density_input_csv(
                 r1_data={k: {'value': v['R1'], 'error': v['R1_err']}
                         for k, v in self.field2_results['merged_data'].items()},
@@ -485,12 +491,7 @@ class IntegratedAnalysisPipeline:
             raise ImportError(f"Could not import {script_name}: {e}")
 
         # Prepare output files
-        if self.params.output_dir:
-            output_dir = Path(self.params.output_dir)
-        else:
-            output_dir = Path(__file__).parent.parent / 'temp'
-        output_dir.mkdir(exist_ok=True)
-        output_prefix = str(output_dir / self.params.output_prefix)
+        output_prefix = str(self.work_dir / self.params.output_prefix)
 
         # Convert rNH from Angstroms to meters
         rNH_meters = self.params.rNH_angstrom * 1e-10

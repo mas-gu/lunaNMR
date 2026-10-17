@@ -57,12 +57,10 @@ def run_dir(tmp_path_factory):
     assert main(["dynamixs", "hetnoe", "--sat", str(NOE / "f600_noe_sat.csv"),
                  "--unsat", str(NOE / "f600_noe_unsat.csv"),
                  "--out", str(run / "hetnoe" / "f600"), "--prefix", "f600"]) == 0
-    # The model-free run above leaves the per-field spectral-density table it built in
-    # the module's shared temp folder; taken straight away, it is this run's own data.
+    # The per-field spectral-density table the model-free run built, from its own folder.
     density_in = run / "density" / "f600_input.csv"
     density_in.parent.mkdir()
-    shutil.copy(Path(__file__).resolve().parents[1] / "modules" / "dynamiXs_v2o0" / "temp"
-                / "dual_field1_input.csv", density_in)
+    shutil.copy(run / "modelfree" / "dual" / "dual_field1_input.csv", density_in)
     assert main(["dynamixs", "density", "--input", str(density_in), "--field1-freq", "600",
                  "--out", str(run / "density" / "f600"), "--prefix", "f600",
                  "--no-plot"]) == 0
@@ -115,6 +113,13 @@ MODELFREE_RERUN = "modelfree_dual_rerun_modelfree"
 METHYL_T2 = "NBD_methylT2"
 HETNOE = "f600_hetNOE"
 DENSITY = "f600_spectralDensity"
+
+
+def test_modelfree_keeps_its_intermediates_in_its_own_folder(run_dir):
+    """They went to a folder inside the installed module, shared by every run: two
+    model-free runs on one prefix overwrote each other's density inputs mid-run."""
+    for field in ("field1", "field2"):
+        assert (run_dir / "modelfree" / "dual" / f"dual_{field}_input.csv").exists()
 
 
 def test_each_command_records_what_it_ran(run_dir):
