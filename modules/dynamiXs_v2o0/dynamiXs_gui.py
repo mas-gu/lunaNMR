@@ -517,12 +517,16 @@ class BasePage(QWidget):
                 for name, br in saved_series.items() if include is None or include(br)]
 
     def _series_intensity_matrix(self, series_name):
-        """The intensity matrix a series wrote beside its outputs, or None."""
+        """A series' intensity matrix, or None: the project's bundled copy first (the
+        run folder may have moved), then the one beside the series' outputs."""
         main = self._lunanmr_main_window()
         batch = (getattr(main, 'saved_series', {}) or {}).get(series_name)
         folder = (getattr(batch, 'metadata', None) or {}).get('output_folder')
-        path = os.path.join(folder, "peak_intensity_matrix.csv") if folder else None
-        return path if path and os.path.exists(path) else None
+        project_path = getattr(main, 'current_project_path', None)
+        candidates = [os.path.join(str(project_path), "series_results", series_name,
+                                   "peak_intensity_matrix.csv") if project_path else None,
+                      os.path.join(folder, "peak_intensity_matrix.csv") if folder else None]
+        return next((c for c in candidates if c and os.path.exists(c)), None)
 
     def _add_series_panel(self, layout, hint, empty_text, include=None, max_height=120):
         """Add the draggable list of the project's series, with its hint, an empty-state

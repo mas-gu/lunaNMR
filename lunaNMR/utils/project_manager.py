@@ -1019,6 +1019,7 @@ class ProjectManager:
             # Copy the tidy CSV into the bundle so the project is self-contained:
             # a moved/renamed source run folder still resolves for Kd/titration input.
             self._copy_series_csv(batch_results, series_subdir)
+            self._copy_series_matrix(batch_results, series_subdir)
 
             # Add to manifest
             spectrum_count = len(batch_results.results) if hasattr(batch_results, 'results') else 0
@@ -1051,6 +1052,16 @@ class ProjectManager:
             src = str(Path(output_folder) / "series_analysis_tidy.csv") if output_folder else None
         if src and Path(src).exists():
             shutil.copy2(src, series_subdir / "series_analysis_tidy.csv")
+
+    def _copy_series_matrix(self, batch_results, series_subdir: Path) -> None:
+        """Copy a series' peak_intensity_matrix.csv - the file the hetNOE and methyl T2
+        pages read - from its output_folder into its bundle subdirectory, if it exists."""
+        import shutil
+        metadata = batch_results.metadata if hasattr(batch_results, 'metadata') else {}
+        output_folder = metadata.get('output_folder')
+        src = Path(output_folder) / "peak_intensity_matrix.csv" if output_folder else None
+        if src and src.exists():
+            shutil.copy2(src, series_subdir / "peak_intensity_matrix.csv")
 
     def _load_series_results(self, bundle_path: Path) -> bool:
         """Load series integration results (multiple series) and reconstruct BatchResults.

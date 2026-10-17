@@ -91,3 +91,17 @@ def test_resolve_no_extra_lunaNMR_component(tmp_path):
     got = resolve_series_csv('S1', {}, str(bundle))
     assert got == str(bundled)
     assert ".lunaNMR/.lunaNMR" not in got.replace(os.sep, "/")
+
+
+def test_save_copies_intensity_matrix_into_bundle(tmp_path):
+    """hetNOE and methyl T2 read the matrix, not the tidy CSV."""
+    batch, tidy = _make_series(tmp_path)
+    matrix = tidy.parent / "peak_intensity_matrix.csv"
+    matrix.write_text("Assignment,A\n3LysH,1.0\n")
+    mw = types.SimpleNamespace(saved_series={'S1': batch})
+    bundle = tmp_path / "proj.lunaNMR"
+    bundle.mkdir()
+    ProjectManager(mw)._save_series_results(bundle)
+
+    copied = bundle / "series_results" / "S1" / "peak_intensity_matrix.csv"
+    assert copied.read_text() == matrix.read_text()

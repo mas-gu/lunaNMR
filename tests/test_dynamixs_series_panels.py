@@ -110,3 +110,14 @@ def test_a_series_dropped_on_methyl_t2_brings_its_intensity_matrix(dialog, serie
     page._on_series_dropped("methyl_t2", "hetNOE600",
                             str(series["hetNOE600"] / "series_analysis_tidy.csv"))
     assert page.input_file == str(series["hetNOE600"] / "peak_intensity_matrix.csv")
+
+
+def test_a_series_in_the_project_drops_its_bundled_matrix(dialog, window, tmp_path):
+    """The bundle's copy first, as for the tidy CSV: the run folder may have moved."""
+    bundled = tmp_path / "p.lunaNMR" / "series_results" / "hetNOE600" / "peak_intensity_matrix.csv"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text("Assignment,hetnoe_600_saturated,hetnoe_600_unsaturated\n3LysH,1.0,2.0\n")
+    window.current_project_path = str(tmp_path / "p.lunaNMR")
+    page = dialog.methyl_t2_page
+    page._on_series_dropped("methyl_t2", "hetNOE600", "")
+    assert page.input_file == str(bundled)
