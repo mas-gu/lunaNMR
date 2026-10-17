@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
+from lunaNMR.utils.project_manager import lacks_fit_arrays, rebuild_fit_arrays
 from lunaNMR.gui.components.peak_navigator_table import PeakNavigatorTable
 from lunaNMR.gui.components.signed_contours import draw_signed_contours
 from lunaNMR.gui.styles.design_system import (
@@ -1961,6 +1962,18 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 self.voigt_3d_plotter.show_placeholder(f"Error: {str(e)[:50]}")
 
     def _find_stored_voigt_result(self, spec: Dict, assignment: str, peak: Dict = None) -> Optional[Dict]:
+        """A stored fit for `assignment` in `spec`, carrying its region and surfaces.
+
+        A series stores its fits slim (project_manager.slim_fit_row): the arrays are
+        rebuilt here, once, from the spectrum - loaded first if it is not yet.
+        """
+        result = self._lookup_stored_voigt_result(spec, assignment, peak)
+        if result is not None and lacks_fit_arrays(result):
+            if spec.get('loaded') or self._load_spectrum_data(spec):
+                rebuild_fit_arrays(result, spec.get('integrator'))
+        return result
+
+    def _lookup_stored_voigt_result(self, spec: Dict, assignment: str, peak: Dict = None) -> Optional[Dict]:
         """Find stored Voigt fitting results for a peak by assignment.
 
         Based on v0.9 find_stored_voigt_result() (multi_spectrum_viewer.py:1276-1305).

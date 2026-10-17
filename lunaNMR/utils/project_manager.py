@@ -84,15 +84,24 @@ def _serialize_integration_result(result: dict) -> dict:
     return serialized
 
 
+def _slim_spectrum_result(result: dict) -> dict:
+    """A spectrum's result with every per-peak row slimmed (slim_fit_row)."""
+    return {key: ([slim_fit_row(row) for row in value]
+                  if key in ('integration_results', 'fitted_results') and isinstance(value, list)
+                  else value)
+            for key, value in result.items()}
+
+
 def write_batch_results(batch_results, path) -> None:
     """Write one series' BatchResults as the bundle's batch_results.json.
 
     The single writer of that file: the GUI's project save and the headless `series`
     command both go through it, so a bundle built from a run's output folders carries
-    exactly what the GUI would have saved.
+    exactly what the GUI would have saved. Fit surfaces are not stored; see
+    rebuild_fit_arrays.
     """
     data = {
-        'results': {name: _serialize_spectrum_result(result)
+        'results': {name: _serialize_spectrum_result(_slim_spectrum_result(result))
                     for name, result in getattr(batch_results, 'results', {}).items()},
         'metadata': _serialize_metadata(getattr(batch_results, 'metadata', {}) or {}),
         'statistics': getattr(batch_results, 'statistics', {}),
@@ -119,6 +128,109 @@ def batch_results_from_dict(data: dict, deserialize_result=None):
         batch_results.results[name] = (deserialize_result(result) if deserialize_result
                                        else result)
     return batch_results
+
+
+# A fit's surfaces are rebuilt from its parameters (`all_peaks`) and its region's ppm
+# axes; the region's intensity is re-sliced from the spectrum. Stored whole they made a
+# 7-point series ~80 MB, 99% of it these.
+SURFACE_KEYS = ('fitted_2d_surface', 'individual_surfaces')
+REGION_AXES = ('f1_ppm', 'f2_ppm')
+
+
+def slim_fit_row(row):
+    """A per-peak fit row without what rebuild_fit_arrays can restore from the spectrum."""
+    if not isinstance(row, dict):
+        return row
+    slim = {key: value for key, value in row.items() if key not in SURFACE_KEYS}
+    region = row.get('region_2d')
+    if isinstance(region, dict):
+        slim['region_2d'] = {axis: region[axis] for axis in REGION_AXES if axis in region}
+    return slim
+
+
+def build_region_2d(f1_ppm, f2_ppm, intensity) -> dict:
+    """Assemble a region_2d dict, rebuilding the coordinate grids."""
+    f1_ppm = np.asarray(f1_ppm)
+    f2_ppm = np.asarray(f2_ppm)
+    f2_grid, f1_grid = np.meshgrid(f2_ppm, f1_ppm, indexing='xy')
+    return {
+        'f1_ppm': f1_ppm,
+        'f2_ppm': f2_ppm,
+        'f1_grid': f1_grid,
+        'f2_grid': f2_grid,
+        'intensity': np.asarray(intensity),
+    }
+
+
+def resolve_region_2d(result: dict, integrator):
+    """A region_2d dict with intensity and grids for `result`, or None.
+
+    From, in order: an intensity the result still carries; `region_bounds`, index
+    bounds into the spectrum (a bundle's fit results); the region's own ppm axes,
+    located on the spectrum's (a series' rows).
+    """
+    region = result.get('region_2d')
+    if isinstance(region, dict) and region.get('intensity') is not None \
+            and region.get('f1_ppm') is not None and region.get('f2_ppm') is not None:
+        return build_region_2d(region['f1_ppm'], region['f2_ppm'], region['intensity'])
+
+    nmr_data = getattr(integrator, 'nmr_data', None)
+    ppm_y = getattr(integrator, 'ppm_y_axis', None)
+    ppm_x = getattr(integrator, 'ppm_x_axis', None)
+    if nmr_data is None or ppm_y is None or ppm_x is None:
+        return None
+    ppm_y, ppm_x = np.asarray(ppm_y), np.asarray(ppm_x)
+
+    bounds = result.get('region_bounds')
+    if bounds is not None and len(bounds) == 4:
+        y0, y1, x0, x1 = bounds
+    elif isinstance(region, dict) and all(region.get(axis) is not None for axis in REGION_AXES):
+        f1, f2 = np.asarray(region['f1_ppm']), np.asarray(region['f2_ppm'])
+        if not (f1.size and f2.size):
+            return None
+        y0 = int(np.argmin(np.abs(ppm_y - f1[0])))
+        x0 = int(np.argmin(np.abs(ppm_x - f2[0])))
+        y1, x1 = y0 + f1.size, x0 + f2.size
+    else:
+        return None
+
+    intensity = nmr_data[y0:y1, x0:x1]
+    if intensity.size == 0:
+        return None
+    return build_region_2d(ppm_y[y0:y1], ppm_x[x0:x1], intensity)
+
+
+def lacks_fit_arrays(result: dict) -> bool:
+    """A stored fit missing the region grid or surfaces a fit-detail plot draws."""
+    region = result.get('region_2d') or {}
+    return region.get('intensity') is None or result.get('fitted_2d_surface') is None
+
+
+def rebuild_fit_arrays(result: dict, integrator) -> bool:
+    """Restore a fit's region grid and surfaces in place, from its parameters.
+
+    :param integrator: holding the spectrum the fit was made on, and
+        `_reconstruct_2d_surface`
+    :return: whether the result now carries them; a result with no parameters, or no
+        spectrum to re-slice, is left as it was
+    """
+    if not result.get('all_peaks'):
+        return False
+    try:
+        region_2d = resolve_region_2d(result, integrator)
+        if region_2d is None:
+            return False
+        surface, individual, baseline = integrator._reconstruct_2d_surface(
+            region_2d, result['all_peaks'])
+    except Exception as e:
+        logger.warning(f"Could not reconstruct fit surface for "
+                       f"{result.get('assignment', '?')}: {e}")
+        return False
+    result['region_2d'] = region_2d
+    result['fitted_2d_surface'] = surface
+    result['individual_surfaces'] = individual
+    result.setdefault('baseline', baseline)
+    return True
 
 
 class ProjectManager:
@@ -745,59 +857,8 @@ class ProjectManager:
             return
 
         for result in results:
-            if not isinstance(result, dict) or 'all_peaks' not in result:
-                continue
-            try:
-                region_2d = self._resolve_region_2d(result, integrator)
-                if region_2d is None:
-                    continue
-                surface, individual, baseline = integrator._reconstruct_2d_surface(
-                    region_2d, result['all_peaks'])
-            except Exception as e:
-                logger.warning(f"Could not reconstruct fit surface for "
-                               f"{result.get('assignment', '?')}: {e}")
-                continue
-            result['region_2d'] = region_2d
-            result['fitted_2d_surface'] = surface
-            result['individual_surfaces'] = individual
-            result.setdefault('baseline', baseline)
-
-    def _resolve_region_2d(self, result: dict, integrator):
-        """Return a region_2d dict with intensity and grids, or None."""
-        region = result.get('region_2d')
-        if isinstance(region, dict) and region.get('intensity') is not None \
-                and region.get('f1_ppm') is not None and region.get('f2_ppm') is not None:
-            return self._build_region_2d(region['f1_ppm'], region['f2_ppm'],
-                                         region['intensity'])
-
-        bounds = result.get('region_bounds')
-        if bounds is None or len(bounds) != 4:
-            return None
-        nmr_data = getattr(integrator, 'nmr_data', None)
-        ppm_y = getattr(integrator, 'ppm_y_axis', None)
-        ppm_x = getattr(integrator, 'ppm_x_axis', None)
-        if nmr_data is None or ppm_y is None or ppm_x is None:
-            return None
-
-        y0, y1, x0, x1 = bounds
-        intensity = nmr_data[y0:y1, x0:x1]
-        if intensity.size == 0:
-            return None
-        return self._build_region_2d(np.asarray(ppm_y)[y0:y1],
-                                     np.asarray(ppm_x)[x0:x1], intensity)
-
-    def _build_region_2d(self, f1_ppm, f2_ppm, intensity) -> dict:
-        """Assemble a region_2d dict, rebuilding the coordinate grids."""
-        f1_ppm = np.asarray(f1_ppm)
-        f2_ppm = np.asarray(f2_ppm)
-        f2_grid, f1_grid = np.meshgrid(f2_ppm, f1_ppm, indexing='xy')
-        return {
-            'f1_ppm': f1_ppm,
-            'f2_ppm': f2_ppm,
-            'f1_grid': f1_grid,
-            'f2_grid': f2_grid,
-            'intensity': np.asarray(intensity),
-        }
+            if isinstance(result, dict):
+                rebuild_fit_arrays(result, integrator)
 
     # =========================================================================
     # UTILITY METHODS

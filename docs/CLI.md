@@ -128,8 +128,10 @@ reference spectrum and the peak list it was fitted against unless `--spectrum`/`
 say otherwise. Both are **referenced by absolute path, not copied**: the bundle needs the
 data where it was. Refuses an existing `--out`. Not yet included: DynamiXs analyses.
 
-A series bundle is large - ~80 MB for 7 spectra - because each fit's surfaces and region
-grids are stored whole.
+A series is stored slim, by `series` and by the GUI alike: each fit keeps its parameters
+(`all_peaks`) and its region's ppm axes, and the viewers rebuild the region and surfaces
+from the spectrum when a fit is opened - bit-identical to storing them. ~3 MB for a
+7-point titration, against ~80 MB whole.
 
 ### integrate-1d
 ```bash
