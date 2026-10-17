@@ -1615,7 +1615,10 @@ def _run_dynamixs_t1rho(args):
             'input_csv_file': input_csv,
             'output_prefix': os.path.join(args.out, f"{args.prefix}_{label}"),
             'results_txt_file': os.path.join(args.out, f"{args.prefix}_{label}_fit_results.txt"),
-            'experiment_type': 'T2',
+            # The label names the output - the results column, the JSON's
+            # experiment_type and its filename. As 'T2' for both, the T1 fit read as a
+            # T2 fit and the T1rho fit's JSON overwrote it.
+            'experiment_type': label,
             'time_units': time_units,
             'error_method': args.error_method,
             'n_bootstrap': args.bootstrap,

@@ -580,6 +580,11 @@ class DropTargetLabel(QLabel):
 # T1/T2 FITTING PAGE
 # =============================================================================
 
+# Residue names are identifiers, read as text: a list named 3.0, 4.0, ... otherwise loads
+# as floats, and the T1rho -> T2 conversion, matching names as strings, fails on them.
+RESIDUE_NAME_DTYPES = {'Residue': str, 'residue': str, 'Assignment': str, 'res': str}
+
+
 class T1T2FittingPage(BasePage):
     """T1/T2 exponential decay fitting analysis page with dual-field support."""
 
@@ -875,6 +880,13 @@ class T1T2FittingPage(BasePage):
             self.outdir_display.setText(os.path.basename(self.output_dir))
             self.outdir_display.setToolTip(self.output_dir)
 
+    @staticmethod
+    def _create_carrier_spin():
+        """A carrier input that starts unset: its minimum reads 'required'."""
+        spin = create_double_spin_box(0.0, 0.0, 300.0, 3, " ppm", width=110)
+        spin.setSpecialValueText("required")
+        return spin
+
     def _toggle_field2(self):
         """Enable or disable Field 2 data section."""
         self.field2_enabled = not self.field2_enabled
@@ -895,6 +907,8 @@ class T1T2FittingPage(BasePage):
         # Enable/disable Field 2 widgets
         self.field2_freq_spin.setEnabled(self.field2_enabled)
         self.field2_auto_btn.setEnabled(self.field2_enabled)
+        for name in ("theta", "omega1", "carrier"):
+            getattr(self, f"field2_{name}_spin").setEnabled(self.field2_enabled)
 
         for exp in ['t1', 't2', 't1rho']:
             display = getattr(self, f"field2_{exp}_display", None)
@@ -1138,25 +1152,30 @@ class T1T2FittingPage(BasePage):
         status_layout.addStretch()
         t1rho_conv_content.addWidget(status_row)
 
-        # Tilt angle θ (cnst28)
-        theta_row = QFrame()
-        theta_layout = create_h_layout(SPACING_SM)
-        theta_row.setLayout(theta_layout)
-        theta_layout.addWidget(create_label("Tilt angle θ (cnst28):"))
-        self.theta_spin = create_double_spin_box(45.0, 1.0, 89.0, 1, " °", width=100)
-        theta_layout.addWidget(self.theta_spin)
-        theta_layout.addStretch()
-        t1rho_conv_content.addWidget(theta_row)
-
-        # Spin-lock ω₁ (cnst27)
-        omega_row = QFrame()
-        omega_layout = create_h_layout(SPACING_SM)
-        omega_row.setLayout(omega_layout)
-        omega_layout.addWidget(create_label("Spin-lock ω₁ (cnst27):"))
-        self.omega1_spin = create_double_spin_box(2000.0, 100.0, 10000.0, 0, " Hz", width=100)
-        omega_layout.addWidget(self.omega1_spin)
-        omega_layout.addStretch()
-        t1rho_conv_content.addWidget(omega_row)
+        # Acquisition parameters, PER FIELD: each field is its own acquisition, and none
+        # of these can be read off the spectra or the filenames. The carrier has no
+        # default - a guessed carrier tilts every residue by the wrong angle.
+        acq_grid = QGridLayout()
+        acq_grid.setHorizontalSpacing(SPACING_MD)
+        acq_grid.addWidget(create_label("Field 1"), 0, 1)
+        acq_grid.addWidget(create_label("Field 2"), 0, 2)
+        rows = (("Tilt angle θ (cnst28):", "theta", lambda: create_double_spin_box(
+                    45.0, 1.0, 89.0, 1, " °", width=110)),
+                ("Spin-lock ω₁ (cnst27):", "omega1", lambda: create_double_spin_box(
+                    2000.0, 100.0, 10000.0, 3, " Hz", width=110)),
+                ("¹⁵N carrier (O3):", "carrier", self._create_carrier_spin))
+        for row, (label, name, make) in enumerate(rows, start=1):
+            acq_grid.addWidget(create_label(label), row, 0)
+            for column, field in enumerate(("field1", "field2"), start=1):
+                spin = make()
+                setattr(self, f"{field}_{name}_spin", spin)
+                acq_grid.addWidget(spin, row, column)
+        acq_grid.setColumnStretch(3, 1)
+        acq_frame = QFrame()
+        acq_frame.setLayout(acq_grid)
+        t1rho_conv_content.addWidget(acq_frame)
+        for name in ("theta", "omega1", "carrier"):
+            getattr(self, f"field2_{name}_spin").setEnabled(False)
 
         # Peak list file for T1rho calculation
         peak_list_row = QFrame()
@@ -1579,7 +1598,7 @@ class T1T2FittingPage(BasePage):
         self.results_text.appendPlainText(f"  T1 file: {os.path.basename(self.t1_results_file)}")
         self.results_text.appendPlainText(f"  T1ρ file: {os.path.basename(self.t1rho_results_file)}")
         self.results_text.appendPlainText(f"  Peak list: {os.path.basename(self.peak_list_file)}")
-        self.results_text.appendPlainText(f"  θ = {self.theta_spin.value()}°, ω₁ = {self.omega1_spin.value()} Hz")
+        self.results_text.appendPlainText(f"  θ = {self.field1_theta_spin.value()}°, ω₁ = {self.field1_omega1_spin.value()} Hz")
 
         try:
             import pandas as pd
@@ -1619,8 +1638,8 @@ class T1T2FittingPage(BasePage):
             result = calculate_T2_from_T1rho(
                 r1_data=r1_data,
                 r1rho_data=r1rho_data,
-                theta_deg=self.theta_spin.value(),
-                omega1_hz=self.omega1_spin.value(),
+                theta_deg=self.field1_theta_spin.value(),
+                omega1_hz=self.field1_omega1_spin.value(),
                 carrier_ppm=carrier_ppm,
                 spec_freq_mhz=spec_freq_mhz,
                 peak_list=peak_list
@@ -1649,127 +1668,107 @@ class T1T2FittingPage(BasePage):
             self.results_text.appendPlainText(traceback.format_exc())
 
     def _calculate_t2_from_t1rho(self):
-        """Calculate T2 from T1 and T1ρ fit results using session data."""
-        # Check if required fits are available
-        field1_data = self.session_results.get('field1')
+        """Calculate T2 from the T1 and T1ρ fit results of every field that has both.
 
-        if not field1_data:
-            show_error(self, "Error", "No fit results available. Please run T1 and T1ρ fitting first.")
+        Each field converts on its own tilt angle, spin-lock field, carrier and
+        spectrometer frequency: they are separate acquisitions. The carrier must be
+        entered - it cannot be read off the spectra, and a guessed one tilts every residue
+        by the wrong angle. Nothing is written unless every field to convert has one.
+        """
+        fields = []
+        for field in ('field1', 'field2'):
+            data = self.session_results.get(field) or {}
+            t1, t1rho = data.get('t1') or {}, data.get('t1rho') or {}
+            if t1.get('results_file') and t1rho.get('results_file'):
+                fields.append((field, t1['results_file'], t1rho['results_file']))
+        if not fields:
+            show_error(self, "Error", "No field has both T1 and T1ρ fit results. "
+                                      "Please run T1 and T1ρ fitting first.")
             return
-
-        t1_result = field1_data.get('t1')
-        t1rho_result = field1_data.get('t1rho')
-
-        if not t1_result or not t1_result.get('results_file'):
-            show_error(self, "Error", "T1 fit results not found. Please run T1 fitting first.")
-            return
-
-        if not t1rho_result or not t1rho_result.get('results_file'):
-            show_error(self, "Error", "T1ρ fit results not found. Please run T1ρ fitting first.")
-            return
-
         if not self.peak_list_file:
             show_error(self, "Error", "Please select a peak list file for T1ρ → T2 calculation.")
             return
-
-        # Use the fit results files
-        self.t1_results_file = t1_result['results_file']
-        self.t1rho_results_file = t1rho_result['results_file']
+        unset = [field.replace('field', 'Field ') for field, _, _ in fields
+                 if getattr(self, f'{field}_carrier_spin').value() <= 0]
+        if unset:
+            show_error(self, "Carrier required",
+                       f"Enter the ¹⁵N carrier (O3, in ppm) for {', '.join(unset)}. It is an "
+                       f"acquisition parameter: it cannot be read from the spectra, and a "
+                       f"guessed carrier gives every residue the wrong tilt angle.")
+            return
 
         self.results_text.clear()
         self.results_text.appendPlainText("Starting T1ρ → T2 Conversion...")
-        self.results_text.appendPlainText(f"  T1 results: {os.path.basename(self.t1_results_file)}")
-        self.results_text.appendPlainText(f"  T1ρ results: {os.path.basename(self.t1rho_results_file)}")
-        self.results_text.appendPlainText(f"  Peak list: {os.path.basename(self.peak_list_file)}")
-        self.results_text.appendPlainText(f"  θ = {self.theta_spin.value()}°, ω₁ = {self.omega1_spin.value()} Hz")
+        for field, t1_file, t1rho_file in fields:
+            try:
+                self._convert_t1rho_field(field, t1_file, t1rho_file)
+            except Exception as e:
+                self.results_text.appendPlainText(
+                    f"\nError during T1ρ → T2 conversion ({field}):\n{str(e)}")
+                import traceback
+                self.results_text.appendPlainText(traceback.format_exc())
+        self._update_status_indicators()
 
-        try:
-            import pandas as pd
-            _ensure_lunaNMR_path()
-            from lunaNMR.utils.t1rho_calculator import calculate_T2_from_T1rho
+    def _convert_t1rho_field(self, field, t1_file, t1rho_file):
+        """Convert one field's T1 + T1ρ fits to T2, and hold it as that field's T2."""
+        _ensure_lunaNMR_path()
+        from lunaNMR.utils.t1rho_calculator import calculate_T2_from_T1rho
 
-            # Load data files
-            self.results_text.appendPlainText("\nLoading fit results...")
+        theta = getattr(self, f'{field}_theta_spin').value()
+        omega1 = getattr(self, f'{field}_omega1_spin').value()
+        carrier = getattr(self, f'{field}_carrier_spin').value()
+        spec_freq_mhz = getattr(self, f'{field}_freq_spin').value()
+        label = field.replace('field', 'Field ')
+        self.results_text.appendPlainText(
+            f"\n{label}: T1 {os.path.basename(t1_file)}, T1ρ {os.path.basename(t1rho_file)}")
+        self.results_text.appendPlainText(
+            f"  θ = {theta}°, ω₁ = {omega1} Hz, carrier = {carrier:.3f} ppm, "
+            f"{spec_freq_mhz} MHz")
 
-            r1_data = self._load_relaxation_results(self.t1_results_file)
-            r1rho_data = self._load_relaxation_results(self.t1rho_results_file)
-            peak_list = self._load_peak_list(self.peak_list_file)
+        r1_data = self._normalize_relaxation_columns(self._load_relaxation_results(t1_file), 'R1')
+        r1rho_data = self._normalize_relaxation_columns(
+            self._load_relaxation_results(t1rho_file), 'R1rho')
+        result = calculate_T2_from_T1rho(
+            r1_data=r1_data,
+            r1rho_data=r1rho_data,
+            theta_deg=theta,
+            omega1_hz=omega1,
+            carrier_ppm=carrier,
+            spec_freq_mhz=spec_freq_mhz,
+            peak_list=self._load_peak_list(self.peak_list_file)
+        )
 
-            # Normalize column names
-            r1_data = self._normalize_relaxation_columns(r1_data, 'R1')
-            r1rho_data = self._normalize_relaxation_columns(r1rho_data, 'R1rho')
+        output_file = os.path.join(self.output_dir, f"{field}_T2_from_T1rho.csv")
+        result.to_csv(output_file, index=False)
 
-            # Get spectrometer frequency
-            spec_freq_mhz = self.field1_freq_spin.value()
+        # Also create a fit_results.txt format for compatibility with View Results
+        results_txt_file = os.path.join(self.output_dir, f"{field}_T2_from_T1rho_fit_results.txt")
+        with open(results_txt_file, 'w') as f:
+            # T2-from-T1rho is a derived quantity, not a direct fit:
+            # no offset C is available, so emit NaN for C / C_err.
+            f.write("Residue\tA\tT2\tC\tA_err\tT2_err\tC_err\tSuccess\n")
+            for _, row in result.iterrows():
+                f.write(
+                    f"{row['residue']}\t1.0\t{row['T2']:.3f}\tNaN\t"
+                    f"0.0\t{row['T2_err']:.3f}\tNaN\tYes\n"
+                )
 
-            # Detect carrier from peak list
-            if 'N_ppm' in peak_list.columns:
-                carrier_ppm = peak_list['N_ppm'].mean()
-            elif '15N' in peak_list.columns:
-                carrier_ppm = peak_list['15N'].mean()
-            else:
-                carrier_ppm = 118.0
-                self.results_text.appendPlainText(f"  Warning: No 15N column found, using default carrier = {carrier_ppm} ppm")
+        # Store in session as T2 result (derived)
+        self.session_results[field]['t2'] = {
+            'output_dir': self.output_dir,
+            'json_folder': None,  # No JSON for derived T2
+            'results_file': results_txt_file,
+            'n_fitted': len(result),
+            'frequency_mhz': spec_freq_mhz,
+            'derived_from': 't1rho'  # Mark as derived
+        }
+        self.fitted_experiments.add(f'{field}_t2')
 
-            self.results_text.appendPlainText(f"  Carrier = {carrier_ppm:.1f} ppm")
-            self.results_text.appendPlainText(f"  Spectrometer = {spec_freq_mhz} MHz")
-
-            # Calculate T2
-            self.results_text.appendPlainText("\nCalculating T2 from T1 and T1ρ...")
-
-            result = calculate_T2_from_T1rho(
-                r1_data=r1_data,
-                r1rho_data=r1rho_data,
-                theta_deg=self.theta_spin.value(),
-                omega1_hz=self.omega1_spin.value(),
-                carrier_ppm=carrier_ppm,
-                spec_freq_mhz=spec_freq_mhz,
-                peak_list=peak_list
-            )
-
-            # Save results to output directory
-            output_file = os.path.join(
-                self.output_dir,
-                f"field1_T2_from_T1rho.csv"
-            )
-            result.to_csv(output_file, index=False)
-
-            # Also create a fit_results.txt format for compatibility with View Results
-            results_txt_file = os.path.join(self.output_dir, "field1_T2_from_T1rho_fit_results.txt")
-            with open(results_txt_file, 'w') as f:
-                # T2-from-T1rho is a derived quantity, not a direct fit:
-                # no offset C is available, so emit NaN for C / C_err.
-                f.write("Residue\tA\tT2\tC\tA_err\tT2_err\tC_err\tSuccess\n")
-                for _, row in result.iterrows():
-                    f.write(
-                        f"{row['residue']}\t1.0\t{row['T2']:.3f}\tNaN\t"
-                        f"0.0\t{row['T2_err']:.3f}\tNaN\tYes\n"
-                    )
-
-            # Store in session as T2 result (derived)
-            t2_entry = {
-                'output_dir': self.output_dir,
-                'json_folder': None,  # No JSON for derived T2
-                'results_file': results_txt_file,
-                'n_fitted': len(result),
-                'frequency_mhz': spec_freq_mhz,
-                'derived_from': 't1rho'  # Mark as derived
-            }
-            self.session_results['field1']['t2'] = t2_entry
-            self.fitted_experiments.add('field1_t2')
-            self._update_status_indicators()
-
-            # Display summary
-            self.results_text.appendPlainText(f"\nConversion completed successfully!")
-            self.results_text.appendPlainText(f"  Residues processed: {len(result)}")
-            self.results_text.appendPlainText(f"  Mean T2: {result['T2'].mean():.1f} ± {result['T2'].std():.1f} ms")
-            self.results_text.appendPlainText(f"  Results saved to: {output_file}")
-            self.results_text.appendPlainText(f"\n  T2 results now available in 'View Results'")
-
-        except Exception as e:
-            self.results_text.appendPlainText(f"\nError during T1ρ → T2 conversion:\n{str(e)}")
-            import traceback
-            self.results_text.appendPlainText(traceback.format_exc())
+        self.results_text.appendPlainText(f"  Residues processed: {len(result)}")
+        self.results_text.appendPlainText(
+            f"  Mean T2: {result['T2'].mean():.1f} ± {result['T2'].std():.1f} ms")
+        self.results_text.appendPlainText(f"  Results saved to: {output_file}")
+        self.results_text.appendPlainText(f"  T2 results now available in 'View Results'")
 
     def _load_relaxation_results(self, file_path: str) -> 'pd.DataFrame':
         """Load relaxation results file, auto-detecting delimiter.
@@ -1786,11 +1785,11 @@ class T1T2FittingPage(BasePage):
             first_line = f.readline()
 
         if '\t' in first_line:
-            return pd.read_csv(file_path, sep='\t')
+            return pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, sep='\t')
         elif ';' in first_line:
-            return pd.read_csv(file_path, sep=';')
+            return pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, sep=';')
         else:
-            return pd.read_csv(file_path)
+            return pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES)
 
     def _normalize_relaxation_columns(self, df: 'pd.DataFrame', rate_type: str) -> 'pd.DataFrame':
         """Normalize column names in relaxation data DataFrame.
@@ -1890,7 +1889,7 @@ class T1T2FittingPage(BasePage):
             if ext == '.peaks':
                 # SPARKY format: typically space/tab delimited with header
                 # Format: Assignment w1 w2 [other columns...]
-                df = pd.read_csv(file_path, delim_whitespace=True, comment='#')
+                df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, delim_whitespace=True, comment='#')
                 # Normalize SPARKY column names
                 col_map = {
                     'Assignment': 'residue',
@@ -1906,22 +1905,22 @@ class T1T2FittingPage(BasePage):
 
                 if ',' in first_line:
                     # Comma-delimited (lunaNMR format)
-                    df = pd.read_csv(file_path, skipinitialspace=True)
+                    df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, skipinitialspace=True)
                 elif '\t' in first_line:
                     # Tab-delimited
-                    df = pd.read_csv(file_path, sep='\t', skipinitialspace=True)
+                    df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, sep='\t', skipinitialspace=True)
                 else:
                     # Whitespace-delimited
-                    df = pd.read_csv(file_path, delim_whitespace=True)
+                    df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, delim_whitespace=True)
 
             else:
                 # CSV - try comma first, then semicolon
                 try:
-                    df = pd.read_csv(file_path, skipinitialspace=True)
+                    df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, skipinitialspace=True)
                     if len(df.columns) == 1 and ';' in open(file_path).readline():
-                        df = pd.read_csv(file_path, sep=';', skipinitialspace=True)
+                        df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, sep=';', skipinitialspace=True)
                 except:
-                    df = pd.read_csv(file_path, sep=';', skipinitialspace=True)
+                    df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, sep=';', skipinitialspace=True)
 
             # Strip whitespace from column names
             df.columns = df.columns.str.strip()
@@ -2099,8 +2098,12 @@ class T1T2FittingPage(BasePage):
             'output_dir': self.output_dir,
 
             # T1rho parameters
-            'theta_angle': self.theta_spin.value(),
-            'omega1': self.omega1_spin.value(),
+            'theta_angle': self.field1_theta_spin.value(),
+            'omega1': self.field1_omega1_spin.value(),
+            'field1_carrier': self.field1_carrier_spin.value(),
+            'field2_theta_angle': self.field2_theta_spin.value(),
+            'field2_omega1': self.field2_omega1_spin.value(),
+            'field2_carrier': self.field2_carrier_spin.value(),
             'peak_list_file': self.peak_list_file,
 
             # Advanced parameters
@@ -2157,8 +2160,12 @@ class T1T2FittingPage(BasePage):
             self.outdir_display.setText(os.path.basename(self.output_dir))
 
         # Restore T1rho parameters
-        self.theta_spin.setValue(state.get('theta_angle', 45.0))
-        self.omega1_spin.setValue(state.get('omega1', 2000.0))
+        self.field1_theta_spin.setValue(state.get('theta_angle', 45.0))
+        self.field1_omega1_spin.setValue(state.get('omega1', 2000.0))
+        self.field1_carrier_spin.setValue(state.get('field1_carrier', 0.0))
+        self.field2_theta_spin.setValue(state.get('field2_theta_angle', 45.0))
+        self.field2_omega1_spin.setValue(state.get('field2_omega1', 2000.0))
+        self.field2_carrier_spin.setValue(state.get('field2_carrier', 0.0))
         self.peak_list_file = state.get('peak_list_file')
         if self.peak_list_file:
             self.peak_list_display.setText(os.path.basename(self.peak_list_file))
