@@ -9,6 +9,7 @@ spectrum, as single-spectrum fit results already are. What matters is that the v
 which draw a fit still get one.
 """
 
+import copy
 import json
 import os
 import sys
@@ -43,7 +44,7 @@ def stored(series_dir):
 @pytest.fixture(scope="module")
 def reference_rows(stored):
     """The reference spectrum's per-peak rows, as stored."""
-    result = stored["results"][REFERENCE.name]
+    result = copy.deepcopy(stored["results"][REFERENCE.name])
     return result["integration_results"]
 
 
@@ -124,7 +125,7 @@ def test_a_rebuild_without_a_spectrum_leaves_the_row_alone(reference_rows):
 def test_the_overlay_viewer_rebuilds_a_fit(app, stored):
     """The overlay's fit-detail lookup returns a result it can draw."""
     from lunaNMR.gui.dialogs.multi_spectrum_viewer_dialog import MultiSpectrumViewerDialog
-    result = dict(stored["results"][REFERENCE.name])
+    result = copy.deepcopy(stored["results"][REFERENCE.name])
     result["spectrum_name"] = REFERENCE.name
     result["spectrum_file"] = str(REFERENCE)
     dialog = MultiSpectrumViewerDialog(all_results=[result])
@@ -141,7 +142,7 @@ def test_the_overlay_viewer_rebuilds_a_fit(app, stored):
 
 def test_the_spectrum_viewer_rebuilds_a_fit(app, stored):
     from lunaNMR.gui.dialogs.spectrum_viewer_dialog import SpectrumViewerDialog
-    result = stored["results"][REFERENCE.name]
+    result = copy.deepcopy(stored["results"][REFERENCE.name])
     dialog = SpectrumViewerDialog(spectrum_name=REFERENCE.name,
                                   spectrum_file_path=str(REFERENCE), result_data=result)
     try:
@@ -152,3 +153,56 @@ def test_the_spectrum_viewer_rebuilds_a_fit(app, stored):
         assert found["fitted_2d_surface"].shape == found["region_2d"]["intensity"].shape
     finally:
         dialog.deleteLater()
+
+
+def test_the_overlay_reports_no_fit_when_the_spectrum_is_gone(app, stored, tmp_path):
+    """A fit that cannot be rebuilt is 'no stored result', not a KeyError mid-plot."""
+    from lunaNMR.gui.dialogs.multi_spectrum_viewer_dialog import MultiSpectrumViewerDialog
+    result = copy.deepcopy(stored["results"][REFERENCE.name])
+    result["spectrum_name"] = REFERENCE.name
+    result["spectrum_file"] = str(tmp_path / "moved_away.ft")
+    dialog = MultiSpectrumViewerDialog(all_results=[result])
+    try:
+        assignment = _fitted(result["integration_results"])[0]["assignment"]
+        assert dialog._find_stored_voigt_result(dialog.spectra[0], assignment) is None
+    finally:
+        dialog.deleteLater()
+
+
+def test_the_spectrum_viewer_reports_no_fit_when_the_spectrum_is_gone(app, stored, tmp_path):
+    from lunaNMR.gui.dialogs.spectrum_viewer_dialog import SpectrumViewerDialog
+    result = copy.deepcopy(stored["results"][REFERENCE.name])
+    dialog = SpectrumViewerDialog(spectrum_name=REFERENCE.name,
+                                  spectrum_file_path=str(tmp_path / "moved_away.ft"),
+                                  result_data=result)
+    try:
+        assignment = _fitted(result["integration_results"])[0]["assignment"]
+        assert dialog._find_stored_voigt_result(assignment) is None
+    finally:
+        dialog.deleteLater()
+
+
+def _rebuilt_series(stored, integrator):
+    """The stored series with the reference spectrum's fits carrying their arrays, as a
+    series just fitted in the GUI does."""
+    from lunaNMR.utils.project_manager import batch_results_from_dict, rebuild_fit_arrays
+    batch = batch_results_from_dict(copy.deepcopy(stored))
+    for row in batch.results[REFERENCE.name]["integration_results"]:
+        rebuild_fit_arrays(row, integrator)
+    return batch
+
+
+@pytest.mark.parametrize("embed, kept", [(True, True), (False, False)])
+def test_embedding_region_data_keeps_a_series_whole(stored, integrator, tmp_path, embed, kept):
+    """'Embed raw fit-region data' exists so a bundle opens without its spectra."""
+    import types
+    from lunaNMR.utils.project_manager import ProjectManager
+    window = types.SimpleNamespace(
+        integrator=types.SimpleNamespace(peak_list=None),
+        saved_series={"DNAJA1": _rebuilt_series(stored, integrator)})
+    bundle = tmp_path / "b.lunaNMR"
+    assert ProjectManager(window).save_project(bundle, embed_region_data=embed)[0]
+    saved = json.loads((bundle / "series_results" / "DNAJA1" / "batch_results.json").read_text())
+    rows = _fitted(saved["results"][REFERENCE.name]["integration_results"])
+    assert ("intensity" in rows[0]["region_2d"]) is kept
+    assert ("fitted_2d_surface" in rows[0]) is kept

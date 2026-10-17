@@ -92,16 +92,20 @@ def _slim_spectrum_result(result: dict) -> dict:
             for key, value in result.items()}
 
 
-def write_batch_results(batch_results, path) -> None:
+def write_batch_results(batch_results, path, slim: bool = True) -> None:
     """Write one series' BatchResults as the bundle's batch_results.json.
 
     The single writer of that file: the GUI's project save and the headless `series`
     command both go through it, so a bundle built from a run's output folders carries
-    exactly what the GUI would have saved. Fit surfaces are not stored; see
-    rebuild_fit_arrays.
+    exactly what the GUI would have saved.
+
+    :param slim: store each fit's parameters and region axes only, its arrays rebuilt
+        from the spectrum when opened (rebuild_fit_arrays); False keeps them, for a
+        bundle that must open without its spectra
     """
     data = {
-        'results': {name: _serialize_spectrum_result(_slim_spectrum_result(result))
+        'results': {name: _serialize_spectrum_result(_slim_spectrum_result(result)
+                                                     if slim else result)
                     for name, result in getattr(batch_results, 'results', {}).items()},
         'metadata': _serialize_metadata(getattr(batch_results, 'metadata', {}) or {}),
         'statistics': getattr(batch_results, 'statistics', {}),
@@ -220,6 +224,12 @@ def lacks_fit_arrays(result: dict) -> bool:
     """A stored fit missing the region grid or surfaces a fit-detail plot draws."""
     region = result.get('region_2d') or {}
     return region.get('intensity') is None or result.get('fitted_2d_surface') is None
+
+
+def unrebuilt_fit(result: dict) -> bool:
+    """A 2D fit stored slim whose arrays have not been rebuilt - one a fit-detail plot
+    cannot draw. A result that never had a 2D region (a 1D fit) is not one."""
+    return bool(result.get('all_peaks')) and lacks_fit_arrays(result)
 
 
 def rebuild_fit_arrays(result: dict, integrator) -> bool:
@@ -386,7 +396,7 @@ class ProjectManager:
                 summary['saved_items'].append('Fit results')
             process_events()
 
-            if self._save_series_results(project_path):
+            if self._save_series_results(project_path, embed_region_data):
                 summary['saved_items'].append('Series results')
             process_events()
 
@@ -952,7 +962,7 @@ class ProjectManager:
     # SERIES RESULTS SAVE/LOAD
     # =========================================================================
 
-    def _save_series_results(self, bundle_path: Path) -> bool:
+    def _save_series_results(self, bundle_path: Path, embed_region_data: bool = False) -> bool:
         """Save series integration results (multiple series) to JSON.
 
         Supports multiple named series in saved_series dict.
@@ -998,7 +1008,10 @@ class ProjectManager:
             series_subdir = series_dir / series_name
             series_subdir.mkdir(exist_ok=True)
 
-            write_batch_results(batch_results, series_subdir / "batch_results.json")
+            # Slim unless the bundle must open without its spectra - the same choice the
+            # save dialog's 'Embed raw fit-region data' makes for the fit results.
+            write_batch_results(batch_results, series_subdir / "batch_results.json",
+                                slim=not embed_region_data)
 
             # Copy the tidy CSV into the bundle so the project is self-contained:
             # a moved/renamed source run folder still resolves for Kd/titration input.
@@ -1250,8 +1263,12 @@ class ProjectManager:
                 rf = ps.get('last_results_file')
                 if rf and (page_dir / Path(rf).name).exists():
                     ps['last_results_file'] = str(page_dir / Path(rf).name)
+            # Only a page that keeps ONE json folder has it at the top of its session
+            # results. The T1/T2 page's are keyed by field ({field1: {t1, t2, t1rho}},
+            # each with its own folder, moved above); a string added there stops both
+            # of its viewers from opening.
             sr = ps.get('session_results')
-            if isinstance(sr, dict) and json_dirs:
+            if isinstance(sr, dict) and 'json_folder' in sr and json_dirs:
                 sr['json_folder'] = str(json_dirs[0])
 
     def _save_dynamixs_state_with_summary(self, bundle_path: Path) -> Dict[str, Any]:

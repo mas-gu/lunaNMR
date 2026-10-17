@@ -71,13 +71,22 @@ def _json_safe(obj):
     return obj
 
 
+# The dynamixs arguments that name files or folders. A value is only ever a path because
+# of what the argument is: `--prefix 600_T1` beside a folder called 600_T1 is a prefix.
+_RECORD_PATH_ARGS = frozenset({
+    'input', 'input2', 'out', 'peaks', 'sat', 'unsat', 't1', 'json', 'params',
+    'f1_t1', 'f1_t2', 'f1_r2_table', 'f1_noe_sat', 'f1_noe_unsat',
+    'f2_t1', 'f2_t2', 'f2_r2_table', 'f2_noe_sat', 'f2_noe_unsat'})
+
+
 def _absolute_paths(value):
-    """`value` with every string naming an existing file or folder made absolute."""
+    """`value` with every path made absolute - a string holding a path separator that
+    names an existing file or folder, as every output path a summary reports does."""
     if isinstance(value, dict):
         return {k: _absolute_paths(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_absolute_paths(v) for v in value]
-    if isinstance(value, str) and value and os.path.exists(value):
+    if isinstance(value, str) and os.sep in value and os.path.exists(value):
         return os.path.abspath(value)
     return value
 
@@ -91,8 +100,9 @@ def _recorded(args, summary):
     """
     import json
     record = {'schema_version': SCHEMA_VERSION, 'command': _full_command(args),
-              'args': _absolute_paths({k: v for k, v in vars(args).items()
-                                       if k != 'func'}),
+              'args': {k: (os.path.abspath(v) if k in _RECORD_PATH_ARGS
+                           and isinstance(v, str) and v else v)
+                       for k, v in vars(args).items() if k != 'func'},
               'summary': _absolute_paths(summary)}
     path = os.path.join(args.out, f"{args.prefix}_dynamixs.json")
     with open(path, 'w') as fh:
@@ -922,6 +932,9 @@ def _run_series(args):
     # because nothing else in the output says which one the series was fitted against.
     from lunaNMR.utils.project_manager import write_batch_results
     result.metadata['peak_list_file'] = os.path.abspath(args.peaks)
+    for key in ('data_folder', 'output_folder', 'csv_path'):
+        if result.metadata.get(key):
+            result.metadata[key] = os.path.abspath(result.metadata[key])
     write_batch_results(result, os.path.join(output_folder, 'batch_results.json'))
     # Naming them beats globbing for them, and series_analysis_tidy.csv is the only
     # place per-peak fit quality reaches the series output — a caller that misses it
@@ -967,11 +980,28 @@ def _run_project_build(args):
             f"{args.out} exists; a build never overwrites a bundle"))
         return 1
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
+    if args.dry_run:
+        # The whole build, into a folder that is then thrown away: every input is read
+        # and checked exactly as a real build would, and nothing is left behind.
+        import tempfile
+        with tempfile.TemporaryDirectory() as scratch:
+            built = build_project(args.run_dir, os.path.join(scratch, 'plan.lunaNMR'),
+                                  spectrum=args.spectrum, peaks=args.peaks)
+        _emit(args, {'command': 'project build', 'dry_run': True,
+                     'bundle': os.path.abspath(args.out), **built},
+              f"Dry run: {args.out} would hold "
+              f"{len(built['series'])} series, {len(built['kd'])} Kd, "
+              f"{len(built['dynamixs'])} DynamiXs analyses")
+        return 0
     try:
         built = build_project(args.run_dir, args.out, spectrum=args.spectrum, peaks=args.peaks)
-    except ValueError as error:
-        _emit_error(args, error)
-        return 1
+    except BaseException:
+        # It did not exist before this build (checked above), so anything there now is
+        # a half-written bundle - and would block the retry.
+        if os.path.exists(args.out):
+            import shutil
+            shutil.rmtree(args.out, ignore_errors=True)
+        raise
     _emit(args, {'command': 'project build', 'bundle': os.path.abspath(args.out), **built},
           f"Built {args.out}",
           f"  spectrum : {built['spectrum']}",

@@ -104,3 +104,29 @@ def test_an_empty_run_is_refused(tmp_path):
     assert main(["project", "build", str(tmp_path / "run"),
                  "--out", str(tmp_path / "x.lunaNMR")]) == 1
     assert not (tmp_path / "x.lunaNMR").exists()
+
+
+def test_a_dry_run_writes_nothing(run_dir, tmp_path):
+    from lunaNMR.cli import main
+    out = tmp_path / "plan.lunaNMR"
+    assert main(["project", "build", str(run_dir), "--out", str(out), "--dry-run"]) == 0
+    assert not out.exists()
+
+
+def test_a_series_run_on_relative_paths_records_absolute_ones(tmp_path):
+    """A bundle is built later, from anywhere; a path relative to where the series ran
+    resolves to nothing there."""
+    import os
+    from lunaNMR.cli import main
+    here = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        assert main(["series", "--spectra", os.path.relpath(DNAJA1, tmp_path),
+                     "--peaks", os.path.relpath(DNAJA1 / "DNAJA1.txt", tmp_path),
+                     "--out", "rel", "--mode", "titration", "--peak-source", "cascade"]) == 0
+    finally:
+        os.chdir(here)
+    meta = json.loads((tmp_path / "rel" / "batch_results.json").read_text())["metadata"]
+    for key in ("data_folder", "output_folder", "csv_path", "peak_list_file"):
+        assert Path(meta[key]).is_absolute(), key
+    assert Path(meta["data_folder"]) == DNAJA1

@@ -19,7 +19,7 @@ from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
 from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
 from lunaNMR.gui.components.signed_contours import draw_signed_contours
-from lunaNMR.utils.project_manager import lacks_fit_arrays, rebuild_fit_arrays
+from lunaNMR.utils.project_manager import lacks_fit_arrays, rebuild_fit_arrays, unrebuilt_fit
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT,
@@ -924,12 +924,13 @@ class SpectrumViewerDialog(BaseDialog):
         """A stored fit for `assignment`, carrying its region and surfaces.
 
         A series stores its fits slim (project_manager.slim_fit_row): the arrays are
-        rebuilt here, once, from this dialog's spectrum.
+        rebuilt here, once, from this dialog's spectrum. A fit that cannot be rebuilt
+        (no spectrum) is no stored result: every caller draws from the arrays.
         """
         result = self._lookup_stored_voigt_result(assignment, peak)
         if result is not None and self.integrator is not None and lacks_fit_arrays(result):
             rebuild_fit_arrays(result, self.integrator)
-        return result
+        return None if result is None or unrebuilt_fit(result) else result
 
     def _lookup_stored_voigt_result(self, assignment: str, peak: Dict = None) -> Optional[Dict]:
         """Find stored Voigt fitting results for a peak by assignment.

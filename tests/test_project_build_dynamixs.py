@@ -49,6 +49,9 @@ def run_dir(tmp_path_factory):
                  "--f2-noe-sat", str(NOE / "f700_noe_sat.csv"),
                  "--f2-noe-unsat", str(NOE / "f700_noe_unsat.csv"), "--field2-freq", "700",
                  "--out", str(run / "modelfree" / "dual"), "--prefix", "dual"]) == 0
+    # A second model-free record of the same prefix, elsewhere in the run: both must be
+    # bundled, not the later one over the earlier.
+    shutil.copytree(run / "modelfree" / "dual", run / "modelfree" / "dual_rerun")
     return run
 
 
@@ -91,6 +94,7 @@ def _inside(path, bundle):
 
 T1T2 = "JA1run0_T1T2"
 MODELFREE = "dual_modelfree"
+MODELFREE_RERUN = "modelfree_dual_rerun_modelfree"
 
 
 def test_each_command_records_what_it_ran(run_dir):
@@ -102,7 +106,25 @@ def test_each_command_records_what_it_ran(run_dir):
 
 
 def test_the_four_fits_become_one_t1t2_analysis_and_modelfree_its_own(loaded):
-    assert set(loaded.dynamixs_analyses) == {T1T2, MODELFREE}
+    assert set(loaded.dynamixs_analyses) == {T1T2, MODELFREE, MODELFREE_RERUN}
+
+
+def test_the_t1t2_results_hold_one_entry_per_field(app, loaded):
+    """The page's viewers walk session_results as {field: {t1, t2, t1rho}}; a stray
+    top-level value there stops both from opening."""
+    dialog = _dialog(app, loaded, T1T2)
+    try:
+        session = dialog.t1t2_page.session_results
+        assert set(session) == {"field1", "field2"}
+        assert all(v is None or isinstance(v, dict) for v in session.values())
+    finally:
+        dialog.deleteLater()
+
+
+def test_an_analysis_keeps_the_command_it_came_from(loaded):
+    """Inputs the page has no field for (an R2 table, say) are still on record."""
+    meta = loaded.dynamixs_analyses[MODELFREE]["state"]["analysis_metadata"]
+    assert meta["cli_runs"][0]["args"]["f1_t1"] == _matrix("600_T1")
 
 
 def test_the_t1t2_page_reopens_both_fields_from_the_bundle(app, loaded, bundle):
@@ -135,3 +157,60 @@ def test_the_modelfree_page_reopens_its_results_from_the_bundle(app, loaded, bun
         assert (Path(page.output_dir) / "dual_spectral_density_detailed.csv").exists()
     finally:
         dialog.deleteLater()
+
+
+@pytest.fixture
+def default_prefix_run(tmp_path):
+    """Two fits on the default --prefix, relative paths, from a folder that holds names
+    equal to their argument values - as a run made by hand is laid out."""
+    from lunaNMR.cli import main
+    work = tmp_path / "work"
+    for name in ("field1", "T1", "T2"):
+        (work / name).mkdir(parents=True)
+    here = os.getcwd()
+    os.chdir(work)
+    try:
+        for out, exp in (("t1", "T1"), ("t2", "T2")):
+            assert main(["dynamixs", "t1t2", "--input", _matrix(f"600_{exp}"), "--out", out,
+                         "--exp", exp, "--field-freq", "600"]) == 0
+    finally:
+        os.chdir(here)
+    return work
+
+
+def test_a_record_keeps_values_that_are_not_paths(default_prefix_run):
+    record = json.loads((default_prefix_run / "t1" / "field1_dynamixs.json").read_text())
+    assert record["args"]["prefix"] == "field1"
+    assert record["args"]["exp"] == "T1"
+    assert record["args"]["out"] == str(default_prefix_run / "t1")
+
+
+def test_experiments_on_one_prefix_keep_their_own_results(default_prefix_run, tmp_path):
+    import types
+    from lunaNMR.cli import main
+    from lunaNMR.utils.project_manager import ProjectManager
+    out = tmp_path / "x.lunaNMR"
+    assert main(["project", "build", str(default_prefix_run), "--out", str(out)]) == 0
+    window = types.SimpleNamespace(integrator=types.SimpleNamespace(peak_list=None))
+    assert ProjectManager(window).load_project(out)
+    (state,) = [a["state"] for a in window.dynamixs_analyses.values()]
+    field = state["t1t2"]["session_results"]["field1"]
+    t1, t2 = Path(field["t1"]["results_file"]), Path(field["t2"]["results_file"])
+    assert t1 != t2 and t1.read_text() != t2.read_text()
+    assert Path(field["t1"]["json_folder"]) != Path(field["t2"]["json_folder"])
+
+
+def test_the_same_experiment_twice_is_refused_not_overwritten(default_prefix_run, tmp_path):
+    from lunaNMR.cli import main
+    shutil.copytree(default_prefix_run / "t1", default_prefix_run / "t1_again")
+    out = tmp_path / "x.lunaNMR"
+    assert main(["project", "build", str(default_prefix_run), "--out", str(out)]) == 1
+    assert not out.exists(), "a failed build must not leave a bundle behind"
+
+
+def test_a_malformed_record_is_an_error_not_a_traceback(default_prefix_run, tmp_path):
+    from lunaNMR.cli import main
+    (default_prefix_run / "t1" / "broken_dynamixs.json").write_text("{")
+    out = tmp_path / "x.lunaNMR"
+    assert main(["project", "build", str(default_prefix_run), "--out", str(out)]) == 1
+    assert not out.exists()

@@ -135,7 +135,15 @@ the bundle is exactly what the GUI would have saved. The GUI reopens the first s
 reference spectrum and the peak list it was fitted against unless `--spectrum`/`--peaks`
 say otherwise. Both are **referenced by absolute path, not copied**: the bundle needs the
 data where it was. DynamiXs results are copied into the bundle, so they reopen after the
-run folder is gone. Refuses an existing `--out`.
+run folder is gone. Refuses an existing `--out`, and leaves nothing behind when a build
+fails. `--dry-run` performs the whole build into a scratch folder and reports what the
+bundle would hold.
+
+A T1/T2 experiment fitted twice at one field is refused rather than one silently replacing
+the other: the page holds one. Two model-free runs of one `--prefix` are both bundled,
+the second named after where its record sits. Every DynamiXs analysis keeps the CLI runs
+it came from (`analysis_metadata.cli_runs`), so inputs the page has no field for - an
+`--f*-r2-table` - stay on record.
 
 A series is stored slim, by `series` and by the GUI alike: each fit keeps its parameters
 (`all_peaks`) and its region's ppm axes, and the viewers rebuild the region and surfaces

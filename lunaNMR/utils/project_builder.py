@@ -91,14 +91,23 @@ T1T2_PAGE, INTEGRATED_PAGE = 1, 4
 
 
 def find_dynamixs_records(run_dir):
-    """Every `<prefix>_dynamixs.json` a dynamixs command left under the run."""
-    return [json.loads(path.read_text())
-            for path in sorted(Path(run_dir).rglob(f'*{DYNAMIXS_RECORD_SUFFIX}'))]
+    """Every `<prefix>_dynamixs.json` a dynamixs command left under the run, each with the
+    file it was read from as `record_file`."""
+    records = []
+    for path in sorted(Path(run_dir).rglob(f'*{DYNAMIXS_RECORD_SUFFIX}')):
+        record = json.loads(path.read_text())
+        record['record_file'] = str(path)
+        records.append(record)
+    return records
 
 
-def _analysis_state(name, page_index, analysis_type, page_key, page_state):
+def _analysis_state(name, page_index, analysis_type, page_key, page_state, records):
+    """A DynamiXs analysis state, with the CLI runs it came from in its metadata - every
+    input on record, including those the page has no field for (an R2 table)."""
+    runs = [{key: r[key] for key in ('command', 'args', 'record_file')} for r in records]
     return {'active_page': page_index, 'analysis_name': name,
-            'analysis_metadata': {'analysis_name': name, 'analysis_type': analysis_type},
+            'analysis_metadata': {'analysis_name': name, 'analysis_type': analysis_type,
+                                  'cli_runs': runs},
             page_key: page_state}
 
 
@@ -106,11 +115,14 @@ def t1t2_analysis(records, name, staging):
     """ONE T1/T2 page analysis from a run's `dynamixs t1t2` records.
 
     The GUI page holds both fields and every experiment together; the CLI fits each one
-    separately, into its own folder. Field 1 is the lower frequency. Each experiment's
-    fit JSON goes into its own `json_<prefix>/` under `staging`, its results file beside
-    them, so the project save copies one folder per page as it does for the GUI.
+    separately, into its own folder and often on the same default --prefix. Field 1 is
+    the lower frequency. Each experiment's fit JSON goes into `json_<field>_<exp>/` under
+    `staging` and its results file beside them under a name of the same key, so the
+    project save copies one folder per page as it does for the GUI, and no experiment
+    can land on another's file.
 
-    :raises ValueError: for more than two fields - the page holds two
+    :raises ValueError: for more than two fields - the page holds two - or one
+        experiment fitted twice, of which the page can show only one
     """
     freqs = sorted({float(r['args']['field_freq']) for r in records})
     if len(freqs) > 2:
@@ -128,23 +140,29 @@ def t1t2_analysis(records, name, staging):
             'field1_freq': freqs[0], 'output_dir': str(staging), 'prefix': name}
     if len(freqs) == 2:
         page['field2_freq'] = freqs[1]
-    refs = {}
+    refs, source = {}, {}
     for record in records:
         args, summary = record['args'], record['summary']
         freq, exp = float(args['field_freq']), args['exp'].lower()
         field = field_of[freq]
-        json_dir = staging / f"json_{args['prefix']}"
-        json_dir.mkdir(exist_ok=True)
+        key = f'{field}_{exp}'
+        if key in source:
+            raise ValueError(f"{args['exp']} at {freq:g} MHz was fitted twice - "
+                             f"{source[key]} and {record['record_file']}; the T1/T2 page "
+                             f"holds one. Build from a folder holding the one to keep.")
+        source[key] = record['record_file']
+        json_dir = staging / f'json_{key}'
+        json_dir.mkdir()
         if summary.get('json_file'):
             shutil.copy2(summary['json_file'], json_dir)
-        results = staging / Path(summary['results_file']).name
+        results = staging / f"{key}_{Path(summary['results_file']).name}"
         shutil.copy2(summary['results_file'], results)
         session[field][exp] = {'output_dir': str(staging), 'json_folder': str(json_dir),
                                'results_file': str(results),
                                'n_fitted': summary.get('n_fitted'), 'frequency_mhz': freq}
-        page['fitted_experiments'].append(f'{field}_{exp}')
-        page[f'{field}_{exp}_file'] = refs[f'{field}_{exp}_file'] = args['input']
-    return {'state': _analysis_state(name, T1T2_PAGE, 't1t2', 't1t2', page),
+        page['fitted_experiments'].append(key)
+        page[f'{key}_file'] = refs[f'{key}_file'] = args['input']
+    return {'state': _analysis_state(name, T1T2_PAGE, 't1t2', 't1t2', page, records),
             'file_refs': {'t1t2': refs}}
 
 
@@ -153,6 +171,8 @@ def modelfree_analysis(record, name):
 
     Its output folder is used as the page's own: the results viewer opens
     `<prefix>_spectral_density_detailed.csv` there, which the CLI writes under that name.
+    An R2 table given for a field (--f*-r2-table) has no field on the page; it is kept
+    with the run in the analysis metadata.
     """
     args = record['args']
     variant = 'jwh' if (args.get('method') or '').endswith('jwh') else '087'
@@ -177,12 +197,16 @@ def modelfree_analysis(record, name):
     }
     page = {k: v for k, v in page.items() if v is not None}
     refs = {key: page[key] for key in page if key.endswith('_file')}
-    return {'state': _analysis_state(name, INTEGRATED_PAGE, 'model_free', 'integrated', page),
+    return {'state': _analysis_state(name, INTEGRATED_PAGE, 'model_free', 'integrated',
+                                     page, [record]),
             'file_refs': {'integrated': refs}}
 
 
 def dynamixs_analyses(run_dir, staging):
     """{name: {state, file_refs}} for every DynamiXs analysis the run's records hold.
+
+    A model-free run is named after its prefix; two runs of one prefix are told apart by
+    where their records sit, as two series of one folder name are.
 
     :return: (analyses, skipped) - `skipped` names the records no GUI page can hold
     """
@@ -195,6 +219,9 @@ def dynamixs_analyses(run_dir, staging):
     for record in records:
         if record['command'] == 'dynamixs modelfree':
             name = f"{record['args']['prefix']}_modelfree"
+            if name in analyses:
+                place = Path(record['record_file']).parent.relative_to(run_dir)
+                name = '_'.join(place.parts) + '_modelfree'
             analyses[name] = modelfree_analysis(record, name)
         elif record['command'] != 'dynamixs t1t2':
             skipped.append(f"{record['command']} ({record['args'].get('prefix')})")
