@@ -65,3 +65,26 @@ def test_an_enabled_field_without_its_carrier_is_refused(page, tmp_path):
     page._calculate_t2_from_t1rho()
     assert page.errors and "Field 2" in page.errors[0]
     assert not list(tmp_path.glob("*T2_from_T1rho*"))
+
+
+def test_a_measured_t2_is_kept_and_the_derived_one_written_beside_it(page, tmp_path):
+    """A fitted T2 is the more direct number; the conversion does not replace it, and
+    `project build` does the same with CLI runs."""
+    page._toggle_field2()
+    measured = {"results_file": str(tmp_path / "measured_T2_fit_results.txt")}
+    page.session_results["field1"]["t2"] = dict(measured)
+    page.field1_carrier_spin.setValue(118)
+    page._calculate_t2_from_t1rho()
+    assert not page.errors, page.errors
+    assert page.session_results["field1"]["t2"] == measured
+    assert (tmp_path / "field1_T2_from_T1rho.csv").exists()
+    assert "kept the measured T2" in page.results_text.toPlainText()
+
+
+def test_a_derived_t2_is_replaced_by_a_new_conversion(page, tmp_path):
+    page._toggle_field2()
+    page.session_results["field1"]["t2"] = {"results_file": "old", "derived_from": "t1rho"}
+    page.field1_carrier_spin.setValue(118)
+    page._calculate_t2_from_t1rho()
+    assert page.session_results["field1"]["t2"]["results_file"].endswith(
+        "field1_T2_from_T1rho_fit_results.txt")

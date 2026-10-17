@@ -1632,22 +1632,29 @@ class T1T2FittingPage(BasePage):
         results_txt_file = os.path.join(self.output_dir, f"{field}_T2_from_T1rho_fit_results.txt")
         write_t2_fit_results(result, results_txt_file)
 
-        # Store in session as T2 result (derived)
-        self.session_results[field]['t2'] = {
-            'output_dir': self.output_dir,
-            'json_folder': None,  # No JSON for derived T2
-            'results_file': results_txt_file,
-            'n_fitted': len(result),
-            'frequency_mhz': spec_freq_mhz,
-            'derived_from': 't1rho'  # Mark as derived
-        }
-        self.fitted_experiments.add(f'{field}_t2')
+        # The derived T2 becomes the field's T2 unless a measured one is there: a fitted
+        # T2 is the more direct number, and `project build` keeps it the same way.
+        current = self.session_results[field].get('t2')
+        if current and current.get('derived_from') != 't1rho':
+            self.results_text.appendPlainText(
+                f"  {label} kept the measured T2; the derived one is in "
+                f"{os.path.basename(output_file)}")
+        else:
+            self.session_results[field]['t2'] = {
+                'output_dir': self.output_dir,
+                'json_folder': None,  # No JSON for derived T2
+                'results_file': results_txt_file,
+                'n_fitted': len(result),
+                'frequency_mhz': spec_freq_mhz,
+                'derived_from': 't1rho'  # Mark as derived
+            }
+            self.fitted_experiments.add(f'{field}_t2')
+            self.results_text.appendPlainText(f"  T2 results now available in 'View Results'")
 
         self.results_text.appendPlainText(f"  Residues processed: {len(result)}")
         self.results_text.appendPlainText(
             f"  Mean T2: {result['T2'].mean():.1f} ± {result['T2'].std():.1f} ms")
         self.results_text.appendPlainText(f"  Results saved to: {output_file}")
-        self.results_text.appendPlainText(f"  T2 results now available in 'View Results'")
 
     def _load_relaxation_results(self, file_path: str) -> 'pd.DataFrame':
         """Load relaxation results file, auto-detecting delimiter.
