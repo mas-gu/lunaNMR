@@ -432,6 +432,28 @@ class DynamiXsMainWindow(QMainWindow):
 # BASE PAGE CLASS
 # =============================================================================
 
+def resolve_series_csv(name, meta, project_path):
+    """Path to a series' series_analysis_tidy.csv for the Kd input.
+
+    Prefers the copy bundled inside the project (so a moved/renamed source run
+    folder still resolves), then the recorded csv_path, then output_folder.
+    Returns the first candidate that exists on disk; if none exist, returns the
+    recorded csv_path (or best-effort candidate) for display.
+    """
+    candidates = []
+    if project_path:
+        candidates.append(os.path.join(str(project_path), "series_results",
+                                       name, "series_analysis_tidy.csv"))
+    if meta.get('csv_path'):
+        candidates.append(meta['csv_path'])
+    if meta.get('output_folder'):
+        candidates.append(os.path.join(meta['output_folder'], "series_analysis_tidy.csv"))
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return meta.get('csv_path') or (candidates[0] if candidates else "")
+
+
 class BasePage(QWidget):
     """Base class for analysis pages with common header and back button."""
 
@@ -471,6 +493,115 @@ class BasePage(QWidget):
         self.content_layout = create_v_layout(SPACING_SM, (SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD))
         self.content_frame.setLayout(self.content_layout)
         self.page_layout.addWidget(self.content_frame, stretch=1)
+
+    # ---------- the LunaNMR project's series ----------
+
+    def _lunanmr_main_window(self):
+        """The real LunaNMR main window. In the app the page's main_window is the
+        hosting dialog, which holds the main window as .main_window; in isolation the
+        main window is passed directly."""
+        mw = self.main_window
+        return getattr(mw, 'main_window', None) or mw
+
+    def _get_available_series(self, include=None) -> List[Dict[str, Any]]:
+        """The project's series as {'name', 'csv_path'} dicts, each tidy CSV resolved by
+        resolve_series_csv. `include(batch_results)` keeps only the series it accepts;
+        by default, the filter the page's series panel was built with."""
+        include = include or getattr(self, '_series_include', None)
+        main = self._lunanmr_main_window()
+        saved_series = getattr(main, 'saved_series', {}) or {}
+        project_path = getattr(main, 'current_project_path', None)
+        return [{'name': name,
+                 'csv_path': resolve_series_csv(name, getattr(br, 'metadata', None) or {},
+                                                project_path)}
+                for name, br in saved_series.items() if include is None or include(br)]
+
+    def _series_intensity_matrix(self, series_name):
+        """The intensity matrix a series wrote beside its outputs, or None."""
+        main = self._lunanmr_main_window()
+        batch = (getattr(main, 'saved_series', {}) or {}).get(series_name)
+        folder = (getattr(batch, 'metadata', None) or {}).get('output_folder')
+        path = os.path.join(folder, "peak_intensity_matrix.csv") if folder else None
+        return path if path and os.path.exists(path) else None
+
+    def _add_series_panel(self, layout, hint, empty_text, include=None, max_height=120):
+        """Add the draggable list of the project's series, with its hint, an empty-state
+        line and a refresh button, to `layout`. `include` filters as _get_available_series."""
+        self._series_include = include
+        hint_label = create_secondary_label(hint)
+        hint_label.setWordWrap(True)
+        layout.addWidget(hint_label)
+        self.no_series_label = create_secondary_label(empty_text)
+        self.no_series_label.setStyleSheet(f"color: {SECONDARY_TEXT}; font-style: italic; padding: 8px;")
+        self.no_series_label.setWordWrap(True)
+        layout.addWidget(self.no_series_label)
+        self.series_list_widget = DraggableSeriesList()
+        self.series_list_widget.setMaximumHeight(max_height)
+        self.series_list_widget.setVisible(False)  # Hidden until populated
+        layout.addWidget(self.series_list_widget)
+        refresh_row = QFrame()
+        refresh_layout = create_h_layout(SPACING_SM)
+        refresh_row.setLayout(refresh_layout)
+        refresh_layout.addWidget(create_secondary_button(
+            "Refresh Series List", clicked=self._populate_series_list, width=150))
+        refresh_layout.addStretch()
+        layout.addWidget(refresh_row)
+        QTimer.singleShot(100, self._populate_series_list)
+
+    def _populate_series_list(self):
+        """Fill the draggable series list; show the empty-state line when there are none."""
+        if not hasattr(self, 'series_list_widget'):
+            return
+        self.series_list_widget.clear()
+        series = self._get_available_series()
+        self.no_series_label.setVisible(not series)
+        self.series_list_widget.setVisible(bool(series))
+        for s in series:
+            item = QListWidgetItem(s['name'])
+            item.setData(Qt.UserRole, s['name'])
+            item.setData(Qt.UserRole + 1, s['csv_path'])
+            if s['csv_path']:
+                item.setToolTip(f"CSV: {s['csv_path']}")
+            self.series_list_widget.addItem(item)
+
+    # ---------- layout helpers shared by the pages ----------
+
+    def _make_section(self, title: str) -> QFrame:
+        """A titled card the page fills through its layout()."""
+        frame = QFrame()
+        frame.setProperty("class", "card")
+        frame.setStyleSheet(
+            f"QFrame[class='card'] {{ background-color: {FRAME_BG_COLOR}; "
+            f"border-radius: 8px; }}"
+        )
+        body = create_v_layout(SPACING_XS, (SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM))
+        frame.setLayout(body)
+        body.addWidget(create_header_label(title, level=3))
+        return frame
+
+    def _make_field_row(self, label_text: str, widget, width: int = 180):
+        """A label and its control on one row, the control at most `width` wide."""
+        row = QFrame()
+        row_layout = create_h_layout(SPACING_SM)
+        row.setLayout(row_layout)
+        row_layout.addWidget(create_label(label_text), stretch=1)
+        widget.setMaximumWidth(width)
+        row_layout.addWidget(widget)
+        return row
+
+    def _make_float_spin(self, attr_name, lo, hi, default, decimals=2, step=1.0):
+        """A QDoubleSpinBox, kept on the page as `attr_name`."""
+        spin = QDoubleSpinBox()
+        spin.setRange(lo, hi)
+        spin.setDecimals(decimals)
+        spin.setSingleStep(step)
+        spin.setValue(default)
+        setattr(self, attr_name, spin)
+        return spin
+
+    def _log(self, msg: str):
+        """Append to the page's log."""
+        self.log_text.appendPlainText(str(msg))
 
 
 # =============================================================================
@@ -681,50 +812,6 @@ class T1T2FittingPage(BasePage):
     # SERIES PICKER METHODS
     # =========================================================================
 
-    def _get_available_series(self) -> List[Dict[str, Any]]:
-        """Get list of available series from lunaNMR project.
-
-        Returns list of dicts with 'name' and 'csv_path' keys.
-        Uses csv_path from BatchResults metadata (stored when series was created).
-        """
-        series_list = []
-
-        # Access lunaNMR main window through DynamiXsDialog
-        lunaNMR_main = None
-        if hasattr(self.main_window, 'main_window'):
-            lunaNMR_main = self.main_window.main_window
-
-        if not lunaNMR_main:
-            return series_list
-
-        # Get saved_series from lunaNMR main window
-        saved_series = getattr(lunaNMR_main, 'saved_series', {}) or {}
-
-        # Get project path for fallback
-        project_path = getattr(lunaNMR_main, 'current_project_path', None)
-
-        for series_name, batch_results in saved_series.items():
-            csv_path = ""
-
-            # Primary: use csv_path from metadata (stored when series was created)
-            if hasattr(batch_results, 'metadata') and batch_results.metadata.get('csv_path'):
-                csv_path = batch_results.metadata['csv_path']
-
-            # Fallback 1: construct from output_folder
-            if not csv_path and hasattr(batch_results, 'metadata') and batch_results.metadata.get('output_folder'):
-                csv_path = os.path.join(batch_results.metadata['output_folder'], "series_analysis_tidy.csv")
-
-            # Fallback 2: project path .lunaNMR/series_results/{series_name}/
-            if not csv_path and project_path:
-                csv_path = str(Path(project_path) / ".lunaNMR" / "series_results" / series_name / "series_analysis_tidy.csv")
-
-            series_list.append({
-                'name': series_name,
-                'csv_path': csv_path
-            })
-
-        return series_list
-
     def _get_fitting_dataframe_from_series(self, series_name: str):
         """Get fitting DataFrame from BatchResults in memory.
 
@@ -765,32 +852,6 @@ class T1T2FittingPage(BasePage):
         except Exception as e:
             print(f"Error generating fitting DataFrame from series '{series_name}': {e}")
             return None
-
-    def _populate_series_list(self):
-        """Populate the series list widget with available series."""
-        if not hasattr(self, 'series_list_widget'):
-            return
-
-        self.series_list_widget.clear()
-        series = self._get_available_series()
-
-        if not series:
-            # Show "no series" message
-            self.no_series_label.setVisible(True)
-            self.series_list_widget.setVisible(False)
-            return
-
-        self.no_series_label.setVisible(False)
-        self.series_list_widget.setVisible(True)
-
-        for s in series:
-            item = QListWidgetItem(s['name'])
-            item.setData(Qt.UserRole, s['name'])
-            item.setData(Qt.UserRole + 1, s['csv_path'])
-            # Add tooltip with CSV path if available
-            if s['csv_path']:
-                item.setToolTip(f"CSV: {s['csv_path']}")
-            self.series_list_widget.addItem(item)
 
     def _on_series_dropped(self, field_name: str, series_name: str, csv_path: str):
         """Handle a series being dropped on a data field.
@@ -1029,34 +1090,11 @@ class T1T2FittingPage(BasePage):
         series_group = CollapsibleGroupBox("Project Series", collapsible=True, initially_collapsed=False)
         series_content = series_group.content_layout
 
-        # Instruction label
-        series_hint = create_secondary_label("Drag a series to assign it to a T1/T2/T1ρ data field below")
-        series_content.addWidget(series_hint)
-
-        # No series message (shown when empty)
-        self.no_series_label = create_secondary_label("No project series available. Use Browse buttons or Auto-Load from Folder.")
-        self.no_series_label.setStyleSheet(f"color: {SECONDARY_TEXT}; font-style: italic; padding: 8px;")
-        series_content.addWidget(self.no_series_label)
-
-        # Series list widget (draggable items)
-        self.series_list_widget = DraggableSeriesList()
-        self.series_list_widget.setMaximumHeight(120)
-        self.series_list_widget.setVisible(False)  # Hidden until populated
-        series_content.addWidget(self.series_list_widget)
-
-        # Refresh button
-        refresh_row = QFrame()
-        refresh_layout = create_h_layout(SPACING_SM)
-        refresh_row.setLayout(refresh_layout)
-        refresh_btn = create_secondary_button("Refresh Series List", clicked=self._populate_series_list, width=150)
-        refresh_layout.addWidget(refresh_btn)
-        refresh_layout.addStretch()
-        series_content.addWidget(refresh_row)
+        self._add_series_panel(
+            series_content, "Drag a series to assign it to a T1/T2/T1ρ data field below",
+            "No project series available. Use Browse buttons or Auto-Load from Folder.")
 
         scroll_layout.addWidget(series_group)
-
-        # Populate series list on first show
-        QTimer.singleShot(100, self._populate_series_list)
 
         # --- Field 1 Data Section (Required) ---
         field1_group = CollapsibleGroupBox("Field 1 Data (Required)")
@@ -2688,34 +2726,11 @@ class IntegratedAnalysisPage(BasePage):
         series_group = CollapsibleGroupBox("Project Series", collapsible=True, initially_collapsed=False)
         series_content = series_group.content_layout
 
-        # Instruction label
-        series_hint = create_secondary_label("Drag a series to assign it to a T1/T2/hetNOE data field below")
-        series_content.addWidget(series_hint)
-
-        # No series message (shown when empty)
-        self.mf_no_series_label = create_secondary_label("No project series available. Use Browse buttons or Auto-Load from Folder.")
-        self.mf_no_series_label.setStyleSheet(f"color: {SECONDARY_TEXT}; font-style: italic; padding: 8px;")
-        series_content.addWidget(self.mf_no_series_label)
-
-        # Series list widget (draggable items)
-        self.mf_series_list_widget = DraggableSeriesList()
-        self.mf_series_list_widget.setMaximumHeight(120)
-        self.mf_series_list_widget.setVisible(False)  # Hidden until populated
-        series_content.addWidget(self.mf_series_list_widget)
-
-        # Refresh button
-        refresh_row = QFrame()
-        refresh_layout = create_h_layout(SPACING_SM)
-        refresh_row.setLayout(refresh_layout)
-        refresh_btn = create_secondary_button("Refresh Series List", clicked=self._populate_series_list, width=150)
-        refresh_layout.addWidget(refresh_btn)
-        refresh_layout.addStretch()
-        series_content.addWidget(refresh_row)
+        self._add_series_panel(
+            series_content, "Drag a series to assign it to a T1/T2/hetNOE data field below",
+            "No project series available. Use Browse buttons or Auto-Load from Folder.")
 
         scroll_layout.addWidget(series_group)
-
-        # Populate series list on first show
-        QTimer.singleShot(100, self._populate_series_list)
 
         # --- CSV Input Section ---
         csv_input_layout = create_v_layout(SPACING_MD)
@@ -3025,76 +3040,6 @@ class IntegratedAnalysisPage(BasePage):
     # =========================================================================
     # SERIES PICKER METHODS
     # =========================================================================
-
-    def _get_available_series(self) -> List[Dict[str, Any]]:
-        """Get list of available series from lunaNMR project.
-
-        Returns list of dicts with 'name' and 'csv_path' keys.
-        Uses csv_path from BatchResults metadata (stored when series was created).
-        """
-        series_list = []
-
-        # Access lunaNMR main window through DynamiXsDialog
-        lunaNMR_main = None
-        if hasattr(self.main_window, 'main_window'):
-            lunaNMR_main = self.main_window.main_window
-
-        if not lunaNMR_main:
-            return series_list
-
-        # Get saved_series from lunaNMR main window
-        saved_series = getattr(lunaNMR_main, 'saved_series', {}) or {}
-
-        # Get project path for fallback
-        project_path = getattr(lunaNMR_main, 'current_project_path', None)
-
-        for series_name, batch_results in saved_series.items():
-            csv_path = ""
-
-            # Primary: use csv_path from metadata (stored when series was created)
-            if hasattr(batch_results, 'metadata') and batch_results.metadata.get('csv_path'):
-                csv_path = batch_results.metadata['csv_path']
-
-            # Fallback 1: construct from output_folder
-            if not csv_path and hasattr(batch_results, 'metadata') and batch_results.metadata.get('output_folder'):
-                csv_path = os.path.join(batch_results.metadata['output_folder'], "series_analysis_tidy.csv")
-
-            # Fallback 2: project path .lunaNMR/series_results/{series_name}/
-            if not csv_path and project_path:
-                csv_path = str(Path(project_path) / ".lunaNMR" / "series_results" / series_name / "series_analysis_tidy.csv")
-
-            series_list.append({
-                'name': series_name,
-                'csv_path': csv_path
-            })
-
-        return series_list
-
-    def _populate_series_list(self):
-        """Populate the series list widget with available series."""
-        if not hasattr(self, 'mf_series_list_widget'):
-            return
-
-        self.mf_series_list_widget.clear()
-        series = self._get_available_series()
-
-        if not series:
-            # Show "no series" message
-            self.mf_no_series_label.setVisible(True)
-            self.mf_series_list_widget.setVisible(False)
-            return
-
-        self.mf_no_series_label.setVisible(False)
-        self.mf_series_list_widget.setVisible(True)
-
-        for s in series:
-            item = QListWidgetItem(s['name'])
-            item.setData(Qt.UserRole, s['name'])
-            item.setData(Qt.UserRole + 1, s['csv_path'])
-            # Add tooltip with CSV path if available
-            if s['csv_path']:
-                item.setToolTip(f"CSV: {s['csv_path']}")
-            self.mf_series_list_widget.addItem(item)
 
     def _on_series_dropped(self, field_name: str, series_name: str, csv_path: str):
         """Handle a series being dropped on a data field.

@@ -22,35 +22,13 @@ from gui_components import (
     get_font, show_info, show_error, show_warning, open_directory_dialog,
 )
 
-from dynamiXs_gui import BasePage, DropTargetLabel, DraggableSeriesList
+from dynamiXs_gui import BasePage, DropTargetLabel
 from workers import KdTitrationFittingParams, KdTitrationFittingWorker
 
 # Make the Kd analysis package importable (bare-name imports inside it).
 _KD_DIR = os.path.join(os.path.dirname(__file__), "dynamiXs_Kd")
 if _KD_DIR not in sys.path:
     sys.path.insert(0, _KD_DIR)
-
-
-def resolve_series_csv(name, meta, project_path):
-    """Path to a series' series_analysis_tidy.csv for the Kd input.
-
-    Prefers the copy bundled inside the project (so a moved/renamed source run
-    folder still resolves), then the recorded csv_path, then output_folder.
-    Returns the first candidate that exists on disk; if none exist, returns the
-    recorded csv_path (or best-effort candidate) for display.
-    """
-    candidates = []
-    if project_path:
-        candidates.append(os.path.join(str(project_path), "series_results",
-                                       name, "series_analysis_tidy.csv"))
-    if meta.get('csv_path'):
-        candidates.append(meta['csv_path'])
-    if meta.get('output_folder'):
-        candidates.append(os.path.join(meta['output_folder'], "series_analysis_tidy.csv"))
-    for c in candidates:
-        if c and os.path.exists(c):
-            return c
-    return meta.get('csv_path') or (candidates[0] if candidates else "")
 
 
 class KdTitrationPage(BasePage):
@@ -89,21 +67,12 @@ class KdTitrationPage(BasePage):
         sec = self._make_section("Titration input data (series_analysis_tidy.csv or comprehensive_peak_tracking.csv)")
         body = sec.layout()
 
-        # Titration-mode series runs from this project — drag one onto the box below.
-        series_hdr = create_label("Titration-mode series runs — drag one onto the box below:")
-        series_hdr.setStyleSheet(f"color: {SECONDARY_TEXT};")
-        series_hdr.setFont(get_font(FONT_SIZE_SMALL))
-        body.addWidget(series_hdr)
-        self.series_list_widget = DraggableSeriesList()
-        self.series_list_widget.setMaximumHeight(110)
-        body.addWidget(self.series_list_widget)
-        self.no_series_label = create_label(
+        self._add_series_panel(
+            body, "Titration-mode series runs — drag one onto the box below:",
             "No titration-mode series in this project — run a series in Titration mode, "
-            "or use Browse CSV…")
-        self.no_series_label.setStyleSheet(f"color: {SECONDARY_TEXT};")
-        self.no_series_label.setFont(get_font(FONT_SIZE_SMALL))
-        self.no_series_label.setWordWrap(True)
-        body.addWidget(self.no_series_label)
+            "or use Browse CSV…",
+            include=lambda br: getattr(br, 'series_mode', 'time') == 'titration',
+            max_height=110)
 
         row = QHBoxLayout()
         row.setSpacing(SPACING_SM)
@@ -249,67 +218,6 @@ class KdTitrationPage(BasePage):
         super().showEvent(event)
         self._populate_series_list()
         self._populate_saved_fits()
-
-    # ---------- series picker (drag source) ----------
-
-    def _get_available_series(self):
-        """Titration-mode series runs in this project, as {'name', 'csv_path'} dicts.
-        Filters saved_series to series_mode == 'titration' (set when the series ran)."""
-        lunaNMR_main = self._lunanmr_main_window()
-        saved_series = getattr(lunaNMR_main, 'saved_series', {}) or {}
-        project_path = getattr(lunaNMR_main, 'current_project_path', None)
-        out = []
-        for name, br in saved_series.items():
-            if getattr(br, 'series_mode', 'time') != 'titration':
-                continue
-            meta = getattr(br, 'metadata', None) or {}
-            csv_path = resolve_series_csv(name, meta, project_path)
-            out.append({'name': name, 'csv_path': csv_path})
-        return out
-
-    def _populate_series_list(self):
-        """Fill the draggable series list; show a hint when there are none."""
-        if not hasattr(self, 'series_list_widget'):
-            return
-        self.series_list_widget.clear()
-        series = self._get_available_series()
-        self.no_series_label.setVisible(not series)
-        self.series_list_widget.setVisible(bool(series))
-        for s in series:
-            item = QListWidgetItem(s['name'])
-            item.setData(Qt.UserRole, s['name'])
-            item.setData(Qt.UserRole + 1, s['csv_path'])
-            if s['csv_path']:
-                item.setToolTip(f"CSV: {s['csv_path']}")
-            self.series_list_widget.addItem(item)
-
-    # ---------- UI helpers ----------
-
-    def _make_section(self, title):
-        frame = QFrame()
-        frame.setStyleSheet(f"QFrame {{ background-color: {FRAME_BG_COLOR}; border-radius: 8px; }}")
-        body = create_v_layout(SPACING_XS, (SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM))
-        frame.setLayout(body)
-        body.addWidget(create_header_label(title, level=3))
-        return frame
-
-    def _make_field_row(self, label_text, widget, wide=False):
-        row = QFrame()
-        rl = create_h_layout(SPACING_SM)
-        row.setLayout(rl)
-        rl.addWidget(create_label(label_text), stretch=1)
-        widget.setMaximumWidth(360 if wide else 180)
-        rl.addWidget(widget)
-        return row
-
-    def _make_float_spin(self, attr, lo, hi, default, decimals=2, step=1.0):
-        spin = QDoubleSpinBox()
-        spin.setRange(lo, hi)
-        spin.setDecimals(decimals)
-        spin.setSingleStep(step)
-        spin.setValue(default)
-        setattr(self, attr, spin)
-        return spin
 
     # ---------- input ----------
 
@@ -675,13 +583,6 @@ class KdTitrationPage(BasePage):
             i += 1
         return f"{base}_{i}"
 
-    def _lunanmr_main_window(self):
-        """The real LunaNMR main window. In the app the page's main_window is the
-        hosting dialog, which holds the main window as .main_window (BasePage
-        convention); in isolation the main window is passed directly."""
-        mw = self.main_window
-        return getattr(mw, 'main_window', None) or mw
-
     def _store_current_analysis(self, overwrite=False, name=None):
         """Snapshot the current fit + params into main_window.kd_analyses. `name` stores
         under that exact name (upsert); otherwise the source-series base name is used,
@@ -979,6 +880,3 @@ class KdTitrationPage(BasePage):
             self.outdir_label.setText(self.output_dir)
         if self.last_json_file:
             self.viewer_btn.setEnabled(True)
-
-    def _log(self, msg):
-        self.log_text.appendPlainText(str(msg))

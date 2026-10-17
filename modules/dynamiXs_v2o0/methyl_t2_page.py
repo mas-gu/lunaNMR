@@ -67,6 +67,9 @@ class MethylT2FittingPage(BasePage):
         # ---- Input data row ----
         input_section = self._make_section("Methyl T2 input data")
         section_body = input_section.layout()
+        self._add_series_panel(
+            section_body, "Series from this project — drag one onto the box below:",
+            "No project series available. Use Browse CSV…")
 
         file_row = QHBoxLayout()
         file_row.setSpacing(SPACING_SM)
@@ -195,49 +198,16 @@ class MethylT2FittingPage(BasePage):
         )
         layout.addWidget(self.log_text, stretch=1)
 
-    # ---------- helpers for compact field rows ----------
-
-    def _make_section(self, title: str) -> QFrame:
-        frame = QFrame()
-        frame.setProperty("class", "card")
-        frame.setStyleSheet(
-            f"QFrame[class='card'] {{ background-color: {FRAME_BG_COLOR}; "
-            f"border-radius: 8px; }}"
-        )
-        body = create_v_layout(SPACING_XS, (SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM))
-        frame.setLayout(body)
-
-        title_label = create_header_label(title, level=3)
-        body.addWidget(title_label)
-        return frame
-
-    def _make_field_row(self, label_text: str, widget):
-        row = QFrame()
-        row_layout = create_h_layout(SPACING_SM)
-        row.setLayout(row_layout)
-        row_layout.addWidget(create_label(label_text), stretch=1)
-        widget.setMaximumWidth(180)
-        row_layout.addWidget(widget)
-        return row
-
-    def _make_float_spin(self, attr_name, lo, hi, default, decimals=2, step=1.0):
-        spin = QDoubleSpinBox()
-        spin.setRange(lo, hi)
-        spin.setDecimals(decimals)
-        spin.setSingleStep(step)
-        spin.setValue(default)
-        setattr(self, attr_name, spin)
-        return spin
-
     # ---------- input selection ----------
 
     def _on_series_dropped(self, field_name: str, series_name: str, csv_path: str):
         self.source_series_map[field_name] = series_name
-        if csv_path and os.path.exists(csv_path):
-            self._set_input_file(csv_path)
-            self.file_drop.setText(f"Series '{series_name}'  →  {os.path.basename(csv_path)}")
+        matrix = self._series_intensity_matrix(series_name)
+        if matrix:
+            self._set_input_file(matrix)
+            self.file_drop.setText(f"Series '{series_name}'  →  {os.path.basename(matrix)}")
         else:
-            self.file_drop.setText(f"Series '{series_name}'  (no CSV path)")
+            self.file_drop.setText(f"Series '{series_name}'  (no intensity matrix)")
 
     def _browse_input_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -431,8 +401,3 @@ class MethylT2FittingPage(BasePage):
         if self.last_json_folder:
             self.viewer_btn.setEnabled(True)
             self.summary_btn.setEnabled(True)
-
-    # ---------- logging ----------
-
-    def _log(self, msg: str):
-        self.log_text.appendPlainText(msg)

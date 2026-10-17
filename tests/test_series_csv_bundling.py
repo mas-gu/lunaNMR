@@ -49,7 +49,7 @@ def test_save_copies_tidy_csv_into_bundle(tmp_path):
 # ---------- resolve side: bundled copy preferred, falls back correctly ----------
 
 def _resolve():
-    from kd_titration_page import resolve_series_csv
+    from dynamiXs_gui import resolve_series_csv
     return resolve_series_csv
 
 

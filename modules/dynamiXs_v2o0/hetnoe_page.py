@@ -69,11 +69,14 @@ class HetNOEPage(BasePage):
         # ---- Input ----
         input_section = self._make_section("hetNOE input data")
         body = input_section.layout()
+        self._add_series_panel(
+            body, "Series from this project — drag a hetNOE series onto the box below:",
+            "No project series available. Use Browse CSV…")
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["Series intensity matrix", "Two intensity files"])
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        body.addWidget(self._make_field_row("Input", self.mode_combo))
+        body.addWidget(self._make_field_row("Input", self.mode_combo, width=260))
 
         self.input_stack = QStackedWidget()
         self.input_stack.addWidget(self._matrix_inputs())
@@ -96,12 +99,12 @@ class HetNOEPage(BasePage):
                                                   width=110))
         outb.addLayout(out_row)
         self.prefix_edit = QLineEdit("field1")
-        outb.addWidget(self._make_field_row("Results prefix", self.prefix_edit))
+        outb.addWidget(self._make_field_row("Results prefix", self.prefix_edit, width=260))
         self.field_freq_spin = QDoubleSpinBox()
         self.field_freq_spin.setRange(100.0, 1500.0)
         self.field_freq_spin.setDecimals(2)
         self.field_freq_spin.setValue(600.0)
-        outb.addWidget(self._make_field_row("Field frequency (MHz)", self.field_freq_spin))
+        outb.addWidget(self._make_field_row("Field frequency (MHz)", self.field_freq_spin, width=260))
         layout.addWidget(out_section)
 
         run_row = QHBoxLayout()
@@ -155,8 +158,8 @@ class HetNOEPage(BasePage):
         box.addLayout(row)
         self.sat_combo = QComboBox()
         self.unsat_combo = QComboBox()
-        box.addWidget(self._make_field_row("Saturated plane", self.sat_combo))
-        box.addWidget(self._make_field_row("Unsaturated plane", self.unsat_combo))
+        box.addWidget(self._make_field_row("Saturated plane", self.sat_combo, width=260))
+        box.addWidget(self._make_field_row("Unsaturated plane", self.unsat_combo, width=260))
         hint = create_label("A matrix carries no intensity errors: each hetNOE error is a flat "
                             "2% estimate. For measured errors, use two intensity files.")
         hint.setStyleSheet(f"color: {SECONDARY_TEXT};")
@@ -185,27 +188,6 @@ class HetNOEPage(BasePage):
         box.addWidget(hint)
         return frame
 
-    def _make_section(self, title: str) -> QFrame:
-        frame = QFrame()
-        frame.setProperty("class", "card")
-        frame.setStyleSheet(
-            f"QFrame[class='card'] {{ background-color: {FRAME_BG_COLOR}; "
-            f"border-radius: 8px; }}"
-        )
-        body = create_v_layout(SPACING_XS, (SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM))
-        frame.setLayout(body)
-        body.addWidget(create_header_label(title, level=3))
-        return frame
-
-    def _make_field_row(self, label_text: str, widget):
-        row = QFrame()
-        row_layout = create_h_layout(SPACING_SM)
-        row.setLayout(row_layout)
-        row_layout.addWidget(create_label(label_text), stretch=1)
-        widget.setMaximumWidth(260)
-        row_layout.addWidget(widget)
-        return row
-
     # ---------- input selection ----------
 
     def _on_mode_changed(self, index: int):
@@ -213,9 +195,8 @@ class HetNOEPage(BasePage):
 
     def _on_series_dropped(self, field_name: str, series_name: str, csv_path: str):
         self.source_series_map[field_name] = series_name
-        matrix = os.path.join(os.path.dirname(csv_path), "peak_intensity_matrix.csv") \
-            if csv_path else None
-        if matrix and os.path.exists(matrix):
+        matrix = self._series_intensity_matrix(series_name)
+        if matrix:
             self._set_matrix(matrix)
             self.matrix_drop.setText(f"Series '{series_name}'  →  {os.path.basename(matrix)}")
         else:
@@ -408,8 +389,3 @@ class HetNOEPage(BasePage):
         """The input files this analysis was computed from."""
         return {key: getattr(self, key) for key in ('matrix_file', 'sat_file', 'unsat_file')
                 if getattr(self, key)}
-
-    # ---------- logging ----------
-
-    def _log(self, msg: str):
-        self.log_text.appendPlainText(msg)
