@@ -71,6 +71,35 @@ def _json_safe(obj):
     return obj
 
 
+def _absolute_paths(value):
+    """`value` with every string naming an existing file or folder made absolute."""
+    if isinstance(value, dict):
+        return {k: _absolute_paths(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_absolute_paths(v) for v in value]
+    if isinstance(value, str) and value and os.path.exists(value):
+        return os.path.abspath(value)
+    return value
+
+
+def _recorded(args, summary):
+    """Write what a dynamixs command ran beside its outputs, and pass `summary` on.
+
+    `<out>/<prefix>_dynamixs.json` holds the command, its arguments and its summary,
+    every path absolute. `project build` reads these to rebuild the DynamiXs page each
+    run belongs to: the outputs alone cannot say which experiment or field they are.
+    """
+    import json
+    record = {'schema_version': SCHEMA_VERSION, 'command': _full_command(args),
+              'args': _absolute_paths({k: v for k, v in vars(args).items()
+                                       if k != 'func'}),
+              'summary': _absolute_paths(summary)}
+    path = os.path.join(args.out, f"{args.prefix}_dynamixs.json")
+    with open(path, 'w') as fh:
+        json.dump(_json_safe(record), fh, indent=2, default=str)
+    return summary
+
+
 def _emit(args, summary, *human_lines):
     """Print the run summary: a single JSON object under --format json, else human lines.
 
@@ -507,7 +536,7 @@ def _run_dynamixs_t1t2(args):
     if marginal:
         human.append(f"  NOTE: {marginal} residues have t_max/T < 2 — the delay window is "
                      f"too short to pin the time constant down for those")
-    _emit(args,
+    _emit(args, _recorded(args,
           {'command': 'dynamixs t1t2', 'experiment': args.exp, 'n_fitted': result['n_fitted'],
            'time_units': time_units, 'series_metadata': _sidecar_summary(sidecar),
            'dropped_columns': result.get('dropped_columns') or [],
@@ -518,7 +547,7 @@ def _run_dynamixs_t1t2(args):
            'mean_t2': result['mean_t2'], 'results_file': result['results_file'],
            'json_file': result.get('json_file'),
            'baseline_fixed': result.get('baseline_fixed', True),
-           'n_window_marginal': marginal},
+           'n_window_marginal': marginal}),
           *human)
     return 0 if result['n_fitted'] else 1
 
@@ -547,12 +576,12 @@ def _run_dynamixs_methyl(args):
     }
     with _engine_stdout(args):
         result = run_methyl_t2_analysis_with_params(params)
-    _emit(args,
+    _emit(args, _recorded(args,
           {'command': 'dynamixs methyl-t2', 'n_fitted': result['n_fitted'],
            'time_units': time_units, 'series_metadata': _sidecar_summary(sidecar),
            'dropped_columns': result.get('dropped_columns') or [],
            'n_total': result['n_total'], 'results_file': result['results_file'],
-           'json_file': result['json_file']},
+           'json_file': result['json_file']}),
           f"Methyl T2 analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted",
           f"  Results: {result['results_file']}",
           f"  JSON:    {result['json_file']}")
@@ -948,7 +977,10 @@ def _run_project_build(args):
           f"  spectrum : {built['spectrum']}",
           f"  peaks    : {built['peaks']}",
           f"  series   : {', '.join(built['series']) or '(none)'}",
-          f"  Kd       : {', '.join(built['kd']) or '(none)'}")
+          f"  Kd       : {', '.join(built['kd']) or '(none)'}",
+          f"  DynamiXs : {', '.join(built['dynamixs']) or '(none)'}",
+          *([f"  not bundled (no GUI page): {', '.join(built['dynamixs_skipped'])}"]
+            if built['dynamixs_skipped'] else []))
     return 0
 
 
@@ -1495,13 +1527,13 @@ def _run_dynamixs_hetnoe(args):
     supplied = {(True, True): 'both', (True, False): 'sat',
                 (False, True): 'unsat', (False, False): 'none'}[
                     (sat_e is not None, unsat_e is not None)]
-    _emit(args,
+    _emit(args, _recorded(args,
           {'command': 'dynamixs hetnoe', 'n_residues': len(noe),
            'errors_supplied': supplied,
            'n_sat': len(sat_i), 'n_unsat': len(unsat_i),
            'n_common': len(set(sat_i) & set(unsat_i)),
            'n_dropped_nonpositive_ref': len(set(sat_i) & set(unsat_i)) - len(noe),
-           'output': out_csv, 'plot': out_pdf},
+           'output': out_csv, 'plot': out_pdf}),
           f"hetNOE complete: {len(noe)} residues "
           f"({len(sat_i)} sat, {len(unsat_i)} unsat, errors: {supplied})",
           *(["  NOTE: no error columns supplied — hetNOE errors are a flat 2% estimate, "
@@ -1592,7 +1624,7 @@ def _run_dynamixs_t1rho(args):
               f"{args.theta} deg (no per-residue correction): "
               f"{', '.join(table.attrs.get('shift_unmatched', [])[:10])}",
               file=sys.stderr)
-    _emit(args,
+    _emit(args, _recorded(args,
           {'command': 'dynamixs t1rho', 'n_residues': len(table),
            'n_shift_unmatched': n_unmatched,
            'shift_unmatched': table.attrs.get('shift_unmatched', []),
@@ -1601,7 +1633,7 @@ def _run_dynamixs_t1rho(args):
            'n_t1_fitted': len(t1_fits), 'n_t1rho_fitted': len(rho_fits),
            'theta_nominal_deg': args.theta, 'omega1_hz': args.omega1,
            'r2_table': out_csv,
-           't1_results': t1_res['results_file'], 't1rho_results': rho_res['results_file']},
+           't1_results': t1_res['results_file'], 't1rho_results': rho_res['results_file']}),
           f"T1rho complete: R2 derived for {len(table)} residues",
           f"  theta (nominal): {args.theta} deg, omega1: {args.omega1} Hz "
           f"(per-residue tilt applied)",
@@ -1672,9 +1704,9 @@ def _run_dynamixs_density(args):
                     os.chdir(cwd)
                 outputs += [os.path.join(args.out, f) for f in new]
 
-    _emit(args,
+    _emit(args, _recorded(args,
           {'command': 'dynamixs density', 'n_residues': len(df),
-           'dual': args.dual, 'outputs': outputs},
+           'dual': args.dual, 'outputs': outputs}),
           f"Spectral density complete: {len(df)} residues",
           *[f"  {o}" for o in outputs])
     return 0
@@ -1785,7 +1817,7 @@ def _run_dynamixs_modelfree(args):
     finally:
         os.chdir(cwd)
     out_files = result.get('output_files', {})
-    _emit(args,
+    _emit(args, _recorded(args,
           {'command': 'dynamixs modelfree', 'method': result.get('method'),
            'time_units': units, 'series_metadata': sidecars or None,
            # Counts per category, so a caller can threshold on them. The residue lists
@@ -1793,7 +1825,7 @@ def _run_dynamixs_modelfree(args):
            'validation': result.get('validation_warnings') or {},
            'residue_counts': result.get('residue_counts') or {},
            'n_residues': result.get('n_residues'), 'n_successful': result.get('n_successful'),
-           'output_files': out_files},
+           'output_files': out_files}),
           f"Model-free complete: {result.get('n_successful')}/{result.get('n_residues')} residues",
           *[f"  {k}: {v}" for k, v in out_files.items()])
     return 0

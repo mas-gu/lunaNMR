@@ -200,6 +200,22 @@ def resolve_region_2d(result: dict, integrator):
     return build_region_2d(ppm_y[y0:y1], ppm_x[x0:x1], intensity)
 
 
+def _relocate_paths(value, old_root: Path, new_root: Path):
+    """`value` with every path string under `old_root` moved to the same place under
+    `new_root` - where something exists there; others are left as they were."""
+    if isinstance(value, dict):
+        return {k: _relocate_paths(v, old_root, new_root) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_relocate_paths(v, old_root, new_root) for v in value]
+    if isinstance(value, str) and value:
+        try:
+            moved = new_root / Path(value).relative_to(old_root)
+        except ValueError:
+            return value
+        return str(moved) if moved.exists() else value
+    return value
+
+
 def lacks_fit_arrays(result: dict) -> bool:
     """A stored fit missing the region grid or surfaces a fit-detail plot draws."""
     region = result.get('region_2d') or {}
@@ -1220,6 +1236,12 @@ class ProjectManager:
             ps = state.get(page)
             if not page_dir.is_dir() or not isinstance(ps, dict):
                 continue
+            old_dir = ps.get('output_dir')
+            if old_dir:
+                # Every path the page holds under its old output folder - the T1/T2
+                # page keeps one json_folder and results_file PER field and experiment
+                # - is moved with it, where the bundle has the copy.
+                state[page] = ps = _relocate_paths(ps, Path(old_dir), page_dir)
             ps['output_dir'] = str(page_dir)
             json_dirs = [d for d in page_dir.glob("json*") if d.is_dir()]
             if page == 'methyl_t2':

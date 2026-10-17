@@ -118,15 +118,24 @@ cannot target, so it is worth seeing. Refuses a non-empty `--out` unless `--forc
 python -m lunaNMR project build <run_dir> --out <bundle.lunaNMR> [--spectrum <file>] [--peaks <file>]
 ```
 Turns an automated run's output folders into a project the GUI opens. Under `<run_dir>` it
-takes every series (`batch_results.json`, written by `series`) and every Kd fit
-(`<prefix>_kd_fit_data.json`, written by `kd`), wherever they sit. A Kd fit whose prefix
-matches a series' folder name is linked to that series' tidy CSV.
+takes, wherever they sit:
+
+- every series (`batch_results.json`, written by `series`);
+- every Kd fit (`<prefix>_kd_fit_data.json`, written by `kd`). A Kd fit whose prefix
+  matches a series' folder name is linked to that series' tidy CSV;
+- every DynamiXs run, from the `<prefix>_dynamixs.json` record each `dynamixs` command
+  writes beside its outputs (command, absolute inputs, parameters, summary). All
+  `dynamixs t1t2` fits become ONE T1/T2 analysis - the GUI page holds both fields, field 1
+  the lower frequency - and each `dynamixs modelfree` run its own. `hetnoe`, `t1rho` and
+  `density` have no page to reopen in and are listed as not bundled; `methyl-t2` is not
+  mapped yet. Runs made before the record existed carry none and are not found.
 
 It saves through `ProjectManager.save_project` itself, handed a stand-in main window, so
 the bundle is exactly what the GUI would have saved. The GUI reopens the first series'
 reference spectrum and the peak list it was fitted against unless `--spectrum`/`--peaks`
 say otherwise. Both are **referenced by absolute path, not copied**: the bundle needs the
-data where it was. Refuses an existing `--out`. Not yet included: DynamiXs analyses.
+data where it was. DynamiXs results are copied into the bundle, so they reopen after the
+run folder is gone. Refuses an existing `--out`.
 
 A series is stored slim, by `series` and by the GUI alike: each fit keeps its parameters
 (`all_peaks`) and its region's ppm axes, and the viewers rebuild the region and surfaces
