@@ -287,6 +287,51 @@ SEED_RADIUS = 2
 # means nothing.
 SEED_FLOOR_FRACTION = 1.0e-3
 
+# How many noise sigmas a seed must reach before its SIGN is taken as known. Below it the
+# peak is fitted as near-noise: shape held, intensity free to take either sign.
+PEAK_SIGN_SIGMAS = 3.0
+
+
+def peak_sign(intensity, y_idx, x_idx, detected_intensity=None, noise=None,
+              reach=(SEED_RADIUS, SEED_RADIUS)):
+    """+1 or -1 for a peak whose sign the data establishes, 0 for one inside the noise.
+
+    Negative peaks are real data - a flexible residue or a side-chain NH2 in a saturated
+    hetNOE plane, CH2 in an edited 13C-HSQC, a folded peak - and the fit can only reach
+    one if its seed and its intensity box carry the right sign. An intensity cannot be
+    let cross zero instead: at zero the model's derivatives with respect to position and
+    linewidth vanish, so those parameters are undetermined exactly where the fit passes.
+
+    The sign is that of the LARGEST-MAGNITUDE sample the fit could reach - `reach`, in
+    grid points per dimension (F1, F2), never less than SEED_RADIUS - not of the one
+    sample at the seed: a positive peak picked a point or two off its maximum can sample
+    negative there, and a titration seed is the PREVIOUS point's position, which a moving
+    peak has left. Judged on a smaller window, such a peak reads as noise, its shape is
+    held where it no longer is, and the cascade carries that frozen position to every
+    later point - measured on a titration, a 6-sigma peak lost for the rest of the
+    series. A detected intensity already above the threshold is positive by
+    construction (the detector finds maxima) and is taken as it is.
+
+    Without a noise estimate there is nothing to judge significance by, and the peak is
+    treated as positive - as every peak was before negative peaks were fitted.
+    """
+    if not noise or noise <= 0:
+        return 1
+    threshold = PEAK_SIGN_SIGMAS * noise
+    if detected_intensity is not None and detected_intensity >= threshold:
+        return 1
+    ry, rx = (max(int(np.ceil(r)), SEED_RADIUS) for r in reach)
+    y_lo, x_lo = max(y_idx - ry, 0), max(x_idx - rx, 0)
+    neighbourhood = intensity[y_lo:y_idx + ry + 1, x_lo:x_idx + rx + 1]
+    if not neighbourhood.size:
+        return 0
+    extremum = float(neighbourhood.flat[np.argmax(np.abs(neighbourhood))])
+    if extremum >= threshold:
+        return 1
+    if extremum <= -threshold:
+        return -1
+    return 0
+
 # How close to a bound counts as resting on it, as a fraction of the box's own width.
 # The optimiser reaches a bound by np.clip, so a pinned parameter lands exactly on it;
 # anything above floating-point noise would do.
@@ -2023,7 +2068,9 @@ class VoigtIntegrator(BaseIntegrator):
                 # Zero out peak outside display ellipse
                 peak_surface = np.where(ellipse_mask, peak_surface, 0.0)
 
-            peak_max = np.max(peak_surface)
+            # The EXTREMUM, signed: np.max of a negative peak's surface is the least
+            # negative point of its tail - measured 1000x too small on a -48 sigma peak.
+            peak_max = float(peak_surface.flat[np.argmax(np.abs(peak_surface))])
             #print(f"      Peak {i+1}: PS2D intensity={fitted_intensity:.2e}, reconstructed max={peak_max:.2e}")
 
             # CRITICAL FIX: Override the height field with reconstructed max
@@ -2141,6 +2188,14 @@ class VoigtIntegrator(BaseIntegrator):
         #print(f"      F1 ({config.nucleus_type}): {region['f1_ppm'].min():.3f} - {region['f1_ppm'].max():.3f} ppm")
         #print(f"      F2 (1H): {region['f2_ppm'].min():.3f} - {region['f2_ppm'].max():.3f} ppm")
 
+        # How far each peak's position may move in this fit, in ppm (F1, F2) - the same
+        # margins fit_multi_peak_2d applies - so its sign is judged over what it can reach
+        territories = self._territory_margins_for(peak_assignments)
+        shared_reach = (getattr(self, 'titration_pos_margin_f1', None) or config.pos_margin_f1,
+                        getattr(self, 'titration_pos_margin_f2', None) or config.pos_margin_f2)
+        f1_step = float(np.median(np.abs(np.diff(region['f1_ppm'])))) or 1.0
+        f2_step = float(np.median(np.abs(np.diff(region['f2_ppm'])))) or 1.0
+
         # Prepare initial parameters with data-driven linewidth estimates
         initial_peaks = []
         for peak_idx, peak_dict in enumerate(overlap_group):
@@ -2154,6 +2209,12 @@ class VoigtIntegrator(BaseIntegrator):
             # Find nearest grid point (still needed for FWHM estimation)
             x_idx = np.argmin(np.abs(region['f2_ppm'] - x_ppm))
             y_idx = np.argmin(np.abs(region['f1_ppm'] - y_ppm))
+
+            # +1 / -1 when the data establishes the sign, 0 inside the noise
+            reach_f1, reach_f2 = territories[peak_idx] if territories else shared_reach
+            sign = peak_sign(region['intensity'], y_idx, x_idx, detected_intensity,
+                             getattr(self, 'noise_level', None),
+                             reach=(reach_f1 / f1_step, reach_f2 / f2_step))
 
             # ====================================================================
             # HEAVY OVERLAP AND TOO-CLOSE DETECTION (DECOUPLED)
@@ -2243,14 +2304,17 @@ class VoigtIntegrator(BaseIntegrator):
                 # Log first peak only to avoid spam
                 if len(initial_peaks) == 0:
                     log_info(f"Using learned LW from PASS1: F1={fwhm_f1:.4f}, F2={fwhm_f2:.5f} ppm")
-            elif heavily_overlapping:
-                # Fallback: Use config typical linewidths for heavy overlap
+            elif heavily_overlapping or sign == 0:
+                # Fallback: Use config typical linewidths for heavy overlap, and for a
+                # peak inside the noise - a slice through noise has no width to measure,
+                # and that peak's shape is held at its seed.
                 fwhm_f1 = config.typical_linewidth_f1
                 fwhm_f2 = config.typical_linewidth_f2
             else:
-                # Fallback: Estimate from 1D cross-sections (may have some contamination)
-                f1_cross = region['intensity'][:, x_idx]  # F1 slice at peak F2 position
-                f2_cross = region['intensity'][y_idx, :]  # F2 slice at peak F1 position
+                # Fallback: Estimate from 1D cross-sections (may have some contamination).
+                # Oriented by the sign, so a negative peak's width is measured too.
+                f1_cross = sign * region['intensity'][:, x_idx]  # F1 slice at peak F2 position
+                f2_cross = sign * region['intensity'][y_idx, :]  # F2 slice at peak F1 position
 
                 # Estimate FWHM by measuring width at half maximum
                 fwhm_f1 = self._estimate_fwhm_from_slice(f1_cross, region['f1_ppm'], y_ppm)
@@ -2279,8 +2343,22 @@ class VoigtIntegrator(BaseIntegrator):
                 lw_gau_f2 = max(fwhm_f2 / 2.0, config.min_linewidth_f2)
                 lw_lor_f2 = max(fwhm_f2 / 25.0, config.min_linewidth_f2)
 
+            if sign < 0:
+                # A NEGATIVE peak: the most negative sample around the seed, scaled as
+                # the positive re-measurement below is. The detector finds maxima only,
+                # so it has nothing to offer here.
+                y_lo, y_hi = max(y_idx - SEED_RADIUS, 0), y_idx + SEED_RADIUS + 1
+                x_lo, x_hi = max(x_idx - SEED_RADIUS, 0), x_idx + SEED_RADIUS + 1
+                initial_intensity = 0.8 * float(np.min(region['intensity'][y_lo:y_hi, x_lo:x_hi]))
+            elif sign == 0:
+                # Inside the noise: only the intensity is fitted, linearly, and may take
+                # either sign, so the seed's value hardly matters. It must not be ~0,
+                # though - the optimiser normalises each parameter by its own size.
+                sample = float(region['intensity'][y_idx, x_idx])
+                noise = self.noise_level
+                initial_intensity = sample if abs(sample) >= noise else noise
             # Use detected intensity if available, otherwise fall back to re-measurement
-            if detected_intensity is not None and detected_intensity > 0:
+            elif detected_intensity is not None and detected_intensity > 0:
                 # Use peak picker's measurement directly (no 0.8 scaling needed)
                 initial_intensity = detected_intensity
             else:
@@ -2322,7 +2400,8 @@ class VoigtIntegrator(BaseIntegrator):
                 'lw_lor_f2': lw_lor_f2, 'lw_gau_f2': lw_gau_f2,  # Data-driven
                 'intensity': initial_intensity,
                 'heavily_overlapping': heavily_overlapping,  # Flag for linewidth estimation strategy
-                'tooclose': tooclose  # Flag for L/G and intensity constraints
+                'tooclose': tooclose,  # Flag for L/G and intensity constraints
+                'near_noise': sign == 0  # Shape held, intensity of either sign
             })
 
         # Log initial intensity estimates

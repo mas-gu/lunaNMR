@@ -137,8 +137,9 @@ def baseline_plane(f1_grid, f2_grid, data, outside):
     Two things have to be true before a tilt is subtracted, and each is a separate
     failure of the plain fit.
 
-    CONTAMINATION. A point standing well above the current baseline is signal, not
-    background, so it is dropped and the plane refitted. The noise is taken from the
+    CONTAMINATION. A point standing well above OR below the current baseline is signal,
+    not background - negative peaks are signal too - so it is dropped and the plane
+    refitted. The noise is taken from the
     RESIDUALS rather than the raw values, because the raw spread of the outside points
     is the tilt itself and would scale the threshold with the thing being measured.
 
@@ -163,7 +164,7 @@ def baseline_plane(f1_grid, f2_grid, data, outside):
         sigma = 1.4826 * float(np.median(np.abs(residual - np.median(residual))))
         if not sigma > 0:
             break
-        nxt = outside & ((data - plane) <= BASELINE_CLIP_SIGMAS * sigma)
+        nxt = outside & (np.abs(data - plane) <= BASELINE_CLIP_SIGMAS * sigma)
         if int(nxt.sum()) < BASELINE_MIN_POINTS or np.array_equal(nxt, keep):
             break
         keep = nxt
@@ -265,13 +266,22 @@ def region_sum_volumes(f1_grid, f2_grid, data, mask, params, n_peaks,
 
 
 def _bound_fraction(value, lower, upper):
-    """Where `value` sits in [lower, upper], in log space: 0.0 floor, 1.0 ceiling.
+    """Where `value` sits in [lower, upper]: 0.0 at the lower bound, 1.0 at the upper.
 
-    Dimensionless on purpose - the caller sees a denormalised intensity but these
-    bounds are in the fitter's normalised units, and a ratio survives that. None when
-    the interval is not a positive range to sit in.
+    In log space for a one-signed box, where the floor is orders of magnitude below the
+    ceiling; a negative peak's box is measured on magnitudes, so 0.0 is still the end
+    nearest zero. A box spanning zero - a near-noise peak, shape held, intensity of
+    either sign - is linear. Dimensionless on purpose - the caller sees a denormalised
+    intensity but these bounds are in the fitter's normalised units, and a ratio
+    survives that. None when the interval is empty.
     """
-    if not (lower > 0 and upper > lower and value > 0):
+    if not upper > lower:
+        return None
+    if lower < 0 < upper:
+        return float((value - lower) / (upper - lower))
+    if upper < 0:
+        value, lower, upper = -value, -upper, -lower
+    if not (lower > 0 and value > 0):
         return None
     span = np.log(upper) - np.log(lower)
     if span <= 0:
@@ -555,7 +565,8 @@ class Ps2dMultiPeakFitter2D:
 
             # Extract current intensities
             intensities = [params_flat[i*NPAR_VOIGT + 6] for i in range(n_peaks)]
-            max_intensity = max(intensities)
+            # By magnitude: the reference peak of a negative cluster is its most negative
+            max_intensity = max(abs(I) for I in intensities)
 
             if max_intensity < 1e-10:  # Avoid division by zero
                 penalty_residuals = np.zeros(n_peaks)
@@ -586,12 +597,11 @@ class Ps2dMultiPeakFitter2D:
             if n_peaks >= 2:
                 # Extract intensities
                 intensities = np.array([params_array[i*NPAR_VOIGT + 6] for i in range(n_peaks)])
-                max_intensity = np.max(intensities)
+                max_idx = int(np.argmax(np.abs(intensities)))
+                max_intensity = abs(intensities[max_idx])
+                max_sign = np.sign(intensities[max_idx])
 
                 if max_intensity > 1e-10:
-                    # Index of peak with max intensity
-                    max_idx = np.argmax(intensities)
-
                     # Derivatives: ∂(I_i/I_max)/∂I_j
                     for i in range(n_peaks):
                         for j in range(n_peaks):
@@ -604,7 +614,7 @@ class Ps2dMultiPeakFitter2D:
                                 deriv = 1.0 / max_intensity
                             elif j == max_idx:
                                 # ∂(I_i/I_max)/∂I_max = -I_i/I_max²
-                                deriv = -intensities[i] / (max_intensity**2)
+                                deriv = -intensities[i] * max_sign / (max_intensity**2)
                             else:
                                 # No dependence
                                 deriv = 0.0
@@ -673,7 +683,8 @@ class Ps2dMultiPeakFitter2D:
 
             # Extract current intensities
             intensities = [params_flat[i*NPAR_VOIGT + 6] for i in range(n_peaks)]
-            max_intensity = max(intensities)
+            # By magnitude: the reference peak of a negative cluster is its most negative
+            max_intensity = max(abs(I) for I in intensities)
 
             if max_intensity < 1e-10:  # Avoid division by zero
                 penalty_residuals = np.zeros(n_peaks)
@@ -704,12 +715,11 @@ class Ps2dMultiPeakFitter2D:
             if n_peaks >= 2:
                 # Extract intensities
                 intensities = np.array([params_array[i*NPAR_VOIGT + 6] for i in range(n_peaks)])
-                max_intensity = np.max(intensities)
+                max_idx = int(np.argmax(np.abs(intensities)))
+                max_intensity = abs(intensities[max_idx])
+                max_sign = np.sign(intensities[max_idx])
 
                 if max_intensity > 1e-10:
-                    # Index of peak with max intensity
-                    max_idx = np.argmax(intensities)
-
                     # Derivatives: ∂(I_i/I_max)/∂I_j
                     for i in range(n_peaks):
                         for j in range(n_peaks):
@@ -722,7 +732,7 @@ class Ps2dMultiPeakFitter2D:
                                 deriv = 1.0 / max_intensity
                             elif j == max_idx:
                                 # ∂(I_i/I_max)/∂I_max = -I_i/I_max²
-                                deriv = -intensities[i] / (max_intensity**2)
+                                deriv = -intensities[i] * max_sign / (max_intensity**2)
                             else:
                                 # No dependence
                                 deriv = 0.0
@@ -853,7 +863,9 @@ class Ps2dMultiPeakFitter2D:
         # These ratios represent the measured peak heights and should be preserved
         if has_tooclose:
             initial_intensities = [peak.get('original_height', peak['intensity']) for peak in initial_peaks]
-            max_initial_intensity = max(initial_intensities)
+            # By magnitude, as the penalty itself normalises: signed ratios of the
+            # largest-magnitude height, so a negative cluster's targets are -1..0.
+            max_initial_intensity = max(abs(h) for h in initial_intensities)
             if max_initial_intensity > 0:
                 initial_intensity_ratios = [intensity / max_initial_intensity for intensity in initial_intensities]
             else:
@@ -879,8 +891,12 @@ class Ps2dMultiPeakFitter2D:
             mask_flat = np.ones(len(y_flat), dtype=bool)
             y_flat_masked = y_flat
 
-        # Weak peak detection disabled - all peaks can move freely
-        weak_peak_indices = set()
+        # A peak inside the noise (core_integrator.peak_sign) has nothing in the data to
+        # fix its position or its width. Both are held, which makes its intensity a
+        # linear parameter - free to take either sign, and to cross zero without losing
+        # anything. Every other peak moves freely.
+        weak_peak_indices = {i for i, peak in enumerate(initial_peaks)
+                             if peak.get('near_noise')}
 
         # Create wrapper functions for optimizer
         def model_function(_f1_f2_dummy, *p):
@@ -1030,7 +1046,9 @@ class Ps2dMultiPeakFitter2D:
         # Calculate cluster-wide intensity bounds to prevent artificial constraints
         # Root cause: Per-peak bounds from contaminated 1D cross-sections can trap peaks
         # Solution: Use max initial intensity across cluster to set bounds for all peaks
-        max_initial_intensity = max(peak['intensity'] for peak in initial_peaks)
+        # By MAGNITUDE: a cluster of negative peaks has a negative maximum, and a mixed one
+        # would size every box from its positive member.
+        max_initial_intensity = max(abs(peak['intensity']) for peak in initial_peaks)
 
 
         lower_bounds = []
@@ -1076,8 +1094,21 @@ class Ps2dMultiPeakFitter2D:
 
             # Intensity bounds - cluster-relative (wide bounds)
             # Intensity ratio guidance is now via penalty in objective, not bounds
-            lower_bounds.append(max_initial_intensity * 0.001)  # Min 0.1% of max
-            upper_bounds.append(max_initial_intensity * 5.0)    # Max 5× max
+            #
+            # The SIGN is fixed by the seed (core_integrator.peak_sign): the box never
+            # contains zero, where position and linewidth stop being determined. A
+            # negative peak gets the mirror image. A peak inside the noise has its shape
+            # held, which makes its intensity linear and lets it span zero safely.
+            floor, ceiling = max_initial_intensity * 0.001, max_initial_intensity * 5.0
+            if peak.get('near_noise'):
+                lower_bounds.append(-ceiling)
+                upper_bounds.append(ceiling)
+            elif peak['intensity'] < 0:
+                lower_bounds.append(-ceiling)
+                upper_bounds.append(-floor)
+            else:
+                lower_bounds.append(floor)     # Min 0.1% of max
+                upper_bounds.append(ceiling)   # Max 5x max
 
             # Spare (always zero)
             lower_bounds.append(0.0)
@@ -1219,7 +1250,7 @@ class Ps2dMultiPeakFitter2D:
                 fixed_stage1[offset + 0] = params[offset + 0]  # Fix pos_f1
                 fixed_stage1[offset + 3] = params[offset + 3]  # Fix pos_f2
                 fixed_stage1[offset + 7] = 0.0  # Fix spare
-                if fix_linewidths:
+                if fix_linewidths or i in weak_peak_indices:
                     fixed_stage1[offset + 1] = params[offset + 1]  # lw_lor_f1
                     fixed_stage1[offset + 2] = params[offset + 2]  # lw_gau_f1
                     fixed_stage1[offset + 4] = params[offset + 4]  # lw_lor_f2
@@ -1319,7 +1350,7 @@ class Ps2dMultiPeakFitter2D:
 
                 # CRITICAL: Respect fix_linewidths flag during position refinement
                 # Without this, linewidths would float in Stage 2 even when user wants them fixed
-                if fix_linewidths:
+                if fix_linewidths or i in weak_peak_indices:
                     fixed_stage2[offset + 1] = params[offset + 1]  # Fix lw_lor_f1
                     fixed_stage2[offset + 2] = params[offset + 2]  # Fix lw_gau_f1
                     fixed_stage2[offset + 4] = params[offset + 4]  # Fix lw_lor_f2
@@ -1372,7 +1403,7 @@ class Ps2dMultiPeakFitter2D:
                 fixed_stage4[offset + 3] = params[offset + 3]  # Fix pos_f2
 
             # CRITICAL: Respect fix_linewidths flag (user's absolute constraint)
-            if fix_linewidths:
+            if fix_linewidths or i in weak_peak_indices:
                 fixed_stage4[offset + 1] = params[offset + 1]  # Fix lw_lor_f1
                 fixed_stage4[offset + 2] = params[offset + 2]  # Fix lw_gau_f1
                 fixed_stage4[offset + 4] = params[offset + 4]  # Fix lw_lor_f2
@@ -1535,7 +1566,17 @@ class Ps2dMultiPeakFitter2D:
             chi2_reduction_factor = chi2_initial / info['final_chi2'] if info['final_chi2'] > 0 else 0.0
             chi2_reduction_success = chi2_reduction_factor > 100
 
-        final_success = formal_convergence or pragmatic_r2_success or chi2_reduction_success
+        # A cluster of near-noise peaks only (core_integrator.peak_sign) is a LINEAR
+        # least-squares problem in their intensities, shapes held, and is solved by the
+        # first accepted step. Neither test above can say so: no later step can lower
+        # chi2 strictly, so the optimiser leaves through its stagnation exit with
+        # formal_convergence False, and R-squared of a fixed shape against noise is ~0 by
+        # construction. Reported as failed, a measured near-zero intensity - the decay
+        # itself - was replaced by a sentinel and dropped.
+        near_noise_only = n_peaks > 0 and len(weak_peak_indices) == n_peaks
+
+        final_success = (formal_convergence or pragmatic_r2_success or chi2_reduction_success
+                         or near_noise_only)
 
         # ====================================================================
         # FINAL WIDTH CAP: re-derive the intensity, do not freeze it
