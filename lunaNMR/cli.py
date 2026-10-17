@@ -2402,6 +2402,11 @@ def main(argv=None):
     validate = getattr(args, '_validate', None)
     if validate:
         validate(parser, args)
+    # Every subcommand is headless. The fitters show their figures on an interactive
+    # backend, so in a process that already uses Qt (after a GUI test, or an in-process
+    # caller) plt.show() started an event loop that never returned.
+    import matplotlib
+    matplotlib.use('Agg')
     try:
         return args.func(args)
     except (FileNotFoundError, ValueError, RuntimeError, KeyError, TypeError) as exc:

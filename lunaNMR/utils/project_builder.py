@@ -11,7 +11,8 @@ What a run contributes, found anywhere under its folder:
   series      every `batch_results.json` the `series` command writes
   Kd          every `<prefix>_kd_fit_data.json` the `kd` command writes
   DynamiXs    every `<prefix>_dynamixs.json` a `dynamixs` command writes: the `t1t2`
-              fits become one T1/T2 analysis, each `modelfree` run its own
+              fits become one T1/T2 analysis, each `modelfree` and `methyl-t2` run
+              its own
 
 The spectrum and peak list the GUI reopens are the first series' reference spectrum and
 the peak list it was fitted against, unless given. Both are referenced by absolute path,
@@ -87,7 +88,7 @@ DYNAMIXS_RECORD_SUFFIX = '_dynamixs.json'
 
 # DynamiXs dialog stack indices (dynamixs_dialog: menu, t1t2, spectral, plotting,
 # integrated, methyl_t2).
-T1T2_PAGE, INTEGRATED_PAGE = 1, 4
+T1T2_PAGE, INTEGRATED_PAGE, METHYL_T2_PAGE = 1, 4, 5
 
 
 def find_dynamixs_records(run_dir):
@@ -202,11 +203,29 @@ def modelfree_analysis(record, name):
             'file_refs': {'integrated': refs}}
 
 
+def methyl_t2_analysis(record, name):
+    """A methyl T2 page analysis from one `dynamixs methyl-t2` record.
+
+    Its output folder is used as the page's own: the CLI writes the fit JSON
+    (`*_methylT2_fit_data.json`, which the page's viewers look for) and the results file
+    there, so both are the page's `last_json_folder` / `last_results_file`.
+    """
+    args, summary = record['args'], record['summary']
+    page = {'input_file': args['input'], 'output_dir': args['out'],
+            'last_json_folder': str(Path(summary['json_file']).parent),
+            'last_results_file': summary['results_file'],
+            'field_freq': args.get('field_freq'), 'bootstrap_iter': args.get('bootstrap')}
+    page = {k: v for k, v in page.items() if v is not None}
+    return {'state': _analysis_state(name, METHYL_T2_PAGE, 'methyl_t2', 'methyl_t2',
+                                     page, [record]),
+            'file_refs': {'methyl_t2': {'input_file': args['input']}}}
+
+
 def dynamixs_analyses(run_dir, staging):
     """{name: {state, file_refs}} for every DynamiXs analysis the run's records hold.
 
-    A model-free run is named after its prefix; two runs of one prefix are told apart by
-    where their records sit, as two series of one folder name are.
+    A model-free or methyl T2 run is named after its prefix; two runs of one prefix are
+    told apart by where their records sit, as two series of one folder name are.
 
     :return: (analyses, skipped) - `skipped` names the records no GUI page can hold
     """
@@ -216,13 +235,16 @@ def dynamixs_analyses(run_dir, staging):
     if t1t2:
         name = f'{Path(run_dir).name}_T1T2'
         analyses[name] = t1t2_analysis(t1t2, name, Path(staging) / name)
+    per_run = {'dynamixs modelfree': ('modelfree', modelfree_analysis),
+               'dynamixs methyl-t2': ('methylT2', methyl_t2_analysis)}
     for record in records:
-        if record['command'] == 'dynamixs modelfree':
-            name = f"{record['args']['prefix']}_modelfree"
+        if record['command'] in per_run:
+            suffix, build = per_run[record['command']]
+            name = f"{record['args']['prefix']}_{suffix}"
             if name in analyses:
                 place = Path(record['record_file']).parent.relative_to(run_dir)
-                name = '_'.join(place.parts) + '_modelfree'
-            analyses[name] = modelfree_analysis(record, name)
+                name = '_'.join(place.parts) + f'_{suffix}'
+            analyses[name] = build(record, name)
         elif record['command'] != 'dynamixs t1t2':
             skipped.append(f"{record['command']} ({record['args'].get('prefix')})")
     return analyses, skipped

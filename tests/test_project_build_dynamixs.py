@@ -23,8 +23,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 RUN = (Path(__file__).resolve().parents[2] / "data_test" / "data_JA1_relaxation"
        / "run_20260825_1405")
 NOE = RUN / "results" / "hetnoe"
+METHYL = (Path(__file__).resolve().parents[2] / "data_test" / "methyl" / "sampleNBD"
+          / "series_results_sampleNBD_20260818_124619" / "peak_intensity_matrix.csv")
 
-pytestmark = pytest.mark.skipif(not RUN.exists(), reason="data_test not present")
+pytestmark = pytest.mark.skipif(not (RUN.exists() and METHYL.exists()),
+                                reason="data_test not present")
 
 
 def _matrix(name):
@@ -49,6 +52,8 @@ def run_dir(tmp_path_factory):
                  "--f2-noe-sat", str(NOE / "f700_noe_sat.csv"),
                  "--f2-noe-unsat", str(NOE / "f700_noe_unsat.csv"), "--field2-freq", "700",
                  "--out", str(run / "modelfree" / "dual"), "--prefix", "dual"]) == 0
+    assert main(["dynamixs", "methyl-t2", "--input", str(METHYL),
+                 "--out", str(run / "fits" / "NBD_methyl"), "--prefix", "NBD"]) == 0
     # A second model-free record of the same prefix, elsewhere in the run: both must be
     # bundled, not the later one over the earlier.
     shutil.copytree(run / "modelfree" / "dual", run / "modelfree" / "dual_rerun")
@@ -95,6 +100,7 @@ def _inside(path, bundle):
 T1T2 = "JA1run0_T1T2"
 MODELFREE = "dual_modelfree"
 MODELFREE_RERUN = "modelfree_dual_rerun_modelfree"
+METHYL_T2 = "NBD_methylT2"
 
 
 def test_each_command_records_what_it_ran(run_dir):
@@ -106,7 +112,23 @@ def test_each_command_records_what_it_ran(run_dir):
 
 
 def test_the_four_fits_become_one_t1t2_analysis_and_modelfree_its_own(loaded):
-    assert set(loaded.dynamixs_analyses) == {T1T2, MODELFREE, MODELFREE_RERUN}
+    assert set(loaded.dynamixs_analyses) == {T1T2, MODELFREE, MODELFREE_RERUN, METHYL_T2}
+
+
+def test_the_methyl_t2_page_reopens_its_fits_from_the_bundle(app, loaded, bundle):
+    dialog = _dialog(app, loaded, METHYL_T2)
+    try:
+        page = dialog.methyl_t2_page
+        assert dialog.stack.currentWidget() is page
+        assert page.input_file == str(METHYL)
+        folder = Path(page.last_json_folder)
+        assert _inside(folder, bundle), folder
+        assert list(folder.glob("*_methylT2_fit_data.json"))
+        assert _inside(page.last_results_file, bundle)
+        assert Path(page.last_results_file).exists()
+        assert page.viewer_btn.isEnabled()
+    finally:
+        dialog.deleteLater()
 
 
 def test_the_t1t2_results_hold_one_entry_per_field(app, loaded):
