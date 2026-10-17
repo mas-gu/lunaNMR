@@ -1561,7 +1561,9 @@ class T1T2FittingPage(BasePage):
         by the wrong angle. Nothing is written unless every field to convert has one.
         """
         fields = []
-        for field in ('field1', 'field2'):
+        # Field 2 only while it is enabled: disabled, it keeps its results but its
+        # parameters cannot be edited, so it must neither convert nor ask for a carrier.
+        for field in ('field1', 'field2') if self.field2_enabled else ('field1',):
             data = self.session_results.get(field) or {}
             t1, t1rho = data.get('t1') or {}, data.get('t1rho') or {}
             if t1.get('results_file') and t1rho.get('results_file'):

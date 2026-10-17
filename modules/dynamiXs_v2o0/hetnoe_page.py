@@ -283,6 +283,12 @@ class HetNOEPage(BasePage):
 
     # ---------- run ----------
 
+    def _input_names(self) -> str:
+        """The current inputs, by file name, for a message."""
+        if self.mode_combo.currentIndex() == MATRIX_MODE:
+            return os.path.basename(self.matrix_file or '')
+        return " and ".join(os.path.basename(p or '') for p in (self.sat_file, self.unsat_file))
+
     def _inputs(self):
         """(sat intensities, unsat intensities, sat errors, unsat errors), or a reason
         the inputs are not ready."""
@@ -301,23 +307,31 @@ class HetNOEPage(BasePage):
         return sat_i, unsat_i, sat_e, unsat_e
 
     def _run(self):
-        inputs = self._inputs()
-        if isinstance(inputs, str):
-            show_error(self, "hetNOE", inputs)
-            return
         if not self.output_dir:
             show_error(self, "hetNOE", "Choose an output directory.")
             return
-        sat_i, unsat_i, sat_e, unsat_e = inputs
-        noe = calculate_hetnoe_from_intensities(
-            saturated_data=sat_i, unsaturated_data=unsat_i,
-            saturated_errors=sat_e, unsaturated_errors=unsat_e)
         prefix = self.prefix_edit.text().strip() or "field1"
-        os.makedirs(self.output_dir, exist_ok=True)
-        results = os.path.join(self.output_dir, f"{prefix}_hetnoe.csv")
-        write_hetnoe_csv(noe, results)
-        plot_hetnoe_vs_residue(noe, os.path.join(self.output_dir, f"{prefix}_hetnoe.pdf"),
-                               title=prefix)
+        try:
+            inputs = self._inputs()
+            if isinstance(inputs, str):          # inputs not chosen yet: say which
+                show_error(self, "hetNOE", inputs)
+                return
+            sat_i, unsat_i, sat_e, unsat_e = inputs
+            noe = calculate_hetnoe_from_intensities(
+                saturated_data=sat_i, unsaturated_data=unsat_i,
+                saturated_errors=sat_e, unsaturated_errors=unsat_e)
+            os.makedirs(self.output_dir, exist_ok=True)
+            results = os.path.join(self.output_dir, f"{prefix}_hetnoe.csv")
+            write_hetnoe_csv(noe, results)
+            plot_hetnoe_vs_residue(noe, os.path.join(self.output_dir, f"{prefix}_hetnoe.pdf"),
+                                   title=prefix)
+        except Exception as error:
+            # A file that is not an intensity table, a plane missing from the matrix, an
+            # unwritable folder: said, and the results shown stay the previous ones.
+            message = f"Could not compute hetNOE from {self._input_names()}: {error}"
+            self._log(message)
+            show_error(self, "hetNOE", message)
+            return
         self.last_results_file = results
         self._show(noe)
         self._log(f"hetNOE: {len(noe)} residues ({len(sat_i)} saturated, "
@@ -380,6 +394,15 @@ class HetNOEPage(BasePage):
         self.last_results_file = state.get('last_results_file')
         if self.last_results_file and os.path.exists(self.last_results_file):
             self._show(read_hetnoe_csv(self.last_results_file))
+
+    def set_file_refs(self, refs: dict):
+        """Apply saved input file references (file_refs() of a saved analysis)."""
+        if refs.get('matrix_file') and os.path.exists(refs['matrix_file']):
+            self._set_matrix(refs['matrix_file'])
+        if refs.get('sat_file'):
+            self._set_sat_file(refs['sat_file'])
+        if refs.get('unsat_file'):
+            self._set_unsat_file(refs['unsat_file'])
 
     def file_refs(self) -> dict:
         """The input files this analysis was computed from."""

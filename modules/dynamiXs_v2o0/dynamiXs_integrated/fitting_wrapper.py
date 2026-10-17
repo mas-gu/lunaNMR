@@ -86,8 +86,7 @@ def fit_relaxation_data(input_csv: str,
 
     # Create output file paths
     if output_prefix is None:
-        # A folder of this fit's own: a fixed path inside the module was shared by every
-        # unprefixed fit of one type, so two of them overwrote each other's results.
+        # A folder of this fit's own, so no two unprefixed fits of one type share a file.
         output_prefix = str(Path(tempfile.mkdtemp(prefix='dynamixs_fit_'))
                             / f"{experiment_type}_fit")
 

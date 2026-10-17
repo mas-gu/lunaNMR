@@ -135,8 +135,8 @@ def batch_results_from_dict(data: dict, deserialize_result=None):
 
 
 # A fit's surfaces are rebuilt from its parameters (`all_peaks`) and its region's ppm
-# axes; the region's intensity is re-sliced from the spectrum. Stored whole they made a
-# 7-point series ~80 MB, 99% of it these.
+# axes; the region's intensity is re-sliced from the spectrum. Stored whole they are 99%
+# of a series: ~80 MB for a 7-point titration, against ~3 MB without them.
 SURFACE_KEYS = ('fitted_2d_surface', 'individual_surfaces')
 
 # The DynamiXs pages whose results a project carries, each as results/<page>/.

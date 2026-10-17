@@ -1,12 +1,11 @@
 # ABOUTME: The CLI must never open a plot window, whatever matplotlib backend its process has.
-# ABOUTME: Run in-process after Qt set the backend, `dynamixs t1t2` blocked in plt.show() forever.
+# ABOUTME: In a process on the Qt backend, an unguarded fit call blocks in plt.show() forever.
 
 """
 The fitters show their figures when the backend is interactive. From a shell the backend
 is non-interactive and nothing shows; in a process that already uses Qt - a test session
 after a GUI test, or an in-process caller such as an MCP server - the backend is QtAgg,
-and `plt.show()` started an event loop that never returned. Measured: a test fixture
-calling `dynamixs t1t2` hung for 40 minutes.
+and `plt.show()` starts an event loop that never returns: the call hangs.
 """
 
 import os

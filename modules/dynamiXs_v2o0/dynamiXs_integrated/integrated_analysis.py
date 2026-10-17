@@ -175,9 +175,8 @@ class IntegratedAnalysisPipeline:
         self.field2_results = {}
         self.final_results = None
 
-        # This run's own folder for its intermediates - the output folder, else a fresh
-        # private one. A folder inside the module, shared by every run, let two runs on
-        # one prefix overwrite each other's spectral-density inputs mid-run.
+        # This run's own folder for everything it writes - the output folder, else a
+        # fresh private one - so concurrent runs on one prefix never share a file.
         if params.output_dir:
             self.work_dir = Path(params.output_dir)
             self.work_dir.mkdir(parents=True, exist_ok=True)
@@ -286,7 +285,7 @@ class IntegratedAnalysisPipeline:
             initial_t1=t1_initial_time,
             n_bootstrap=self.params.t1_bootstrap_iterations,
             error_method=self.params.error_method,
-            output_prefix=f"{self.params.output_prefix}_{field_label}_T1",
+            output_prefix=str(self.work_dir / f"{self.params.output_prefix}_{field_label}_T1"),
             json_folder=self.params.json_folder,
             field_name=field_label,
             field_freq=field_freq
@@ -317,7 +316,7 @@ class IntegratedAnalysisPipeline:
                 initial_t2=t2_initial_time,
                 n_bootstrap=self.params.t2_bootstrap_iterations,
                 error_method=self.params.error_method,
-                output_prefix=f"{self.params.output_prefix}_{field_label}_T2",
+                output_prefix=str(self.work_dir / f"{self.params.output_prefix}_{field_label}_T2"),
                 json_folder=self.params.json_folder,
                 field_name=field_label,
                 field_freq=field_freq
@@ -341,7 +340,7 @@ class IntegratedAnalysisPipeline:
         try:
             plot_hetnoe_vs_residue(
                 noe_params,
-                f"{self.params.output_prefix}_{field_label}_hetnoe.pdf",
+                str(self.work_dir / f"{self.params.output_prefix}_{field_label}_hetnoe.pdf"),
                 title=f"{field_label} ({field_freq} MHz)"
             )
         except Exception as exc:

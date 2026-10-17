@@ -560,6 +560,8 @@ class DynamiXsDialog(BaseDialog):
             self._set_integrated_file_refs(refs['integrated'])
         if 'methyl_t2' in refs:
             self._set_methyl_t2_file_refs(refs['methyl_t2'])
+        if 'hetnoe' in refs:
+            self.hetnoe_page.set_file_refs(refs['hetnoe'])
 
     # -------------------------------------------------------------------------
     # Named analyses (project save/reopen, parity with the Kd module)
@@ -599,7 +601,15 @@ class DynamiXsDialog(BaseDialog):
         meta = state.get('analysis_metadata') or {}
         series = str(meta.get('source_series') or '').strip()
         type_label = self._ANALYSIS_TYPE_LABELS.get(page, page)
-        base = f"{series}_{type_label}" if series else (self.current_analysis_name or type_label)
+        prefix = str((state.get(page) or {}).get('prefix') or '').strip()
+        if series:
+            base = f"{series}_{type_label}"
+        elif page == 'hetnoe' and prefix:
+            # One field per hetNOE analysis, with no series to name it: its results
+            # prefix tells one field's apart from another's.
+            base = f"{prefix}_{type_label}"
+        else:
+            base = self.current_analysis_name or type_label
         return base.strip('_ ') or type_label
 
     def ensure_current_saved(self):

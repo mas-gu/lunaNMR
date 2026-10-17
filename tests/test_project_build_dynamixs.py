@@ -116,8 +116,8 @@ DENSITY = "f600_spectralDensity"
 
 
 def test_modelfree_keeps_its_intermediates_in_its_own_folder(run_dir):
-    """They went to a folder inside the installed module, shared by every run: two
-    model-free runs on one prefix overwrote each other's density inputs mid-run."""
+    """A folder shared by every run would let two model-free runs on one prefix
+    overwrite each other's density inputs mid-run."""
     for field in ("field1", "field2"):
         assert (run_dir / "modelfree" / "dual" / f"dual_{field}_input.csv").exists()
 

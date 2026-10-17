@@ -1612,12 +1612,14 @@ def _run_dynamixs_t1rho(args):
             'output_prefix': os.path.join(args.out, f"{args.prefix}_{label}"),
             'results_txt_file': os.path.join(args.out, f"{args.prefix}_{label}_fit_results.txt"),
             # The label names the output - the results column and the JSON's
-            # experiment_type. As 'T2' for both, the T1 fit read as a T2 fit.
+            # experiment_type - so each fit reads as what it is: readers go by it.
             'experiment_type': label,
             'time_units': time_units,
             'error_method': args.error_method,
             'n_bootstrap': args.bootstrap,
-            'field_name': label,
+            # Names the fit JSON (<field_name>_<label>_fit_data.json): with the prefix
+            # in it, runs sharing an --out keep their own, as their results files do.
+            'field_name': f"{args.prefix}_{label}",
             'field_freq': args.field_freq,
             'json_folder': args.out,
         }
@@ -2402,8 +2404,8 @@ def main(argv=None):
     if validate:
         validate(parser, args)
     # Every subcommand is headless. The fitters show their figures on an interactive
-    # backend, so in a process that already uses Qt (after a GUI test, or an in-process
-    # caller) plt.show() started an event loop that never returned.
+    # backend, and in a process that already uses Qt (a GUI test session, an in-process
+    # caller) plt.show() starts an event loop that never returns.
     import matplotlib
     matplotlib.use('Agg')
     try:

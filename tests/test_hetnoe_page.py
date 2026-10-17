@@ -142,3 +142,43 @@ def test_a_project_saves_and_reopens_the_analysis(app, tmp_path):
         assert page.results_table.rowCount() > 0
     finally:
         second.deleteLater()
+
+
+def test_two_hetnoe_analyses_are_saved_under_their_own_names(app, tmp_path):
+    """Without a source series, each is named by its results prefix - one field's
+    analysis must not replace another's."""
+    from lunaNMR.gui.dialogs.dynamixs_dialog import DynamiXsDialog
+    window = types.SimpleNamespace()
+    dialog = DynamiXsDialog(parent=None, main_window=window)
+    try:
+        dialog.show_hetnoe()
+        names = set()
+        for prefix in ("f600", "f700"):
+            _run_matrix(dialog.hetnoe_page, tmp_path / prefix, prefix)
+            names.add(dialog.ensure_current_saved())
+        assert names == {"f600_hetNOE", "f700_hetNOE"}
+        assert set(window.dynamixs_analyses) == names
+    finally:
+        dialog.deleteLater()
+
+
+def test_an_unreadable_input_is_reported_not_raised(dialog, tmp_path, monkeypatch):
+    import hetnoe_page
+    errors = []
+    monkeypatch.setattr(hetnoe_page, "show_error", lambda parent, title, msg: errors.append(msg))
+    bad = tmp_path / "bad.csv"
+    bad.write_text("not,an\nintensity file\n")
+    page = dialog.hetnoe_page
+    page.mode_combo.setCurrentIndex(1)
+    page._set_sat_file(str(bad))
+    page._set_unsat_file(str(UNSAT))
+    page.output_dir = str(tmp_path)
+    page._run()
+    assert errors and "bad.csv" in errors[0]
+    assert page.last_results_file is None
+
+
+def test_saved_file_references_are_restored(dialog):
+    dialog.set_file_refs({"hetnoe": {"sat_file": str(SAT), "unsat_file": str(UNSAT)}})
+    assert dialog.hetnoe_page.sat_file == str(SAT)
+    assert dialog.hetnoe_page.unsat_file == str(UNSAT)

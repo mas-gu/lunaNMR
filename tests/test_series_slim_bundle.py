@@ -2,7 +2,7 @@
 # ABOUTME: Real DNAJA1 series; both viewers that draw a fit must get the arrays back.
 
 """
-batch_results.json once carried every fit's surfaces and region grids whole: ~80 MB for
+Stored whole, every fit's surfaces and region grids make batch_results.json ~80 MB for
 a 7-point titration, in the run folder and again in every bundle. The parameters
 (`all_peaks`) and the region's own ppm axes are enough to rebuild them from the
 spectrum, as single-spectrum fit results already are. What matters is that the views
