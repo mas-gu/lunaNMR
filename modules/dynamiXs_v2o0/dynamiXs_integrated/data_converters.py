@@ -169,40 +169,82 @@ def _residue_number(assignment):
     return int(m.group()) if m else None
 
 
-def plot_hetnoe_vs_residue(noe_values, output_pdf, title=None):
-    """QC plot of hetNOE (I_sat/I_unsat) vs residue number, one point per residue.
+def in_sequence_order(noe_values):
+    """(residue, record) pairs ordered by sequence number; residues without a parseable
+    number follow, alphabetically."""
+    return sorted(noe_values.items(),
+                  key=lambda kv: (_residue_number(kv[0]) is None,
+                                  _residue_number(kv[0]) if _residue_number(kv[0]) is not None else 0,
+                                  str(kv[0])))
+
+
+def draw_hetnoe_vs_residue(ax, noe_values, title=None):
+    """Draw hetNOE (I_sat/I_unsat) vs residue number on `ax`, one point per residue.
 
     `noe_values` is the dict returned by calculate_hetnoe_from_intensities
     ({residue: {'value', 'error'}}). Residues are ordered by sequence number; any
-    without a parseable number are appended alphabetically. Writes nothing (no file,
-    no error) when there is nothing to plot.
+    without a parseable number are appended alphabetically. Shared by the CLI's PDF and
+    the GUI page's live plot, so the two cannot drift apart.
     """
-    if not noe_values:
-        return
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
-    items = sorted(noe_values.items(),
-                   key=lambda kv: (_residue_number(kv[0]) is None,
-                                   _residue_number(kv[0]) if _residue_number(kv[0]) is not None else 0,
-                                   str(kv[0])))
+    items = in_sequence_order(noe_values)
     labels = [k for k, _ in items]
     x = [_residue_number(k) if _residue_number(k) is not None else i
          for i, k in enumerate(labels)]
     y = [v['value'] for _, v in items]
     yerr = [v.get('error', 0.0) for _, v in items]
 
-    fig, ax = plt.subplots(figsize=(max(6, len(labels) * 0.18), 4))
     ax.errorbar(x, y, yerr=yerr, fmt='o', ms=4, capsize=2, color='#1f77b4')
     ax.axhline(0.8, color='0.6', ls='--', lw=0.8, label='rigid ≈ 0.8')
     ax.set_xlabel('Residue')
     ax.set_ylabel('hetNOE  (I$_{sat}$/I$_{unsat}$)')
     ax.set_title(f'hetNOE — {title}' if title else 'hetNOE')
     ax.legend(loc='best', fontsize=8)
+
+
+def plot_hetnoe_vs_residue(noe_values, output_pdf, title=None):
+    """QC plot of hetNOE vs residue number, written to `output_pdf`.
+
+    Writes nothing (no file, no error) when there is nothing to plot. Drawn on a bare
+    Figure, never through pyplot: the GUI calls this in-process, and selecting a backend
+    here would switch every other plot window's.
+    """
+    if not noe_values:
+        return
+    from matplotlib.figure import Figure
+    fig = Figure(figsize=(max(6, len(noe_values) * 0.18), 4))
+    draw_hetnoe_vs_residue(fig.add_subplot(), noe_values, title)
     fig.tight_layout()
     fig.savefig(output_pdf)
-    plt.close(fig)
+
+
+def write_hetnoe_csv(noe_values, path):
+    """`Residue,hetNOE,hetNOEerr` - the CLI's and the GUI page's results file."""
+    import csv
+    with open(path, 'w', newline='') as fh:
+        writer = csv.writer(fh)
+        writer.writerow(['Residue', 'hetNOE', 'hetNOEerr'])
+        for res, rec in noe_values.items():
+            writer.writerow([res, rec['value'], rec['error']])
+
+
+def read_hetnoe_csv(path):
+    """The {residue: {'value', 'error'}} a write_hetnoe_csv file holds."""
+    import csv
+    with open(path, newline='') as fh:
+        return {row['Residue']: {'value': float(row['hetNOE']), 'error': float(row['hetNOEerr'])}
+                for row in csv.DictReader(fh)}
+
+
+def intensities_from_matrix(matrix_csv, column):
+    """{residue: intensity} for one point column of a series intensity matrix.
+
+    An empty cell is a point the series did not measure (a fit on a bound); it is left
+    out, never read as zero.
+    """
+    import pandas as pd
+    df = pd.read_csv(matrix_csv, dtype={'Assignment': str})
+    values = df.set_index('Assignment')[column].dropna()
+    return {str(res): float(v) for res, v in values.items()}
 
 
 def parse_intensity_csv(csv_file: str) -> Tuple[Dict[str, float], Optional[Dict[str, float]]]:

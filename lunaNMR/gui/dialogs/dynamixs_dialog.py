@@ -122,11 +122,15 @@ class DynamiXsDialog(BaseDialog):
         from methyl_t2_page import MethylT2FittingPage
         self.methyl_t2_page = MethylT2FittingPage(self)
 
+        from hetnoe_page import HetNOEPage
+        self.hetnoe_page = HetNOEPage(self)
+
         self.stack.addWidget(self.t1t2_page)
         self.stack.addWidget(self.spectral_page)
         self.stack.addWidget(self.plotting_page)
         self.stack.addWidget(self.integrated_page)
         self.stack.addWidget(self.methyl_t2_page)
+        self.stack.addWidget(self.hetnoe_page)
 
         layout.addWidget(self.stack)
         self.setLayout(layout)
@@ -196,6 +200,15 @@ class DynamiXsDialog(BaseDialog):
         btn_methyl_t2.setFont(get_font(18, bold=True))
         options_layout.addWidget(btn_methyl_t2, alignment=Qt.AlignCenter)
 
+        # Heteronuclear NOE button
+        btn_hetnoe = create_primary_button(
+            "hetNOE Analysis",
+            clicked=self.show_hetnoe,
+            width=200
+        )
+        btn_hetnoe.setFont(get_font(18, bold=True))
+        options_layout.addWidget(btn_hetnoe, alignment=Qt.AlignCenter)
+
         # Spectral Density button
         btn_spectral = create_primary_button(
             "Spectral Density Analysis",
@@ -264,6 +277,10 @@ class DynamiXsDialog(BaseDialog):
     def show_methyl_t2_fitting(self):
         """Show methyl bi-exp T2 fitting page."""
         self.stack.setCurrentWidget(self.methyl_t2_page)
+
+    def show_hetnoe(self):
+        """Show the heteronuclear NOE page."""
+        self.stack.setCurrentWidget(self.hetnoe_page)
 
     def show_spectral_density(self):
         """Show spectral density analysis page."""
@@ -364,6 +381,8 @@ class DynamiXsDialog(BaseDialog):
             metadata['analysis_type'] = 'model_free'
         elif current_widget == self.spectral_page:
             metadata['analysis_type'] = 'spectral_density'
+        elif current_widget == self.hetnoe_page:
+            metadata['analysis_type'] = 'hetnoe'
 
         return metadata
 
@@ -480,6 +499,7 @@ class DynamiXsDialog(BaseDialog):
             'spectral': self._get_spectral_state(),
             'integrated': self._get_integrated_state(),
             'methyl_t2': self._get_methyl_t2_state(),
+            'hetnoe': self.hetnoe_page.get_session_state(),
         }
 
     def set_state(self, state: Dict[str, Any]):
@@ -507,6 +527,8 @@ class DynamiXsDialog(BaseDialog):
             self._set_integrated_state(state['integrated'])
         if 'methyl_t2' in state:
             self._set_methyl_t2_state(state['methyl_t2'])
+        if 'hetnoe' in state:
+            self.hetnoe_page.restore_session_state(state['hetnoe'])
         if 'active_page' in state:
             self.stack.setCurrentIndex(state['active_page'])
 
@@ -521,6 +543,7 @@ class DynamiXsDialog(BaseDialog):
             'spectral': self._get_spectral_file_refs(),
             'integrated': self._get_integrated_file_refs(),
             'methyl_t2': self._get_methyl_t2_file_refs(),
+            'hetnoe': self.hetnoe_page.file_refs(),
         }
 
     def set_file_refs(self, refs: Dict[str, Any]):
@@ -544,7 +567,7 @@ class DynamiXsDialog(BaseDialog):
 
     _ANALYSIS_TYPE_LABELS = {
         't1t2': 'T1T2', 'methyl_t2': 'methylT2',
-        'spectral': 'spectralDensity', 'integrated': 'modelFree',
+        'spectral': 'spectralDensity', 'integrated': 'modelFree', 'hetnoe': 'hetNOE',
     }
 
     def _active_page_key(self) -> Optional[str]:
@@ -552,7 +575,7 @@ class DynamiXsDialog(BaseDialog):
         w = self.stack.currentWidget()
         return {self.t1t2_page: 't1t2', self.spectral_page: 'spectral',
                 self.integrated_page: 'integrated',
-                self.methyl_t2_page: 'methyl_t2'}.get(w)
+                self.methyl_t2_page: 'methyl_t2', self.hetnoe_page: 'hetnoe'}.get(w)
 
     @staticmethod
     def _page_has_results(state: Dict[str, Any], page: Optional[str]) -> bool:
@@ -560,7 +583,7 @@ class DynamiXsDialog(BaseDialog):
         ps = (state.get(page) or {}) if page else {}
         if page == 't1t2':
             return bool(ps.get('fitted_experiments') or ps.get('output_dir'))
-        if page == 'methyl_t2':
+        if page in ('methyl_t2', 'hetnoe'):
             return bool(ps.get('last_results_file'))
         if page in ('spectral', 'integrated'):
             sr = ps.get('session_results') or {}

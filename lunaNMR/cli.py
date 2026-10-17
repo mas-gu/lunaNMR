@@ -1526,13 +1526,13 @@ def _run_export_kd(args):
 
 def _run_dynamixs_hetnoe(args):
     """Compute heteronuclear NOE (I_sat / I_unsat) per residue, as the GUI pipeline does."""
-    import csv
     if args.dry_run:
         return _dry_run(args, [('sat', args.sat), ('unsat', args.unsat)], {'output_dir': args.out})
     _add_modules_path('dynamiXs_v2o0')
     from dynamiXs_integrated.data_converters import (parse_intensity_csv,
                                                      calculate_hetnoe_from_intensities,
-                                                     plot_hetnoe_vs_residue)
+                                                     plot_hetnoe_vs_residue,
+                                                     write_hetnoe_csv)
     for label, path in (('--sat', args.sat), ('--unsat', args.unsat)):
         if not os.path.isfile(path):
             raise FileNotFoundError(f"{label} file not found: {path}")
@@ -1543,11 +1543,7 @@ def _run_dynamixs_hetnoe(args):
                                                 saturated_errors=sat_e, unsaturated_errors=unsat_e)
     os.makedirs(args.out, exist_ok=True)
     out_csv = os.path.join(args.out, f"{args.prefix}_hetnoe.csv")
-    with open(out_csv, 'w', newline='') as fh:
-        writer = csv.writer(fh)
-        writer.writerow(['Residue', 'hetNOE', 'hetNOEerr'])
-        for res, rec in noe.items():
-            writer.writerow([res, rec['value'], rec['error']])
+    write_hetnoe_csv(noe, out_csv)
     out_pdf = os.path.join(args.out, f"{args.prefix}_hetnoe.pdf")
     with _engine_stdout(args):
         plot_hetnoe_vs_residue(noe, out_pdf, title=args.prefix)

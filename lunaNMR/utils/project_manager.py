@@ -138,6 +138,9 @@ def batch_results_from_dict(data: dict, deserialize_result=None):
 # axes; the region's intensity is re-sliced from the spectrum. Stored whole they made a
 # 7-point series ~80 MB, 99% of it these.
 SURFACE_KEYS = ('fitted_2d_surface', 'individual_surfaces')
+
+# The DynamiXs pages whose results a project carries, each as results/<page>/.
+DYNAMIXS_RESULT_PAGES = ('integrated', 't1t2', 'spectral', 'methyl_t2', 'hetnoe')
 REGION_AXES = ('f1_ppm', 'f2_ppm')
 
 
@@ -1216,9 +1219,9 @@ class ProjectManager:
             return
         patterns = ['_fit_results', '_basic', '_detailed', '_results', '_T2_from_T1rho',
                     '_spectral_density', '_series_tidy', '_data', '_intensities',
-                    'hetNOE_ratios', '_methylT2', '_methyl_t2']
+                    'hetNOE_ratios', '_methylT2', '_methyl_t2', '_hetnoe']
         dest = Path(dest_results_dir)
-        for page in ('integrated', 't1t2', 'spectral', 'methyl_t2'):
+        for page in DYNAMIXS_RESULT_PAGES:
             page_state = state.get(page) or {}
             out = page_state.get('output_dir')
             if not out or not Path(out).is_dir():
@@ -1244,7 +1247,7 @@ class ProjectManager:
         if not isinstance(state, dict):
             return
         results_dir = Path(results_dir)
-        for page in ('integrated', 't1t2', 'spectral', 'methyl_t2'):
+        for page in DYNAMIXS_RESULT_PAGES:
             page_dir = results_dir / page
             ps = state.get(page)
             if not page_dir.is_dir() or not isinstance(ps, dict):
