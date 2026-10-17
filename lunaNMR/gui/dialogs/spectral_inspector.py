@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 
 from lunaNMR.gui.base.base_window import BaseWindow
+from lunaNMR.gui.components.signed_contours import draw_signed_contours
 from lunaNMR.gui.styles.design_system import (
     PRIMARY_TEXT, FRAME_BG_COLOR,
     SPACING_XS, SPACING_SM, SPACING_MD,
@@ -1178,9 +1179,9 @@ class InspectorCanvas(QWidget):
                 if not levels:
                     continue
 
-                ax.contour(ppm_x, ppm_y, data,
-                           levels=levels, colors=spec.color,
-                           linewidths=1.0, alpha=0.8)
+                # Both signs in the spectrum colour, negatives dashed
+                draw_signed_contours(ax, ppm_x, ppm_y, data, levels,
+                                     colors=spec.color, linewidths=1.0, alpha=0.8)
 
                 if self._peaks_visible and spec.peaks:
                     xs = [p.ppm_x for p in spec.peaks]

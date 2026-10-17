@@ -126,6 +126,10 @@ ERROR_RED = "#E8554E"  # Errors (matches destructive buttons)
 INFO_BLUE = "#5B9EE5"  # Informational messages (matches primary buttons)
 """Info color. Use for informational messages and tips."""
 
+NEGATIVE_CONTOUR_COLOR = "#E8554E"  # Negative peaks in a colourmapped spectrum
+"""Negative-peak contour color, beside a colourmap (viridis) used for the positive peaks.
+Views that draw a spectrum in one colour keep that colour and rely on the dashing."""
+
 
 # ============================================================================
 # BORDER & SEPARATOR COLORS

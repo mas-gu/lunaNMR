@@ -18,13 +18,14 @@ from PySide6.QtCore import Qt, Signal
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
 from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
+from lunaNMR.gui.components.signed_contours import draw_signed_contours
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT,
     PRIMARY_BUTTON_BG, SUCCESS_GREEN, ERROR_RED,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
-    FRAME_BG_COLOR
+    FRAME_BG_COLOR, NEGATIVE_CONTOUR_COLOR
 )
 
 logger = logging.getLogger(__name__)
@@ -688,10 +689,10 @@ class SpectrumViewerDialog(BaseDialog):
 
             level_values = np.geomspace(min_intensity, max_intensity * 0.8, num_levels)
 
-            # Plot contours
-            self.contour_widget.axes.contour(
-                ppm_x, ppm_y, data,
-                levels=level_values,
+            # Plot contours of both signs; negatives dashed in their own colour
+            draw_signed_contours(
+                self.contour_widget.axes, ppm_x, ppm_y, data, level_values,
+                negative_colors=NEGATIVE_CONTOUR_COLOR,
                 cmap=cmap,
                 linewidths=0.5
             )

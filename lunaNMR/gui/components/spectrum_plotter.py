@@ -27,10 +27,12 @@ from PySide6.QtCore import Signal
 
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
 from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
+from lunaNMR.gui.components.signed_contours import draw_signed_contours
 from lunaNMR.gui.styles.design_system import (
     SUCCESS_GREEN,
     ERROR_RED,
-    WARNING_ORANGE
+    WARNING_ORANGE,
+    NEGATIVE_CONTOUR_COLOR
 )
 
 
@@ -157,10 +159,10 @@ class SpectrumPlotter(MatplotlibWidget):
         # Determine contour levels from GUI controls or defaults
         levels = self._calculate_contour_levels(integrator, data_abs, kwargs)
 
-        # Create contour plot
-        self.contour_plot = self.ax.contour(
-            X, Y, data_abs,
-            levels=levels,
+        # Positive peaks on the colourmap, negative ones dashed in their own colour
+        self.contour_plot, _ = draw_signed_contours(
+            self.ax, X, Y, integrator.nmr_data, levels,
+            negative_colors=NEGATIVE_CONTOUR_COLOR,
             cmap=self.settings['colormap'],
             linewidths=self.settings['line_width'],
             alpha=self.settings['alpha']

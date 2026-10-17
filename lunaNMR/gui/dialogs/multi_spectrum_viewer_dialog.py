@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor, QFont, QIcon
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.components.peak_navigator_table import PeakNavigatorTable
+from lunaNMR.gui.components.signed_contours import draw_signed_contours
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, FONT_SIZE_BODY, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT,
@@ -1705,10 +1706,9 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 # Use geomspace for better contour distribution
                 level_values = np.geomspace(min_intensity, max_intensity * 0.8, num_levels)
 
-                # Plot contours with spectrum color
-                self.plot_widget.axes.contour(
-                    ppm_x, ppm_y, data,
-                    levels=level_values,
+                # Plot contours of both signs in the spectrum color, negatives dashed
+                draw_signed_contours(
+                    self.plot_widget.axes, ppm_x, ppm_y, data, level_values,
                     colors=spec['color'],
                     linewidths=1.0,
                     alpha=0.8
