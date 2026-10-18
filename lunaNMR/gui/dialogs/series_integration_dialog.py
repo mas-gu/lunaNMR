@@ -307,7 +307,7 @@ class SeriesIntegrationDialog(BaseDialog):
         self.independent_radio.setToolTip(
             "Runs the exact same process as GUI 'Fit Spectrum' for each spectrum:\n"
             "- Uses original reference peaks for detection (no position drift)\n"
-            "- Full PASS 1 learning + adaptive optimization\n"
+            "- Full PASS 1 learning\n"
             "- Complete fitting pipeline per spectrum\n"
             "Best for maximum accuracy when spectra may differ significantly.\n"
             "Not available for a titration, which tracks peaks by cascade."
@@ -980,6 +980,7 @@ class SeriesIntegrationDialog(BaseDialog):
         self.tracking_statement = self._tracking_statement(peak_source_mode)
         self._log(self.tracking_statement)
         self._log("Noise Threshold does not apply to a series: series detection runs at its own S/N threshold")
+        self._log("Adaptive radius search: off for a series")
 
         # Create worker and thread
         self.thread = QThread()
@@ -1468,6 +1469,10 @@ class SeriesIntegrationDialog(BaseDialog):
                 'centroid_noise_multiplier': getattr(self.main_window, 'centroid_noise_multiplier', 2.0),
                 'use_ps2d_multi_peak': getattr(self.main_window, 'use_ps2d_multi_peak', True),
                 'use_ps2d_linewidth_reuse': getattr(self.main_window, 'use_ps2d_linewidth_reuse', False),
+                # The fitting-window grid search is never run on a series: on real
+                # titrations it chose a window that cuts the peak at half height
+                'use_adaptive_optimization': False,
+                'auto_add_dummy_peaks': getattr(self.main_window, 'auto_add_dummy_peaks', True),
                 # ML training data collection
                 'collect_training_data': self._get_ml_collect_enabled(),
                 # Custom linewidth parameters (only if enabled)

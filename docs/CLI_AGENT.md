@@ -229,6 +229,7 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 - **CSP needs a fresh series run.** Older series output rounded positions to 0.1 ppm; CSP needs 4-decimal precision. Re-run `series` before `kd` CSP. Intensity fits work on existing data.
 - **Kd is always bounded ≥ 0** internally (unbounded lands on a degenerate negative-Kd minimum). Don't post-process assuming otherwise.
 - **Non-finite fit values serialize to JSON `null`.** A degenerate Kd fit (e.g. only 3 points) is `success=true` with finite `Kd` but `Kd_err`/`r_squared` = `null`. Treat `Kd`/`Kd_err`/`r_squared` as possibly `None` — legitimate, not a failure.
+- **`series` adds `dummy_NNN` peaks by default.** The first spectrum's detection adds unmatched peaks near listed ones; they are fitted at every point and appear in the matrices and the tidy CSV. `--params` with `{"gui_params": {"auto_add_dummy_peaks": false}}` turns it off.
 - **Search-window default is 0.070 ppm** (1H and 15N). Don't widen 15N for low-S/N spectra (e.g. saturated hetNOE) — wide windows fit peaks to noise → Height 0 → NOE≈0 → residues silently dropped.
 - **`--method` field prefix follows `--dual`.** In `modelfree` field count derives from `--dual`; you only pick the `087` vs `jwh` variant (default `087`). A mismatched `single_*`/`dual_*` prefix is ignored.
 - **`--intensity-scale` scales height/volume only** (per-point scan-count correction), never positions/CSP; a uniform scale cancels in the I/I₀ ratio.

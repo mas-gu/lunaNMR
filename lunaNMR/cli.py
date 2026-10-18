@@ -804,6 +804,9 @@ def _default_series_params(parallel=False):
             # The fitting-window grid search; off unless asked for (it chose the
             # smallest window on every real titration and broke CSP positions)
             'use_adaptive_optimization': False,
+            # Unmatched peaks near listed ones, added as dummy_ peaks on the first
+            # spectrum and fitted at every point
+            'auto_add_dummy_peaks': True,
             'collect_training_data': False,
             'height_threshold': 0.1,
             'distance_factor': 2.0,

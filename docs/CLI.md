@@ -277,6 +277,10 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   search (1.0 / 1.5 / 2.0 x the median linewidth). It is **off by default**: on the DNAJA1
   and ERDJ6 titrations it chose 1.0x both times, a window that cuts the peak at half height,
   and ERDJ6's CSP Kd went from 282 µM to pinned at its 1500 µM bound.
+- `"gui_params": {"auto_add_dummy_peaks": false}` stops the first spectrum's detection from
+  adding the unmatched peaks it finds near listed ones as `dummy_NNN` peaks. It is **on by
+  default**; those dummies are fitted at every point and appear in the matrices and the tidy
+  CSV. The series dialog takes it from the Expert "Auto-add nearby unmatched peaks" box.
 - Writes `peak_intensity_matrix.csv`, `_volume_matrix`, `comprehensive_peak_tracking.csv`,
   `series_analysis_tidy.csv`, `series_metadata.json`, per-spectrum CSVs.
   `peak_detection_matrix.csv` (and each `{pt}_Detected` tracking column) is 1 where the fit
