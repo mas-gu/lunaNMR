@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Optional
 
 # Independent imports - no GUI dependencies
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
+from lunaNMR.core.parallel_voigt_processor import ParallelVoigtProcessor
 from lunaNMR.core.ps2d_config import get_ps2d_config, restore_base_ps2d_config, set_ps2d_config
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
@@ -1673,28 +1674,12 @@ class MultiSpectrumProcessor:
                 if result_data.get('success', False):
                     integration_results = result_data.get('integration_results', [])
                     for peak in integration_results:
-                        # CRITICAL FIX: Convert both sides to string to avoid type mismatch (int vs str)
-                        # Bug: peak.get('Assignment') might be "142" (str) while peak_row['Assignment'] is 142 (int)
-                        # Additional fix: int64 converts to "142.0" with str(), need to handle properly
-                        peak_assignment_raw = peak.get('Assignment', '')
-                        row_assignment_raw = peak_row['Assignment']
-
-                        # Normalize both to strings, handling int/float conversions
-                        try:
-                            # Try to convert to int first to strip any .0 suffix
-                            peak_assignment = str(int(float(peak_assignment_raw)))
-                        except (ValueError, TypeError):
-                            # If conversion fails, use string directly
-                            peak_assignment = str(peak_assignment_raw)
-
-                        try:
-                            # Same for row assignment
-                            row_assignment = str(int(float(row_assignment_raw)))
-                        except (ValueError, TypeError):
-                            row_assignment = str(row_assignment_raw)
-
-                        # DEBUG: Print matching attempt
-                        # print(f"      Matching: peak '{peak_assignment}' vs row '{row_assignment}' -> {peak_assignment == row_assignment}")
+                        # Both sides canonicalised: a peak list read as numbers holds 142
+                        # where a result holds '142' or '142.0', while 45.1 and 45.2 stay apart
+                        peak_assignment = ParallelVoigtProcessor._normalize_assignment(
+                            peak.get('Assignment', ''))
+                        row_assignment = ParallelVoigtProcessor._normalize_assignment(
+                            peak_row['Assignment'])
 
                         if peak_assignment == row_assignment:
                             peak_row[f'{spectrum_key}_Detected'] = True
