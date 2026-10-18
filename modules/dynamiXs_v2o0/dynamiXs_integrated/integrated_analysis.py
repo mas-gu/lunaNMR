@@ -295,7 +295,9 @@ class IntegratedAnalysisPipeline:
             error_method=self.params.error_method,
             output_prefix=str(self.work_dir / f"{self.params.output_prefix}_{field_label}_T1"),
             json_folder=self.params.json_folder,
-            field_name=field_label,
+            # The fit JSON is <prefix>_<field>_T1_fit_data.json, as every file of the
+            # run starts with its prefix: runs sharing a JSON folder keep their own.
+            field_name=f"{self.params.output_prefix}_{field_label}",
             field_freq=field_freq
         )
         self.log_progress(f"  │  ✓ {len(t1_params)} residues fitted")
@@ -326,7 +328,7 @@ class IntegratedAnalysisPipeline:
                 error_method=self.params.error_method,
                 output_prefix=str(self.work_dir / f"{self.params.output_prefix}_{field_label}_T2"),
                 json_folder=self.params.json_folder,
-                field_name=field_label,
+                field_name=f"{self.params.output_prefix}_{field_label}",
                 field_freq=field_freq
             )
             self.log_progress(f"  │  ✓ {len(t2_params)} residues fitted")

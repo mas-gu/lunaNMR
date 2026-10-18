@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QVBoxLayout, QLabel, QFileDialog, QDoubleSpinBox, QSpinBox,
     QComboBox, QFormLayout, QProgressBar, QPlainTextEdit, QScrollArea, QWidget,
-    QListWidget, QListWidgetItem, QMessageBox, QInputDialog,
+    QListWidget, QListWidgetItem, QMessageBox,
 )
 
 from constants import (
@@ -21,6 +21,7 @@ from gui_components import (
     create_primary_button, create_secondary_button, create_label,
     create_header_label, create_v_layout, create_h_layout,
     get_font, show_info, show_error, show_warning, open_directory_dialog,
+    prompt_name_collision, unique_name,
 )
 
 from dynamiXs_gui import BasePage, DropTargetLabel
@@ -681,13 +682,7 @@ class KdTitrationPage(BasePage):
 
     def _unique_analysis_name(self, base, existing):
         """A name not already in `existing`; suffix _2, _3, … on collision."""
-        base = base or "analysis"
-        if base not in existing:
-            return base
-        i = 2
-        while f"{base}_{i}" in existing:
-            i += 1
-        return f"{base}_{i}"
+        return unique_name(base, existing)
 
     def _store_current_analysis(self, overwrite=False, name=None):
         """Snapshot the current fit + params into main_window.kd_analyses. `name` stores
@@ -742,39 +737,8 @@ class KdTitrationPage(BasePage):
         """A Kd analysis named `base` already exists. Ask whether to replace it or save
         under a different name. Returns the name to store under (the base to replace, or
         a new name), or None to cancel."""
-        box = QMessageBox(self)
-        box.setWindowTitle("Analysis already exists")
-        box.setText(f"A saved Kd analysis named '{base}' already exists in this project.")
-        box.setInformativeText("Replace it, or save under a different name?")
-        replace_btn = box.addButton("Replace", QMessageBox.AcceptRole)
-        rename_btn = box.addButton("Save as…", QMessageBox.ActionRole)
-        box.addButton(QMessageBox.Cancel)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is replace_btn:
-            return base
-        if clicked is rename_btn:
-            return self._prompt_new_analysis_name(base)
-        return None
-
-    def _prompt_new_analysis_name(self, base):
-        """Ask for a new analysis name, pre-filled with a collision-free suggestion.
-        Re-prompts on a blank name and confirms before overwriting an existing one.
-        Returns the chosen name, or None if the user cancels."""
         existing = getattr(self._lunanmr_main_window(), 'kd_analyses', None) or {}
-        suggestion = self._unique_analysis_name(base, existing)
-        while True:
-            name, ok = QInputDialog.getText(
-                self, "Save analysis as", "Name for this Kd analysis:", text=suggestion)
-            if not ok:
-                return None
-            name = name.strip()
-            if not name:
-                continue
-            if name in existing and QMessageBox.question(
-                    self, "Name in use", f"'{name}' also exists. Replace it?") != QMessageBox.Yes:
-                continue
-            return name
+        return prompt_name_collision(self, base, existing, "Kd analysis")
 
     def ensure_current_saved(self):
         """Auto-capture the fit currently on screen under its source-series name

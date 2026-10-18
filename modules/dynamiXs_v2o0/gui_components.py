@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QLineEdit, QTextEdit, QPlainTextEdit,
     QGroupBox, QScrollArea, QCheckBox, QRadioButton, QButtonGroup,
     QComboBox, QSpinBox, QDoubleSpinBox, QSlider, QProgressBar,
-    QFileDialog, QMessageBox, QApplication, QSizePolicy
+    QFileDialog, QMessageBox, QApplication, QSizePolicy, QInputDialog
 )
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QFont, QFontDatabase
@@ -867,6 +867,60 @@ def ask_yes_no(parent: QWidget, title: str, message: str) -> bool:
         QMessageBox.Yes | QMessageBox.No
     )
     return result == QMessageBox.Yes
+
+
+# =============================================================================
+# NAMING A SAVED ANALYSIS
+# =============================================================================
+
+def unique_name(base: str, existing) -> str:
+    """`base`, or the first of base_2, base_3, ... not already in `existing`."""
+    base = base or "analysis"
+    if base not in existing:
+        return base
+    i = 2
+    while f"{base}_{i}" in existing:
+        i += 1
+    return f"{base}_{i}"
+
+
+def prompt_name_collision(parent: QWidget, base: str, existing, kind: str) -> Optional[str]:
+    """A saved `kind` (e.g. "Kd analysis") named `base` already exists: ask whether to
+    replace it or save under a different name. Returns the name to store under (the base
+    to replace, or a new name), or None to cancel."""
+    box = QMessageBox(parent)
+    box.setWindowTitle("Analysis already exists")
+    box.setText(f"A saved {kind} named '{base}' already exists in this project.")
+    box.setInformativeText("Replace it, or save under a different name?")
+    replace_btn = box.addButton("Replace", QMessageBox.AcceptRole)
+    rename_btn = box.addButton("Save as…", QMessageBox.ActionRole)
+    box.addButton(QMessageBox.Cancel)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is replace_btn:
+        return base
+    if clicked is rename_btn:
+        return prompt_new_name(parent, base, existing, kind)
+    return None
+
+
+def prompt_new_name(parent: QWidget, base: str, existing, kind: str) -> Optional[str]:
+    """Ask for a name for a `kind`, pre-filled with a collision-free suggestion.
+    Re-prompts on a blank name and confirms before overwriting an existing one.
+    Returns the chosen name, or None if the user cancels."""
+    suggestion = unique_name(base, existing)
+    while True:
+        name, ok = QInputDialog.getText(
+            parent, "Save analysis as", f"Name for this {kind}:", text=suggestion)
+        if not ok:
+            return None
+        name = name.strip()
+        if not name:
+            continue
+        if name in existing and QMessageBox.question(
+                parent, "Name in use", f"'{name}' also exists. Replace it?") != QMessageBox.Yes:
+            continue
+        return name
 
 
 def open_file_dialog(

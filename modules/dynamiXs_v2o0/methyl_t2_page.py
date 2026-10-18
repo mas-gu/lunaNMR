@@ -8,7 +8,7 @@ import pandas as pd
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QFileDialog, QDoubleSpinBox, QSpinBox,
-    QComboBox, QProgressBar, QPlainTextEdit,
+    QComboBox, QProgressBar, QPlainTextEdit, QLineEdit,
 )
 
 from constants import (
@@ -26,7 +26,7 @@ from gui_components import (
 
 
 # Imported from dynamiXs_gui to avoid duplication of widget classes.
-from dynamiXs_gui import BasePage, DropTargetLabel
+from dynamiXs_gui import BasePage, DropTargetLabel, MS_TO_UNITS, TIME_UNITS_DEFAULT
 from workers import MethylT2FittingParams, MethylT2FittingWorker
 
 
@@ -45,7 +45,9 @@ class MethylT2FittingPage(BasePage):
         self.output_dir = None
         self.source_series_map = {}  # for project save/restore parity
         self.last_json_folder = None
+        self.last_json_file = None
         self.last_results_file = None
+        self.file_prefixes = []  # what the last run's files start with
 
         self._setup_content()
 
@@ -93,6 +95,8 @@ class MethylT2FittingPage(BasePage):
                                           self._make_float_spin("t2a_spin", 0.1, 1e5, 100.0, decimals=2, step=10.0)))
         gb.addWidget(self._make_field_row("Initial T2b (fast, ms)",
                                           self._make_float_spin("t2b_spin", 0.1, 1e5, 20.0, decimals=2, step=5.0)))
+        gb.addWidget(self._make_field_row("Delay units", self._make_units_combo()))
+        gb.addWidget(self._make_observable_combo())
 
         hint = create_label(
             "A defaults to span(y) = max(y) − min(y). "
@@ -142,15 +146,9 @@ class MethylT2FittingPage(BasePage):
         out_row.addWidget(out_btn)
         outb.addLayout(out_row)
 
-        prefix_row = QHBoxLayout()
-        prefix_row.addWidget(QLabel("Results prefix:"))
-        self.prefix_edit = QLabel("field1_methylT2")
-        self.prefix_edit.setStyleSheet(
-            f"color: {PRIMARY_TEXT}; background-color: {FRAME_BG_COLOR}; "
-            f"padding: 4px 8px; border-radius: 4px;"
-        )
-        prefix_row.addWidget(self.prefix_edit, stretch=1)
-        outb.addLayout(prefix_row)
+        # Every file of a run starts with it: runs sharing an output folder keep their own.
+        self.prefix_edit = QLineEdit("methyl")
+        outb.addWidget(self._make_field_row("Results prefix:", self.prefix_edit, width=260))
 
         layout.addWidget(out_section)
 
@@ -179,6 +177,7 @@ class MethylT2FittingPage(BasePage):
             "into the viewer without re-running the fit."
         )
         run_row.addWidget(self.open_prev_btn)
+        run_row.addWidget(self._make_save_run_button())
         run_row.addStretch()
         layout.addLayout(run_row)
 
@@ -205,9 +204,10 @@ class MethylT2FittingPage(BasePage):
         matrix = self._series_intensity_matrix(series_name)
         if matrix:
             self._set_input_file(matrix)
+            self._take_recorded_units(matrix, self._log)
             self.file_drop.setText(f"Series '{series_name}'  →  {os.path.basename(matrix)}")
         else:
-            self.file_drop.setText(f"Series '{series_name}'  (no intensity matrix)")
+            self.file_drop.setText(f"Series '{series_name}'  (no {self._observable_matrix_name()})")
 
     def _browse_input_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -251,17 +251,24 @@ class MethylT2FittingPage(BasePage):
             self._choose_output_dir()
             if not self.output_dir:
                 return
+        time_units = self._checked_units([self.input_file])
+        if time_units is None:
+            return
+        to_units = MS_TO_UNITS[time_units]   # the initial guesses are entered in ms
 
+        # The CLI's <prefix>_<field> naming: the JSON is <prefix>_field1_methylT2_fit_data.json
+        run_name = f"{self.prefix_edit.text().strip() or 'methyl'}_field1"
         params = MethylT2FittingParams(
             input_file=self.input_file,
             output_dir=self.output_dir,
-            results_prefix="field1_methylT2",
+            results_prefix=f"{run_name}_methylT2",
             json_folder=os.path.join(self.output_dir, "json"),
-            field_name="field1",
+            field_name=run_name,
             field_freq=float(self.field_freq_spin.value()),
             initial_A=None,  # data-driven: span(y)
-            initial_t2_a=float(self.t2a_spin.value()),
-            initial_t2_b=float(self.t2b_spin.value()),
+            initial_t2_a=float(self.t2a_spin.value()) * to_units,
+            initial_t2_b=float(self.t2b_spin.value()) * to_units,
+            time_units=time_units,
             n_bootstrap=int(self.boot_spin.value()),
             error_method="bootstrap" if self.error_combo.currentIndex() == 1 else "analytical",
         )
@@ -296,7 +303,10 @@ class MethylT2FittingPage(BasePage):
                       f"out of the fit: {', '.join(map(str, dropped))}")
         self._log(f"Results -> {result.get('results_file')}")
         self.last_json_folder = result.get("json_folder") or os.path.dirname(result.get("json_file") or "")
+        self.last_json_file = result.get("json_file")
         self.last_results_file = result.get("results_file")
+        self.file_prefixes = [os.path.basename(result["results_file"]).replace(
+            "_fit_results.txt", "")] if result.get("results_file") else []
         if n_fitted:
             self.viewer_btn.setEnabled(True)
             self.summary_btn.setEnabled(True)
@@ -314,9 +324,15 @@ class MethylT2FittingPage(BasePage):
             return
         try:
             from visualization.methyl_t2_fit_viewer import open_methyl_t2_fit_viewer
-            self._viewer = open_methyl_t2_fit_viewer(parent=self, json_folder=self.last_json_folder)
+            self._viewer = open_methyl_t2_fit_viewer(parent=self, json_folder=self.last_json_folder,
+                                                     json_file=self._own_json_file())
         except Exception as e:
             show_error(self, "Viewer error", f"Could not open viewer:\n{e}")
+
+    def _own_json_file(self):
+        """The last run's fit JSON, where it still is: the viewer then opens it alone."""
+        f = self.last_json_file
+        return f if f and os.path.exists(f) else None
 
     def _open_viewer_with_summary(self):
         """Open the across-residues summary plot (no per-residue fit panel)."""
@@ -326,7 +342,8 @@ class MethylT2FittingPage(BasePage):
         try:
             from visualization.methyl_t2_fit_viewer import open_methyl_t2_summary_viewer
             self._viewer = open_methyl_t2_summary_viewer(
-                parent=self, json_folder=self.last_json_folder
+                parent=self, json_folder=self.last_json_folder,
+                json_file=self._own_json_file()
             )
         except Exception as e:
             show_error(self, "Viewer error", f"Could not open viewer:\n{e}")
@@ -364,6 +381,7 @@ class MethylT2FittingPage(BasePage):
         # the subsequent buttons enabled.
         self._viewer = viewer
         self.last_json_folder = folder
+        self.last_json_file = None
         self.viewer_btn.setEnabled(True)
         self.summary_btn.setEnabled(True)
         self._log(f"Opened previous dataset: {folder} "
@@ -378,12 +396,17 @@ class MethylT2FittingPage(BasePage):
             'output_dir': self.output_dir,
             'source_series_map': dict(self.source_series_map),
             'last_json_folder': self.last_json_folder,
+            'last_json_file': self.last_json_file,
             'last_results_file': self.last_results_file,
+            'prefix': self.prefix_edit.text(),
+            'file_prefixes': list(self.file_prefixes),
             'initial_t2_a': self.t2a_spin.value(),
             'initial_t2_b': self.t2b_spin.value(),
             'field_freq': self.field_freq_spin.value(),
             'bootstrap_iter': self.boot_spin.value(),
             'error_method': self.error_combo.currentIndex(),
+            'delay_units': self.units_combo.currentText(),
+            'fit_on': self._observable(),
         }
 
     def restore_session_state(self, state: dict):
@@ -394,13 +417,20 @@ class MethylT2FittingPage(BasePage):
         self.output_dir = state.get('output_dir')
         self.source_series_map = dict(state.get('source_series_map', {}))
         self.last_json_folder = state.get('last_json_folder')
+        self.last_json_file = state.get('last_json_file')
         self.last_results_file = state.get('last_results_file')
+        self.file_prefixes = list(state.get('file_prefixes') or [])
+        self.prefix_edit.setText(state.get('prefix', 'methyl'))
 
         self.t2a_spin.setValue(state.get('initial_t2_a', 100.0))
         self.t2b_spin.setValue(state.get('initial_t2_b', 20.0))
         self.field_freq_spin.setValue(state.get('field_freq', 600.0))
         self.boot_spin.setValue(state.get('bootstrap_iter', 1000))
         self.error_combo.setCurrentIndex(state.get('error_method', 0))
+        self.units_combo.setCurrentText(state.get('delay_units', TIME_UNITS_DEFAULT))
+        self.observable_combo.blockSignals(True)   # restoring, not choosing: no re-drop
+        self._set_observable(state.get('fit_on'))
+        self.observable_combo.blockSignals(False)
 
         if self.input_file:
             self.file_drop.setText(os.path.basename(self.input_file))

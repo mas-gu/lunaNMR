@@ -317,29 +317,20 @@ def _add_modules_path(*parts):
 # from "the user said nothing", to know whether a sidecar may supply the answer.
 _TIME_UNITS_DEFAULT = 'ms'
 
-_SIDECAR_NAME = 'series_metadata.json'
-
 
 def _series_sidecar(input_path):
-    """The `series` run-metadata written beside a matrix, or None.
+    """The `series` run-metadata written beside a matrix, or None (delay_units)."""
+    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
+    from delay_units import series_sidecar
+    return series_sidecar(input_path)
 
-    `series` records the delay units it normalised to and which spectra had no
-    parseable delay. Both were previously re-asserted by hand on the command line
-    while the answer sat next to the input file.
-    """
-    import json
-    path = os.path.join(os.path.dirname(os.path.abspath(input_path)), _SIDECAR_NAME)
-    if not os.path.isfile(path):
-        return None
-    try:
-        with open(path) as fh:
-            meta = json.load(fh)
-    except (OSError, ValueError):
-        return None            # a damaged sidecar must not block a runnable input
-    if not isinstance(meta, dict):
-        return None
-    meta['path'] = path
-    return meta
+
+def _resolve_time_units(flag, sidecar, stated_by='--time-units', input_path=None):
+    """Delay units: the flag, else the sidecar's, else ms; a flag contradicting the
+    sidecar or unit-stating headers is refused (delay_units.resolve_time_units)."""
+    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
+    from delay_units import resolve_time_units
+    return resolve_time_units(flag, sidecar, stated_by, input_path)
 
 
 def _unparsed_spectra(sidecar):
@@ -366,53 +357,6 @@ def _check_unparsed_delays(sidecar, allow):
         f"(_300ms, _2.4s, _2400us) and re-run `series`, or pass "
         f"--allow-unparsed-delays to fit the remaining points without them."
     )
-
-
-def _headers_stating_units(input_path):
-    """The delay headers of a matrix that write out their unit ('..._2o4s', '..._300ms').
-
-    The delay parser has converted those to ms before anything is fitted, whatever unit
-    they state. Needs the dynamiXs_T1_T2 folder on sys.path, as the fitters do.
-    """
-    import csv
-    from delay_parser import stated_unit
-    if not os.path.isfile(input_path):
-        return []          # the fitter reports the missing file in its own words
-    with open(input_path, newline='') as fh:
-        header = next(csv.reader(fh), [])
-    return [h for h in header if stated_unit(h)]
-
-
-def _resolve_time_units(flag, sidecar, flag_name='--time-units', input_path=None):
-    """Delay units: an explicit flag, else the sidecar's, else the documented default.
-
-    A flag that contradicts the sidecar is refused rather than preferred. One of the
-    two is wrong, and picking either way is how a T1 in seconds meets a T2 in
-    milliseconds and puts R1 out by 1000x.
-
-    So is any flag but ms on a matrix whose delay headers state their unit: the parser
-    has already converted those to ms, and a seconds flag converts them a second time.
-    """
-    recorded = (sidecar or {}).get('value_units')
-    if flag is None:
-        return recorded or _TIME_UNITS_DEFAULT
-    if recorded and recorded != flag:
-        raise ValueError(
-            f"{flag_name} says {flag!r} but {sidecar['path']} records the delays as "
-            f"{recorded!r}. One of them is wrong; guessing puts R1 out by 1000x. "
-            f"Drop the flag to use the recorded units, or re-run `series` if the "
-            f"sidecar is stale."
-        )
-    stated = _headers_stating_units(input_path) if input_path and flag != 'ms' else []
-    if stated:
-        from delay_parser import parse_delay_column
-        raise ValueError(
-            f"{flag_name} says {flag!r} but the delay headers of {input_path} state their "
-            f"own units, and are read as ms: {stated[0]!r} is "
-            f"{parse_delay_column(stated[0]):g} ms. Reading those ms as {flag!r} is a "
-            f"1000x error. Drop the flag, or pass ms."
-        )
-    return flag
 
 
 def _sidecar_summary(sidecar):
@@ -1871,7 +1815,7 @@ def _run_dynamixs_t1rho(args):
     time_units = args.time_units
     for label, sidecar in sidecars.items():
         time_units = _resolve_time_units(time_units, sidecar,
-                                         flag_name=f'--time-units (against {label})',
+                                         stated_by=f'--time-units (against {label})',
                                          input_path=series_paths[label])
     os.makedirs(args.out, exist_ok=True)
 
@@ -2055,7 +1999,7 @@ def _run_dynamixs_modelfree(args):
             _check_unparsed_delays(sidecar, args.allow_unparsed)
             sidecars[f'{field}-{exp}'] = _sidecar_summary(sidecar)
         units[key] = _resolve_time_units(getattr(args, key), sidecar,
-                                         flag_name=f'--{field}-{exp}-units',
+                                         stated_by=f'--{field}-{exp}-units',
                                          input_path=path)
     out_dir = os.path.abspath(args.out)
     os.makedirs(out_dir, exist_ok=True)

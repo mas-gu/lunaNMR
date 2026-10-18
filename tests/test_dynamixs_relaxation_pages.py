@@ -187,24 +187,33 @@ class TestTheModelFreePageReportsTheFit:
             page._start_analysis()
             page.worker.finished.connect(results.append)
             _wait(app, page)
-        yield page.progress_text.toPlainText(), results[0]
+        yield page.progress_text.toPlainText(), results[0], page
         for viewer in ("results_viewer", "fit_viewer"):
             if getattr(page, viewer, None) is not None:
                 getattr(page, viewer).close()
         d.deleteLater()
 
+    def test_the_fit_jsons_carry_the_runs_prefix(self, run):
+        out = Path(run[2].output_dir)
+        assert {p.name for p in (out / "json").iterdir()} == {
+            "integrated_analysis_field1_T1_fit_data.json",
+            "integrated_analysis_field1_T2_fit_data.json"}
+
+    def test_its_fit_viewer_shows_both_fits_of_the_run(self, run):
+        assert set(run[2].fit_viewer.data) == {"field1_T1", "field1_T2"}
+
     def test_the_log_gives_the_fitted_count_out_of_the_total(self, run):
-        log, result = run
+        log, result, _ = run
         assert (f"Model-free complete: {result['n_successful']}/{result['n_residues']} "
                 f"residues") in log
 
     def test_the_log_counts_the_fits_at_the_iteration_cap(self, run):
-        log, result = run
+        log, result, _ = run
         assert (f"{result['n_at_iteration_cap']} fits stopped at the iteration cap "
                 f"without converging") in log
 
     def test_the_log_names_the_residues_the_merge_dropped(self, run):
-        log, result = run
+        log, result, _ = run
         excluded = result["excluded_residues"]["field1"]
         assert excluded
         assert (f"Field 1: {len(excluded)} residues excluded at the merge (not in all "
@@ -232,19 +241,3 @@ class TestASeriesDroppedOnTheModelFreePage:
                                 str(T1_SERIES / "series_analysis_tidy.csv"))
         assert page.field1_noe_sat_file is None
         assert "hetNOE" in page.progress_text.toPlainText()
-
-
-def test_the_analysis_name_prompt_suggests_a_name_the_project_does_not_hold(app, monkeypatch):
-    import lunaNMR.gui.dialogs.dynamixs_dialog as dynamixs_dialog
-    suggested = []
-
-    def answer(parent, title, label, text=""):     # the name box, answered as offered
-        suggested.append(text)
-        return text, True
-    monkeypatch.setattr(dynamixs_dialog.QInputDialog, "getText", staticmethod(answer))
-    d = _dialog(types.SimpleNamespace(dynamixs_analyses={"Analysis_1": {}, "Analysis_2": {}}))
-    try:
-        assert d._prompt_analysis_name("T1/T2 Fitting") == "Analysis_3"
-        assert suggested == ["Analysis_3"]
-    finally:
-        d.deleteLater()

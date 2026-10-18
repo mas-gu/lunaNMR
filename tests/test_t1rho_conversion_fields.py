@@ -56,8 +56,8 @@ def test_a_disabled_field_is_neither_converted_nor_asked_for(page, tmp_path):
     page.field1_carrier_spin.setValue(118)
     page._calculate_t2_from_t1rho()
     assert not page.errors, page.errors
-    assert (tmp_path / "field1_T2_from_T1rho.csv").exists()
-    assert not (tmp_path / "field2_T2_from_T1rho.csv").exists()
+    assert (tmp_path / f"{page._run_prefix()}_field1_T2_from_T1rho.csv").exists()
+    assert not (tmp_path / f"{page._run_prefix()}_field2_T2_from_T1rho.csv").exists()
 
 
 def test_an_enabled_field_without_its_carrier_is_refused(page, tmp_path):
@@ -77,7 +77,7 @@ def test_a_measured_t2_is_kept_and_the_derived_one_written_beside_it(page, tmp_p
     page._calculate_t2_from_t1rho()
     assert not page.errors, page.errors
     assert page.session_results["field1"]["t2"] == measured
-    assert (tmp_path / "field1_T2_from_T1rho.csv").exists()
+    assert (tmp_path / f"{page._run_prefix()}_field1_T2_from_T1rho.csv").exists()
     assert "kept the measured T2" in page.results_text.toPlainText()
 
 
@@ -87,4 +87,4 @@ def test_a_derived_t2_is_replaced_by_a_new_conversion(page, tmp_path):
     page.field1_carrier_spin.setValue(118)
     page._calculate_t2_from_t1rho()
     assert page.session_results["field1"]["t2"]["results_file"].endswith(
-        "field1_T2_from_T1rho_fit_results.txt")
+        f"{page._run_prefix()}_field1_T2_from_T1rho_fit_results.txt")

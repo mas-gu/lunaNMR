@@ -62,7 +62,7 @@ class MethylT2FitViewer(QMainWindow):
         ("eta",    "η = T2a / T2b",     "eta_err"),
     ]
 
-    def __init__(self, parent=None, json_folder=None, summary_only=False):
+    def __init__(self, parent=None, json_folder=None, summary_only=False, json_file=None):
         super().__init__(parent)
         self.summary_only = bool(summary_only)
         self.setWindowTitle(
@@ -74,8 +74,12 @@ class MethylT2FitViewer(QMainWindow):
         # fall through to system palette for color (white on macOS Dark Mode).
         self.setStyleSheet(f"background-color: {BG_COLOR}; color: {PRIMARY_TEXT};")
 
-        # State
+        # State. `json_file` opens one run's fit alone: a folder shared with other runs
+        # holds theirs too.
+        if json_file:
+            json_folder = os.path.dirname(json_file)
         self.json_folder = json_folder
+        self.json_only = os.path.basename(json_file) if json_file else None
         self.data = {}             # {file_key: parsed json}
         self.json_paths = {}       # {file_key: Path}
         self.exclusions = {}       # {file_key: {residue: [indices]}}
@@ -295,6 +299,7 @@ class MethylT2FitViewer(QMainWindow):
         initial = self.json_folder or os.getcwd()
         folder = QFileDialog.getExistingDirectory(self, "Select JSON folder", initial)
         if folder:
+            self.json_only = None
             self._load_json_folder(folder)
 
     def _load_json_folder(self, folder_path: str, silent: bool = False):
@@ -308,6 +313,8 @@ class MethylT2FitViewer(QMainWindow):
         residues_set = set()
         try:
             for json_file in Path(folder_path).glob(JSON_GLOB):
+                if self.json_only and json_file.name != self.json_only:
+                    continue
                 try:
                     payload = json.loads(json_file.read_text())
                 except Exception as e:
@@ -888,17 +895,18 @@ class MethylT2FitViewer(QMainWindow):
                       f"Exclusions cleared and residue {residue} re-fitted.")
 
 
-def open_methyl_t2_fit_viewer(parent=None, json_folder=None):
-    viewer = MethylT2FitViewer(parent, json_folder=json_folder)
+def open_methyl_t2_fit_viewer(parent=None, json_folder=None, json_file=None):
+    viewer = MethylT2FitViewer(parent, json_folder=json_folder, json_file=json_file)
     viewer.show()
     return viewer
 
 
-def open_methyl_t2_summary_viewer(parent=None, json_folder=None):
+def open_methyl_t2_summary_viewer(parent=None, json_folder=None, json_file=None):
     """Open the across-residues summary plot (Plot T2 vs Residue): a single
     bar chart of T2_avg / ΔT2 / T2a / T2b / η, with a residue checklist for
     excluding contaminating fits.
     """
-    viewer = MethylT2FitViewer(parent, json_folder=json_folder, summary_only=True)
+    viewer = MethylT2FitViewer(parent, json_folder=json_folder, summary_only=True,
+                               json_file=json_file)
     viewer.show()
     return viewer

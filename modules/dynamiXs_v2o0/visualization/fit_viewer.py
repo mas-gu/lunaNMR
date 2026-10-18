@@ -63,7 +63,7 @@ class FitViewer(QMainWindow):
     inspect_peak_requested = Signal(str, str, object)
 
     def __init__(self, parent=None, json_folder=None, json_folders=None,
-                 source_series_map=None):
+                 source_series_map=None, json_files=None):
         """
         Initialize the Fit Viewer
 
@@ -77,6 +77,9 @@ class FitViewer(QMainWindow):
             List of JSON data folder paths (for multi-experiment support)
         source_series_map : dict, optional
             Mapping from field names to series names (e.g., {'field1_t1': 'T1_series'})
+        json_files : list, optional
+            The *_fit_data.json files of one run, opened instead of whole folders - a
+            folder shared with other runs holds their fits too
         """
         super().__init__(parent)
 
@@ -111,8 +114,11 @@ class FitViewer(QMainWindow):
         # Build UI
         self._create_ui()
 
-        # Load data from all folders
-        if self.json_folders:
+        # Load the run's files, else every fit in the folders
+        if json_files:
+            self.json_folder = os.path.dirname(json_files[0])
+            self._load_json_files(json_files, f"{len(json_files)} file(s)")
+        elif self.json_folders:
             self._load_json_folders(self.json_folders)
 
     def _create_ui(self):
@@ -403,46 +409,56 @@ class FitViewer(QMainWindow):
         if folder_path:
             self._load_json_folder(folder_path)
 
+    # A fit JSON is named <prefix>_<field>_<experiment>_fit_data.json (the prefix may
+    # be absent): the viewer files it under <field>_<experiment>, e.g. 'field1_T1'.
+    _DATA_KEY = re.compile(r'(field\d+_(?:T1rho|T1|T2))_fit_data$')
+
+    @classmethod
+    def _data_key(cls, json_file):
+        """The <field>_<experiment> a fit JSON holds, read off the end of its name."""
+        stem = Path(json_file).stem
+        match = cls._DATA_KEY.search(stem)
+        return match.group(1) if match else stem.replace("_fit_data", "")
+
     def _load_json_folders(self, folder_paths):
         """Load JSON files from multiple folders."""
+        json_files = [f for folder_path in folder_paths if os.path.exists(folder_path)
+                      for f in sorted(Path(folder_path).glob("*_fit_data.json"))]
+        label = folder_paths[0] if len(folder_paths) == 1 else f"{len(folder_paths)} folders"
+        self._load_json_files(json_files, label)
+
+    def _load_json_files(self, json_files, label):
+        """Load the given *_fit_data.json files, showing `label` as their source."""
         try:
             self.data = {}
+            self.json_paths = {}
             self.available_residues = []
             residues_set = set()
 
-            # Update folder label with count
-            if len(folder_paths) == 1:
-                self.folder_label.setText(folder_paths[0])
-            else:
-                self.folder_label.setText(f"{len(folder_paths)} folders")
+            self.folder_label.setText(label)
 
-            # Load from each folder
-            for folder_path in folder_paths:
-                if not os.path.exists(folder_path):
-                    continue
+            # Two runs' fits of one field and experiment cannot both be shown: the
+            # first is kept, and the others are named.
+            not_shown = []
+            for json_file in map(Path, json_files):
+                try:
+                    file_key = self._data_key(json_file)
+                    if file_key in self.data:
+                        not_shown.append(json_file.name)
+                        continue
+                    with open(json_file, 'r') as f:
+                        data = json.load(f)
 
-                # Scan for JSON files
-                json_files = list(Path(folder_path).glob("*_fit_data.json"))
+                    self.data[file_key] = data
+                    self.json_paths[file_key] = json_file
+                    self.exclusions[file_key] = load_outliers(json_file)
 
-                for json_file in json_files:
-                    try:
-                        with open(json_file, 'r') as f:
-                            data = json.load(f)
+                    # Collect residues
+                    for fit in data['fits']:
+                        residues_set.add(fit['residue'])
 
-                        # Extract file key (e.g., "field1_T1")
-                        filename = json_file.stem
-                        file_key = filename.replace("_fit_data", "")
-
-                        self.data[file_key] = data
-                        self.json_paths[file_key] = json_file
-                        self.exclusions[file_key] = load_outliers(json_file)
-
-                        # Collect residues
-                        for fit in data['fits']:
-                            residues_set.add(fit['residue'])
-
-                    except Exception as e:
-                        print(f"Error loading {json_file}: {e}")
+                except Exception as e:
+                    print(f"Error loading {json_file}: {e}")
 
             if not self.data:
                 show_warning(self, "No Data", "No fit data JSON files found in the folders.")
@@ -461,6 +477,10 @@ class FitViewer(QMainWindow):
             n_residues = len(self.available_residues)
             show_info(self, "Data Loaded",
                      f"Loaded {n_files} dataset(s) with {n_residues} residue(s)")
+            if not_shown:
+                show_warning(self, "Fits Not Shown",
+                             "These files hold a field and experiment already shown, "
+                             "from another run: " + ", ".join(not_shown))
 
         except Exception as e:
             show_error(self, "Load Error", f"Error loading JSON folders:\n{str(e)}")
@@ -1046,7 +1066,8 @@ class FitViewer(QMainWindow):
         json_path = self.json_paths.get(data_key)
         if json_path is None:
             return None
-        candidate = Path(json_path).parent.parent / f"{data_key}_fit_results.txt"
+        run_name = Path(json_path).stem.replace("_fit_data", "")
+        candidate = Path(json_path).parent.parent / f"{run_name}_fit_results.txt"
         return candidate if candidate.exists() else None
 
     def _refit_one(self, data_key, residue):
