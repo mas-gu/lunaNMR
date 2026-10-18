@@ -565,7 +565,9 @@ def _run_dynamixs_t1t2(args):
         'time_units': time_units,
         'error_method': args.error_method,
         'n_bootstrap': args.bootstrap,
-        'field_name': args.field_name,
+        # Names the fit JSON: with the prefix in it, runs sharing an --out keep their
+        # own, as their results files do.
+        'field_name': f"{args.prefix}_{args.field_name}",
         'field_freq': args.field_freq,
         'json_folder': None if args.no_json else args.out,
     }
@@ -613,7 +615,9 @@ def _run_dynamixs_methyl(args):
         'output_prefix': os.path.join(args.out, args.prefix),
         'results_txt_file': os.path.join(args.out, f"{args.prefix}_fit_results.txt"),
         'json_folder': args.out,
-        'field_name': args.field_name,
+        # Names the fit JSON: with the prefix in it, runs sharing an --out keep their
+        # own, as their results files do.
+        'field_name': f"{args.prefix}_{args.field_name}",
         'field_freq': args.field_freq,
         'time_units': time_units,
         'error_method': args.error_method,
@@ -2408,7 +2412,7 @@ def _add_relaxation_flags(p):
     p.add_argument('--out', required=True, help='Output directory for results + JSON')
     p.add_argument('--prefix', default='field1', help='Output filename prefix (default: field1)')
     p.add_argument('--field-name', default='field1', dest='field_name',
-                   help='Field label used in the JSON filename (default: field1)')
+                   help='Field label used in the JSON filename, after --prefix (default: field1)')
     p.add_argument('--field-freq', type=float, default=600.0, dest='field_freq',
                    help='Spectrometer field frequency in MHz (default: 600)')
     p.add_argument('--time-units', choices=['ms', 's', 'us'], default=None, dest='time_units',
