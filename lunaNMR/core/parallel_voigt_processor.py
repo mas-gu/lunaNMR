@@ -612,11 +612,15 @@ class ParallelVoigtProcessor:
             return (consolidated_results, learned_statistics)
 
         except Exception as e:
+            reason = f"{type(e).__name__}: {e}"
             log_error(f"Parallel Voigt fitting failed: {e}")
-            log_info("Falling back to sequential processing")
+            log_warning(f"Falling back to per-peak fitting, with no clusters, territories or "
+                        f"drift limits, because the cluster pipeline raised {reason}")
             import traceback
             traceback.print_exc()
             results = self._sequential_fallback(peak_list, progress_callback)
+            for result in results:
+                result['fitting_fallback'] = f"per-peak fitting ({reason})"
             return (results, None)  # Sequential fallback doesn't learn statistics
 
         finally:
@@ -1566,6 +1570,10 @@ def _parallel_cluster_worker(cluster_task):
                         best_match = None
 
                     if best_match:
+                        # Labelled as an isolated peak with this R-squared would be
+                        member_quality = worker_integrator._assign_quality_to_fitted_peak(
+                            group_result['r_squared'], best_match)
+
                         # Get detected_intensity from original cluster_dicts (before fitting)
                         orig_detected_intensity = cluster_dicts[i].get('intensity') if i < len(cluster_dicts) else None
 
@@ -1589,8 +1597,8 @@ def _parallel_cluster_worker(cluster_task):
                             'gamma_x': best_match['lw_lor_f2'],
                             'sigma_y': best_match['lw_gau_f1'],
                             'gamma_y': best_match['lw_lor_f1'],
-                            'fitting_quality': 'Excellent' if group_result['r_squared'] > 0.9 else 'Good',
-                            'quality': 'Excellent' if group_result['r_squared'] > 0.9 else 'Good',
+                            'fitting_quality': member_quality,
+                            'quality': member_quality,
                             'success': True,
                             'fitted': True,
                             'method': '2d_simultaneous_multi_peak',

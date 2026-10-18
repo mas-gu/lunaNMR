@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Optional
 
 # Independent imports - no GUI dependencies
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
+from lunaNMR.core.parallel_voigt_processor import ParallelVoigtProcessor
 from lunaNMR.core.ps2d_config import get_ps2d_config, restore_base_ps2d_config, set_ps2d_config
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
@@ -1007,7 +1008,8 @@ class MultiSpectrumProcessor:
             if result and result.get('success', False):
                 # Add spectrum-specific metadata
                 result['spectrum_file'] = spectrum_name
-                result['processing_mode'] = 'series_integration'
+                if 'fitting_fallback' not in result:
+                    result['processing_mode'] = 'series_integration'
                 successful_fits += 1
 
                 # Extract linewidths from reference spectrum (first spectrum only)
@@ -1045,8 +1047,16 @@ class MultiSpectrumProcessor:
             'successful_fits': successful_fits,
             'success_rate': success_rate,
             'spectrum_file': spectrum_name,
+            'fitting_fallbacks': self._fitting_fallbacks(fitted_results),
             'integration_results': self._convert_to_integration_format(fitted_results)
         }
+
+    @staticmethod
+    def _fitting_fallbacks(fitted_results) -> List[str]:
+        """Each distinct fallback algorithm, with its reason, that produced any of
+        `fitted_results` - empty when the cluster pipeline fitted them all."""
+        return sorted({result['fitting_fallback'] for result in fitted_results
+                       if result and result.get('fitting_fallback')})
 
     def _convert_fitted_results_to_reference_df(self, fitted_results):
         """
@@ -1183,15 +1193,20 @@ class MultiSpectrumProcessor:
 
         tidy_df = pd.DataFrame(tidy_data)
         tidy_file = os.path.join(self.output_folder, "series_analysis_tidy.csv")
-        # Format ppm_x and ppm_y with 3 decimals (position data), other numeric columns with 1 decimal
+        # Positions, R-squared and S/N get 4 decimals: CSP needs full ppm precision, and
+        # a caller gates on the other two (the Kd loader's 3-sigma floor among them).
+        # Intensities get 1 decimal; integers and flags are written as what they are.
         tidy_df_formatted = tidy_df.copy()
         for col in tidy_df_formatted.columns:
-            if not pd.api.types.is_numeric_dtype(tidy_df_formatted[col]):
+            if col in ('position_pinned', 'intensity_pinned'):
+                tidy_df_formatted[col] = tidy_df_formatted[col].apply(
+                    lambda x: str(bool(x)) if x is not None and pd.notna(x) else '')
+            elif not pd.api.types.is_numeric_dtype(tidy_df_formatted[col]):
                 continue
-            # Position columns get 4 decimals — CSP/titration needs full ppm precision
-            if col in ['ppm_x', 'ppm_y']:
+            elif col == 'peak_number':
+                tidy_df_formatted[col] = tidy_df_formatted[col].apply(lambda x: f'{x:.0f}' if pd.notna(x) else '')
+            elif col in ['ppm_x', 'ppm_y', 'r_squared', 'snr', 'detection_sigma']:
                 tidy_df_formatted[col] = tidy_df_formatted[col].apply(lambda x: f'{x:.4f}' if pd.notna(x) else '')
-            # All other numeric columns get 1 decimal place
             else:
                 tidy_df_formatted[col] = tidy_df_formatted[col].apply(lambda x: f'{x:.1f}' if pd.notna(x) else '')
         tidy_df_formatted.to_csv(tidy_file, index=False)
@@ -1668,28 +1683,12 @@ class MultiSpectrumProcessor:
                 if result_data.get('success', False):
                     integration_results = result_data.get('integration_results', [])
                     for peak in integration_results:
-                        # CRITICAL FIX: Convert both sides to string to avoid type mismatch (int vs str)
-                        # Bug: peak.get('Assignment') might be "142" (str) while peak_row['Assignment'] is 142 (int)
-                        # Additional fix: int64 converts to "142.0" with str(), need to handle properly
-                        peak_assignment_raw = peak.get('Assignment', '')
-                        row_assignment_raw = peak_row['Assignment']
-
-                        # Normalize both to strings, handling int/float conversions
-                        try:
-                            # Try to convert to int first to strip any .0 suffix
-                            peak_assignment = str(int(float(peak_assignment_raw)))
-                        except (ValueError, TypeError):
-                            # If conversion fails, use string directly
-                            peak_assignment = str(peak_assignment_raw)
-
-                        try:
-                            # Same for row assignment
-                            row_assignment = str(int(float(row_assignment_raw)))
-                        except (ValueError, TypeError):
-                            row_assignment = str(row_assignment_raw)
-
-                        # DEBUG: Print matching attempt
-                        # print(f"      Matching: peak '{peak_assignment}' vs row '{row_assignment}' -> {peak_assignment == row_assignment}")
+                        # Both sides canonicalised: a peak list read as numbers holds 142
+                        # where a result holds '142' or '142.0', while 45.1 and 45.2 stay apart
+                        peak_assignment = ParallelVoigtProcessor._normalize_assignment(
+                            peak.get('Assignment', ''))
+                        row_assignment = ParallelVoigtProcessor._normalize_assignment(
+                            peak_row['Assignment'])
 
                         if peak_assignment == row_assignment:
                             peak_row[f'{spectrum_key}_Detected'] = True
