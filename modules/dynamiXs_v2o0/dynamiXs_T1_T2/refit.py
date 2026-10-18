@@ -7,7 +7,7 @@ from typing import Iterable
 
 import numpy as np
 
-from fit_Tx_NMRRE import fit_single_residue
+from fit_Tx_NMRRE import fit_data_entry, fit_single_residue, results_row
 from fit_methyl_T2 import fit_single_residue_methyl
 
 
@@ -49,7 +49,8 @@ def refit_residue(fit_entry: dict, metadata: dict,
     """Re-fit one residue with the given time-point indices excluded.
 
     The original `intensities` array is preserved verbatim in the returned entry —
-    exclusions live in the sidecar, never in the data record.
+    exclusions live in the sidecar, never in the data record. Every other field is the
+    refit's own, `success` and the window ones included, over the points it kept.
 
     Initial guesses are warm-started from the prior fit's A/t2/C.
     The dense `fit_curve` is regenerated over the original full time range so plots
@@ -83,24 +84,7 @@ def refit_residue(fit_entry: dict, metadata: dict,
     # Dense curve over the original full time range, so plots stay consistent.
     max_t = float(time_points.max()) if len(time_points) else 0.0
     fit_time_dense = np.linspace(0.0, max_t * 1.2, 100)
-    fit_intensity_dense = (
-        result["A"] * np.exp(-fit_time_dense / result["t2"]) + result["C"]
-    )
-
-    return {
-        "residue": fit_entry.get("residue", ""),
-        "A": float(result["A"]),
-        "t2": float(result["t2"]),
-        "C": float(result["C"]),
-        "A_err": float(result["A_err"]),
-        "t2_err": float(result["t2_err"]),
-        "C_err": float(result["C_err"]),
-        "intensities": list(map(float, intensities)),
-        "fit_curve": {
-            "time": [float(t) for t in fit_time_dense],
-            "intensity": [float(i) for i in fit_intensity_dense],
-        },
-    }
+    return fit_data_entry({**result, "y": intensities}, fit_time_dense)
 
 
 def update_json_fit_entry(json_path, residue: str, new_fit_entry: dict) -> None:
@@ -123,11 +107,12 @@ def update_json_fit_entry(json_path, residue: str, new_fit_entry: dict) -> None:
 def update_tsv_row(tsv_path, residue: str, new_fit: dict, experiment_type: str) -> None:
     """Replace one Residue row in a fit_results.txt TSV.
 
-    The TSV is written by `fit_Tx_NMRRE.save_results` with header:
-        Residue \t A \t {experiment_type} \t C \t A_err \t {experiment_type}_err \t C_err
-    (optionally followed by `\tSuccess` from the multicore variant).
+    The TSV is written by `fit_Tx_NMRRE.save_results` (or its multicore twin), with
+    the header `fit_Tx_NMRRE.results_columns`. The row is written under the file's own
+    header, one cell per column, from `fit_Tx_NMRRE.results_row`.
 
-    Raises KeyError if the residue is absent.
+    Raises KeyError if the residue is absent, or if the header names a column the
+    results row does not have.
     """
     p = Path(tsv_path)
     lines = p.read_text().splitlines()
@@ -136,7 +121,7 @@ def update_tsv_row(tsv_path, residue: str, new_fit: dict, experiment_type: str) 
 
     header = lines[0]
     cols = header.split("\t")
-    has_success = cols and cols[-1] == "Success"
+    row = results_row({**new_fit, "residue": residue}, experiment_type)
 
     out_lines = [header]
     found = False
@@ -146,18 +131,7 @@ def update_tsv_row(tsv_path, residue: str, new_fit: dict, experiment_type: str) 
             continue
         first = line.split("\t", 1)[0]
         if first == str(residue):
-            cells = [
-                str(residue),
-                f"{new_fit['A']:.6e}",
-                f"{new_fit['t2']:.6e}",
-                f"{new_fit['C']:.6e}",
-                f"{new_fit['A_err']:.6e}",
-                f"{new_fit['t2_err']:.6e}",
-                f"{new_fit['C_err']:.6e}",
-            ]
-            if has_success:
-                cells.append("Yes")
-            out_lines.append("\t".join(cells))
+            out_lines.append("\t".join(row[c] for c in cols))
             found = True
         else:
             out_lines.append(line)

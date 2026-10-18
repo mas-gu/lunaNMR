@@ -25,12 +25,15 @@ from lmfit import Model
 # One definition of the fit conventions, shared with the single-core fitter.
 try:
     from fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
-                              MARGINAL_TMAX_OVER_T, _is_reliable_t2, measured_points,
-                              results_file_from_json)
+                              MARGINAL_TMAX_OVER_T, _is_reliable_t2, delay_window,
+                              fit_data_entry, measured_points, results_columns,
+                              results_file_from_json, results_row)
 except ImportError:  # imported as dynamiXs_T1_T2.fitmulti__Tx_NMRRE (parent dir on path)
     from dynamiXs_T1_T2.fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
                                              MARGINAL_TMAX_OVER_T, _is_reliable_t2,
-                                             measured_points, results_file_from_json)
+                                             delay_window, fit_data_entry,
+                                             measured_points, results_columns,
+                                             results_file_from_json, results_row)
 import pandas as pd
 import multiprocessing
 from multiprocessing import cpu_count
@@ -240,8 +243,8 @@ def fit_single_residue_parallel(args):
 
         # A fit whose t2 exceeds 100x the longest delay has no measurable decay
         # in the window (flat / no-signal / bad peak) -> unreliable, excluded.
-        x_max = float(np.max(x)) if np.size(x) else 0.0
         reliable = _is_reliable_t2(t2, t2_err, x, amplitude=a, y=y)
+        window_ratio, window_marginal = delay_window(x, t2)
 
         return {
             'residue': residue_name,
@@ -251,6 +254,9 @@ def fit_single_residue_parallel(args):
             'A_err': a_err,
             't2_err': t2_err,
             'C_err': c_err,
+            'baseline_fixed': not fit_baseline,
+            'window_ratio': window_ratio,
+            'window_marginal': window_marginal,
             'x': x_all,
             'y': y_all,
             'result': result,
@@ -372,23 +378,13 @@ def save_results(results_list, output_file, experiment_type="T1"):
         Type of experiment for headers
     """
     with open(output_file, "w") as f:
-        f.write(
-            f"Residue\tA\t{experiment_type}\tC\tA_err\t{experiment_type}_err\tC_err"
-            f"\tSuccess\tWindowRatio\n"
-        )
+        f.write("\t".join(results_columns(experiment_type)) + "\n")
         for result in results_list:
-            success_flag = "Yes" if result.get('success', False) else "No"
-            # t_max/T: below ~2 the window is too short to pin the time constant down.
-            wr = result.get('window_ratio', float('nan'))
             if result.get('success', False):
-                f.write(
-                    f"{result['residue']}\t{result['A']:.6e}\t{result['t2']:.6e}\t"
-                    f"{result['C']:.6e}\t{result['A_err']:.6e}\t"
-                    f"{result['t2_err']:.6e}\t{result['C_err']:.6e}\t{success_flag}\t{wr:.3f}\n"
-                )
+                f.write("\t".join(results_row(result, experiment_type).values()) + "\n")
             else:
                 f.write(
-                    f"{result['residue']}\tNaN\tNaN\tNaN\tNaN\tNaN\tNaN\t{success_flag}\tNaN\n"
+                    f"{result['residue']}\tNaN\tNaN\tNaN\tNaN\tNaN\tNaN\tNo\tNaN\n"
                 )
 
 
@@ -428,33 +424,7 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
     max_time = max(time_points)
     fit_time_dense = np.linspace(0, max_time * 1.2, 100)
 
-    fits_data = []
-    for result in successful_results:
-        c = result.get('C', 0.0)
-        c_err = result.get('C_err', np.nan)
-        # Calculate fit curve using fitted parameters
-        fit_intensity = result['A'] * np.exp(-fit_time_dense / result['t2']) + c
-
-        fits_data.append({
-            'residue': str(result['residue']),
-            'A': float(result['A']),
-            't2': float(result['t2']),
-            'C': float(c),
-            'A_err': float(result['A_err']),
-            't2_err': float(result['t2_err']),
-            'C_err': float(c_err),
-            # Fit provenance: whether the baseline was fixed, and whether the delay window
-            # was long enough to pin the time constant down. Computed by the fitter and
-            # previously dropped here, which made them unreachable from the CLI.
-            'baseline_fixed': bool(result.get('baseline_fixed', True)),
-            'window_ratio': float(result.get('window_ratio', float('nan'))),
-            'window_marginal': bool(result.get('window_marginal', False)),
-            'intensities': [float(val) for val in result['y']],
-            'fit_curve': {
-                'time': [float(t) for t in fit_time_dense],
-                'intensity': [float(i) for i in fit_intensity]
-            }
-        })
+    fits_data = [fit_data_entry(result, fit_time_dense) for result in successful_results]
 
     output_data = {
         'metadata': {

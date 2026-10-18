@@ -38,6 +38,7 @@ from refit import (
     load_outliers, save_outliers,
     refit_residue_methyl, update_json_fit_entry, update_tsv_row_methyl,
 )
+from fit_Tx_NMRRE import recorded_results_file
 
 
 JSON_GLOB = "*_methylT2_fit_data.json"
@@ -816,12 +817,12 @@ class MethylT2FitViewer(QMainWindow):
         return None, None
 
     def _find_tsv_for(self, data_key):
-        """Best-effort: locate the *_methylT2_fit_results.txt sibling of the json folder."""
+        """The results file the fit JSON records, where it still is."""
         json_path = self.json_paths.get(data_key)
         if json_path is None:
             return None
-        candidate = Path(json_path).parent.parent / f"{data_key}_fit_results.txt"
-        return candidate if candidate.exists() else None
+        candidate = recorded_results_file(json_path, self.data[data_key].get("metadata"))
+        return candidate if candidate is not None and candidate.exists() else None
 
     def _refit_one(self, data_key, residue):
         excl = self.exclusions.get(data_key, {}).get(str(residue), [])
