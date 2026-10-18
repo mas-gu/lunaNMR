@@ -29,7 +29,7 @@ from gui_components import (
     create_v_layout, create_h_layout,
     create_header_label, create_secondary_label, create_label,
     create_primary_button, create_secondary_button,
-    get_font, open_directory_dialog
+    get_font, open_directory_dialog, prompt_name_collision, unique_name
 )
 from constants import (
     SPACING_XS, SPACING_SM, SPACING_MD, SPACING_XL,
@@ -83,8 +83,12 @@ class DynamiXsDialog(BaseDialog):
         # Path to dynamiXs module
         self.dynamixs_path = _dynamixs_path
 
-        # Current analysis name (required before entering analysis pages)
+        # Name of the analysis last saved or reopened
         self.current_analysis_name = None
+
+        # {page key: the name that page's run was last saved or reopened under}: the
+        # project save keeps the run there
+        self._run_names = {}
 
         # Analysis metadata (source_series, analysis_type, created_at, etc.)
         self._analysis_metadata = {}
@@ -262,16 +266,7 @@ class DynamiXsDialog(BaseDialog):
         self.stack.setCurrentWidget(self.main_menu_page)
 
     def show_t1t2_fitting(self):
-        """Show T1/T2 fitting page.
-
-        Prompts for analysis name if not already set.
-        """
-        if not self.current_analysis_name:
-            name = self._prompt_analysis_name("T1/T2 Fitting")
-            if name is None:
-                return  # User cancelled
-            self.current_analysis_name = name
-
+        """Show T1/T2 fitting page."""
         self.stack.setCurrentWidget(self.t1t2_page)
 
     def show_methyl_t2_fitting(self):
@@ -291,61 +286,8 @@ class DynamiXsDialog(BaseDialog):
         self.stack.setCurrentWidget(self.plotting_page)
 
     def show_integrated_analysis(self):
-        """Show integrated analysis page.
-
-        Prompts for analysis name if not already set.
-        """
-        if not self.current_analysis_name:
-            name = self._prompt_analysis_name("Model-Free Analysis")
-            if name is None:
-                return  # User cancelled
-            self.current_analysis_name = name
-
+        """Show integrated analysis page."""
         self.stack.setCurrentWidget(self.integrated_page)
-
-    def _prompt_analysis_name(self, analysis_type: str) -> Optional[str]:
-        """Prompt user for analysis name before starting analysis.
-
-        Args:
-            analysis_type: Type of analysis (for dialog title)
-
-        Returns:
-            Analysis name if provided, None if cancelled.
-        """
-        # Generate suggested name
-        suggested_name = "Analysis_1"
-
-        # Check for existing analyses to avoid duplicates
-        existing_analyses = set()
-        if self.main_window and getattr(self.main_window, 'dynamixs_analyses', None):
-            existing_analyses = set(self.main_window.dynamixs_analyses.keys())
-
-        if suggested_name in existing_analyses:
-            # Append number to make unique
-            base_name = "Analysis"
-            counter = 2
-            while f"{base_name}_{counter}" in existing_analyses:
-                counter += 1
-            suggested_name = f"{base_name}_{counter}"
-
-        # Show input dialog
-        name, ok = QInputDialog.getText(
-            self,
-            "Analysis Name",
-            f"Enter a name for this {analysis_type}:",
-            text=suggested_name
-        )
-
-        if not ok or not name.strip():
-            return None
-
-        # Validate name (no special characters that could cause file issues)
-        name = name.strip()
-        invalid_chars = '<>:"/\\|?*'
-        for char in invalid_chars:
-            name = name.replace(char, '_')
-
-        return name
 
     def clear_analysis_name(self):
         """Clear current analysis name (e.g., when starting fresh)."""
@@ -572,12 +514,19 @@ class DynamiXsDialog(BaseDialog):
         'spectral': 'spectralDensity', 'integrated': 'modelFree', 'hetnoe': 'hetNOE',
     }
 
+    def _pages(self) -> Dict[str, QWidget]:
+        """{page key: page} for the pages whose runs are saved."""
+        return {'t1t2': self.t1t2_page, 'spectral': self.spectral_page,
+                'integrated': self.integrated_page,
+                'methyl_t2': self.methyl_t2_page, 'hetnoe': self.hetnoe_page}
+
+    def _page_key(self, page) -> Optional[str]:
+        """The key of `page`, or None if it is not a page whose runs are saved."""
+        return next((key for key, p in self._pages().items() if p is page), None)
+
     def _active_page_key(self) -> Optional[str]:
         """Key of the page the user is currently on (a result page), or None."""
-        w = self.stack.currentWidget()
-        return {self.t1t2_page: 't1t2', self.spectral_page: 'spectral',
-                self.integrated_page: 'integrated',
-                self.methyl_t2_page: 'methyl_t2', self.hetnoe_page: 'hetnoe'}.get(w)
+        return self._page_key(self.stack.currentWidget())
 
     @staticmethod
     def _page_has_results(state: Dict[str, Any], page: Optional[str]) -> bool:
@@ -592,38 +541,91 @@ class DynamiXsDialog(BaseDialog):
             return bool(sr.get('analysis_complete') or ps.get('output_dir'))
         return False
 
-    def _analysis_save_name(self, state: Dict[str, Any]) -> Optional[str]:
-        """Name for the active run: <source_series>_<type> (e.g. HSPA1A_T1T2), or None
-        if the active page has no completed results to save."""
-        page = self._active_page_key()
-        if not self._page_has_results(state, page):
-            return None
-        meta = state.get('analysis_metadata') or {}
-        series = str(meta.get('source_series') or '').strip()
-        type_label = self._ANALYSIS_TYPE_LABELS.get(page, page)
-        prefix = str((state.get(page) or {}).get('prefix') or '').strip()
-        if series:
-            base = f"{series}_{type_label}"
-        elif page == 'hetnoe' and prefix:
-            # One field per hetNOE analysis, with no series to name it: its results
-            # prefix tells one field's apart from another's.
-            base = f"{prefix}_{type_label}"
-        else:
-            base = self.current_analysis_name or type_label
-        return base.strip('_ ') or type_label
+    def _page_series(self, page_key: str) -> List[str]:
+        """The series dropped on the page's slots, each once, in slot order."""
+        page = self._pages()[page_key]
+        series = []
+        for name in (getattr(page, 'source_series_map', None) or {}).values():
+            if name and name not in series:
+                series.append(name)
+        return series
 
-    def ensure_current_saved(self):
-        """Auto-capture the active page's current run into the project's saved DynamiXs
-        analyses (upsert by <series>_<type>). No-op if the active page has no results."""
-        state = self.get_state()
-        name = self._analysis_save_name(state)
-        if not name:
-            return None
+    def _base_analysis_name(self, page_key: str) -> str:
+        """<source_series>_<type> for the page's run: its own dropped series, several
+        joined by '+' (600_T1+600_T2_T1T2). Without one, the series the analysis was
+        reopened with; on the hetNOE page, its results prefix (one field per analysis);
+        else the type alone."""
+        type_label = self._ANALYSIS_TYPE_LABELS.get(page_key, page_key)
+        series = '+'.join(self._page_series(page_key))
+        if not series:
+            series = str(self.get_analysis_metadata().get('source_series') or '').strip()
+        if not series and page_key == 'hetnoe':
+            series = self.hetnoe_page.prefix_edit.text().strip()
+        name = f"{series}_{type_label}" if series else type_label
+        for char in '<>:"/\\|?*':
+            name = name.replace(char, '_')
+        return name.strip('_ ') or type_label
+
+    def _saved_analyses(self) -> Dict[str, Any]:
+        """The project's saved DynamiXs analyses (main_window.dynamixs_analyses)."""
         mw = self.main_window
         if getattr(mw, 'dynamixs_analyses', None) is None:
             mw.dynamixs_analyses = {}
-        mw.dynamixs_analyses[name] = {'state': state, 'file_refs': self.get_file_refs()}
+        return mw.dynamixs_analyses
+
+    def _suggested_analysis_name(self, page_key: str) -> str:
+        """The page's <source_series>_<type>, numbered past any name already taken."""
+        return unique_name(self._base_analysis_name(page_key),
+                           getattr(self.main_window, 'dynamixs_analyses', None) or {})
+
+    def _store_run(self, page_key: str, name: str, remember: bool = True) -> str:
+        """Keep the page's run in the project session under `name` (replacing an analysis
+        of that name); with `remember`, as the name the page's run is saved under."""
+        if remember:
+            self._run_names[page_key] = name
+        self.current_analysis_name = name
+        self._saved_analyses()[name] = {'state': self.get_state(),
+                                        'file_refs': self.get_file_refs()}
         return name
+
+    def save_run_to_project(self, page) -> Optional[str]:
+        """The page's "Save run to project": ask a name, suggested from the page's own
+        series and never one already taken; a name already taken asks Replace / Save as /
+        Cancel, as the Kd page does. Returns the name stored under, or None."""
+        page_key = self._page_key(page)
+        if page_key is None:
+            return None
+        if self.stack.currentWidget() is not page:
+            self.stack.setCurrentWidget(page)
+        if not self._page_has_results(self.get_state(), page_key):
+            page._page_log("Nothing to save: run the analysis first.")
+            return None
+        existing = getattr(self.main_window, 'dynamixs_analyses', None) or {}
+        name, ok = QInputDialog.getText(
+            self, "Save run to project", "Name for this DynamiXs analysis:",
+            text=self._suggested_analysis_name(page_key))
+        name = name.strip() if ok else ''
+        if not name:
+            return None
+        if name in existing:
+            name = prompt_name_collision(self, name, existing, "DynamiXs analysis")
+            if name is None:
+                return None
+        self._store_run(page_key, name)
+        page._page_log(f"Saved run as '{name}' in the project (save the project to "
+                       f"write it to disk).")
+        return name
+
+    def ensure_current_saved(self):
+        """Keep the active page's run in the project session, with no prompt: under the
+        name the page last saved or reopened it with, else its suggested
+        <source_series>_<type> (upserted, as Kd keeps its fit under the base name).
+        No-op if the active page has no results."""
+        page_key = self._active_page_key()
+        if not self._page_has_results(self.get_state(), page_key):
+            return None
+        name = self._run_names.get(page_key) or self._base_analysis_name(page_key)
+        return self._store_run(page_key, name, remember=False)
 
     def open_analysis(self, entry: Dict[str, Any], name: Optional[str] = None):
         """Reopen a saved DynamiXs analysis: restore its state (which switches to its
@@ -636,6 +638,9 @@ class DynamiXsDialog(BaseDialog):
             self.set_file_refs(refs)
         if name:
             self.current_analysis_name = name
+            page_key = self._active_page_key()
+            if page_key:
+                self._run_names[page_key] = name
 
     # -------------------------------------------------------------------------
     # Methyl T2 Page State Helpers

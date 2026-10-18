@@ -677,6 +677,26 @@ class BasePage(QWidget):
         """Append to the page's log."""
         self.log_text.appendPlainText(str(msg))
 
+    def _page_log(self, msg: str):
+        """Append to whichever log the page shows its runs in."""
+        for name in ('log_text', 'results_text', 'progress_text'):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.appendPlainText(str(msg))
+                return
+
+    # ---------- saving the run to the project ----------
+
+    def _make_save_run_button(self):
+        """The "Save run to project" button: the hosting dialog names the page's run and
+        keeps it in the project session. Disabled where no project hosts the page."""
+        host = self.main_window
+        self.save_run_btn = create_secondary_button(
+            "Save run to project", width=170,
+            clicked=lambda: host.save_run_to_project(self))
+        self.save_run_btn.setEnabled(hasattr(host, 'save_run_to_project'))
+        return self.save_run_btn
+
 
 # =============================================================================
 # DRAG-DROP WIDGETS FOR SERIES PICKER
@@ -1499,6 +1519,7 @@ class T1T2FittingPage(BasePage):
 
         view_fits_btn = create_secondary_button("View Fits", clicked=self._open_fit_viewer, width=100)
         btn_row_layout.addWidget(view_fits_btn)
+        btn_row_layout.addWidget(self._make_save_run_button())
 
         btn_row_layout.addStretch()
         results_layout.addWidget(btn_row)
@@ -2544,6 +2565,7 @@ class SpectralDensityPage(BasePage):
         # Start button
         start_btn = create_primary_button("Start Analysis", clicked=self._start_analysis, width=200)
         scroll_layout.addWidget(start_btn, alignment=Qt.AlignCenter)
+        scroll_layout.addWidget(self._make_save_run_button(), alignment=Qt.AlignCenter)
 
         # Results area
         results_group = StyledGroupBox("Analysis Results")
@@ -3103,6 +3125,7 @@ class IntegratedAnalysisPage(BasePage):
 
         view_fits_btn = create_secondary_button("View Fits", clicked=self._open_fit_viewer, width=100)
         btn_layout.addWidget(view_fits_btn)
+        btn_layout.addWidget(self._make_save_run_button())
 
         btn_layout.addStretch()
         scroll_layout.addWidget(btn_frame)

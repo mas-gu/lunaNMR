@@ -177,6 +177,7 @@ class MethylT2FittingPage(BasePage):
             "into the viewer without re-running the fit."
         )
         run_row.addWidget(self.open_prev_btn)
+        run_row.addWidget(self._make_save_run_button())
         run_row.addStretch()
         layout.addLayout(run_row)
 

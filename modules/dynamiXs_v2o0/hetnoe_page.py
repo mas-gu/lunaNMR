@@ -112,6 +112,7 @@ class HetNOEPage(BasePage):
         run_row.setSpacing(SPACING_SM)
         self.run_btn = create_primary_button("Compute hetNOE", clicked=self._run, width=200)
         run_row.addWidget(self.run_btn)
+        run_row.addWidget(self._make_save_run_button())
         run_row.addStretch()
         layout.addLayout(run_row)
 
