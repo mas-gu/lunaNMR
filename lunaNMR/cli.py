@@ -915,6 +915,18 @@ def _load_series_params(args):
     return params
 
 
+def _series_tracking(args, series_params):
+    """The peak tracking the engine will run, beside the one asked for: titration mode
+    forces cascade with no absolute drift limit, whatever --peak-source says, and the
+    drift limit only ever applies to a tracked (cascade/independent) source."""
+    from lunaNMR.processors.multi_spectrum_processor import resolve_titration_tracking
+    source, drift, _ = resolve_titration_tracking(
+        args.mode, args.peak_source,
+        series_params['processing_options']['enable_cascade_drift_limit'])
+    return {'peak_source': source, 'requested_peak_source': args.peak_source,
+            'drift_limit': bool(drift) and source in ('cascade', 'independent')}
+
+
 # The files a series run writes that the JSON summary names.
 SERIES_OUTPUTS = ('peak_intensity_matrix.csv', 'peak_volume_matrix.csv',
                   'peak_detection_matrix.csv', 'peak_intensity_detected_matrix.csv',
@@ -935,13 +947,14 @@ def _run_series(args):
 
     # Validated before the dry-run returns: a plan that says "OK" for a run whose
     # tuning file will be rejected is the dry-run contract breaking again.
-    _load_series_params(args)
+    series_params = _load_series_params(args)
+    tracking = _series_tracking(args, series_params)
     if args.dry_run:
         peaks_ok = os.path.exists(args.peaks)
         missing = ([] if nmr_files else ['spectra']) + ([] if peaks_ok else [args.peaks])
         summary = {'command': 'series', 'dry_run': True, 'spectra_found': len(nmr_files),
                    'peaks': args.peaks, 'peaks_exists': peaks_ok, 'mode': args.mode,
-                   'peak_source': args.peak_source, 'parallel': args.parallel,
+                   **tracking, 'parallel': args.parallel,
                    'output_dir': args.out, 'missing_inputs': missing}
         deep_lines, deep_code = [], 0
         if getattr(args, 'deep', False) and nmr_files and peaks_ok:
@@ -959,7 +972,8 @@ def _run_series(args):
               "[dry-run] series",
               f"  spectra found: {len(nmr_files)}",
               f"  peaks: {args.peaks} [{'OK' if peaks_ok else 'MISSING'}]",
-              f"  mode={args.mode} peak-source={args.peak_source} parallel={args.parallel}",
+              f"  mode={args.mode} peak-source={tracking['peak_source']} "
+              f"drift-limit={tracking['drift_limit']} parallel={args.parallel}",
               f"  output: {args.out}",
               *deep_lines)
         return 1 if missing else deep_code
@@ -972,9 +986,8 @@ def _run_series(args):
         _emit_error(args, ValueError(f"Peak list is empty: {args.peaks}"))
         return 1
 
-    series_params = _load_series_params(args)
     os.makedirs(args.out, exist_ok=True)
-    print(f"Processing {len(nmr_files)} spectra ({args.mode} mode, {args.peak_source} peaks)...",
+    print(f"Processing {len(nmr_files)} spectra ({args.mode} mode, {tracking['peak_source']} peaks)...",
           file=sys.stderr)
     processor = MultiSpectrumProcessor(series_params)
     with _engine_stdout(args):
@@ -1019,7 +1032,8 @@ def _run_series(args):
         print(f"  warning: {name} was fitted by a fallback: {'; '.join(reasons)}", file=sys.stderr)
     _emit(args,
           {'command': 'series', 'spectra_fitted': n_success, 'spectra_total': len(results),
-           'failed_spectra': failed, 'fitting_fallbacks': fallbacks, 'output_folder': output_folder, 'outputs': outputs, 'parallel': args.parallel,
+           'failed_spectra': failed, 'fitting_fallbacks': fallbacks, 'output_folder': output_folder, 'outputs': outputs,
+           **tracking, 'parallel': args.parallel,
            'params_file': getattr(args, 'params', None), 'params': series_params},
           f"Series analysis complete: {n_success}/{len(results)} spectra fitted",
           f"  Output: {output_folder}",
