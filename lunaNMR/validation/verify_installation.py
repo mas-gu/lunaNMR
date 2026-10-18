@@ -58,8 +58,8 @@ def check_python_version():
     version = sys.version_info
     print(f"   Python {version.major}.{version.minor}.{version.micro}")
 
-    if version.major < 3 or (version.major == 3 and version.minor < 7):
-        print("   ❌ Python 3.7+ required")
+    if version.major < 3 or (version.major == 3 and version.minor < 9):
+        print("   ❌ Python 3.9+ required")
         return False
     else:
         print("   ✅ Python version compatible")
@@ -168,7 +168,7 @@ def generate_installation_report(missing_external, missing_internal, app_ok, fix
         print("❌ INSTALLATION INCOMPLETE!")
 
         if not python_ok:
-            print("\n Python version is below the 3.7 minimum")
+            print("\n Python version is below the 3.9 minimum")
 
         if missing_external:
             print("\n📦 Missing External Dependencies:")
