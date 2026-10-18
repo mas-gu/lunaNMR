@@ -17,20 +17,13 @@ def app():
     return QApplication.instance() or QApplication(sys.argv)
 
 
-class _FakeAxes:
-    def __init__(self):
-        self.scatters = []
-
-    def scatter(self, x, y, **kw):
-        self.scatters.append((kw.get('c'), len(x) if hasattr(x, '__len__') else 1))
-
-    def annotate(self, *a, **k):
-        pass
-
-
-class _FakePlotWidget:
-    def __init__(self):
-        self.axes = _FakeAxes()
+def _drawn(axes):
+    """(colour name, point count) of every marker set drawn on the real axes. Colours
+    are compared without alpha, which the markers set for themselves."""
+    from matplotlib.colors import to_rgb
+    names = {to_rgb(c): c for c in ('red', 'green')}
+    return [(names[tuple(coll.get_facecolor()[0][:3])], len(coll.get_offsets()))
+            for coll in axes.collections]
 
 
 def _viewer():
@@ -44,25 +37,29 @@ def _viewer():
     ]
     o.overlay_selected_spectrum_idx = 0
     o.edit_mode = False
-    o.plot_widget = _FakePlotWidget()
+    # A real matplotlib Axes in place of the dialog's plot widget, which this test
+    # does not build: the markers are drawn on it, and read back from it.
+    import types
+    from matplotlib.figure import Figure
+    o.plot_widget = types.SimpleNamespace(axes=Figure().add_subplot())
     return o
 
 
 def test_each_visible_spectrum_draws_its_list_in_its_color(app):
     o = _viewer()
     o._plot_overlay_peak_markers()
-    assert o.plot_widget.axes.scatters == [('red', 1), ('green', 1)]
+    assert _drawn(o.plot_widget.axes) == [('red', 1), ('green', 1)]
 
 
 def test_per_spectrum_toggle_hides_one_list(app):
     o = _viewer()
     o.spectra[1]['show_peaks'] = False
     o._plot_overlay_peak_markers()
-    assert o.plot_widget.axes.scatters == [('red', 1)]   # only spectrum A
+    assert _drawn(o.plot_widget.axes) == [('red', 1)]   # only spectrum A
 
 
 def test_hidden_spectrum_draws_no_peaks(app):
     o = _viewer()
     o.spectra[0]['visible'] = False
     o._plot_overlay_peak_markers()
-    assert o.plot_widget.axes.scatters == [('green', 1)]  # only visible spectrum B
+    assert _drawn(o.plot_widget.axes) == [('green', 1)]  # only visible spectrum B
