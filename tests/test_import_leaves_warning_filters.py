@@ -17,13 +17,14 @@ _MODULES = [
     "lunaNMR.utils.file_manager",
     "lunaNMR.integrators.inplace_advanced_nmr_integrator",
     "ZZ_density",
-    "ZZ_multi_density",
-    "ZZ_multi_density_087",
+    # by package name, as every caller imports them
+    "dynamiXs_density_functions.ZZ_multi_density",
+    "dynamiXs_density_functions.ZZ_multi_density_087",
     "ZZ_2fields_density",
     "ZZ_2fields_density_087",
     "ZZ_2fields_density_claude_rex_mcmc_error",
-    "ZZ_multi_2fields_density",
-    "ZZ_multi_2fields_density_087",
+    "dynamiXs_density_functions.ZZ_multi_2fields_density",
+    "dynamiXs_density_functions.ZZ_multi_2fields_density_087",
 ]
 
 # The third-party libraries those modules import, loaded before the snapshot: what they
@@ -35,7 +36,7 @@ _THIRD_PARTY = ("numpy", "scipy.optimize", "scipy.signal", "scipy.special", "pan
 @pytest.mark.parametrize("module", _MODULES)
 def test_importing_leaves_the_filters_unchanged(module):
     code = ("import importlib, sys, warnings\n"
-            f"sys.path.insert(0, {str(DENSITY_DIR)!r})\n"
+            f"sys.path[:0] = [{str(DENSITY_DIR)!r}, {str(DENSITY_DIR.parent)!r}]\n"
             "import matplotlib; matplotlib.use('Agg')\n"
             f"for name in {_THIRD_PARTY!r}:\n"
             "    try:\n"

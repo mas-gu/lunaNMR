@@ -12,17 +12,18 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DNAJA1 = Path(__file__).resolve().parents[2] / "data_test" / "data_binding" / "DNAJA1_HSPA8"
 MODULE_DIRS = [REPO_ROOT / "modules" / "dynamiXs_v2o0" / "dynamiXs_T1_T2",
-               REPO_ROOT / "modules" / "dynamiXs_v2o0" / "dynamiXs_density_functions"]
+               REPO_ROOT / "modules" / "dynamiXs_v2o0"]
 
 _MODULES = [
     "lunaNMR.core.parallel_voigt_processor",
     "lunaNMR.core.adaptive_optimizer",
     "lunaNMR.processors.parallel_fitting",
     "fitmulti__Tx_NMRRE",
-    "ZZ_multi_density",
-    "ZZ_multi_density_087",
-    "ZZ_multi_2fields_density",
-    "ZZ_multi_2fields_density_087",
+    # by package name, as every caller imports them
+    "dynamiXs_density_functions.ZZ_multi_density",
+    "dynamiXs_density_functions.ZZ_multi_density_087",
+    "dynamiXs_density_functions.ZZ_multi_2fields_density",
+    "dynamiXs_density_functions.ZZ_multi_2fields_density_087",
 ]
 
 
