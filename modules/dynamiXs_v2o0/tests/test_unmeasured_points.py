@@ -92,3 +92,83 @@ def test_t1t2_cli_survives_an_empty_cell(tmp_path):
     assert out.returncode == 0, out.stderr[-2000:]
     summary = json.loads(out.stdout)
     assert summary['n_fitted'] == 2, summary
+
+
+REAL_T1 = (REPO_ROOT.parent / "data_test" / "data_JA1_relaxation" / "run_20260825_1405"
+           / "series" / "600_T1" / "peak_intensity_matrix.csv")
+needs_real_t1 = pytest.mark.skipif(not REAL_T1.exists(), reason="data_test not present")
+
+
+def _real_t1_with_first_delay_blank(tmp_path):
+    """The real 600 MHz T1 matrix, with residue 2's first delay left empty as the
+    series writes an intensity-pinned point."""
+    matrix = pd.read_csv(REAL_T1)
+    matrix.loc[1, matrix.columns[4]] = np.nan
+    path = tmp_path / 'peak_intensity_matrix.csv'
+    matrix.to_csv(path, index=False)
+    return path, matrix
+
+
+@needs_real_t1
+def test_t1t2_cli_survives_an_empty_first_delay(tmp_path):
+    """The plot drew the full row, NaN included: min() of a row starting with NaN is
+    NaN, and set_ylim raised after every residue had been fitted."""
+    path, _ = _real_t1_with_first_delay_blank(tmp_path)
+    out = subprocess.run(
+        [sys.executable, '-m', 'lunaNMR', 'dynamixs', 't1t2', '--input', str(path),
+         '--out', str(tmp_path / 'fits'), '--exp', 'T1', '--field-freq', '600',
+         '--time-units', 'ms', '--format', 'json'],
+        cwd=str(REPO_ROOT), capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout[-2000:] + out.stderr[-2000:]
+    assert Path(json.loads(out.stdout)['results_file']).exists()
+
+
+@needs_real_t1
+def test_multicore_plot_survives_an_empty_first_delay(tmp_path):
+    from fitmulti__Tx_NMRRE import fit_single_residue_parallel, create_plots
+    from delay_parser import parse_delay_columns
+    _, matrix = _real_t1_with_first_delay_blank(tmp_path)
+    x, keep, _ = parse_delay_columns(list(matrix.columns[4:]))
+    y = matrix.iloc[1, 4:].astype(float).to_numpy()[keep]
+    r = fit_single_residue_parallel((x, y, matrix.loc[1, 'Assignment'], None, None, None,
+                                     0, 'analytical', 0, 1))
+    assert r['success']
+    create_plots([r], str(tmp_path / 'p'))
+    assert (tmp_path / 'p_fit_results_fig1.pdf').exists()
+
+
+def test_single_core_plot_survives_a_residue_with_no_measurement(tmp_path):
+    from fit_Tx_NMRRE import fit_single_residue, create_plots
+    r = fit_single_residue(X, np.full_like(Y, np.nan), "A1")
+    create_plots([r], str(tmp_path / 'p'))
+    assert (tmp_path / 'p_fit_results_fig1.pdf').exists()
+
+
+def _real_t1_first_residue_on_two_delays():
+    """Residue 1 of the real T1 matrix with every delay after the second left empty."""
+    from delay_parser import parse_delay_columns
+    matrix = pd.read_csv(REAL_T1)
+    x, keep, _ = parse_delay_columns(list(matrix.columns[4:]))
+    y = matrix.iloc[0, 4:].astype(float).to_numpy()[keep]
+    y[np.argsort(x)[2:]] = np.nan
+    return x, y
+
+
+@needs_real_t1
+def test_single_core_refuses_a_fit_with_no_spare_point():
+    """Two points fit two parameters exactly: the residual is zero because nothing is
+    left over, and an error of zero then reports a guess as perfectly known."""
+    from fit_Tx_NMRRE import fit_single_residue
+    x, y = _real_t1_first_residue_on_two_delays()
+    r = fit_single_residue(x, y, "R1")
+    assert r['success'] is False
+    assert not (r['t2_err'] == 0.0)
+
+
+@needs_real_t1
+def test_multicore_refuses_a_fit_with_no_spare_point():
+    from fitmulti__Tx_NMRRE import fit_single_residue_parallel
+    x, y = _real_t1_first_residue_on_two_delays()
+    r = fit_single_residue_parallel((x, y, "R1", None, None, None, 0, 'analytical', 0, 1))
+    assert r['success'] is False
+    assert not (r['t2_err'] == 0.0)

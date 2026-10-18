@@ -17,6 +17,7 @@ Each subcommand imports its own dependencies lazily so that unrelated subcommand
 
 import argparse
 import glob
+import math
 import os
 import re
 import sys
@@ -565,7 +566,9 @@ def _run_dynamixs_t1t2(args):
         'time_units': time_units,
         'error_method': args.error_method,
         'n_bootstrap': args.bootstrap,
-        'field_name': args.field_name,
+        # Names the fit JSON: with the prefix in it, runs sharing an --out keep their
+        # own, as their results files do.
+        'field_name': f"{args.prefix}_{args.field_name}",
         'field_freq': args.field_freq,
         'json_folder': None if args.no_json else args.out,
     }
@@ -613,7 +616,9 @@ def _run_dynamixs_methyl(args):
         'output_prefix': os.path.join(args.out, args.prefix),
         'results_txt_file': os.path.join(args.out, f"{args.prefix}_fit_results.txt"),
         'json_folder': args.out,
-        'field_name': args.field_name,
+        # Names the fit JSON: with the prefix in it, runs sharing an --out keep their
+        # own, as their results files do.
+        'field_name': f"{args.prefix}_{args.field_name}",
         'field_freq': args.field_freq,
         'time_units': time_units,
         'error_method': args.error_method,
@@ -623,11 +628,14 @@ def _run_dynamixs_methyl(args):
         result = run_methyl_t2_analysis_with_params(params)
     _emit(args, _recorded(args,
           {'command': 'dynamixs methyl-t2', 'n_fitted': result['n_fitted'],
+           'n_bi_exp_unidentifiable': result['n_bi_exp_unidentifiable'],
            'time_units': time_units, 'series_metadata': _sidecar_summary(sidecar),
            'dropped_columns': result.get('dropped_columns') or [],
            'n_total': result['n_total'], 'results_file': result['results_file'],
            'json_file': result['json_file']}),
           f"Methyl T2 analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted",
+          f"  {result['n_bi_exp_unidentifiable']} of them bi-exp unidentifiable "
+          f"(T2a/T2b not told apart; see bi_exp_unidentifiable per row)",
           f"  Results: {result['results_file']}",
           f"  JSON:    {result['json_file']}")
     return 0 if result['n_fitted'] else 1
@@ -1609,12 +1617,17 @@ def _run_dynamixs_hetnoe(args):
     supplied = {(True, True): 'both', (True, False): 'sat',
                 (False, True): 'unsat', (False, False): 'none'}[
                     (sat_e is not None, unsat_e is not None)]
+    common = set(sat_i) & set(unsat_i)
+    # An empty cell in either plane is a residue the series did not measure there.
+    n_unmeasured = sum(1 for r in common
+                       if not (math.isfinite(sat_i[r]) and math.isfinite(unsat_i[r])))
     _emit(args, _recorded(args,
           {'command': 'dynamixs hetnoe', 'n_residues': len(noe),
            'errors_supplied': supplied,
            'n_sat': len(sat_i), 'n_unsat': len(unsat_i),
-           'n_common': len(set(sat_i) & set(unsat_i)),
-           'n_dropped_nonpositive_ref': len(set(sat_i) & set(unsat_i)) - len(noe),
+           'n_common': len(common),
+           'n_dropped_unmeasured': n_unmeasured,
+           'n_dropped_nonpositive_ref': len(common) - n_unmeasured - len(noe),
            'output': out_csv, 'plot': out_pdf}),
           f"hetNOE complete: {len(noe)} residues "
           f"({len(sat_i)} sat, {len(unsat_i)} unsat, errors: {supplied})",
@@ -1779,17 +1792,9 @@ def _run_dynamixs_density(args):
             df.to_csv(results, index=False)
             outputs = [results]
             if not args.no_plot:
-                # The single-field plotter writes a hard-coded filename to the CWD, so run
-                # it from the output directory and record whatever PDF it produced.
-                cwd = os.getcwd()
-                try:
-                    os.chdir(args.out)
-                    before = set(f for f in os.listdir('.') if f.endswith('.pdf'))
-                    analyzer.plot_results(df, save_plots=True)
-                    new = [f for f in os.listdir('.') if f.endswith('.pdf') and f not in before]
-                finally:
-                    os.chdir(cwd)
-                outputs += [os.path.join(args.out, f) for f in new]
+                plots = f"{prefix}_plots.pdf"
+                analyzer.plot_results(df, save_plots=True, plot_filename=plots)
+                outputs.append(plots)
 
     _emit(args, _recorded(args,
           {'command': 'dynamixs density', 'n_residues': len(df),
@@ -1894,15 +1899,8 @@ def _run_dynamixs_modelfree(args):
     # exactly the mode the runbooks tell an agent to use.
     cb = ((lambda msg, *a, **k: print(msg, file=sys.stderr))
           if getattr(args, 'format', 'text') == 'json' else None)
-    # Run from the output dir: the single-field density plotter and the intermediate
-    # fit-result txt files are written to the CWD with relative/hard-coded names.
-    cwd = os.getcwd()
-    try:
-        os.chdir(out_dir)
-        with _engine_stdout(args):
-            result = IntegratedAnalysisPipeline(p, progress_callback=cb).run_complete_analysis()
-    finally:
-        os.chdir(cwd)
+    with _engine_stdout(args):
+        result = IntegratedAnalysisPipeline(p, progress_callback=cb).run_complete_analysis()
     out_files = result.get('output_files', {})
     _emit(args, _recorded(args,
           {'command': 'dynamixs modelfree', 'method': result.get('method'),
@@ -1911,6 +1909,7 @@ def _run_dynamixs_modelfree(args):
            # are in the human report; a summary that carries neither is the black hole.
            'validation': result.get('validation_warnings') or {},
            'residue_counts': result.get('residue_counts') or {},
+           'excluded_residues': result.get('excluded_residues') or {},
            'n_residues': result.get('n_residues'), 'n_successful': result.get('n_successful'),
            'output_files': out_files}),
           f"Model-free complete: {result.get('n_successful')}/{result.get('n_residues')} residues",
@@ -2411,7 +2410,7 @@ def _add_relaxation_flags(p):
     p.add_argument('--out', required=True, help='Output directory for results + JSON')
     p.add_argument('--prefix', default='field1', help='Output filename prefix (default: field1)')
     p.add_argument('--field-name', default='field1', dest='field_name',
-                   help='Field label used in the JSON filename (default: field1)')
+                   help='Field label used in the JSON filename, after --prefix (default: field1)')
     p.add_argument('--field-freq', type=float, default=600.0, dest='field_freq',
                    help='Spectrometer field frequency in MHz (default: 600)')
     p.add_argument('--time-units', choices=['ms', 's', 'us'], default=None, dest='time_units',

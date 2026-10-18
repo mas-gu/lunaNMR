@@ -14,6 +14,7 @@ Author: DynamiXs Development Team
 Date: 2025-01-23
 """
 
+import importlib
 import sys
 import os
 import tempfile
@@ -262,6 +263,13 @@ class IntegratedAnalysisPipeline:
 
         results['validation_warnings'] = getattr(self, 'validation_warnings', {})
         results['residue_counts'] = getattr(self, 'residue_counts', {})
+        # Who the merge dropped, not only how many: the residue lists otherwise reach
+        # the progress log alone.
+        results['excluded_residues'] = {
+            label: sorted(field['excluded_residues'])
+            for label, field in (('field1', self.field1_results),
+                                 ('field2', getattr(self, 'field2_results', None)))
+            if field}
         self.final_results = results
         return results
 
@@ -435,6 +443,7 @@ class IntegratedAnalysisPipeline:
         # the end is already the survivors -- 40 of 200 reads as 40/40 unless the
         # denominator each stage started from is carried out with it.
         self.residue_counts = {
+            'field1_excluded_at_merge': len(self.field1_results['excluded_residues']),
             'field1_merged': len(self.field1_results['merged_data']),
             'field1_density_input': int(n_residues_f1),
         }
@@ -454,6 +463,7 @@ class IntegratedAnalysisPipeline:
             input_files['field2'] = field2_input
             self.log_progress(f"  ✓ Field 2 input created: {n_residues_f2} residues")
             self.residue_counts.update(
+                field2_excluded_at_merge=len(self.field2_results['excluded_residues']),
                 field2_merged=len(self.field2_results['merged_data']),
                 field2_density_input=int(n_residues_f2))
 
@@ -462,9 +472,12 @@ class IntegratedAnalysisPipeline:
     def _run_spectral_density_analysis(self, input_files: Dict[str, str]) -> Dict:
         """Run the appropriate spectral density analysis script using multicore versions"""
 
-        # Import spectral density module
-        density_module_path = Path(__file__).parent.parent / 'dynamiXs_density_functions'
-        sys.path.insert(0, str(density_module_path))
+        # Import spectral density module by its package name, the one `density` and the
+        # GUI use: the numba cache of its kernels rebuilds them by importing the module
+        # under the name they were compiled in, so a second name breaks the other path.
+        dynamixs_path = str(Path(__file__).parent.parent)
+        if dynamixs_path not in sys.path:
+            sys.path.insert(0, dynamixs_path)
 
         # Determine which multicore script to use
         method_map = {
@@ -484,7 +497,7 @@ class IntegratedAnalysisPipeline:
 
         # Import the appropriate class
         try:
-            module = __import__(script_name)
+            module = importlib.import_module(f'dynamiXs_density_functions.{script_name}')
             AnalysisClass = getattr(module, class_name)
         except ImportError as e:
             raise ImportError(f"Could not import {script_name}: {e}")

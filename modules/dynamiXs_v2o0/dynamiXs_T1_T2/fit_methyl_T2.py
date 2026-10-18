@@ -573,6 +573,9 @@ def run_methyl_t2_analysis_with_params(params, progress_callback=None):
 
     return {
         "n_fitted": len(successful),
+        # Fitted, but T2a and T2b not told apart: their split is not a measurement.
+        "n_bi_exp_unidentifiable": sum(1 for r in successful
+                                       if r.get("bi_exp_unidentifiable", False)),
         "dropped_columns": dropped_columns,
         "n_total": total,
         "output_dir": os.path.dirname(output_prefix),

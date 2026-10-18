@@ -168,8 +168,10 @@ def fit_single_residue_parallel(args):
         y_all = np.asarray(y, dtype=float)
         x, y = measured_points(x_all, y_all)
         n_free = 3 if fit_baseline else 2
-        if len(y) < n_free:
-            raise ValueError(f"{len(y)} measured points, need {n_free}")
+        # One point beyond the parameters: with none spare the fit is exact by
+        # construction and would report an error of zero, not an unknown one.
+        if len(y) <= n_free:
+            raise ValueError(f"{len(y)} measured points, need {n_free + 1}")
 
         # Data-driven initial guesses (fixed A=5/t2=100 fail to converge when the
         # amplitude or time-scale differ by orders of magnitude).
@@ -339,7 +341,10 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
             ax.set_ylabel(f"Signal ({signal_units})")
             ax.legend()
             ax.set_xlim(0, max(x)*1.1)
-            ax.set_ylim(min(y)*0.9, max(y)*1.1)
+            # An empty cell is an unmeasured point: the limits come from the rest.
+            _, y_measured = measured_points(x, y)
+            if y_measured.size:
+                ax.set_ylim(y_measured.min()*0.9, y_measured.max()*1.1)
 
         # Hide unused subplots
         for idx in range(end_idx - start_idx, len(axes)):

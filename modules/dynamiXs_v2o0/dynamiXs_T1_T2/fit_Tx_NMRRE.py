@@ -374,9 +374,11 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
     x, y = measured_points(x_all, y_all)
 
     n_free = 3 if fit_baseline else 2
-    if len(y) < n_free:
+    # One point beyond the parameters: with none spare the fit is exact by construction,
+    # its residual is zero and the error it would report is zero, not unknown.
+    if len(y) <= n_free:
         print(f"Fitting residue: {residue_name}  ->  {len(y)} measured points, "
-              f"need {n_free}, excluded")
+              f"need {n_free + 1}, excluded")
         return {
             'residue': residue_name,
             'A': np.nan, 't2': np.nan, 'C': np.nan,
@@ -529,7 +531,10 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
             ax.set_ylabel(f"Signal ({signal_units})")
             ax.legend()
             ax.set_xlim(0, max(x)*1.1)
-            ax.set_ylim(min(y)*0.9, max(y)*1.1)
+            # An empty cell is an unmeasured point: the limits come from the rest.
+            _, y_measured = measured_points(x, y)
+            if y_measured.size:
+                ax.set_ylim(y_measured.min()*0.9, y_measured.max()*1.1)
         
         # Hide unused subplots
         for idx in range(end_idx - start_idx, len(axes)):

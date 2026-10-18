@@ -129,7 +129,7 @@ class TestDynamixsT1T2:
                      "--exp", "T2", "--prefix", "field1"])
         assert code == 0
         assert (out / "field1_fit_results.txt").exists()
-        json_file = out / "field1_T2_fit_data.json"
+        json_file = out / "field1_field1_T2_fit_data.json"
         assert json_file.exists()
         data = json.loads(json_file.read_text())
         # Recovered T2 must be near the injected tau (80 ms).
@@ -169,7 +169,7 @@ class TestDynamixsMethyl:
         code = main(["dynamixs", "methyl-t2", "--input", str(csv), "--out", str(out),
                      "--field-name", "field1", "--field-freq", "600", "--bootstrap", "0"])
         assert code == 0
-        json_file = out / "field1_methylT2_fit_data.json"
+        json_file = out / "field1_field1_methylT2_fit_data.json"
         assert json_file.exists()
         # Recovered slow/fast components must be near the injected bi-exp (80/15 ms).
         r = next(f for f in json.loads(json_file.read_text())['fits'] if f['residue'] == '27_cg1_D')
@@ -216,7 +216,7 @@ class TestDynamixsMethyl:
         out = tmp_path / "t1out"
         code = main(["dynamixs", "t1t2", "--input", str(csv), "--out", str(out), "--exp", "T1"])
         assert code == 0
-        data = json.loads((out / "field1_T1_fit_data.json").read_text())
+        data = json.loads((out / "field1_field1_T1_fit_data.json").read_text())
         residues = {f["residue"] for f in data["fits"]}
         assert residues == {"3.0", "4.0"}          # dummy row excluded
         # Recovered T1 must be near the injected tau (0.5), not a degenerate huge value.
