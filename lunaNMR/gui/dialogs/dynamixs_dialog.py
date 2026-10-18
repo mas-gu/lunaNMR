@@ -1108,13 +1108,15 @@ class DynamiXsDialog(BaseDialog):
             if self.main_window and hasattr(self.main_window, 'file_manager'):
                 file_manager = self.main_window.file_manager
 
-            # Create and show the viewer
+            # Create and show the viewer; corrections are saved into the series' CSVs
+            from lunaNMR.utils.project_manager import series_folder
             self.multi_spectrum_viewer = MultiSpectrumViewerDialog(
                 parent=self,
                 all_results=all_results,
                 file_manager=file_manager,
                 initial_assignment=initial_assignment,
-                exponential_fit_data=exponential_fit_data
+                exponential_fit_data=exponential_fit_data,
+                output_folder=series_folder(series_data)
             )
             self.multi_spectrum_viewer.show()
 

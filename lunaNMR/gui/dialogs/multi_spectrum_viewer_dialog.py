@@ -2336,12 +2336,44 @@ class MultiSpectrumViewerDialog(BaseDialog):
             self._ref_lw_cache = self._learned_linewidths(0) if self.spectra else None
         return self._ref_lw_cache
 
+    def _series_metadata(self):
+        """The series' series_metadata.json, or {} without one."""
+        import json
+        import os
+        if not self.output_folder:
+            return {}
+        path = os.path.join(self.output_folder, "series_metadata.json")
+        if not os.path.exists(path):
+            return {}
+        with open(path) as fh:
+            return json.load(fh)
+
+    def _recorded_fit_settings(self, spec_idx):
+        """(PS2D config, linewidth-total caps {assignment: [f1, f2]}) the series fitted
+        this spectrum's point with, each None where the series recorded none."""
+        import os
+        meta = self._series_metadata()
+        name = os.path.basename(self.spectra[spec_idx]['name'])
+        column = next((c for c in meta.get('columns', [])
+                       if os.path.basename(c.get('spectrum', '')) == name), {})
+        return meta.get('ps2d_config'), column.get('linewidth_caps')
+
     def _refit_peak_in_spectrum(self, spec_idx, assignment, x_ppm, y_ppm):
         """Re-fit one peak in one spectrum, anchored at (x_ppm, y_ppm) with a tight window.
 
-        Returns the new R² on success, or None on failure. Writes the result back
-        into the in-memory fitted peak.
+        Fitted as the series fitted that point - its PS2D config and the point's
+        linewidth-total caps, held only for the refit - but with the viewer's own
+        position window, which a manual correction may need to reach beyond the
+        series' territory. Returns the new R² on success, or None on failure. Writes
+        the result back into the in-memory fitted peak.
         """
+        from lunaNMR.core.ps2d_config import applied_ps2d_config
+        config, lw_caps = self._recorded_fit_settings(spec_idx)
+        with applied_ps2d_config(config):
+            return self._refit_with_series_config(spec_idx, assignment, x_ppm, y_ppm,
+                                                  lw_caps)
+
+    def _refit_with_series_config(self, spec_idx, assignment, x_ppm, y_ppm, lw_caps):
         import numpy as np
         spec = self.spectra[spec_idx]
         if not spec.get('loaded'):
@@ -2389,6 +2421,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         # re-fit matches the original (PASS-1-equivalent) fit instead of degrading.
         integ.spectrum_statistics = self._learned_linewidths(spec_idx)
         integ.titration_pos_margin_f1, integ.titration_pos_margin_f2 = self._edit_window()
+        integ.titration_lw_margins = lw_caps
         try:
             result = integ.fit_overlap_group_2d(
                 group, assignment=assignment,
@@ -2400,6 +2433,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         finally:
             integ.titration_pos_margin_f1 = None
             integ.titration_pos_margin_f2 = None
+            integ.titration_lw_margins = None
             integ.gui_params = saved_gui
             integ.spectrum_statistics = saved_stats
 
@@ -2513,8 +2547,14 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         self._pending_corrections.clear()
         self._edit_selected_peak = None
-        self.edit_status_label.setText(
-            f"Re-fit {done} peak-fits ({failed} failed). Use 'Save corrected' to persist.")
+        msg = f"Re-fit {done} peak-fits ({failed} failed). Use 'Save corrected' to persist."
+        if self._series_metadata().get('ps2d_config') is None:
+            from lunaNMR.core.ps2d_config import get_ps2d_config
+            config = get_ps2d_config()
+            msg += (f" The series has no PS2D config recorded: fitted with the current "
+                    f"{config.nucleus_type} config (radF1 {config.radF1:g}, "
+                    f"radF2 {config.radF2:g} ppm).")
+        self.edit_status_label.setText(msg)
         self._update_plot()
 
     def _find_peak_obj(self, spec_idx, assignment):

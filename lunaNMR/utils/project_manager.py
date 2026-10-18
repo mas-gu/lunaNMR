@@ -134,29 +134,37 @@ def batch_results_from_dict(data: dict, deserialize_result=None):
     return batch_results
 
 
-# The CSVs a series' analyses read, bundled beside its batch_results.json.
-SERIES_CSVS = ('series_analysis_tidy.csv', 'peak_intensity_matrix.csv')
+# What a series' pages and viewers read beside its batch_results.json: the tidy CSV and
+# the intensity matrix the analyses fit, and the tracking table and point map an overlay
+# correction is written into.
+SERIES_FILES = ('series_analysis_tidy.csv', 'peak_intensity_matrix.csv',
+                'comprehensive_peak_tracking.csv', 'series_metadata.json')
 
 
-def series_csv_path(batch_results, filename: str, bundled_first: bool) -> Optional[Path]:
-    """Where one of a series' SERIES_CSVS is on disk, or None.
-
-    Two places can hold it: the run's own output folder (for the tidy CSV, first the
-    csv_path it recorded), and - for a series opened from a project - the copy beside
-    the batch_results.json it was read from (`bundled_folder`). A series run in this
-    session has no bundled copy, so a project's copy under the same name never stands
-    in for it.
-    """
-    metadata = getattr(batch_results, 'metadata', None) or {}
-    own = []
-    if filename == 'series_analysis_tidy.csv' and metadata.get('csv_path'):
-        own.append(Path(metadata['csv_path']))
-    if metadata.get('output_folder'):
-        own.append(Path(metadata['output_folder']) / filename)
+def series_folder(batch_results) -> Optional[str]:
+    """The folder holding a series' SERIES_FILES: for a series opened from a project,
+    the bundle folder its batch_results.json was read from (`bundled_folder`) - never
+    its recorded run folder, which may hold a later run; for a series run in this
+    session, its own output folder."""
     folder = getattr(batch_results, 'bundled_folder', None)
-    bundled = [Path(folder) / filename] if folder else []
-    return next((path for path in (bundled + own if bundled_first else own + bundled)
-                 if path.exists()), None)
+    if folder:
+        return folder
+    return (getattr(batch_results, 'metadata', None) or {}).get('output_folder')
+
+
+def series_csv_path(batch_results, filename: str) -> Optional[Path]:
+    """Where one of a series' SERIES_FILES is on disk, or None: in its series_folder,
+    after - for the tidy CSV of a series run in this session - the csv_path it recorded.
+    """
+    candidates = []
+    metadata = getattr(batch_results, 'metadata', None) or {}
+    if (filename == 'series_analysis_tidy.csv' and metadata.get('csv_path')
+            and not getattr(batch_results, 'bundled_folder', None)):
+        candidates.append(Path(metadata['csv_path']))
+    folder = series_folder(batch_results)
+    if folder:
+        candidates.append(Path(folder) / filename)
+    return next((path for path in candidates if path.exists()), None)
 
 
 # A fit's surfaces are rebuilt from its parameters (`all_peaks`) and its region's ppm
@@ -1113,15 +1121,14 @@ class ProjectManager:
         return True
 
     def _copy_series_csvs(self, batch_results, series_subdir: Path) -> None:
-        """Copy a series' SERIES_CSVS - the tidy CSV Kd and DynamiXs read, the matrix
-        the hetNOE and methyl T2 pages read - into its bundle subdirectory.
-
-        From its run folder, else from the project it was opened from (a moved run, a
-        Save As, a renamed series). A CSV found in neither is left out.
+        """Copy a series' SERIES_FILES into its bundle subdirectory, from where its pages
+        and viewers read them (series_csv_path): the project it was opened from (a Save
+        As, a renamed series), or the run folder of a series run in this session. A file
+        not there is left out.
         """
         import shutil
-        for filename in SERIES_CSVS:
-            src = series_csv_path(batch_results, filename, bundled_first=False)
+        for filename in SERIES_FILES:
+            src = series_csv_path(batch_results, filename)
             dest = series_subdir / filename
             if src is not None and src.resolve() != dest.resolve():
                 shutil.copy2(src, dest)

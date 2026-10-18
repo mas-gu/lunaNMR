@@ -185,3 +185,86 @@ class TestRefitFlags:
         row = tracking[tracking['Assignment'] == '48IleH'].iloc[0]
         assert row['3_Detected'] == 0.0
         assert math.isclose(row['3_SNR'], sigma, rel_tol=1e-9)
+
+
+def _metadata(folder):
+    return json.loads((folder / "series_metadata.json").read_text())
+
+
+def _rewrite_metadata(folder, edit):
+    meta = _metadata(folder)
+    edit(meta)
+    (folder / "series_metadata.json").write_text(json.dumps(meta))
+
+
+@contextlib.contextmanager
+def _global_ps2d_config(nucleus):
+    """The global PS2D config holds `nucleus`'s defaults - as after the main window
+    loaded such a spectrum - and is put back afterwards."""
+    from lunaNMR.core.ps2d_config import PS2DConfig, get_ps2d_config
+    config = get_ps2d_config()
+    saved = dict(vars(config))
+    vars(config).update(vars(PS2DConfig(nucleus)))
+    try:
+        yield config
+    finally:
+        vars(config).clear()
+        vars(config).update(saved)
+
+
+class TestRefitFitsAsTheSeriesDid:
+    def test_a_time_series_records_no_territories(self, repeat_series):
+        meta = _metadata(repeat_series)
+        assert meta['ps2d_config']['nucleus_type'] == '15N'
+        assert not any('territories' in c for c in meta['columns'])
+
+    def test_a_refit_uses_the_recorded_config_and_leaves_the_global_one(self, titration):
+        folder, viewer = titration
+        idx = _spectrum_index(viewer, '2D_DNAJA1_HSPA8_3o0.ft')
+        _refit_in_place(viewer, idx, '42GlyH')
+        expected = viewer._find_peak_obj(idx, '42GlyH')['height']
+
+        other = _open_viewer(folder)
+        try:
+            with _global_ps2d_config('13C') as config:
+                carbon = dict(vars(config))
+                _refit_in_place(other, idx, '42GlyH')
+                assert dict(vars(config)) == carbon
+            assert math.isclose(other._find_peak_obj(idx, '42GlyH')['height'], expected,
+                                rel_tol=1e-9)
+        finally:
+            other.deleteLater()
+
+    def test_a_refit_keeps_the_linewidth_caps_of_its_point(self, titration):
+        """Caps are (max total F1, max total F2); lw_y/lw_x are the Gaussian parts,
+        which a capped total bounds. Uncapped, 42GlyH at 3 eq fits 0.135/0.031 ppm."""
+        folder, viewer = titration
+        caps = (0.12, 0.028)
+
+        def cap(meta):
+            entry = next(c for c in meta['columns'] if c['column'] == '3')
+            entry['linewidth_caps'] = {'42GlyH': list(caps)}
+        _rewrite_metadata(folder, cap)
+        idx = _spectrum_index(viewer, '2D_DNAJA1_HSPA8_3o0.ft')
+        _refit_in_place(viewer, idx, '42GlyH')
+        peak = viewer._find_peak_obj(idx, '42GlyH')
+        assert peak['lw_y'] <= caps[0] and peak['lw_x'] <= caps[1]
+        assert viewer.spectra[idx]['integrator'].titration_lw_margins is None
+
+    def test_a_refit_without_a_recorded_config_says_which_it_used(self, titration):
+        folder, viewer = titration
+        _rewrite_metadata(folder, lambda meta: meta.pop('ps2d_config'))
+        idx = _spectrum_index(viewer, '2D_DNAJA1_HSPA8_3o0.ft')
+        viewer._pending_corrections[(idx, '42GlyH')] = viewer._peak_center(
+            viewer._find_peak_obj(idx, '42GlyH'))
+        viewer._on_refit_corrected()
+        status = viewer.edit_status_label.text()
+        assert "no PS2D config recorded" in status and "15N" in status
+
+    def test_a_refit_with_the_recorded_config_says_nothing_of_it(self, titration):
+        folder, viewer = titration
+        idx = _spectrum_index(viewer, '2D_DNAJA1_HSPA8_3o0.ft')
+        viewer._pending_corrections[(idx, '42GlyH')] = viewer._peak_center(
+            viewer._find_peak_obj(idx, '42GlyH'))
+        viewer._on_refit_corrected()
+        assert "PS2D" not in viewer.edit_status_label.text()

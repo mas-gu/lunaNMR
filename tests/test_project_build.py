@@ -132,7 +132,8 @@ def test_a_series_run_on_relative_paths_records_absolute_ones(tmp_path):
     assert Path(meta["data_folder"]) == DNAJA1
 
 
-SERIES_CSVS = ("series_analysis_tidy.csv", "peak_intensity_matrix.csv")
+SERIES_FILES = ("series_analysis_tidy.csv", "peak_intensity_matrix.csv",
+                "comprehensive_peak_tracking.csv", "series_metadata.json")
 
 
 def _copy_of_run(run_dir, dest):
@@ -140,7 +141,7 @@ def _copy_of_run(run_dir, dest):
     the original folder is told apart from one taken from this folder."""
     import shutil
     shutil.copytree(run_dir, dest)
-    for name in SERIES_CSVS:
+    for name in SERIES_FILES:
         path = dest / "series" / "DNAJA1" / name
         path.write_text(path.read_text() + "\n")
     return dest
@@ -153,7 +154,7 @@ def test_a_copied_run_bundles_its_own_csvs_not_the_originals(run_dir, tmp_path):
     moved = _copy_of_run(run_dir, tmp_path / "moved")
     out = tmp_path / "B.lunaNMR"
     assert main(["project", "build", str(moved), "--out", str(out)]) == 0
-    for name in SERIES_CSVS:
+    for name in SERIES_FILES:
         assert ((out / "series_results" / "DNAJA1" / name).read_text()
                 == (moved / "series" / "DNAJA1" / name).read_text()), name
 
@@ -170,7 +171,7 @@ def test_a_moved_run_still_bundles_its_csvs(run_dir, tmp_path):
     batch.write_text(json.dumps(data))
     out = tmp_path / "B.lunaNMR"
     assert main(["project", "build", str(moved), "--out", str(out)]) == 0
-    for name in SERIES_CSVS:
+    for name in SERIES_FILES:
         assert (out / "series_results" / "DNAJA1" / name).exists(), name
 
 

@@ -15,7 +15,8 @@ Version: 1.0 - CENTRALIZED_CONFIG
 Author: Claude Code (architectural refactoring)
 """
 
-from typing import Dict, Any
+from contextlib import contextmanager
+from typing import Dict, Any, Optional
 
 
 class PS2DConfig:
@@ -440,6 +441,21 @@ def restore_base_ps2d_config():
     vars(_ps2d_config).update(_base_values)
 
 
+@contextmanager
+def applied_ps2d_config(values: Optional[Dict[str, Any]]):
+    """Hold `values` (a recorded `dict(vars(config))`) in the global configuration for
+    the duration, then put back exactly what it held. None leaves it as it is. In place,
+    so every holder of the config object sees it."""
+    saved = dict(vars(_ps2d_config))
+    if values:
+        vars(_ps2d_config).update(values)
+    try:
+        yield _ps2d_config
+    finally:
+        vars(_ps2d_config).clear()
+        vars(_ps2d_config).update(saved)
+
+
 # ============================================================================
 # Convenience functions for parameter access
 # ============================================================================
@@ -479,6 +495,7 @@ __all__ = [
     'reset_ps2d_config',
     'mark_ps2d_config_as_base',
     'restore_base_ps2d_config',
+    'applied_ps2d_config',
     'get_ellipse_radii',
     'get_overlap_thresholds',
     'get_gap_thresholds',

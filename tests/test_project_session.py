@@ -251,7 +251,9 @@ def test_opening_a_project_closes_the_windows_showing_the_previous_one(app, bund
 
 # ---------- a series' CSVs: its bundled copy, or its own run's ----------
 
-SERIES_CSVS = ("series_analysis_tidy.csv", "peak_intensity_matrix.csv")
+# What a series' pages, viewers and the overlay correction read, bundled beside it.
+SERIES_FILES = ("series_analysis_tidy.csv", "peak_intensity_matrix.csv",
+                "comprehensive_peak_tracking.csv", "series_metadata.json")
 
 
 def _point_series_at(bundle, folder):
@@ -266,7 +268,7 @@ def _point_series_at(bundle, folder):
 def _rerun_folder(bundle, folder):
     """A re-run's output folder: the bundled CSVs, each marked so the two are told apart."""
     folder.mkdir()
-    for name in SERIES_CSVS:
+    for name in SERIES_FILES:
         text = (bundle / "series_results" / SERIES / name).read_text()
         (folder / name).write_text(text + "\n")
     return folder
@@ -278,7 +280,7 @@ def test_save_as_carries_the_bundled_csvs_once_the_run_has_moved(bundle_a, tmp_p
     window, pm, _ = _loaded(bundle)
     other = tmp_path / "P2.lunaNMR"
     assert pm.save_project(other)[0]
-    for name in SERIES_CSVS:
+    for name in SERIES_FILES:
         assert ((other / "series_results" / SERIES / name).read_text()
                 == (bundle / "series_results" / SERIES / name).read_text()), name
 
@@ -287,11 +289,11 @@ def test_a_renamed_series_keeps_its_bundled_csvs(bundle_a, tmp_path):
     bundle = _copy(bundle_a, tmp_path)
     _point_series_at(bundle, tmp_path / "gone")
     original = {name: (bundle / "series_results" / SERIES / name).read_text()
-                for name in SERIES_CSVS}
+                for name in SERIES_FILES}
     window, pm, _ = _loaded(bundle)
     window.saved_series = {"renamed": window.saved_series[SERIES]}
     assert pm.save_project(bundle)[0]
-    for name in SERIES_CSVS:
+    for name in SERIES_FILES:
         assert (bundle / "series_results" / "renamed" / name).read_text() == original[name]
 
 
@@ -337,6 +339,94 @@ def test_a_loaded_series_reads_its_bundled_csvs(app, bundle_a, tmp_path):
         [series] = page._get_available_series(include=lambda br: True)
         assert series["csv_path"] == str(held / "series_analysis_tidy.csv")
         assert page._series_intensity_matrix(SERIES) == str(held / "peak_intensity_matrix.csv")
+    finally:
+        dialog.deleteLater()
+
+
+def test_a_bundle_carries_what_an_overlay_correction_writes(bundle_a):
+    held = bundle_a / "series_results" / SERIES
+    for name in SERIES_FILES:
+        assert (held / name).exists(), name
+
+
+def test_a_loaded_series_without_a_bundled_file_does_not_read_its_run_folder(
+        app, bundle_a, tmp_path):
+    """The run folder may hold a later run; a file the bundle lacks is absent."""
+    bundle = _copy(bundle_a, tmp_path)
+    rerun = _rerun_folder(bundle, tmp_path / "rerun")
+    _point_series_at(bundle, rerun)
+    (bundle / "series_results" / SERIES / "peak_intensity_matrix.csv").unlink()
+    window, _, _ = _loaded(bundle)
+    dialog = _dynamixs_dialog(window, bundle)
+    try:
+        assert dialog.hetnoe_page._series_intensity_matrix(SERIES) is None
+    finally:
+        dialog.deleteLater()
+
+
+def test_a_save_takes_a_loaded_series_files_from_the_bundle_it_was_read_from(bundle_a,
+                                                                             tmp_path):
+    bundle = _copy(bundle_a, tmp_path)
+    rerun = _rerun_folder(bundle, tmp_path / "rerun")
+    _point_series_at(bundle, rerun)
+    window, pm, _ = _loaded(bundle)
+    other = tmp_path / "P2.lunaNMR"
+    assert pm.save_project(other)[0]
+    for name in SERIES_FILES:
+        assert ((other / "series_results" / SERIES / name).read_text()
+                == (bundle / "series_results" / SERIES / name).read_text()), name
+
+
+def _overlay_viewer(window):
+    from lunaNMR.gui.dialogs.multi_spectrum_viewer_dialog import MultiSpectrumViewerDialog
+    [viewer] = window.findChildren(MultiSpectrumViewerDialog)
+    return viewer
+
+
+def _correct_one_height(viewer, assignment="3LysH"):
+    idx = next(i for i, s in enumerate(viewer.spectra) if s['name'].endswith("_3o0.ft"))
+    viewer._find_peak_obj(idx, assignment)['height'] = 999.0
+    viewer._edited.add((idx, assignment))
+    viewer._on_save_corrected()
+
+
+def test_an_overlay_correction_of_a_loaded_series_is_saved_into_the_bundle(
+        app, bundle_a, tmp_path):
+    from lunaNMR.gui.main_window import LunaNMRMainWindow
+    import pandas as pd
+    bundle = _copy(bundle_a, tmp_path)
+    rerun = _rerun_folder(bundle, tmp_path / "rerun")
+    _point_series_at(bundle, rerun)
+    run_tracking = (rerun / "comprehensive_peak_tracking.csv").read_text()
+    window = LunaNMRMainWindow()
+    try:
+        assert window._get_project_manager().load_project(bundle)[0]
+        window.open_multi_spectrum_viewer()
+        viewer = _overlay_viewer(window)
+        # Set, so the save asks for no folder.
+        assert viewer.output_folder == str(bundle / "series_results" / SERIES)
+        _correct_one_height(viewer)
+        tracking = pd.read_csv(bundle / "series_results" / SERIES
+                               / "comprehensive_peak_tracking.csv")
+        assert tracking.loc[tracking['Assignment'] == '3LysH', '3_Height'].item() == 999.0
+        assert (rerun / "comprehensive_peak_tracking.csv").read_text() == run_tracking
+        viewer.close()
+        viewer.deleteLater()
+    finally:
+        window.close()
+        window.deleteLater()
+
+
+def test_the_dynamixs_overlay_of_a_loaded_series_saves_into_the_bundle(app, bundle_a,
+                                                                      tmp_path):
+    bundle = _copy(bundle_a, tmp_path)
+    window, _, _ = _loaded(bundle)
+    dialog = _dynamixs_dialog(window, bundle)
+    try:
+        dialog._open_multi_spectrum_viewer(window.saved_series[SERIES])
+        viewer = dialog.multi_spectrum_viewer
+        assert viewer.output_folder == str(bundle / "series_results" / SERIES)
+        viewer.deleteLater()
     finally:
         dialog.deleteLater()
 
