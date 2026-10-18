@@ -267,8 +267,8 @@ def run_kd_survey_with_params(params):
     # 'equivalents' would convert twice on read-back, and storing it as 'absolute'
     # would silently contradict a --conc-units the next run restates. Recording what
     # the caller gave keeps the numbers and their units describing the same thing.
-    # normalize_params keeps the schema keys and drops the rest, so every setting a run
-    # was judged with round-trips without being enumerated here.
+    # dump_params_json keeps only kd_params.STORED_KEYS, the thresholds among them, so
+    # every threshold a run was judged with round-trips without being enumerated here.
     dump_params_json(params_file, {**params, 'points': data_in['points']})
 
     counts = {v: sum(1 for r in rows if r['verdict'] == v)

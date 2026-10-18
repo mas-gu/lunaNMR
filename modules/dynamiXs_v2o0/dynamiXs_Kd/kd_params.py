@@ -42,6 +42,13 @@ _DEFAULTS = {
 THRESHOLD_KEYS = ('csp_sigma_multiple', 'kd_outlier_z', 'noise_quantile',
                   'dd_runaway_ratio', 'ref_max_ratio')
 
+# What a settings file written for later runs records: what both front ends restore from
+# it, plus the input and points it describes (find_params_source matches on those).
+# P0, alpha, the observable and where intensities come from are the caller's to give
+# each run; the fit JSON's metadata keeps them as the record of the fit.
+STORED_KEYS = ('input', 'points', 'concentrations', 'conc_units', 'intensity_scales',
+               *THRESHOLD_KEYS)
+
 _OBS_BY_INDEX = {0: ['csp', 'intensity'], 1: ['csp'], 2: ['intensity']}
 
 
@@ -121,11 +128,12 @@ def recorded_keys(path):
 
 
 def dump_params_json(path, params):
-    """Write normalized params to a JSON file (indent=2, hand-editable). A conc_units of
-    None means nobody stated the units: the file then records none, rather than the
-    schema default every reader would take for a statement."""
-    out = normalize_params(params)
-    if 'conc_units' in params and params['conc_units'] is None:
+    """Write the STORED_KEYS of normalized params to a JSON file (indent=2,
+    hand-editable). Units nobody stated (conc_units None or absent) are not recorded,
+    rather than the schema default every reader would take for a statement."""
+    normalized = normalize_params(params)
+    out = {k: normalized[k] for k in STORED_KEYS}
+    if params.get('conc_units') is None:
         del out['conc_units']
     with open(path, 'w') as fh:
         json.dump(out, fh, indent=2)

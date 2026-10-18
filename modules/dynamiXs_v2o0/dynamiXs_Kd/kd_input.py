@@ -115,6 +115,15 @@ def labels_without_points(csv_path):
     return [lbl for lbl in labels if not _is_number_label(lbl)]
 
 
+def unnamed_points(csv_path):
+    """{point: [label, ...]} for the points of `csv_path` (as load_titration keys them)
+    whose labels name no titration point (labels_without_points)."""
+    points = {}
+    for lbl in labels_without_points(csv_path):
+        points.setdefault(_to_point(lbl), []).append(lbl)
+    return points
+
+
 def load_titration_tidy(csv_path):
     """Load series_analysis_tidy.csv into per-residue titration arrays.
 

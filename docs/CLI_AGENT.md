@@ -306,10 +306,12 @@ titration points (a hand-placed `<input_dir>/kd_params.json` need not name its i
 Every file passed over is listed in the summary's `params_skipped` with the reason, and
 `params_source` names the one used. A run refused for want of concentrations names them
 in its message and, under json, in `error.details.params_skipped`.
-Precedence: an explicit flag beats the stored value beats the schema default. Only the
-concentrations, `intensity_scales` and the five thresholds are restored: `--p0`,
-`--alpha`, `--intensity-from` and `--observable` are recorded but not read back, so pass
-them on every run.
+Precedence: an explicit flag beats the stored value beats the schema default. The file
+records only what is restored - the concentrations, `conc_units` (only when stated),
+`intensity_scales` and the five thresholds, plus `input` and `points` to identify what it
+was written for. `--p0`, `--alpha`, `--intensity-from` and `--observable` are not
+recorded there, so pass them on every run; the fit JSON's `metadata` keeps the values a
+fit used. The Kd page applies only the keys a file records and leaves its other controls.
 
 **Concentrations and their units are one pair.** `--conc` is in the units given beside
 it (`--conc-units`, default `absolute`), never in units a stored file recorded. Without

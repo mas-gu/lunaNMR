@@ -35,12 +35,37 @@ def test_bootstrap_alias_and_coercion():
 def test_roundtrip_dump_load(tmp_path):
     from kd_params import dump_params_json, load_params, normalize_params
     params = normalize_params({
-        'points': [0.0, 1.0, 2.0], 'concentrations': [0.0, 6.25, 12.5],
-        'intensity_scales': [1.2, 1.0, 0.5], 'protein_conc': 50.0, 'alpha': 0.14,
-        'observables': ['csp'], 'intensity_value': 'volume', 'n_bootstrap': 200})
+        'input': 'series_analysis_tidy.csv', 'points': [0.0, 1.0, 2.0],
+        'concentrations': [0.0, 6.25, 12.5], 'conc_units': 'equivalents',
+        'intensity_scales': [1.2, 1.0, 0.5], 'kd_outlier_z': 2.0})
     path = tmp_path / "kd_params.json"
     dump_params_json(path, params)
     assert load_params(path) == params
+
+
+def test_dump_records_only_what_both_front_ends_restore(tmp_path):
+    """P0, alpha, the observable and the intensity source are given per run; a file that
+    recorded them made the page restore them over what the user had set."""
+    from kd_params import STORED_KEYS, THRESHOLD_KEYS, dump_params_json
+    path = tmp_path / "kd_params.json"
+    dump_params_json(path, {
+        'input_csv_file': '/data/series_analysis_tidy.csv', 'points': [0.0, 1.0],
+        'concentrations': [0.0, 5.0], 'conc_units': 'absolute', 'protein_conc': 30.0,
+        'alpha': 0.2, 'observables': ['intensity'], 'intensity_value': 'volume',
+        'n_bootstrap': 100})
+    written = json.loads(path.read_text())
+    assert set(written) == set(STORED_KEYS)
+    assert set(STORED_KEYS) == {'input', 'points', 'concentrations', 'conc_units',
+                                'intensity_scales', *THRESHOLD_KEYS}
+    assert written['input'] == 'series_analysis_tidy.csv'
+
+
+def test_dump_records_no_units_nobody_stated(tmp_path):
+    from kd_params import dump_params_json
+    for params in ({'points': [0.0, 1.0]}, {'points': [0.0, 1.0], 'conc_units': None}):
+        path = tmp_path / "kd_params.json"
+        dump_params_json(path, params)
+        assert 'conc_units' not in json.loads(path.read_text())
 
 
 def test_load_from_fit_json_metadata(tmp_path):

@@ -152,8 +152,8 @@ to tune — anything that fails to reproduce was never measured.
 - Settings persist per dataset and are read back automatically — concentrations with
   their `conc_units`, `intensity_scales` and every threshold, recorded as you typed them —
   but only from a file written for this same input CSV and titration points. `--p0`,
-  `--alpha`, `--intensity-from` and `--observable` are recorded and NOT read back: pass
-  them on every run. A survey writes `<input_dir>/<prefix>_kd_params.json`, which the fit
+  `--alpha`, `--intensity-from` and `--observable` are NOT stored there (the fit JSON's
+  metadata records what a fit used): pass them on every run. A survey writes `<input_dir>/<prefix>_kd_params.json`, which the fit
   after it finds; a fit writes `<out>/data/<prefix>_kd_params.json`, which a later run
   finds only when `--out` is `<input_dir>/kd_analysis` — not the timestamped folders above.
   The run summary's `params_source` names the file that was read, or `null` if none was,

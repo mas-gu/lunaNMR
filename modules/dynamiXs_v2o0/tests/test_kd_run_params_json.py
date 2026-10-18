@@ -1,6 +1,7 @@
 # ABOUTME: Tests that every Kd run writes an importable <prefix>_kd_params.json into the results folder's data/ subfolder.
 # ABOUTME: Reproducibility: re-running an analysis needs no manual re-entry of binding params.
 
+import json
 import sys
 from pathlib import Path
 
@@ -43,6 +44,8 @@ def test_run_writes_importable_params_json(tmp_path):
     loaded = load_params(pf)
     assert loaded['concentrations'] == [0.0, 6.25, 12.5]
     assert loaded['intensity_scales'] == [1.2, 1.0, 0.5]
-    assert loaded['protein_conc'] == 50.0
-    assert loaded['observables'] == ['csp', 'intensity']
-    assert loaded['intensity_value'] == 'height'
+    assert loaded['input'] == 'series_analysis_tidy.csv'
+    written = json.loads(Path(pf).read_text())
+    for given_per_run in ('protein_conc', 'alpha', 'observables', 'intensity_value',
+                          'n_bootstrap'):
+        assert given_per_run not in written
