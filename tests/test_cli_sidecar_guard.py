@@ -111,11 +111,12 @@ class TestTheUnitsComeFromTheSidecar:
         return csv, out
 
     def test_the_sidecar_supplies_the_units(self, tmp_path, capsys):
-        """t1t2 defaults --time-units to 's', but a series-produced matrix is in ms."""
-        self._summary(tmp_path, [])
+        """The recorded units win over the ms fallback: a sidecar saying seconds is
+        what the summary reports, so the two cannot be the same value here."""
+        self._summary(tmp_path, [], value_units="s")
         summary = json.loads(capsys.readouterr().out)
-        assert summary["time_units"] == "ms"
-        assert summary["series_metadata"]["value_units"] == "ms"
+        assert summary["time_units"] == "s"
+        assert summary["series_metadata"]["value_units"] == "s"
 
     def test_an_explicit_flag_that_disagrees_is_refused(self, tmp_path):
         """One of the two is wrong and guessing is the 1000x error. Refuse instead."""

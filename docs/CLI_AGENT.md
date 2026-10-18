@@ -198,18 +198,19 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 - **`diagnose --format json`** (and `series --dry-run --deep`'s `checks` key): `experiments[]` each with `spectra[]` (`dx`, `dy`, `capture`, `capture_rate`, `median_snr`, `weak`, `decayed`, `is_reference`), `delays` (`parsed`, `unparsed`, `repeats`), `peak_list`, `hetnoe`, `subseries`; plus a flat `findings[]` of `{severity, check, message}` with severity `FAIL`/`WARN`.
 
 ## Gotchas (silent-corruption risks)
-- **`--time-units` means three different things.** Same spelling, different effect and
-  different default, so read the row before using it:
+- **`--time-units` does two different things.** Same spelling, different effect, so read
+  the row before using it:
 
   | command | flag | effect | default when you say nothing |
   |---|---|---|---|
-  | `dynamixs t1t2` / `methyl-t2` | `--time-units` | **labels output only** — no rescaling | the sidecar's `value_units`, else `s` |
+  | `dynamixs t1t2` / `methyl-t2` | `--time-units` | **labels output only** — no rescaling | the sidecar's `value_units`, else `ms` |
   | `dynamixs t1rho` | `--time-units` | **rescales** (T→R for both `--input` and `--t1`) | the sidecar's `value_units`, else `ms` |
   | `dynamixs modelfree` | `--f{1,2}-t{1,2}-units` | **rescales** (drives the T→R conversion) | that series' sidecar, else `ms` |
 
-  The defaults are deliberately not unified: changing either would silently move numbers
-  that have already been published. A T1 in seconds against a T2 in ms puts R1 out by
-  1000×, which is what the rescaling rows exist to prevent.
+  The fallback is `ms` everywhere because that is what the data is in: the delay parser
+  returns every header in ms and `series` writes its matrices in ms. A T1 in seconds
+  against a T2 in ms puts R1 out by 1000×, which is what the rescaling rows exist to
+  prevent.
 - **`quality`, `r_squared` and `success` cannot say "there is no peak here".** `success` is true on flat noise, and R² is per *cluster*, so a member with nothing at its position rides its neighbours' R² (measured: 0.58σ under a cluster R² of 0.9884). The bound flags in `series_analysis_tidy.csv` are what tell the two near-zero states apart, and they need **opposite** handling:
 
   | state | flag | CSP / positions | I/I₀ (T1, T2, titration intensity) |

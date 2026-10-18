@@ -298,7 +298,11 @@ python -m lunaNMR dynamixs methyl-t2 --input <matrix.csv> --out <dir> \
 ```
 Input = a series `peak_intensity_matrix.csv` / `comprehensive_peak_tracking.csv`. Delay column
 headers are parsed by `parse_delay_column` (explicit `ms`/`s`/`us` unit + optional repeat
-marker `b` or `_2`). Exit code 1 if nothing fits.
+marker `b` or `_2`), which returns every delay in ms. Exit code 1 if nothing fits.
+
+`--time-units` labels the output (summary, fit JSON, plot axes); it does not rescale. Left
+out, it is taken from `series_metadata.json` beside the input, else `ms` — the unit the
+parser returns and `series` writes.
 
 ### dynamixs hetnoe
 ```bash
