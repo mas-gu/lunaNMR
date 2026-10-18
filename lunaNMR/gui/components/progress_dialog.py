@@ -26,7 +26,6 @@ from lunaNMR.gui.styles.design_system import (
     FRAME_BG_COLOR,
     PRIMARY_TEXT,
     SUCCESS_GREEN,
-    WARNING_ORANGE,
     SECONDARY_BUTTON_BG,
     SECONDARY_BUTTON_HOVER,
     DESTRUCTIVE_BUTTON_BG,
@@ -55,7 +54,7 @@ class ProgressDialog(BaseDialog):
         - Real-time status messages
         - Detailed logging with timestamps
         - ETA calculation and display
-        - Pause/Resume/Cancel functionality
+        - Cancel functionality
         - Save log to file
         - Non-modal operation (user can continue working)
 
@@ -120,7 +119,6 @@ class ProgressDialog(BaseDialog):
 
     # Signals for external communication
     cancelled = Signal()  # Emitted when user clicks Cancel
-    paused = Signal(bool)  # Emitted when user pauses/resumes (True = paused)
 
     def __init__(
         self,
@@ -155,7 +153,6 @@ class ProgressDialog(BaseDialog):
         # State flags
         self._is_cancelled = False
         self._is_completed = False
-        self._is_paused = False
 
         # Store whether to show details
         self._show_details = show_details
@@ -362,24 +359,7 @@ class ProgressDialog(BaseDialog):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(SPACING_SM)
 
-        # Left side buttons (Pause, Cancel)
-        self.pause_button = QPushButton("⏸️ Pause")
-        self.pause_button.setMinimumWidth(100)
-        self.pause_button.clicked.connect(self._on_pause_clicked)
-        self.pause_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {WARNING_ORANGE};
-                color: white;
-                border: none;
-                border-radius: 10px;
-                padding: 6px 12px;
-                font-size: 10pt;
-            }}
-            QPushButton:hover {{
-                background-color: #DD9043;
-            }}
-        """)
-
+        # Left side button (Cancel)
         self.cancel_button = QPushButton("❌ Cancel")
         self.cancel_button.setMinimumWidth(100)
         self.cancel_button.clicked.connect(self._on_cancel_clicked)
@@ -397,7 +377,6 @@ class ProgressDialog(BaseDialog):
             }}
         """)
 
-        button_layout.addWidget(self.pause_button)
         button_layout.addWidget(self.cancel_button)
         button_layout.addStretch()
 
@@ -552,7 +531,6 @@ class ProgressDialog(BaseDialog):
 
         # Enable/disable buttons
         self.cancel_button.setEnabled(False)
-        self.pause_button.setEnabled(False)
         self.close_button.setEnabled(True)
 
         if self._show_details:
@@ -577,19 +555,6 @@ class ProgressDialog(BaseDialog):
             f"✅ Completed: {self.completed_tasks} | ❌ Failed: {self.failed_tasks}"
         )
         self.stats_label.setText(stats_text)
-
-    def _on_pause_clicked(self):
-        """Handle pause button click."""
-        self._is_paused = not self._is_paused
-
-        if self._is_paused:
-            self.pause_button.setText("▶️ Resume")
-            self.task_label.setText("⏸️ Processing paused...")
-        else:
-            self.pause_button.setText("⏸️ Pause")
-
-        # Emit signal for worker thread to handle
-        self.paused.emit(self._is_paused)
 
     def _on_cancel_clicked(self):
         """Handle cancel button click."""
@@ -641,8 +606,3 @@ class ProgressDialog(BaseDialog):
     def is_completed(self) -> bool:
         """Check if operation completed."""
         return self._is_completed
-
-    @property
-    def is_paused(self) -> bool:
-        """Check if operation is paused."""
-        return self._is_paused

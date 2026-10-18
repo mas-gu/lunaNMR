@@ -342,7 +342,6 @@ class LunaNMRMainWindow(BaseWindow):
         # ===== Processing State Flags =====
         self.processing_active = False
         self.integration_active = False
-        self.integration_paused = False
         self.integration_start_time = None
 
         # Processors (created on-demand)
