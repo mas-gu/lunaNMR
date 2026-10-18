@@ -1104,8 +1104,8 @@ class TestTheSurveyRecordsWhatTheFitNeeds:
 # threshold meant to identify them. Untrimmed sigma is materially larger.
 DNAJA1_SIGMA_TRIMMED = 0.0150
 DNAJA1_SIGMA_UNTRIMMED = 0.0236
-DNAJA1_SIGNIFICANT = 16
-DNAJA1_MEASURED = 41
+DNAJA1_SIGNIFICANT = 15
+DNAJA1_MEASURED = 40
 
 
 class TestCspSignificanceCutoff:
