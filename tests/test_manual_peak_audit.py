@@ -219,6 +219,10 @@ class TestSaveCorrected:
             cols[f'{label}_Position_Y'] = [0.0]
             cols[f'{label}_R_Squared'] = [0.0]
         pd.DataFrame(cols).to_csv(tmp_path / "comprehensive_peak_tracking.csv", index=False)
+        import json
+        (tmp_path / "series_metadata.json").write_text(json.dumps({'columns': [
+            {'column': '0', 'spectrum': 'p0', 'value': 0.0},
+            {'column': '1', 'spectrum': 'p1', 'value': 1.0}]}))
 
         dialog.output_folder = str(tmp_path)
         dialog._edited = {(0, 'R1')}
