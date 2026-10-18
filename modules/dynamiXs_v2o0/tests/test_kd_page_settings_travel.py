@@ -79,6 +79,7 @@ class TestTheUnitsTravelWithTheConcentrations:
     def test_a_restored_page_keeps_absolute(self, app, csv):
         page = _page()
         page._set_input_file(str(csv))
+        page.conc_units_combo.setCurrentIndex(0)
 
         reopened = _page()
         reopened.conc_units_combo.setCurrentIndex(1)

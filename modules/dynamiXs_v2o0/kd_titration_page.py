@@ -152,7 +152,10 @@ class KdTitrationPage(BasePage):
         self.intvalue_combo = iv
         b2.addWidget(self._make_field_row("Intensity from", iv))
         cu = QComboBox()
-        cu.addItems(["absolute", "equivalents of [P]0"])
+        cu.addItems(["absolute", "equivalents of [P]0", self._UNITS_UNSTATED])
+        # Unstated until the user or a params source for this input says which: the
+        # point labels fill [L], and nothing in them tells micromolar from equivalents.
+        cu.setCurrentIndex(2)
         self.conc_units_combo = cu
         b2.addWidget(self._make_field_row("Concentration units", cu))
         nb = QSpinBox()
@@ -250,6 +253,7 @@ class KdTitrationPage(BasePage):
 
     def _set_input_file(self, path):
         self._log(f"Input set: {path}")
+        previous_input = self.input_file
         try:
             from kd_input import load_titration
             points, residues = load_titration(path)
@@ -276,9 +280,13 @@ class KdTitrationPage(BasePage):
                 self.points_label.setText(
                     f"Detected 0 points — is this a titration series CSV? ({len(residues)} residues)")
             self._build_conc_rows(points)
+            self._set_conc_units(None)
             from kd_params import thresholds
             self.thresholds = thresholds()
-            self._maybe_apply_params_json(path, points)
+            applied = self._maybe_apply_params_json(path, points)
+            if previous_input and not applied:
+                self._log(f"Protein concentration [P]0 kept from the previous input: "
+                          f"{self.p0_spin.value():g}")
             if not has_positions:
                 self.obs_combo.setCurrentIndex(2)  # no positions -> intensity only wins
         except Exception as e:
@@ -340,13 +348,20 @@ class KdTitrationPage(BasePage):
 
     # ---------- run ----------
 
+    _UNITS_UNSTATED = "— state the units —"
+
     def _conc_units(self):
-        """'equivalents' or 'absolute', as the Concentration units selector says."""
-        return 'equivalents' if self.conc_units_combo.currentIndex() == 1 else 'absolute'
+        """'absolute', 'equivalents', or None while the selector says nobody stated them."""
+        return {0: 'absolute', 1: 'equivalents'}.get(self.conc_units_combo.currentIndex())
 
     def _set_conc_units(self, units):
-        """Point the Concentration units selector at `units` ('equivalents'/'absolute')."""
-        self.conc_units_combo.setCurrentIndex(1 if str(units).lower().startswith('eq') else 0)
+        """Point the Concentration units selector at `units` ('equivalents'/'absolute',
+        or None for unstated)."""
+        if units is None:
+            self.conc_units_combo.setCurrentIndex(2)
+        else:
+            self.conc_units_combo.setCurrentIndex(
+                1 if str(units).lower().startswith('eq') else 0)
 
     def _parse_concentrations(self):
         if not self.conc_spins:
@@ -401,7 +416,8 @@ class KdTitrationPage(BasePage):
 
     def _maybe_apply_params_json(self, csv_path, points):
         """Auto-detect a sibling binding-parameters JSON (or a prior fit JSON) next to the
-        input CSV and populate the panel. Values stay editable; absent → manual entry."""
+        input CSV and populate the panel. Values stay editable; absent → manual entry.
+        Returns whether a source was applied."""
         try:
             from kd_params import find_params_source
             skipped = []
@@ -409,10 +425,12 @@ class KdTitrationPage(BasePage):
             for s in skipped:
                 self._log(f"Not using {os.path.basename(s['path'])}: {s['reason']}")
             if not src:
-                return
+                return False
             self._load_params_file(src)
+            return True
         except Exception as e:
             self._log(f"Could not read binding-parameters JSON: {e}")
+            return False
 
     def _load_params_file(self, path):
         """Apply a params source to the panel and say on the page what it supplied."""
@@ -429,17 +447,19 @@ class KdTitrationPage(BasePage):
             self._log("Thresholds from that file: " + ", ".join(stored))
 
     def _gather_params_dict(self):
-        """The current panel values as a params dict (for saving a params JSON)."""
+        """The current panel values as a params dict (for saving a params JSON). With the
+        units unstated, neither they nor the [L] values are a statement worth recording."""
         from kd_params import combo_index_to_observables
+        units = self._conc_units()
         return {
             'points': list(self.detected_points),
-            'concentrations': self._parse_concentrations(),
+            'concentrations': self._parse_concentrations() if units else None,
             'intensity_scales': [s.value() for s in self.scale_spins] or None,
             'protein_conc': float(self.p0_spin.value()),
             'alpha': float(self.alpha_spin.value()),
             'observables': combo_index_to_observables(self.obs_combo.currentIndex()),
             'intensity_value': self.intvalue_combo.currentText(),
-            'conc_units': self._conc_units(),
+            'conc_units': units,
             'n_bootstrap': int(self.boot_spin.value()),
             **self.thresholds,
         }
@@ -485,6 +505,14 @@ class KdTitrationPage(BasePage):
         concs = self._parse_concentrations()
         if not concs:
             show_error(self, "No concentrations", "Load a CSV so the titration points appear, then set [L].")
+            return
+        if self._conc_units() is None:
+            # On the page, not in a modal: the refusal stays readable beside the [L] values.
+            msg = ("Not run: state the concentration units. The [L] values are filled from "
+                   "the point labels, which do not say whether they are absolute "
+                   "concentrations or equivalents of [P]0.")
+            self._log(msg)
+            self._show_result(msg, WARNING_ORANGE)
             return
         if not self.output_dir:
             self._choose_output_dir()
@@ -944,7 +972,7 @@ class KdTitrationPage(BasePage):
         self._build_conc_rows(self.detected_points)
         for spin, val in zip(self.conc_spins, state.get('concentrations', [])):
             spin.setValue(val)
-        self._set_conc_units(state.get('conc_units', 'absolute'))
+        self._set_conc_units(state.get('conc_units'))
         for spin, val in zip(self.scale_spins, state.get('intensity_scales', [])):
             spin.setValue(val)
 

@@ -78,6 +78,7 @@ def kd_page_state(fit_data, fit_path, input_file=None):
         'output_dir': str(Path(fit_path).parent.parent),
         'detected_points': points,
         'concentrations': list(meta.get('concentrations') or []),
+        'conc_units': meta.get('conc_units'),
         'intensity_scales': list(scales),
         'p0': meta.get('protein_conc'),
         'alpha': meta.get('alpha'),

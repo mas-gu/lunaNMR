@@ -83,7 +83,7 @@ def normalize_params(d):
         'observables': _parse_observables(obs_source),
         'intensity_value': str(d.get('intensity_value', _DEFAULTS['intensity_value'])),
         'n_bootstrap': int(boot),
-        'conc_units': str(d.get('conc_units', _DEFAULTS['conc_units'])),
+        'conc_units': str(d.get('conc_units') or _DEFAULTS['conc_units']),
         'csp_sigma_multiple': float(d.get('csp_sigma_multiple',
                                           _DEFAULTS['csp_sigma_multiple'])),
         'kd_outlier_z': float(d.get('kd_outlier_z', _DEFAULTS['kd_outlier_z'])),
@@ -121,9 +121,14 @@ def recorded_keys(path):
 
 
 def dump_params_json(path, params):
-    """Write normalized params to a JSON file (indent=2, hand-editable)."""
+    """Write normalized params to a JSON file (indent=2, hand-editable). A conc_units of
+    None means nobody stated the units: the file then records none, rather than the
+    schema default every reader would take for a statement."""
+    out = normalize_params(params)
+    if 'conc_units' in params and params['conc_units'] is None:
+        del out['conc_units']
     with open(path, 'w') as fh:
-        json.dump(normalize_params(params), fh, indent=2)
+        json.dump(out, fh, indent=2)
 
 
 def observables_to_combo_index(observables):

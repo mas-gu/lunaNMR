@@ -42,8 +42,8 @@ def _saved_fit(app, folder, equivalents):
     shutil.copy(DNAJA1, csv)
     page = _page()
     page._set_input_file(str(csv))
-    if equivalents:
-        page.conc_units_combo.setCurrentIndex(1)
+    # Absolute is a deliberate choice here: the labels read as micromolar.
+    page.conc_units_combo.setCurrentIndex(1 if equivalents else 0)
     page._start_analysis()
     assert page.worker.wait(300_000), "the fit did not finish"
     app.processEvents()
