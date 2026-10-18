@@ -1072,9 +1072,9 @@ def _run_series(args):
         if result.metadata.get(key):
             result.metadata[key] = os.path.abspath(result.metadata[key])
     write_batch_results(result, os.path.join(output_folder, 'batch_results.json'))
-    # Naming them beats globbing for them, and series_analysis_tidy.csv is the only
-    # place per-peak fit quality reaches the series output — a caller that misses it
-    # has no way to gate residues.
+    # Naming them beats globbing for them, and series_analysis_tidy.csv is where
+    # per-peak fit quality reaches the series output with the bound and detection flags
+    # beside it — a caller that misses it has no way to gate residues.
     outputs = {name: os.path.join(output_folder, name)
                for name in SERIES_OUTPUTS
                if os.path.exists(os.path.join(output_folder, name))}
