@@ -392,7 +392,8 @@ def build_project(run_dir, bundle, spectrum=None, peaks=None):
     :param peaks: the peak list it shows; defaults to the one that series was fitted with
     :return: {'series', 'kd', 'dynamixs': [...names], 'dynamixs_skipped': [...records
         no GUI page holds], 'spectrum', 'peaks'}
-    :raises ValueError: when the run holds no series, Kd fit or DynamiXs record
+    :raises ValueError: when the run holds no series, Kd fit or DynamiXs record, or when
+        no `spectrum` is given and the series' reference spectrum does not exist
     """
     series_files = find_series(run_dir)
     kd_files = find_kd_fits(run_dir)
@@ -409,6 +410,11 @@ def _build(run_dir, bundle, spectrum, peaks, series_files, kd_files, staging):
     first = next(iter(saved_series.values()), None)
     if spectrum is None and first is not None:
         spectrum = _reference_spectrum(first)
+        # The bundle reopens it by path, and rebuilds the slim series' fits from it.
+        if spectrum and not Path(spectrum).exists():
+            raise ValueError(f"The series' reference spectrum {spectrum} does not exist - "
+                             f"its spectra have moved since the series ran. Pass "
+                             f"--spectrum <file> to name the spectrum the bundle reopens")
     if peaks is None and first is not None:
         peaks = first.metadata.get('peak_list_file')
 

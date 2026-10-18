@@ -149,7 +149,9 @@ It saves through `ProjectManager.save_project` itself, handed a stand-in main wi
 the bundle is exactly what the GUI would have saved. The GUI reopens the first series'
 reference spectrum and the peak list it was fitted against unless `--spectrum`/`--peaks`
 say otherwise. Both are **referenced by absolute path, not copied**: the bundle needs the
-data where it was. DynamiXs results are copied into the bundle, so they reopen after the
+data where it was. With no `--spectrum`, a reference spectrum that no longer exists where
+the series read it is refused (exit 1) with a message to pass `--spectrum`; so is a given
+`--spectrum` that does not exist. DynamiXs results are copied into the bundle, so they reopen after the
 run folder is gone. Refuses an existing `--out`, and leaves nothing behind when a build
 fails. `--dry-run` performs the whole build into a scratch folder and reports what the
 bundle would hold.
