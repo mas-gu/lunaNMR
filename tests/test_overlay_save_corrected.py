@@ -5,7 +5,6 @@ import contextlib
 import io
 import json
 import math
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -25,20 +24,6 @@ def app():
     return QApplication.instance() or QApplication(sys.argv)
 
 
-def _open_viewer(folder):
-    """The overlay viewer on a series output folder, built as the series dialog builds it."""
-    from lunaNMR.gui.dialogs.multi_spectrum_viewer_dialog import MultiSpectrumViewerDialog
-    stored = json.loads((folder / "batch_results.json").read_text())
-    data_folder = stored['metadata']['data_folder']
-    all_results = []
-    for name, result in stored['results'].items():
-        result = dict(result)
-        result['spectrum_name'] = name
-        result['spectrum_file'] = os.path.join(data_folder, name)
-        all_results.append(result)
-    return MultiSpectrumViewerDialog(all_results=all_results, output_folder=str(folder))
-
-
 def _spectrum_index(viewer, name):
     return [s['name'] for s in viewer.spectra].index(name)
 
@@ -53,11 +38,11 @@ def _refit_in_place(viewer, spec_idx, assignment):
 
 
 @pytest.fixture
-def titration(app, dnaja1_titration_series, tmp_path):
+def titration(app, dnaja1_titration_series, tmp_path, open_overlay_viewer):
     """A writable copy of the 3-point titration output, and the viewer open on it."""
     folder = tmp_path / "out"
     shutil.copytree(dnaja1_titration_series, folder)
-    viewer = _open_viewer(folder)
+    viewer = open_overlay_viewer(folder)
     yield folder, viewer
     viewer.deleteLater()
 
@@ -81,13 +66,14 @@ def repeat_series(tmp_path_factory):
 
 
 class TestCorrectionLandsInItsOwnPoint:
-    def test_a_repeat_acquisition_saves_to_the_column_the_series_gave_it(self, app, repeat_series, tmp_path):
+    def test_a_repeat_acquisition_saves_to_the_column_the_series_gave_it(self, app, repeat_series, tmp_path,
+                                                                         open_overlay_viewer):
         folder = tmp_path / "out"
         shutil.copytree(repeat_series, folder)
         columns = {c['spectrum']: c['column']
                    for c in json.loads((folder / "series_metadata.json").read_text())['columns']}
         assert columns['s_10msb.ft'] == '10_2'
-        viewer = _open_viewer(folder)
+        viewer = open_overlay_viewer(folder)
         try:
             idx = _spectrum_index(viewer, 's_10msb.ft')
             peak = viewer._find_peak_obj(idx, '3LysH')
@@ -223,13 +209,14 @@ class TestRefitFitsAsTheSeriesDid:
         assert meta['ps2d_config']['nucleus_type'] == '15N'
         assert not any('territories' in c for c in meta['columns'])
 
-    def test_a_refit_uses_the_recorded_config_and_leaves_the_global_one(self, titration):
+    def test_a_refit_uses_the_recorded_config_and_leaves_the_global_one(self, titration,
+                                                                         open_overlay_viewer):
         folder, viewer = titration
         idx = _spectrum_index(viewer, '2D_DNAJA1_HSPA8_3o0.ft')
         _refit_in_place(viewer, idx, '42GlyH')
         expected = viewer._find_peak_obj(idx, '42GlyH')['height']
 
-        other = _open_viewer(folder)
+        other = open_overlay_viewer(folder)
         try:
             with _global_ps2d_config('13C') as config:
                 carbon = dict(vars(config))

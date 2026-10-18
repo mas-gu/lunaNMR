@@ -1,235 +1,209 @@
-# ABOUTME: Unit tests for Series Picker drag-and-drop functionality in T1T2FittingPage
-# ABOUTME: Tests DraggableSeriesList, DropTargetLabel, and series assignment logic
+# ABOUTME: Tests the series picker of the real T1/T2 page: the draggable list of the project's
+# ABOUTME: series, its drag payload, the drop targets, and what a dropped series assigns.
+
+import os
+import sys
+from pathlib import Path
 
 import pytest
-from unittest.mock import MagicMock, patch
-from pathlib import Path
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_DIR))
+
+DATA = Path(__file__).resolve().parents[4] / "data_test"
+SERIES = DATA / "data_JA1_relaxation" / "run_20260825_1405" / "series"
+T1_TIDY = SERIES / "600_T1" / "series_analysis_tidy.csv"
+T2_TIDY = SERIES / "600_T2" / "series_analysis_tidy.csv"
+
+
+@pytest.fixture(scope="module")
+def app():
+    from PySide6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication(sys.argv)
+
+
+def _series(folder=None, bundled_folder=None):
+    """A series as LunaNMR holds it: run into `folder` this session, or opened from a
+    project whose copy of its files sits in `bundled_folder`."""
+    from dynamiXs_gui import _ensure_lunaNMR_path
+    _ensure_lunaNMR_path()
+    from lunaNMR.processors.multi_spectrum_processor import BatchResults
+    br = BatchResults()
+    if folder:
+        br.metadata['output_folder'] = str(folder)
+    if bundled_folder:
+        br.bundled_folder = str(bundled_folder)
+    return br
+
+
+@pytest.fixture
+def window(app):
+    """The standalone DynamiXs window, the main window its pages read the series from."""
+    from dynamiXs_gui import DynamiXsMainWindow
+    w = DynamiXsMainWindow()
+    w.saved_series = {}
+    yield w
+    w.deleteLater()
+
+
+def _item(name, csv_path=None):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QListWidgetItem
+    item = QListWidgetItem(name)
+    item.setData(Qt.UserRole, name)
+    if csv_path is not None:
+        item.setData(Qt.UserRole + 1, csv_path)
+    return item
+
+
+def _drag_payload(text):
+    from PySide6.QtCore import QMimeData
+    mime = QMimeData()
+    mime.setText(text)
+    return mime
+
+
+def _drag_enter(label, text):
+    """Hand `label` a drag entering it with `text`; whether it accepted."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QDragEnterEvent
+    mime = _drag_payload(text)
+    event = QDragEnterEvent(QPoint(1, 1), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier)
+    event.ignore()
+    label.dragEnterEvent(event)
+    return event.isAccepted()
+
+
+def _drop(label, mime):
+    """Drop `mime` on `label`; the (field, series, csv path) it emitted, if any."""
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QDropEvent
+    emitted = []
+    label.series_dropped.connect(lambda *args: emitted.append(args))
+    event = QDropEvent(QPointF(1, 1), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier)
+    label.dropEvent(event)
+    return emitted
 
 
 class TestDraggableSeriesList:
-    """Test the draggable series list widget."""
 
-    def test_list_stores_series_data(self):
-        """Series items store name and CSV path in UserRole data."""
-        from PySide6.QtWidgets import QListWidgetItem
+    def test_the_page_lists_each_series_with_its_name_and_tidy_csv(self, window):
         from PySide6.QtCore import Qt
+        window.saved_series = {"600_T1": _series(SERIES / "600_T1")}
+        page = window.t1t2_page
+        page._populate_series_list()
+        item = page.series_list_widget.item(0)
+        assert item.data(Qt.UserRole) == "600_T1"
+        assert item.data(Qt.UserRole + 1) == str(T1_TIDY)
 
-        item = QListWidgetItem("T1_asyn_series")
-        item.setData(Qt.UserRole, "T1_asyn_series")
-        item.setData(Qt.UserRole + 1, "/path/to/series_analysis_tidy.csv")
-
-        assert item.data(Qt.UserRole) == "T1_asyn_series"
-        assert item.data(Qt.UserRole + 1) == "/path/to/series_analysis_tidy.csv"
-
-    def test_mime_data_format(self):
-        """Mime data uses series:name:path format."""
-        mime_text = "series:T1_asyn_series:/path/to/csv"
-        parts = mime_text.split(":", 2)
-
-        assert parts[0] == "series"
-        assert parts[1] == "T1_asyn_series"
-        assert parts[2] == "/path/to/csv"
-
-    def test_mime_data_with_colons_in_path(self):
-        """Mime data handles paths with colons (Windows drives)."""
-        mime_text = "series:T1_series:C:/Users/data/series.csv"
-        parts = mime_text.split(":", 2)
-
-        assert parts[0] == "series"
-        assert parts[1] == "T1_series"
-        assert parts[2] == "C:/Users/data/series.csv"
-
-
-class TestDropTargetLabel:
-    """Test the drop target label functionality."""
-
-    def test_field_name_stored(self):
-        """DropTargetLabel stores its field name."""
-        # This tests the logic, not actual Qt widgets
-        field_name = "field1_t1"
-        label_text = "No file selected"
-
-        # Simulate the label behavior
-        class MockDropLabel:
-            def __init__(self, field_name, text):
-                self.field_name = field_name
-                self.text = text
-
-        label = MockDropLabel(field_name, label_text)
-        assert label.field_name == "field1_t1"
-
-    def test_accepts_series_drop_data(self):
-        """Drop label accepts mime data starting with 'series:'."""
-        mime_text = "series:T1_asyn_series:/path/to/csv"
-        assert mime_text.startswith("series:")
-
-    def test_rejects_non_series_data(self):
-        """Drop label rejects mime data not starting with 'series:'."""
-        mime_text = "file:///path/to/file.csv"
-        assert not mime_text.startswith("series:")
-
-
-class TestSeriesDropHandler:
-    """Test the series drop handling logic."""
-
-    def test_drop_sets_file_path(self):
-        """Dropping a series sets the file path attribute."""
-        # Simulate _on_series_dropped behavior
-        class MockPage:
-            def __init__(self):
-                self.source_series_map = {}
-
-            def _on_series_dropped(self, field_name, series_name, csv_path):
-                if csv_path:
-                    setattr(self, f"{field_name}_file", csv_path)
-                if not hasattr(self, 'source_series_map'):
-                    self.source_series_map = {}
-                self.source_series_map[field_name] = series_name
-
-        page = MockPage()
-        page._on_series_dropped("field1_t1", "T1_asyn_series", "/path/to/csv")
-
-        assert page.field1_t1_file == "/path/to/csv"
-        assert page.source_series_map["field1_t1"] == "T1_asyn_series"
-
-    def test_drop_stores_source_series(self):
-        """Dropping a series stores source_series for Inspect Peak."""
-        source_series_map = {}
-        field_name = "field2_t2"
-        series_name = "T2_asyn_series"
-
-        source_series_map[field_name] = series_name
-
-        assert source_series_map["field2_t2"] == "T2_asyn_series"
-
-
-class TestGetAvailableSeries:
-    """Test the series discovery logic."""
-
-    def test_returns_empty_list_without_lunaNMR(self):
-        """Returns empty list when lunaNMR main window not available."""
-        # Simulate main_window without main_window attribute
-        class MockMainWindow:
-            pass
-
-        main_window = MockMainWindow()
-
-        # Simulate _get_available_series logic
-        lunaNMR_main = getattr(main_window, 'main_window', None)
-        series_list = []
-
-        if not lunaNMR_main:
-            pass  # Returns empty list
-
-        assert series_list == []
-
-    def test_returns_series_from_saved_series(self):
-        """Returns series from lunaNMR saved_series dict."""
-        # Simulate the nested main_window structure
-        saved_series = {
-            'T1_asyn_series': MagicMock(),
-            'T2_asyn_series': MagicMock(),
-        }
-
-        series_list = []
-        for series_name in saved_series.keys():
-            series_list.append({
-                'name': series_name,
-                'csv_path': ""
-            })
-
-        assert len(series_list) == 2
-        assert series_list[0]['name'] == 'T1_asyn_series'
-        assert series_list[1]['name'] == 'T2_asyn_series'
-
-    def test_finds_csv_path_in_project(self):
-        """Finds series_analysis_tidy.csv for series with project path."""
-        import tempfile
-        import os
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create project structure
-            series_dir = Path(tmpdir) / ".lunaNMR" / "series_results" / "T1_series"
-            series_dir.mkdir(parents=True)
-            tidy_csv = series_dir / "series_analysis_tidy.csv"
-            tidy_csv.write_text("header\ndata")
-
-            # Simulate the path lookup
-            project_path = tmpdir
-            series_name = "T1_series"
-            csv_path = ""
-
-            tidy_path = Path(project_path) / ".lunaNMR" / "series_results" / series_name / "series_analysis_tidy.csv"
-            if tidy_path.exists():
-                csv_path = str(tidy_path)
-
-            assert csv_path == str(tidy_csv)
-
-
-class TestSeriesListPopulation:
-    """Test the series list population logic."""
-
-    def test_shows_no_series_message_when_empty(self):
-        """Shows 'No project series available' when series list is empty."""
-        series = []
-        no_series_visible = len(series) == 0
-        list_visible = len(series) > 0
-
-        assert no_series_visible is True
-        assert list_visible is False
-
-    def test_shows_list_when_series_available(self):
-        """Shows series list when series are available."""
-        series = [{'name': 'T1_series', 'csv_path': '/path'}]
-        no_series_visible = len(series) == 0
-        list_visible = len(series) > 0
-
-        assert no_series_visible is False
-        assert list_visible is True
-
-
-class TestDraggableSeriesListMimeData:
-    """Real-widget tests for the drag payload the drop target consumes."""
-
-    @pytest.fixture(scope="class")
-    def app(self):
-        import sys
-        from PySide6.QtWidgets import QApplication
-        return QApplication.instance() or QApplication(sys.argv)
-
-    def _widget_class(self):
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    def test_the_drag_payload_is_series_name_path(self, app):
         from dynamiXs_gui import DraggableSeriesList
-        return DraggableSeriesList
-
-    def test_mimedata_emits_series_payload(self, app):
-        """mimeData() carries the 'series:name:path' text the drop target reads,
-        so the base view manages the drag lifecycle (no manual drag.exec)."""
-        from PySide6.QtWidgets import QListWidgetItem
-        from PySide6.QtCore import Qt
-        lst = self._widget_class()()
-        item = QListWidgetItem("T1_series")
-        item.setData(Qt.UserRole, "T1_series")
-        item.setData(Qt.UserRole + 1, "/path/to/series_analysis_tidy.csv")
+        lst = DraggableSeriesList()
+        item = _item("T1_series", "/path/to/series_analysis_tidy.csv")
         lst.addItem(item)
-
         mime = lst.mimeData([item])
         assert mime.hasText()
         assert mime.text() == "series:T1_series:/path/to/series_analysis_tidy.csv"
 
-    def test_mimedata_handles_missing_csv_path(self, app):
-        """A series with no CSV path still yields a well-formed payload."""
-        from PySide6.QtWidgets import QListWidgetItem
-        from PySide6.QtCore import Qt
-        lst = self._widget_class()()
-        item = QListWidgetItem("S")
-        item.setData(Qt.UserRole, "S")
+    def test_a_series_with_no_csv_path_still_yields_a_payload(self, app):
+        from dynamiXs_gui import DraggableSeriesList
+        lst = DraggableSeriesList()
+        item = _item("S")
         lst.addItem(item)
+        assert lst.mimeData([item]).text() == "series:S:"
 
-        mime = lst.mimeData([item])
-        assert mime.text() == "series:S:"
+
+class TestDropTargetLabel:
+
+    def test_it_keeps_its_field_name(self, app):
+        from dynamiXs_gui import DropTargetLabel
+        assert DropTargetLabel("field1_t1").field_name == "field1_t1"
+
+    def test_it_accepts_a_series_drag(self, app):
+        from dynamiXs_gui import DropTargetLabel
+        assert _drag_enter(DropTargetLabel("field1_t1"), "series:T1_series:/path/to/csv")
+
+    def test_it_refuses_anything_else(self, app):
+        from dynamiXs_gui import DropTargetLabel
+        assert not _drag_enter(DropTargetLabel("field1_t1"), "file:///path/to/file.csv")
+
+    def test_a_drop_emits_its_field_the_series_and_its_path(self, app):
+        from dynamiXs_gui import DropTargetLabel
+        emitted = _drop(DropTargetLabel("field1_t1"),
+                        _drag_payload("series:T1_series:/path/to/csv"))
+        assert emitted == [("field1_t1", "T1_series", "/path/to/csv")]
+
+    def test_a_path_with_a_drive_colon_survives_the_drop(self, app):
+        from dynamiXs_gui import DropTargetLabel
+        emitted = _drop(DropTargetLabel("field1_t1"),
+                        _drag_payload("series:T1_series:C:/Users/data/series.csv"))
+        assert emitted == [("field1_t1", "T1_series", "C:/Users/data/series.csv")]
+
+
+@pytest.mark.skipif(not T1_TIDY.exists(), reason="data_test not present")
+class TestSeriesDropOnThePage:
+
+    def test_dragging_a_listed_series_onto_a_slot_assigns_its_tidy_csv(self, window):
+        window.saved_series = {"600_T1": _series(SERIES / "600_T1")}
+        page = window.t1t2_page
+        page._populate_series_list()
+        item = page.series_list_widget.item(0)
+        _drop(page.field1_t1_display, page.series_list_widget.mimeData([item]))
+        assert page.field1_t1_file == str(T1_TIDY)
+        assert page.source_series_map["field1_t1"] == "600_T1"
+        assert page.field1_t1_display.text() == "📊 600_T1"
+
+    def test_each_slot_records_the_series_dropped_on_it(self, window):
+        page = window.t1t2_page
+        page._on_series_dropped("field1_t1", "600_T1", str(T1_TIDY))
+        page._on_series_dropped("field1_t2", "600_T2", str(T2_TIDY))
+        assert page.source_series_map == {"field1_t1": "600_T1", "field1_t2": "600_T2"}
+        assert page.field1_t2_file == str(T2_TIDY)
+
+
+class TestGetAvailableSeries:
+
+    def test_a_window_holding_no_series_offers_none(self, window):
+        del window.saved_series
+        assert window.t1t2_page._get_available_series() == []
+
+    @pytest.mark.skipif(not T1_TIDY.exists(), reason="data_test not present")
+    def test_every_saved_series_is_offered(self, window):
+        window.saved_series = {"600_T1": _series(SERIES / "600_T1"),
+                               "600_T2": _series(SERIES / "600_T2")}
+        assert window.t1t2_page._get_available_series() == [
+            {"name": "600_T1", "csv_path": str(T1_TIDY)},
+            {"name": "600_T2", "csv_path": str(T2_TIDY)}]
+
+    @pytest.mark.skipif(not T1_TIDY.exists(), reason="data_test not present")
+    def test_a_series_opened_from_a_project_offers_its_bundled_tidy_csv(self, window,
+                                                                         tmp_path):
+        import shutil
+        bundled = tmp_path / "proj.lunaNMR" / "series_results" / "600_T1"
+        bundled.mkdir(parents=True)
+        shutil.copy(T1_TIDY, bundled / "series_analysis_tidy.csv")
+        window.saved_series = {"600_T1": _series(SERIES / "600_T1", bundled_folder=bundled)}
+        assert window.t1t2_page._get_available_series() == [
+            {"name": "600_T1", "csv_path": str(bundled / "series_analysis_tidy.csv")}]
+
+
+class TestSeriesListPopulation:
+
+    def test_with_no_series_the_page_says_so_and_hides_the_list(self, window):
+        page = window.t1t2_page
+        page._populate_series_list()
+        assert not page.no_series_label.isHidden()
+        assert page.series_list_widget.isHidden()
+
+    def test_with_series_the_page_shows_the_list(self, window):
+        window.saved_series = {"600_T1": _series(SERIES / "600_T1")}
+        page = window.t1t2_page
+        page._populate_series_list()
+        assert page.no_series_label.isHidden()
+        assert not page.series_list_widget.isHidden()
+        assert page.series_list_widget.count() == 1
 
 
 if __name__ == '__main__':

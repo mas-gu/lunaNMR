@@ -183,12 +183,13 @@ def test_dynamixs_analyses_roundtrip_bundles_and_repoints_results(tmp_path):
     # dynamixs/analyses/<name>/results/methyl_t2/, and load repoints into the bundle.
     out_dir = tmp_path / "methyl_out"
     (out_dir / "json").mkdir(parents=True)
-    (out_dir / "field1_methylT2_results.csv").write_text("residue,t2a\nA,100\n")
-    (out_dir / "json" / "A_methylT2_fit_data.json").write_text("{}")
+    (out_dir / "A_field1_methylT2_results.csv").write_text("residue,t2a\nA,100\n")
+    (out_dir / "json" / "A_field1_methylT2_fit_data.json").write_text("{}")
     state = {'methyl_t2': {
         'output_dir': str(out_dir),
         'last_json_folder': str(out_dir / "json"),
-        'last_results_file': str(out_dir / "field1_methylT2_results.csv"),
+        'last_results_file': str(out_dir / "A_field1_methylT2_results.csv"),
+        'file_prefixes': ["A_field1_methylT2"],
     }}
     mw = types.SimpleNamespace(dynamixs_dialog=None, dynamixs_analyses={
         'HSPA8_methylT2': {'state': state, 'file_refs': {}}})
@@ -197,7 +198,7 @@ def test_dynamixs_analyses_roundtrip_bundles_and_repoints_results(tmp_path):
     bundle.mkdir()
     assert pm._save_dynamixs_state(bundle) is True
     adir = bundle / "dynamixs" / "analyses" / "HSPA8_methylT2"
-    assert (adir / "results" / "methyl_t2" / "field1_methylT2_results.csv").exists()
+    assert (adir / "results" / "methyl_t2" / "A_field1_methylT2_results.csv").exists()
     assert (adir / "results" / "methyl_t2" / "json").is_dir()
 
     mw2 = types.SimpleNamespace(dynamixs_dialog=None, dynamixs_analyses=None)

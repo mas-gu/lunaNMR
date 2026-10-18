@@ -2344,9 +2344,10 @@ class T1T2FittingPage(BasePage):
             # The session's own fit JSONs: a folder shared with other runs holds theirs too
             json_files = sorted({e['json_file'] for e in self._session_entries()
                                  if e.get('json_file') and os.path.exists(e['json_file'])})
-            # A session that recorded none: every fit in its JSON folders
-            json_folders = sorted({e['json_folder'] for e in self._session_entries()
-                                   if e.get('json_folder') and os.path.exists(e['json_folder'])})
+            if not json_files:
+                self.results_text.appendPlainText(
+                    "The session records no fit JSON on disk: nothing to view.")
+                return
 
             # Get source series map for Inspect Peak functionality
             series_map = getattr(self, 'source_series_map', {})
@@ -2354,8 +2355,7 @@ class T1T2FittingPage(BasePage):
             # Store as instance variable to prevent garbage collection
             self.fit_viewer = FitViewer(
                 parent=None,  # Separate window
-                json_folders=None if json_files else (json_folders or None),
-                json_files=json_files or None,
+                json_files=json_files,
                 source_series_map=series_map
             )
 
@@ -3571,23 +3571,13 @@ class IntegratedAnalysisPage(BasePage):
         try:
             from visualization.fit_viewer import FitViewer
 
-            # Try to get json_folder from session_results first (for project reload)
-            json_folder = None
-            if self.session_results and self.session_results.get('json_folder'):
-                stored_folder = self.session_results['json_folder']
-                if os.path.exists(stored_folder):
-                    json_folder = stored_folder
-
-            # Fallback: reconstruct from UI values
-            if not json_folder:
-                json_folder_name = self.json_display.text() if hasattr(self, 'json_display') else "json"
-                json_folder = os.path.join(self.output_dir, json_folder_name)
-                if not os.path.exists(json_folder):
-                    json_folder = None
-
             # The run's own fits, where it recorded them and they are still there
             json_files = [f for f in (self.session_results or {}).get('json_files') or []
                           if os.path.exists(f)]
+            if not json_files:
+                self.progress_text.appendPlainText(
+                    "The run records no fit JSON on disk: nothing to view.")
+                return
 
             # Get source series map for Inspect Peak functionality
             series_map = getattr(self, 'source_series_map', {})
@@ -3595,8 +3585,7 @@ class IntegratedAnalysisPage(BasePage):
             # Store as instance variable to prevent garbage collection
             self.fit_viewer = FitViewer(
                 parent=None,  # Separate window
-                json_folder=None if json_files else json_folder,
-                json_files=json_files or None,
+                json_files=json_files,
                 source_series_map=series_map
             )
 

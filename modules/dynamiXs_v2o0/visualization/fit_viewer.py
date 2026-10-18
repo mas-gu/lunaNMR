@@ -43,6 +43,7 @@ from refit import (
     load_outliers, save_outliers,
     refit_residue, update_json_fit_entry, update_tsv_row,
 )
+from fit_Tx_NMRRE import recorded_results_file
 
 
 class FitViewer(QMainWindow):
@@ -1062,13 +1063,12 @@ class FitViewer(QMainWindow):
         return [k for k in keys if k in self.data]
 
     def _find_tsv_for(self, data_key):
-        """Best-effort: locate the *_fit_results.txt sibling of the json folder."""
+        """The results file the fit JSON records, where it still is."""
         json_path = self.json_paths.get(data_key)
         if json_path is None:
             return None
-        run_name = Path(json_path).stem.replace("_fit_data", "")
-        candidate = Path(json_path).parent.parent / f"{run_name}_fit_results.txt"
-        return candidate if candidate.exists() else None
+        candidate = recorded_results_file(json_path, self.data[data_key].get("metadata"))
+        return candidate if candidate is not None and candidate.exists() else None
 
     def _refit_one(self, data_key, residue):
         """Refit (data_key, residue) using current exclusions; persist to disk."""

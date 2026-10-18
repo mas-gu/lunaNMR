@@ -53,3 +53,23 @@ def series_from_tidy():
                                                 'integration_results': peaks})
         return br, tidy
     return build
+
+
+@pytest.fixture
+def open_overlay_viewer():
+    """Open the overlay viewer on a series output folder, built as the series dialog
+    builds it: each stored result with its spectrum's name and file."""
+    import os
+    from lunaNMR.gui.dialogs.multi_spectrum_viewer_dialog import MultiSpectrumViewerDialog
+
+    def open_viewer(folder):
+        stored = json.loads((Path(folder) / "batch_results.json").read_text())
+        data_folder = stored['metadata']['data_folder']
+        all_results = []
+        for name, result in stored['results'].items():
+            result = dict(result)
+            result['spectrum_name'] = name
+            result['spectrum_file'] = os.path.join(data_folder, name)
+            all_results.append(result)
+        return MultiSpectrumViewerDialog(all_results=all_results, output_folder=str(folder))
+    return open_viewer

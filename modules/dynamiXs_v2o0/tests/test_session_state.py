@@ -1,250 +1,99 @@
-# ABOUTME: Unit tests for DynamiXs session state persistence
-# ABOUTME: Tests that field assignments (T1 Data, T2 Data) are saved/restored correctly
+# ABOUTME: Tests that the real T1/T2 page and the standalone DynamiXs window save and restore
+# ABOUTME: the page's field assignments (T1 Data, T2 Data) and the series dropped on them.
+
+import os
+import sys
+from pathlib import Path
 
 import pytest
-from unittest.mock import MagicMock, patch
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_DIR))
+
+SERIES = (Path(__file__).resolve().parents[4] / "data_test" / "data_JA1_relaxation"
+          / "run_20260825_1405" / "series")
+T1_TIDY = SERIES / "600_T1" / "series_analysis_tidy.csv"
+T2_TIDY = SERIES / "600_T2" / "series_analysis_tidy.csv"
+
+pytestmark = pytest.mark.skipif(not T1_TIDY.exists(), reason="data_test not present")
+
+
+@pytest.fixture(scope="module")
+def app():
+    from PySide6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication(sys.argv)
+
+
+@pytest.fixture
+def windows(app):
+    """A factory of standalone DynamiXs windows, each closed afterwards."""
+    from dynamiXs_gui import DynamiXsMainWindow
+    made = []
+
+    def make():
+        made.append(DynamiXsMainWindow())
+        return made[-1]
+    yield make
+    for w in made:
+        w.deleteLater()
+
+
+def _assigned(window):
+    """The window's T1/T2 page with series dropped on Field 1's T1 and T2 slots."""
+    page = window.t1t2_page
+    page._on_series_dropped("field1_t1", "600_T1", str(T1_TIDY))
+    page._on_series_dropped("field1_t2", "600_T2", str(T2_TIDY))
+    return page
 
 
 class TestT1T2FittingPageSessionState:
-    """Test T1T2FittingPage session state save/restore."""
 
-    def test_get_session_state_includes_source_series_map(self):
-        """get_session_state() includes source_series_map in returned state."""
-        # Simulate T1T2FittingPage state
-        class MockPage:
-            def __init__(self):
-                self.source_series_map = {
-                    'field1_t1': 'T1_asyn_series',
-                    'field1_t2': 'T2_asyn_series',
-                }
-                self.field1_t1_file = '/path/to/t1.csv'
-                self.field1_t2_file = '/path/to/t2.csv'
-                self.field1_b0_file = None
-                self.field1_temp_file = None
-                self.field2_t1_file = None
-                self.field2_t2_file = None
-                self.field2_b0_file = None
-                self.field2_temp_file = None
+    def test_get_session_state_includes_source_series_map(self, windows):
+        state = _assigned(windows()).get_session_state()
+        assert state['source_series_map'] == {'field1_t1': '600_T1', 'field1_t2': '600_T2'}
+        assert state['field1_t1_file'] == str(T1_TIDY)
+        assert state['field1_t2_file'] == str(T2_TIDY)
 
-            def get_session_state(self):
-                """Simulate the actual get_session_state method."""
-                state = {
-                    'field_files': {
-                        'field1_t1': self.field1_t1_file,
-                        'field1_t2': self.field1_t2_file,
-                        'field1_b0': self.field1_b0_file,
-                        'field1_temp': self.field1_temp_file,
-                        'field2_t1': self.field2_t1_file,
-                        'field2_t2': self.field2_t2_file,
-                        'field2_b0': self.field2_b0_file,
-                        'field2_temp': self.field2_temp_file,
-                    },
-                    'source_series_map': dict(getattr(self, 'source_series_map', {})),
-                }
-                return state
+    def test_restore_session_state_restores_source_series_map(self, windows):
+        page = windows().t1t2_page
+        page.restore_session_state({
+            'field1_t1_file': str(T1_TIDY), 'field1_t2_file': str(T2_TIDY),
+            'source_series_map': {'field1_t1': '600_T1', 'field1_t2': '600_T2'}})
+        assert page.source_series_map == {'field1_t1': '600_T1', 'field1_t2': '600_T2'}
+        assert page.field1_t1_file == str(T1_TIDY)
+        assert page.field1_t1_display.text() == "📊 600_T1"
+        assert page.field1_t2_display.text() == "📊 600_T2"
 
-        page = MockPage()
-        state = page.get_session_state()
-
-        assert 'source_series_map' in state
-        assert state['source_series_map']['field1_t1'] == 'T1_asyn_series'
-        assert state['source_series_map']['field1_t2'] == 'T2_asyn_series'
-        assert state['field_files']['field1_t1'] == '/path/to/t1.csv'
-
-    def test_restore_session_state_restores_source_series_map(self):
-        """restore_session_state() restores source_series_map from saved state."""
-        # Simulate T1T2FittingPage restore
-        class MockDisplay:
-            def __init__(self):
-                self.text_value = "No file selected"
-                self.tooltip = ""
-
-            def setText(self, text):
-                self.text_value = text
-
-            def setToolTip(self, tip):
-                self.tooltip = tip
-
-        class MockPage:
-            def __init__(self):
-                self.source_series_map = {}
-                self.field1_t1_file = None
-                self.field1_t2_file = None
-                self.field1_t1_display = MockDisplay()
-                self.field1_t2_display = MockDisplay()
-                self.update_displays_called = False
-
-            def _update_field_displays(self):
-                self.update_displays_called = True
-                # Simulate the actual display update
-                for field_key in ['field1_t1', 'field1_t2']:
-                    display = getattr(self, f"{field_key}_display", None)
-                    series_name = self.source_series_map.get(field_key)
-                    if series_name and display:
-                        display.setText(f"📊 {series_name}")
-
-            def restore_session_state(self, state):
-                """Simulate the actual restore_session_state method."""
-                field_files = state.get('field_files', {})
-                for field_key, file_path in field_files.items():
-                    setattr(self, f"{field_key}_file", file_path)
-
-                self.source_series_map = dict(state.get('source_series_map', {}))
-                self._update_field_displays()
-
-        page = MockPage()
-        saved_state = {
-            'field_files': {
-                'field1_t1': '/path/to/t1.csv',
-                'field1_t2': '/path/to/t2.csv',
-            },
-            'source_series_map': {
-                'field1_t1': 'T1_asyn_series',
-                'field1_t2': 'T2_asyn_series',
-            }
-        }
-
-        page.restore_session_state(saved_state)
-
-        assert page.source_series_map['field1_t1'] == 'T1_asyn_series'
-        assert page.source_series_map['field1_t2'] == 'T2_asyn_series'
-        assert page.field1_t1_file == '/path/to/t1.csv'
-        assert page.update_displays_called is True
-        assert "📊 T1_asyn_series" in page.field1_t1_display.text_value
-        assert "📊 T2_asyn_series" in page.field1_t2_display.text_value
-
-    def test_session_state_round_trip(self):
-        """State saved with get_session_state() restores correctly."""
-        class MockDisplay:
-            def __init__(self):
-                self.text_value = "No file selected"
-
-            def setText(self, text):
-                self.text_value = text
-
-            def setToolTip(self, tip):
-                pass
-
-        class MockPage:
-            def __init__(self):
-                self.source_series_map = {}
-                self.field1_t1_file = None
-                self.field1_t2_file = None
-                self.field1_b0_file = None
-                self.field1_temp_file = None
-                self.field2_t1_file = None
-                self.field2_t2_file = None
-                self.field2_b0_file = None
-                self.field2_temp_file = None
-                self.field1_t1_display = MockDisplay()
-                self.field1_t2_display = MockDisplay()
-
-            def get_session_state(self):
-                return {
-                    'field_files': {
-                        'field1_t1': self.field1_t1_file,
-                        'field1_t2': self.field1_t2_file,
-                        'field1_b0': self.field1_b0_file,
-                        'field1_temp': self.field1_temp_file,
-                        'field2_t1': self.field2_t1_file,
-                        'field2_t2': self.field2_t2_file,
-                        'field2_b0': self.field2_b0_file,
-                        'field2_temp': self.field2_temp_file,
-                    },
-                    'source_series_map': dict(self.source_series_map),
-                }
-
-            def _update_field_displays(self):
-                for field_key in ['field1_t1', 'field1_t2']:
-                    display = getattr(self, f"{field_key}_display", None)
-                    series_name = self.source_series_map.get(field_key)
-                    if series_name and display:
-                        display.setText(f"📊 {series_name}")
-
-            def restore_session_state(self, state):
-                field_files = state.get('field_files', {})
-                for field_key, file_path in field_files.items():
-                    setattr(self, f"{field_key}_file", file_path)
-                self.source_series_map = dict(state.get('source_series_map', {}))
-                self._update_field_displays()
-
-        # Create page with initial state
-        original_page = MockPage()
-        original_page.source_series_map = {
-            'field1_t1': 'T1_asyn_series',
-            'field1_t2': 'T2_asyn_series',
-        }
-        original_page.field1_t1_file = '/path/to/t1.csv'
-        original_page.field1_t2_file = '/path/to/t2.csv'
-
-        # Save state
-        saved_state = original_page.get_session_state()
-
-        # Create fresh page and restore
-        restored_page = MockPage()
-        restored_page.restore_session_state(saved_state)
-
-        # Verify round-trip
-        assert restored_page.source_series_map == original_page.source_series_map
-        assert restored_page.field1_t1_file == original_page.field1_t1_file
-        assert restored_page.field1_t2_file == original_page.field1_t2_file
-        assert "📊 T1_asyn_series" in restored_page.field1_t1_display.text_value
+    def test_session_state_round_trip(self, windows):
+        original = _assigned(windows())
+        restored = windows().t1t2_page
+        restored.restore_session_state(original.get_session_state())
+        assert restored.source_series_map == original.source_series_map
+        assert restored.field1_t1_file == original.field1_t1_file
+        assert restored.field1_t2_file == original.field1_t2_file
+        assert restored.field1_t1_display.text() == "📊 600_T1"
 
 
 class TestDynamiXsMainWindowState:
-    """Test DynamiXsMainWindow state methods."""
 
-    def test_get_state_delegates_to_page(self):
-        """DynamiXsMainWindow.get_state() delegates to page get_session_state()."""
-        class MockPage:
-            def get_session_state(self):
-                return {'source_series_map': {'field1_t1': 'T1_series'}}
+    def test_get_state_carries_the_pages_series_and_files(self, windows):
+        window = windows()
+        _assigned(window)
+        assert window.get_state()['t1t2']['source_series_map'] == {
+            'field1_t1': '600_T1', 'field1_t2': '600_T2'}
+        assert window.get_file_refs()['t1t2']['field1_t1_file'] == str(T1_TIDY)
 
-        class MockMainWindow:
-            def __init__(self):
-                self.current_page = MockPage()
-
-            def get_state(self):
-                state = {}
-                if hasattr(self.current_page, 'get_session_state'):
-                    state['t1t2_fitting'] = self.current_page.get_session_state()
-                return state
-
-        main_window = MockMainWindow()
-        state = main_window.get_state()
-
-        assert 't1t2_fitting' in state
-        assert state['t1t2_fitting']['source_series_map']['field1_t1'] == 'T1_series'
-
-    def test_restore_state_delegates_to_page(self):
-        """DynamiXsMainWindow.restore_state() delegates to page restore_session_state()."""
-        class MockPage:
-            def __init__(self):
-                self.restored_state = None
-
-            def restore_session_state(self, state):
-                self.restored_state = state
-
-        class MockMainWindow:
-            def __init__(self):
-                self.current_page = MockPage()
-
-            def restore_state(self, state):
-                if 't1t2_fitting' in state and hasattr(self.current_page, 'restore_session_state'):
-                    self.current_page.restore_session_state(state['t1t2_fitting'])
-
-        main_window = MockMainWindow()
-        state = {
-            't1t2_fitting': {
-                'source_series_map': {'field1_t1': 'T1_series'},
-                'field_files': {'field1_t1': '/path/to/t1.csv'},
-            }
-        }
-
-        main_window.restore_state(state)
-
-        assert main_window.current_page.restored_state is not None
-        assert main_window.current_page.restored_state['source_series_map']['field1_t1'] == 'T1_series'
+    def test_restore_state_hands_them_back_to_the_page(self, windows):
+        saved = windows()
+        _assigned(saved)
+        window = windows()
+        window.restore_state(saved.get_state(), saved.get_file_refs())
+        page = window.t1t2_page
+        assert page.source_series_map == {'field1_t1': '600_T1', 'field1_t2': '600_T2'}
+        assert page.field1_t1_file == str(T1_TIDY)
+        assert page.field1_t1_display.text() == "📊 600_T1"
 
 
 if __name__ == '__main__':

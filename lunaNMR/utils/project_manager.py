@@ -1332,9 +1332,10 @@ class ProjectManager:
         """Copy one analysis's result files into dest_results_dir/<page>/, using ONLY the
         per-page output_dir in `state` (no live-dialog merge).
 
-        A page that records its runs' `file_prefixes` gets only the files those runs
-        wrote: runs sharing a folder are told apart by prefix, as `project build` does,
-        against every run of that folder in `runs_by_folder` ({folder: prefixes}).
+        Each page gets only the files its runs wrote, by the `file_prefixes` it records:
+        runs sharing a folder are told apart by prefix, as `project build` does, against
+        every run of that folder in `runs_by_folder` ({folder: prefixes}). A page that
+        records none gets nothing.
         """
         import shutil, glob
         if not isinstance(state, dict):
@@ -1353,10 +1354,11 @@ class ProjectManager:
                 continue    # a reopened analysis saved onto its own bundle: in place
             prefixes = page_state.get('file_prefixes')
             if prefixes is None:
-                owned = lambda name: True
-            else:
-                rivals = (runs_by_folder or {}).get(Path(out).resolve(), set())
-                owned = lambda name: any(_run_owns(name, p, rivals) for p in prefixes)
+                logger.warning(f"DynamiXs {page} page records no file prefixes: none of "
+                               f"its results in {out} are bundled")
+                continue
+            rivals = (runs_by_folder or {}).get(Path(out).resolve(), set())
+            owned = lambda name: any(_run_owns(name, p, rivals) for p in prefixes)
             files = (glob.glob(str(Path(out) / "*.csv")) + glob.glob(str(Path(out) / "*.txt"))
                      + glob.glob(str(Path(out) / "*.json")))
             files = [f for f in files
@@ -1364,7 +1366,7 @@ class ProjectManager:
             json_dirs = {Path(d).name: [f for f in Path(d).iterdir()
                                         if f.is_file() and owned(f.name)]
                          for d in glob.glob(str(Path(out) / "json*")) if Path(d).is_dir()}
-            json_dirs = {d: fs for d, fs in json_dirs.items() if fs or prefixes is None}
+            json_dirs = {d: fs for d, fs in json_dirs.items() if fs}
             if not files and not json_dirs:
                 continue
             page_dir.mkdir(parents=True, exist_ok=True)
@@ -1374,9 +1376,6 @@ class ProjectManager:
                 dst = page_dir / jd
                 if dst.exists():
                     shutil.rmtree(dst)
-                if prefixes is None:
-                    shutil.copytree(Path(out) / jd, dst)
-                    continue
                 dst.mkdir()
                 for src in json_files:
                     shutil.copy2(src, dst / src.name)

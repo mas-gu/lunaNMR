@@ -451,14 +451,15 @@ def test_a_later_run_into_the_same_folder_leaves_a_saved_analysis_alone(run_dir,
     shutil.copytree(run_dir / "fits" / "NBD", live)
     _mark_run(live, "first")
     window = _window()
-    window.dynamixs_analyses = {"first": {"state": {"methyl_t2": {"output_dir": str(live)}},
+    page_state = {"output_dir": str(live), "file_prefixes": ["NBD"]}
+    window.dynamixs_analyses = {"first": {"state": {"methyl_t2": dict(page_state)},
                                           "file_refs": {}}}
     pm = ProjectManager(window)
     bundle = tmp_path / "P.lunaNMR"
     assert pm.save_project(bundle)[0]
 
     _mark_run(live, "second")
-    window.dynamixs_analyses["second"] = {"state": {"methyl_t2": {"output_dir": str(live)}},
+    window.dynamixs_analyses["second"] = {"state": {"methyl_t2": dict(page_state)},
                                           "file_refs": {}}
     assert pm.save_project(bundle)[0]
     for name in ("first", "second"):

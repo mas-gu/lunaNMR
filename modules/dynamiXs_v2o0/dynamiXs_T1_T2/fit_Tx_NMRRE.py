@@ -579,8 +579,24 @@ def save_results(results_list, output_file, experiment_type="T1"):
             )
 
 
+def results_file_from_json(json_file, results_file):
+    """`results_file` as the fit JSON `json_file` records it: relative to the JSON's
+    folder, so the pair can move together (into a project bundle, say). Absolute where
+    no relative path exists (another drive)."""
+    try:
+        return os.path.relpath(results_file, os.path.dirname(os.path.abspath(json_file)))
+    except ValueError:
+        return os.path.abspath(results_file)
+
+
+def recorded_results_file(json_file, metadata):
+    """The results file the fit JSON `json_file` records in its `metadata`, or None."""
+    recorded = (metadata or {}).get('results_file')
+    return Path(json_file).parent / recorded if recorded else None
+
+
 def save_fit_data_json(results_list, output_file, experiment_type, time_units,
-                       signal_units, n_bootstrap, field_freq):
+                       signal_units, n_bootstrap, field_freq, results_file=None):
     """
     Save complete fitting data as JSON for interactive visualization
 
@@ -600,6 +616,8 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
         Number of bootstrap iterations used
     field_freq : float
         Magnetic field frequency in MHz
+    results_file : str, optional
+        The run's results file, recorded relative to the JSON for a refit to update
     """
     # Get time points from first result (same for all residues)
     if not results_list:
@@ -651,7 +669,9 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
             'signal_units': signal_units,
             'n_bootstrap': n_bootstrap,
             'n_residues': len(results_list),
-            'time_points': [float(t) for t in time_points]
+            'time_points': [float(t) for t in time_points],
+            'results_file': (results_file_from_json(output_file, results_file)
+                             if results_file else None)
         },
         'fits': fits_data
     }
@@ -941,7 +961,8 @@ def run_analysis_with_params(params, progress_callback=None):
             time_units=time_units,
             signal_units=signal_units,
             n_bootstrap=n_bootstrap,
-            field_freq=params.get('field_freq', 600.0)
+            field_freq=params.get('field_freq', 600.0),
+            results_file=results_txt_file
         )
 
     # Summary statistics over reliable residues only (degenerate/no-decay excluded)
