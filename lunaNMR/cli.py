@@ -277,6 +277,11 @@ def _missing_input_error(missing):
     return ('MissingInput', f"Input(s) not found: {', '.join(str(p) for p in missing)}")
 
 
+class NothingFitted(RuntimeError):
+    """A fit command ran and produced nothing; reported under this name, as the other
+    fit commands' nothing-fitted runs are."""
+
+
 def _nothing_fitted_error(n_fitted, what='residues fitted'):
     """The `error` of a fit run that produced nothing, or None."""
     if n_fitted:
@@ -1165,7 +1170,7 @@ def _run_series(args):
     results = getattr(result, 'results', None) or {}
     n_success = result.metadata.get('successful_spectra', 0)
     if not n_success:
-        _emit_error(args, RuntimeError(
+        _emit_error(args, NothingFitted(
             f"Series produced no successful fits: 0 of {len(results)} spectra "
             f"(all failed, or none loaded)"))
         return 1
