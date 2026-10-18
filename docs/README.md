@@ -11,7 +11,7 @@ Load spectrum → **Detect** → **Fit Spectrum** → inspect → export. PS2D h
 1. **Launch** — `cd lunaNMR_v1o0 && python launch_lunaNMR.py`; the main window opens directly.
 2. **Load data** — click **Load Data** and pick a spectrum (`.2ii`/`.2rr` Bruker, `.ft`/`.pipe` NMRPipe, `.ucsf` SPARKY, `.fid`/`.ft` Varian). The same dialog optionally loads a peak list; reference peaks show as blue ×. Without a list, all peaks are detected.
 3. **Detect** — click **Detect**. Markers appear as red dots.
-4. **Fit** — click **Fit Spectrum**. Progress logs to the console; fitted peaks populate the **Peak Navigator** (right panel).
+4. **Fit** — click **Fit Spectrum**. Progress shows in a progress dialog whose **Cancel** stops the fit before its next cluster; fitted peaks populate the **Peak Navigator** (right panel).
 5. **Inspect** — click a peak in the Navigator to auto-center. The **Voigt Analysis** tab shows contours, fitted peaks, the residual heatmap, and quality metrics (R², intensity, linewidths).
 
 All detection/fitting parameters live behind the **Expert Mode** button (not needed for routine use). See [QUICK_REFERENCE.md](QUICK_REFERENCE.md) for the cheat-sheet.
@@ -39,11 +39,12 @@ All detection/fitting parameters live behind the **Expert Mode** button (not nee
 ### Analysis Modules (Modules menu)
 - **DynamiXs Relaxation Analysis** — T₁/T₂, methyl T₂ (bi-exponential), T₁ρ, spectral density, model-free.
 - **Kd / Titration Analysis** — CSP (1:1 quadratic isotherm) and intensity exponential-decay binding fits.
+- **1D Integration** — peak picking on a 1D spectrum, then height / region-sum / Voigt-area measurement across a series.
 
-Both are scriptable headless (`python -m lunaNMR dynamixs …` / `kd`) — see [CLI.md](CLI.md).
+All three are scriptable headless (`python -m lunaNMR dynamixs …` / `kd` / `integrate-1d`) — see [CLI.md](CLI.md).
 
 ### Project Bundles (`.lunaNMR`)
-State-based save/load. Fit surfaces are stored slim and reconstructed on load. DynamiXs and Kd analyses persist as multiple named runs, reopenable from the Project Browser (File ▸ Project Contents…).
+State-based save/load. Fit surfaces are stored slim and reconstructed on load. DynamiXs and Kd analyses persist as multiple named runs, reopenable from the Project Browser (File ▸ Project Contents…). Opening a project starts a clean session, and a series opened from it reads and saves only its bundled files.
 
 ### PS2D 2D Simultaneous Fitting
 The primary fitting engine for overlapping peaks — not optional.
@@ -58,14 +59,14 @@ The primary fitting engine for overlapping peaks — not optional.
 See [ALGORITHMS.md](ALGORITHMS.md) for detection, clustering, and fitting details.
 
 ### Quality Color Coding
-Peak markers are colored by fit R² (thresholds vary by nucleus; GUI marker defaults below):
+Peak markers are colored by the fit's quality label, assigned from R²:
 
 | Quality | R² | Color |
 |---------|-----|-------|
-| Excellent | ≥ 0.9 | green |
-| Good | ≥ 0.8 | green/blue |
+| Excellent | ≥ 0.9 | lime |
+| Good | ≥ 0.8 | green |
 | Fair | ≥ 0.5 | orange |
-| Poor / unfitted | < 0.5 | red |
+| Poor / Failed / unfitted | < 0.5 (Failed < 0.2) | red |
 
 ---
 
@@ -97,7 +98,7 @@ Loaded via `nmrglue` with automatic axis-ordering detection.
 | Problem | Try |
 |---------|-----|
 | PS2D fitting fails for some peaks | Expert Mode ▸ **Show Ellipses** to inspect windows; see [ALGORITHMS.md](ALGORITHMS.md) |
-| Peaks at wrong positions | Tighten centroid windows (Expert Mode search X/Y ppm); see [lunaNMR_guide.html](lunaNMR_guide.html) |
+| Peaks at wrong positions | Tighten the centroid windows (Expert Mode ▸ Peak Centroid Detection, Window X/Y ppm); see [lunaNMR_guide.html](lunaNMR_guide.html) |
 | Slow with many peaks | Expert Mode ▸ **Use Parallel Processing**; ensure Numba is installed (see [INSTALLATION.md](INSTALLATION.md)) |
 | Inconsistent series results | Enable **Fix Positions**; use a reference peak list from the first spectrum; see [MULTI_SPECTRUM_GUIDE.md](MULTI_SPECTRUM_GUIDE.md) |
 
