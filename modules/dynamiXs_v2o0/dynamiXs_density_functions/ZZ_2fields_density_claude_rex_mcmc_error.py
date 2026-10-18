@@ -11,9 +11,7 @@ GUI Compatible wrapper functions added for integration with DynamiXs GUI.
 
 import numpy as np
 import pandas as pd
-import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend for thread safety
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from scipy import stats
 from scipy.optimize import minimize
 
@@ -260,7 +258,8 @@ class DualFieldSpectralDensityAnalysis:
             print("No data to plot!")
             return
             
-        fig, axes = plt.subplots(3, 3, figsize=(18, 15))
+        fig = Figure(figsize=(18, 15))
+        axes = fig.subplots(3, 3)
         fig.suptitle(f'Dual-Field Spectral Density Analysis Results\n{self.field1_freq} MHz vs {self.field2_freq} MHz', fontsize=16)
         
         residues = results_df.index
@@ -332,15 +331,12 @@ class DualFieldSpectralDensityAnalysis:
                 if i < 2:  # First 2 rows need residue labels on x-axis
                     axes[i,j].set_xlabel('Residue')
         
-        plt.tight_layout()
+        fig.tight_layout()
 
         if save_plots:
             plot_filename = f"{output_prefix}_analysis_results.pdf"
-            plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+            fig.savefig(plot_filename, dpi=300, bbox_inches='tight')
             print(f"Plots saved as '{plot_filename}'")
-            plt.close(fig)  # Close figure to free memory
-        else:
-            plt.close(fig)  # Always close to prevent memory leaks
 
     def save_results(self, results_df, filename='spectral_density_results.csv'):
         """
