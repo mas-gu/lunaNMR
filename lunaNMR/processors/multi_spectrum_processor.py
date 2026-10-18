@@ -418,6 +418,8 @@ class MultiSpectrumProcessor:
         restore_base_ps2d_config()
 
         self.reference_peaks = reference_peaks.copy()
+        # Dummies detected on the first spectrum, fitted at every point like listed peaks
+        self.dummy_peaks = pd.DataFrame()
         self.pre_detected_peaks = pre_detected_peaks  # Store for cascade mode spectrum 1
         self.output_folder = output_folder
         self.progress_callback = progress_callback
@@ -703,13 +705,13 @@ class MultiSpectrumProcessor:
         # DETECTION-BASED MATCHING: Choose reference source based on mode
         if self.peak_source_mode == 'reference':
             # REFERENCE MODE: Always use original reference peaks
-            self.integrator.peak_list = self.reference_peaks.copy()
+            self.integrator.peak_list = self._listed_and_dummy_peaks()
 
         elif self.peak_source_mode == 'independent':
             # INDEPENDENT MODE: Always use original reference peaks for detection
             # Full detection + fitting pipeline runs for each spectrum
             log_info(f"Spectrum {spectrum_number}: Independent mode - using original reference for detection")
-            self.integrator.peak_list = self.reference_peaks.copy()
+            self.integrator.peak_list = self._listed_and_dummy_peaks()
 
         elif self.peak_source_mode in ['cascade', 'detected']:
             # CASCADE/DETECTED MODE: Use n-1 fitted results for spectrum 2+
@@ -717,18 +719,18 @@ class MultiSpectrumProcessor:
             if spectrum_number > 1 and self.previous_fitted_results is not None:
                 if self.use_original_reference_for_detection:
                     log_info(f"Spectrum {spectrum_number}: Using original reference (override enabled)")
-                    self.integrator.peak_list = self.reference_peaks.copy()
+                    self.integrator.peak_list = self._listed_and_dummy_peaks()
                 else:
                     # Convert previous fitted results to reference DataFrame format
                     detection_reference = self._convert_fitted_results_to_reference_df(self.previous_fitted_results)
                     self.integrator.peak_list = detection_reference.copy()
             else:
                 # Spectrum 1: Use provided reference peaks
-                self.integrator.peak_list = self.reference_peaks.copy()
+                self.integrator.peak_list = self._listed_and_dummy_peaks()
         else:
             # Fallback for unknown mode
             log_warning(f"Unknown peak_source_mode '{self.peak_source_mode}', using reference peaks")
-            self.integrator.peak_list = self.reference_peaks.copy()
+            self.integrator.peak_list = self._listed_and_dummy_peaks()
 
         # OPTION A: SKIP DETECTION FOR SPECTRUM 2+ IN CASCADE MODE
         # In cascade mode, spectrum 1 runs full detection to find peak positions.
@@ -805,6 +807,10 @@ class MultiSpectrumProcessor:
                 # CRITICAL: Replace peak_list with detected positions (not reference positions)
                 # This ensures fitting uses DETECTED/RECENTERED positions, just like GUI
                 self.integrator.peak_list = detected_df
+
+                if spectrum_number == 1:
+                    is_dummy = detected_df['Assignment'].astype(str).str.startswith('dummy_')
+                    self.dummy_peaks = detected_df[is_dummy].reset_index(drop=True)
 
             else:
                 log_warning("No peaks detected - using reference positions as fallback")
@@ -1069,6 +1075,13 @@ class MultiSpectrumProcessor:
             'fitting_fallbacks': self._fitting_fallbacks(fitted_results),
             'integration_results': self._convert_to_integration_format(fitted_results)
         }
+
+    def _listed_and_dummy_peaks(self) -> pd.DataFrame:
+        """The reference peak list plus the dummies the first spectrum's detection added,
+        at the positions detection found them there."""
+        if self.dummy_peaks.empty:
+            return self.reference_peaks.copy()
+        return pd.concat([self.reference_peaks, self.dummy_peaks], ignore_index=True)
 
     @staticmethod
     def _fitting_fallbacks(fitted_results) -> List[str]:
