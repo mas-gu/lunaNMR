@@ -17,7 +17,7 @@ lunaNMR_v1o0/
 │   ├── processors/         # Single/multi-spectrum workflow orchestration
 │   ├── core/               # Detection, Voigt/PS2D fitting, overlap clustering, parallel processor
 │   ├── batch_processing/   # CLI folder batch automation
-│   ├── ml/                 # ML/statistics parameter prediction + collectors + gui/
+│   ├── ml/                 # ML/statistics parameter prediction + gui/
 │   ├── integrators/        # In-place advanced/series integrators
 │   ├── utils/              # Config, params, file I/O, project bundles, output routing
 │   └── validation/         # Installation + memory checks
@@ -37,7 +37,7 @@ tkinter is used **only** for the launcher's application-selector dialog; the app
 | **Workflow** | `processors/` | Drive detection + fitting for single/series; batch in `batch_processing/` |
 | **Core** | `core/` | Peak detection, PS2D 2D fitting, overlap clustering, parallel dispatch |
 | **Utils** | `utils/` | Parameter manager, config, file formats, project bundles |
-| **ML** | `ml/` | ML/stats parameter prediction; PS2D/peak training collectors |
+| **ML** | `ml/` | ML/stats parameter prediction; peak classifiers |
 
 ---
 
@@ -125,7 +125,7 @@ GUI values **always override** calculated defaults in simplified mode.
 
 ## 8. Result Schema
 
-All fitting engines return dicts with a consistent shape (GUI tables, exports, ML collectors depend on it):
+All fitting engines return dicts with a consistent shape (GUI tables and exports depend on it):
 
 ```python
 {

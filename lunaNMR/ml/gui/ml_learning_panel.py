@@ -269,16 +269,6 @@ class MLLearningPanel(BaseDialog):
         self.stats_fallback_check.setStyleSheet(f"font-size: {FONT_SIZE_BODY}px;")
         layout.addWidget(self.stats_fallback_check)
 
-        # Training data collection checkbox
-        self.collect_data_check = QCheckBox("Collect training data from fitting results")
-        self.collect_data_check.setStyleSheet(f"font-size: {FONT_SIZE_BODY}px;")
-        self.collect_data_check.setToolTip(
-            "When enabled, successful fitting results are saved to train the ML model.\n"
-            "Data is stored locally in lunaNMR_v1o0/ml_training_data/"
-        )
-        self.collect_data_check.stateChanged.connect(self._on_collect_data_changed)
-        layout.addWidget(self.collect_data_check)
-
         group.setLayout(layout)
         return group
 
@@ -542,23 +532,6 @@ class MLLearningPanel(BaseDialog):
             self.stats_fallback_check.setChecked(
                 ml_config.get('use_statistical_fallback', True)
             )
-            self.collect_data_check.setChecked(
-                ml_config.get('collect_training_data', False)
-            )
-
-    def _on_collect_data_changed(self, state):
-        """Handle collect training data checkbox change."""
-        if self.main_window and hasattr(self.main_window, 'config_manager'):
-            config = self.main_window.config_manager.config
-            if 'ml_learning' not in config:
-                config['ml_learning'] = {}
-
-            enabled = self.collect_data_check.isChecked()
-            config['ml_learning']['collect_training_data'] = enabled
-            self.main_window.config_manager.save_config()
-
-            status = "enabled" if enabled else "disabled"
-            logger.info(f"Training data collection {status}")
 
     def _on_retrain_clicked(self):
         """Handle Force Retrain button click."""
@@ -628,7 +601,6 @@ class MLLearningPanel(BaseDialog):
 
             config['ml_learning']['ml_confidence_threshold'] = self.confidence_spin.value()
             config['ml_learning']['use_statistical_fallback'] = self.stats_fallback_check.isChecked()
-            config['ml_learning']['collect_training_data'] = self.collect_data_check.isChecked()
 
             self.main_window.config_manager.save_config()
             logger.info("ML configuration saved")

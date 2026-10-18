@@ -44,15 +44,6 @@ from .ps2d_config import get_ps2d_config
 from scipy.special import wofz
 
 
-# Import training data collector (optional)
-try:
-    from ..ml import PS2DTrainingDataCollector
-    ML_COLLECTOR_AVAILABLE = True
-except ImportError:
-    PS2DTrainingDataCollector = None
-    ML_COLLECTOR_AVAILABLE = False
-
-
 def calculate_peak_height(lw_lor_f1: float, lw_gau_f1: float,
                           lw_lor_f2: float, lw_gau_f2: float,
                           intensity: float) -> float:
@@ -339,7 +330,7 @@ class Ps2dMultiPeakFitter2D:
     Implements simultaneous Levenberg-Marquardt fitting of multiple 2D Voigt
     """
 
-    def __init__(self, verbose: bool = False, training_collector=None, lg_penalty_weight: float = 0.0, constrain_intensity_ratios: bool = True, intensity_ratio_penalty_weight: float = 10.0):
+    def __init__(self, verbose: bool = False, lg_penalty_weight: float = 0.0, constrain_intensity_ratios: bool = True, intensity_ratio_penalty_weight: float = 10.0):
         """
         Initialize 2D multi-peak fitter
 
@@ -347,8 +338,6 @@ class Ps2dMultiPeakFitter2D:
         -----------
         verbose : bool
             Print detailed fitting progress
-        training_collector : PS2DTrainingDataCollector, optional
-            Training data collector for ML model development
         lg_penalty_weight : float
             Penalty weight for enforcing similar L/G ratios across cluster.
             Default 10.0 provides gentle guidance (peaks encouraged to similar shapes).
@@ -379,7 +368,6 @@ class Ps2dMultiPeakFitter2D:
             verbose=verbose,
             max_iter=max_iterations
         )
-        self.training_collector = training_collector
 
     def _calculate_lg_ratio(self, lw_lor: float, lw_gau: float) -> float:
         """
@@ -1699,9 +1687,5 @@ class Ps2dMultiPeakFitter2D:
             'params': params,
             'covariance': cov
         }
-
-        # Collect training data if collector is available and fit was successful
-        if self.training_collector is not None and final_success:
-            self.training_collector.collect_ps2d_fit(result)
 
         return result

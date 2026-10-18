@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG = {
     "enabled": False,
     "use_predictions": False,
-    "collect_training_data": False,
     "use_statistical_fallback": True,
     "ml_threshold": 0.6,
     "stats_threshold": 0.4,
@@ -102,22 +101,6 @@ class ModelManager:
         )
 
         return result
-
-    def update_statistics(self, nucleus: str, params: OptimalParameters) -> None:
-        """
-        Add successful parameters to statistical history.
-
-        Parameters
-        ----------
-        nucleus : str
-            Nucleus type ("15N" or "13C")
-        params : OptimalParameters
-            Parameters from successful processing
-        """
-        if not self.config["collect_training_data"]:
-            return
-
-        self._stats_predictor.update(nucleus, params)
 
     def load_ml_model(self, nucleus: str, path: Path) -> bool:
         """
@@ -214,7 +197,6 @@ class ModelManager:
             "stats_samples_15N": self._stats_predictor.get_sample_count("15N"),
             "stats_samples_13C": self._stats_predictor.get_sample_count("13C"),
             "use_predictions": self.config["use_predictions"],
-            "collect_training_data": self.config["collect_training_data"],
         }
 
     def get_statistics_summary(self, nucleus: str) -> Optional[Dict]:

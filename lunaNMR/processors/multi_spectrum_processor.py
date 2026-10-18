@@ -8,7 +8,6 @@ Date: 2025
 
 import os
 import json
-import shutil
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -305,12 +304,6 @@ class MultiSpectrumProcessor:
         #          'lw_f2_mad': float, 'n_samples': int, 'alpha': float}
         self.reference_spectrum_statistics = None
 
-        # ML Training Data Collection (initialized in process_nmr_series with output_folder)
-        self.training_collector = None
-        self.collect_training_data = self.voigt_params.get('collect_training_data', False)
-        if 'gui_params' in self.voigt_params:
-            self.collect_training_data = self.voigt_params['gui_params'].get('collect_training_data', False)
-
     def _at_noise_floor(self, result, noise_level):
         """True when this peak has no signal left to hold its position.
 
@@ -460,8 +453,7 @@ class MultiSpectrumProcessor:
             lock_detection_threshold: If True, use spectrum 1 threshold for all spectra (default True)
             stop: Optional threading.Event. Checked before each spectrum and before the
                 output is written, and handed to each spectrum's fit, which ends before its
-                next cluster. A stopped series writes nothing - an output folder it created
-                is removed - and raises Cancelled.
+                next cluster. A stopped series writes nothing and raises Cancelled.
         """
         refuse_duplicate_assignments(reference_peaks)
 
@@ -496,15 +488,10 @@ class MultiSpectrumProcessor:
         self.peak_source_mode = peak_source_mode  # Store for cascade mode
         self.previous_fitted_results = None  # Initialize cascade tracking
         self.extract_delays = extract_delays  # Store for output file generation
-        self.nmr_files = nmr_files  # Store for ML training data collection
         self.sn_from_gui_locked = sn_from_gui_locked  # Store locked threshold for series
         self.peak_list_contour_min = peak_list_contour_min  # Store for Peak List mode detection
         self.lock_detection_threshold = lock_detection_threshold  # Lock threshold from spectrum 1
         self.locked_contour_threshold = None  # Will store spectrum 1 threshold if locking enabled
-
-        # Initialize ML training collector with series output folder
-        if self.collect_training_data and output_folder:
-            self._init_training_collector(output_folder)
 
         # Build original reference position dictionary for cascade mode drift limiting
         # Maps assignment -> (x_ppm, y_ppm) for absolute bounds enforcement
@@ -531,10 +518,6 @@ class MultiSpectrumProcessor:
             self.delay_mapping = extractor.build_column_mapping(filenames)
 
 
-
-        # Only the output files are written at the end; training data collection writes
-        # into the folder while the run goes on. A cancelled run removes a folder it made.
-        output_folder_is_new = bool(output_folder) and not os.path.exists(output_folder)
 
         # Track processing duration
         start_time = datetime.now()
@@ -622,8 +605,6 @@ class MultiSpectrumProcessor:
             return batch_results_obj
 
         except Cancelled:
-            if output_folder_is_new and os.path.isdir(output_folder):
-                shutil.rmtree(output_folder)
             log_info("Series cancelled - nothing written")
             raise
         except Exception as e:
@@ -1141,16 +1122,6 @@ class MultiSpectrumProcessor:
         self.previous_fitted_results = self._carry_forward_seed(
             fitted_results, self.previous_fitted_results,
             noise_level=getattr(self.integrator, 'noise_level', None))
-
-        # Collect ML training data if enabled
-        if self.collect_training_data and self.training_collector is not None:
-            self._collect_spectrum_training_data(
-                spectrum_name=spectrum_name,
-                spectrum_number=spectrum_number,
-                fitted_results=fitted_results,
-                learned_statistics=learned_statistics,
-                total_spectra=len(self.nmr_files),
-            )
 
         return {
             'success': successful_fits > 0,
@@ -2095,205 +2066,6 @@ class MultiSpectrumProcessor:
 
         except Exception as e:
             log_warning(f"Could not extract linewidths for {assignment}: {e}")
-
-    def _init_training_collector(self, output_folder: str):
-        """Initialize the ML training data collector with series output folder."""
-        try:
-            from lunaNMR.ml.comprehensive_collector import ComprehensiveTrainingCollector
-            from pathlib import Path
-
-            # Use series_results folder for data collection
-            storage_dir = Path(output_folder) / "data_collection"
-
-            self.training_collector = ComprehensiveTrainingCollector(
-                storage_dir=storage_dir,
-                min_r2=0.70,
-                auto_save=True,
-            )
-            log_info(f"ML training data collector initialized: {storage_dir}")
-        except Exception as e:
-            log_warning(f"Could not initialize ML training collector: {e}")
-            self.training_collector = None
-            self.collect_training_data = False
-
-    def _collect_spectrum_training_data(
-        self,
-        spectrum_name: str,
-        spectrum_number: int,
-        fitted_results: List[Dict],
-        learned_statistics: Optional[Dict],
-        total_spectra: int,
-    ):
-        """Collect training data for a single spectrum in series processing.
-
-        Parameters
-        ----------
-        spectrum_name : str
-            Name of the spectrum file
-        spectrum_number : int
-            Position in series (1-indexed)
-        fitted_results : list
-            Fit results for all peaks
-        learned_statistics : dict, optional
-            PASS1 statistics
-        total_spectra : int
-            Total number of spectra in series
-        """
-        if self.training_collector is None:
-            return
-
-        try:
-            # Get spectrum data from integrator
-            spectrum_data = self.integrator.nmr_data
-            if spectrum_data is None:
-                return
-
-            # Get peak list
-            peak_list = self.integrator.peak_list
-            if peak_list is None or len(peak_list) == 0:
-                return
-            if hasattr(peak_list, 'to_dict'):
-                peak_list_dicts = peak_list.to_dict('records')
-            else:
-                peak_list_dicts = peak_list
-
-            # Enhance learned_statistics with additional stats from fit results
-            if learned_statistics is None:
-                learned_statistics = {}
-
-            # Calculate additional statistics from fit results if not present
-            if fitted_results and 'lw_f1_std' not in learned_statistics:
-                lw_f1_values = []
-                lw_f2_values = []
-                r2_values = []
-                for r in fitted_results:
-                    if r.get('success', False):
-                        # Get linewidths from fit results
-                        # PS2D 2D fits: lw_lor_f1/lw_gau_f1 or gamma_y/sigma_y
-                        # 1D fits: linewidths in nested y_fit/x_fit dicts
-                        y_fit = r.get('y_fit', {})
-                        x_fit = r.get('x_fit', {})
-
-                        # F1 linewidth (Y dimension)
-                        lw_lor_f1 = r.get('lw_lor_f1', r.get('gamma_y', y_fit.get('gamma', 0)))
-                        lw_gau_f1 = r.get('lw_gau_f1', r.get('sigma_y', y_fit.get('sigma', 0)))
-                        lw_f1 = lw_lor_f1 + lw_gau_f1
-
-                        # F2 linewidth (X dimension)
-                        lw_lor_f2 = r.get('lw_lor_f2', r.get('gamma_x', r.get('gamma', x_fit.get('gamma', 0))))
-                        lw_gau_f2 = r.get('lw_gau_f2', r.get('sigma_x', r.get('sigma', x_fit.get('sigma', 0))))
-                        lw_f2 = lw_lor_f2 + lw_gau_f2
-
-                        if lw_f1 > 0:
-                            lw_f1_values.append(lw_f1)
-                        if lw_f2 > 0:
-                            lw_f2_values.append(lw_f2)
-                        r2 = r.get('r_squared', r.get('avg_r_squared', 0))
-                        if r2 > 0:
-                            r2_values.append(r2)
-
-                if lw_f1_values:
-                    learned_statistics['lw_f1_std'] = float(np.std(lw_f1_values))
-                    learned_statistics['lw_f1_min'] = float(np.min(lw_f1_values))
-                    learned_statistics['lw_f1_max'] = float(np.max(lw_f1_values))
-                if lw_f2_values:
-                    learned_statistics['lw_f2_std'] = float(np.std(lw_f2_values))
-                    learned_statistics['lw_f2_min'] = float(np.min(lw_f2_values))
-                    learned_statistics['lw_f2_max'] = float(np.max(lw_f2_values))
-                if r2_values:
-                    learned_statistics['n_good_peaks'] = len(r2_values)
-                    learned_statistics['mean_r_squared'] = float(np.mean(r2_values))
-
-            # Get PPM ranges from integrator's ppm axes
-            ppm_ranges = {}
-            if hasattr(self.integrator, 'ppm_y_axis') and self.integrator.ppm_y_axis is not None:
-                ppm_y = self.integrator.ppm_y_axis
-                ppm_ranges['f1'] = (float(min(ppm_y)), float(max(ppm_y)))
-            if hasattr(self.integrator, 'ppm_x_axis') and self.integrator.ppm_x_axis is not None:
-                ppm_x = self.integrator.ppm_x_axis
-                ppm_ranges['f2'] = (float(min(ppm_x)), float(max(ppm_x)))
-
-            # Detect nucleus type from F1 range
-            nucleus_type = "15N"
-            if ppm_ranges.get('f1'):
-                f1_max = ppm_ranges['f1'][1]
-                if f1_max > 150:
-                    nucleus_type = "13C"
-
-            # Get field strength from metadata
-            field_strength = 600.0
-            if hasattr(self.integrator, 'dic') and self.integrator.dic:
-                field_strength = float(
-                    self.integrator.dic.get('FDF2OBS',
-                    self.integrator.dic.get('SFO1',
-                    self.integrator.dic.get('bf1', 600.0)))
-                )
-
-            # Get intermediate results from parallel processor (if available)
-            adaptive_results = None
-            timing_info = None
-            cluster_info = None
-            pass1_results = None
-            pass1bis_results = None
-            pass2_results = None
-
-            if hasattr(self.integrator, 'enhanced_fitter'):
-                fitter = self.integrator.enhanced_fitter
-                if hasattr(fitter, 'parallel_processor') and fitter.parallel_processor:
-                    pp = fitter.parallel_processor
-                    if hasattr(pp, 'optimal_params') and pp.optimal_params:
-                        adaptive_results = pp.optimal_params
-                    if hasattr(pp, 'timing_info') and pp.timing_info:
-                        timing_info = pp.timing_info
-                    if hasattr(pp, 'cluster_info') and pp.cluster_info:
-                        cluster_info = pp.cluster_info
-                    if hasattr(pp, 'pass1_results'):
-                        pass1_results = pp.pass1_results
-                    if hasattr(pp, 'pass1bis_results'):
-                        pass1bis_results = pp.pass1bis_results
-                    if hasattr(pp, 'pass2_results'):
-                        pass2_results = pp.pass2_results
-
-            # Get detection parameters and statistics from integrator
-            detection_params = {
-                'search_window_x': getattr(self.integrator, 'search_window_x', 0.01),
-                'search_window_y': getattr(self.integrator, 'search_window_y', 0.05),
-                'noise_threshold': getattr(self.integrator, 'threshold_multiplier', 3.0),
-                'noise_level': getattr(self.integrator, 'noise_level', 0),
-            }
-            detection_statistics = None
-            if hasattr(self.integrator, 'get_detection_statistics'):
-                detection_statistics = self.integrator.get_detection_statistics()
-
-            # Collect training data
-            from pathlib import Path
-            success = self.training_collector.collect_spectrum_processing(
-                spectrum_data=spectrum_data,
-                peak_list=peak_list_dicts,
-                fit_results=fitted_results,
-                pass1_statistics=learned_statistics,
-                adaptive_results=adaptive_results,
-                pass1_results=pass1_results,
-                pass1bis_results=pass1bis_results,
-                pass2_results=pass2_results,
-                cluster_info=cluster_info,
-                timing_info=timing_info,
-                spectrum_name=Path(spectrum_name).name,
-                nucleus_type=nucleus_type,
-                field_strength_mhz=field_strength,
-                ppm_ranges=ppm_ranges,
-                processing_mode='parallel',
-                is_reference=(spectrum_number == 1),
-                series_index=spectrum_number - 1,
-                detection_params=detection_params,
-                detection_statistics=detection_statistics,
-            )
-
-            if success:
-                log_info(f"Collected ML training data: {Path(spectrum_name).name} ({spectrum_number}/{total_spectra})")
-
-        except Exception as e:
-            log_warning(f"Failed to collect training data for {spectrum_name}: {e}")
 
     def _sample_intensities_for_peak_list(self):
         """

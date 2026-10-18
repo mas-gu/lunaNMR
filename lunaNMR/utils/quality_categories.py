@@ -212,12 +212,8 @@ def get_quality_categorizer(mode: str = 'scientific', config: Optional[Dict] = N
     if config and 'quality_threshold_mode' in config:
         mode = config['quality_threshold_mode']
 
-    # Auto mode: choose based on context
     if mode == 'auto':
-        if config and config.get('ml_data_collection_enabled', False):
-            mode = 'ml_friendly'
-        else:
-            mode = 'scientific'
+        mode = 'scientific'
 
     return QualityCategorizer(threshold_set=mode)
 
