@@ -221,6 +221,10 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   checked during `--dry-run` too. Command-line flags (`--parallel`, `--peak-source`) win over
   the file, so a stale tuning file cannot silently override what you just typed. The run
   summary records the effective `params`.
+- `"gui_params": {"use_adaptive_optimization": true}` turns on the fitting-window grid
+  search (1.0 / 1.5 / 2.0 x the median linewidth). It is **off by default**: on the DNAJA1
+  and ERDJ6 titrations it chose 1.0x both times, a window that cuts the peak at half height,
+  and ERDJ6's CSP Kd went from 282 µM to pinned at its 1500 µM bound.
 - Writes `peak_intensity_matrix.csv`, `_volume_matrix`, `comprehensive_peak_tracking.csv`,
   `series_analysis_tidy.csv`, `series_metadata.json`, per-spectrum CSVs.
 

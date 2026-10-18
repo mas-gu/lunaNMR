@@ -26,10 +26,27 @@ DNAJA1_ROWS = 69
 DNAJA1_REAL = 68
 ERDJ6_REAL = 60
 
-# 48IleH fails at 5 of its 7 points, leaving too few to fit a three-parameter decay.
-UNFITTABLE_RESIDUE = "48IleH"
+# 43GluH is noise at every point - within 4 sigma, six of seven negative - so no point is
+# a usable intensity, and there is nothing to fit a three-parameter decay to.
+UNFITTABLE_RESIDUE = "43GluH"
 # The intensity model has three free parameters (I0, I_inf, Kd).
 MIN_POINTS = 4
+
+
+def _points(tidy, residue, keep):
+    """[L] of the residue's titration points that keep(row) accepts, ascending."""
+    df = pd.read_csv(tidy)
+    return sorted(float(r.spectrum_name) * float(P0)
+                  for r in df[df["assignment"] == residue].itertuples() if keep(r))
+
+
+def _failed(row):
+    return str(row.quality).lower() == "failed"
+
+
+def _usable_intensity(row):
+    """A point the intensity fit keeps: not Failed, not on its intensity floor, positive."""
+    return not _failed(row) and row.intensity_pinned != 1 and row.height > 0
 
 
 def _partially_failed(data):
@@ -158,9 +175,10 @@ class TestFailedPointsAreExcluded:
 
     def test_failed_points_do_not_reach_the_fit(self, dnaja1_tidy, tmp_path):
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
-        res, lost = _partially_failed(data)
-        fit = _by_residue(data)[res]["intensity"]
-        assert len(fit["L"]) == 7 - lost
+        res, _lost = _partially_failed(data)
+        failed = _points(dnaja1_tidy, res, _failed)
+        assert failed
+        assert not set(failed) & set(_by_residue(data)[res]["intensity"]["L"])
 
     def test_no_negative_intensity_reaches_a_fit(self, dnaja1_tidy, tmp_path):
         """Says only that no negative survives into fitted data. It does NOT prove the
@@ -177,8 +195,8 @@ class TestFailedPointsAreExcluded:
         assert lost and sum(lost.values()) > 0
 
     def test_a_residue_left_with_too_few_points_says_so(self, dnaja1_tidy, tmp_path):
-        """48IleH keeps 2 of 7 points — fewer than the model's free parameters. Failing
-        with a stated reason is correct; silently returning a fit would not be."""
+        """43GluH keeps no usable point - fewer than the model's free parameters.
+        Failing with a stated reason is correct; silently returning a fit would not be."""
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
         fit = _by_residue(data)[UNFITTABLE_RESIDUE]["intensity"]
         assert fit["success"] is False
@@ -268,12 +286,14 @@ class TestExclusionIsPointWiseNotResidueWise:
         assert res in _by_residue(data)
 
     def test_it_keeps_every_point_that_was_good(self, dnaja1_tidy, tmp_path):
+        """Every usable point, and only those - whichever rule removed the others."""
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
-        res, lost = _partially_failed(data)
-        assert len(_by_residue(data)[res]["intensity"]["L"]) == 7 - lost
+        res, _lost = _partially_failed(data)
+        assert sorted(_by_residue(data)[res]["intensity"]["L"]) == \
+            _points(dnaja1_tidy, res, _usable_intensity)
 
     def test_residues_with_one_bad_point_are_not_wholesale_dropped(self, dnaja1_tidy, tmp_path):
-        """17 residues carry >=1 Failed point; only a residue failing at every point
+        """7 residues carry >=1 Failed point; only a residue failing at every point
         has nothing left to fit."""
         df = pd.read_csv(dnaja1_tidy)
         q = df["quality"].astype(str).str.lower()
@@ -871,7 +891,8 @@ class TestThresholdsArePersistedAndOverridable:
 
     # 43GluH and 5ThrH have their reference inside the noise, fitted negative. A
     # non-positive reference is unusable at any ratio threshold (kd_models), so only
-    # 29LeuH - 50.8x short of its own series - moves with the threshold.
+    # 29LeuH - its reference at 0.3 sigma, 17.9x short of its own series - moves with
+    # the threshold.
     NOISE_REFERENCES = 2
 
     def test_the_default_reference_threshold_is_applied(
@@ -882,7 +903,7 @@ class TestThresholdsArePersistedAndOverridable:
         assert self._flagged(out, "reference") == self.NOISE_REFERENCES + 1
 
     def test_a_flag_loosens_the_reference_threshold(self, dnaja1_tidy_unflagged, tmp_path):
-        """29LeuH sits at 50.8, so a threshold above it lets 29LeuH through."""
+        """29LeuH sits at 17.9, so a threshold above it lets 29LeuH through."""
         tidy = self._own_copy(dnaja1_tidy_unflagged, tmp_path)
         out = self._survey(tidy, tmp_path / "survey", extra=["--ref-max-ratio", "100"])
         assert self._flagged(out, "reference") == self.NOISE_REFERENCES
@@ -1076,10 +1097,10 @@ class TestTheSurveyRecordsWhatTheFitNeeds:
 
 # Measured at the last titration point, top 10% trimmed so the binders do not set the
 # threshold meant to identify them. Untrimmed sigma is materially larger.
-DNAJA1_SIGMA_TRIMMED = 0.0131
+DNAJA1_SIGMA_TRIMMED = 0.0135
 DNAJA1_SIGMA_UNTRIMMED = 0.0216
-DNAJA1_SIGNIFICANT = 10
-DNAJA1_MEASURED = 30
+DNAJA1_SIGNIFICANT = 15
+DNAJA1_MEASURED = 40
 
 
 class TestCspSignificanceCutoff:
@@ -1387,20 +1408,21 @@ class TestKdOutlierExclusion:
         base = self._block(_fit(dnaja1_tidy, tmp_path / "base")[0])
         scaled = self._block(_fit(dnaja1_tidy, tmp_path / "scaled",
                                   conc=CONC_X10, p0="500")[0])
-        assert scaled["median_log10"] - base["median_log10"] == pytest.approx(1.0, abs=1e-6)
         # Not exact: per-residue fits that are poorly determined do not reproduce
-        # bit-for-bit under rescaling, so the spread wobbles in the fifth figure.
+        # bit-for-bit under rescaling, so the centre and the spread wobble in the fifth
+        # figure.
+        assert scaled["median_log10"] - base["median_log10"] == pytest.approx(1.0, abs=1e-4)
         assert scaled["mad_log10"] == pytest.approx(base["mad_log10"], rel=1e-4)
 
     def test_extreme_residues_are_excluded(self, dnaja1_tidy, tmp_path):
         assert self._block(_fit(dnaja1_tidy, tmp_path / "kd")[0])["excluded"]
 
-    def test_a_spread_based_test_would_have_sheltered_them(self, erdj6_tidy, tmp_path):
+    def test_a_spread_based_test_would_have_sheltered_them(self, dnaja1_tidy, tmp_path):
         """Why physics runs before statistics. The implausible values inflate the spread
-        enough to sit inside it: on ERDJ6 mean/2-sigma shelters all four - Q19 and D71
-        near zero, F37 and N39 near 3.5e+04 - and only the credible window catches them."""
+        enough to sit inside it: on DNAJA1 mean/2-sigma shelters 23LysH, at 1.6e+04 -
+        8.9e+03 +/- 2.8e+04 spans it - and only the credible window catches it."""
         import statistics
-        data, _ = _fit(erdj6_tidy, tmp_path / "kd")
+        data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
         excluded = set(self._block(data)["excluded"])
         assert excluded, "no outliers to test the comparison against"
         by_residue = _by_residue(data)

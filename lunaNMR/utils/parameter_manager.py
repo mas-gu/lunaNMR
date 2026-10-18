@@ -245,7 +245,7 @@ class NMRParameterManager:
                 # Series Integration / PS2D Linewidth Reuse
                 'use_ps2d_linewidth_reuse': self.current_params.get('use_ps2d_linewidth_reuse', False),
                 # Adaptive parameter optimization
-                'use_adaptive_optimization': self.current_params.get('use_adaptive_optimization', True)
+                'use_adaptive_optimization': self.current_params.get('use_adaptive_optimization', False)
             },
             'processing_options': {
                 'use_parallel_processing': self.current_params['use_parallel_processing'],
@@ -349,7 +349,7 @@ class NMRParameterManager:
             params['gui_params']['centroid_noise_multiplier'] = self.current_params.get('centroid_noise_multiplier', 2.0)
 
             # Adaptive optimization parameter
-            params['gui_params']['use_adaptive_optimization'] = self.current_params.get('use_adaptive_optimization', True)
+            params['gui_params']['use_adaptive_optimization'] = self.current_params.get('use_adaptive_optimization', False)
 
             return params
         else:

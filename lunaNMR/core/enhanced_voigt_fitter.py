@@ -3214,9 +3214,11 @@ class EnhancedVoigtFitter:
         from lunaNMR.core.parallel_voigt_processor import ParallelVoigtProcessor
 
         # Get adaptive optimization setting from gui_params
-        enable_adaptive = True  # Default: ON
+        # Off unless asked for: on real titrations the search always chose the smallest
+        # window (1.0 x linewidth), which cuts the peak at half height and broke CSP
+        enable_adaptive = False
         if parent_integrator and hasattr(parent_integrator, 'gui_params'):
-            enable_adaptive = parent_integrator.gui_params.get('use_adaptive_optimization', True)
+            enable_adaptive = parent_integrator.gui_params.get('use_adaptive_optimization', False)
         log_progress(f"Using parallel Voigt fitting for {len(peak_list)} peaks")
         parallel_processor = ParallelVoigtProcessor(self, enable_adaptive=enable_adaptive,
                                                     in_process=in_process)

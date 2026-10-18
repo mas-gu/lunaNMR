@@ -85,7 +85,11 @@ def test_the_expert_panel_sets_the_base():
 
 @pytest.mark.skipif(not DNAJA1.exists(), reason="data_test not present")
 def test_two_identical_runs_give_the_same_series(tmp_path):
+    """With the adaptive search on - the only thing that tunes the global config."""
+    import json
     from lunaNMR.cli import main
+    params = tmp_path / "params.json"
+    params.write_text(json.dumps({"gui_params": {"use_adaptive_optimization": True}}))
     (tmp_path / "spectra").mkdir()
     for name in POINTS:
         (tmp_path / "spectra" / name).symlink_to(DNAJA1 / name)
@@ -93,6 +97,7 @@ def test_two_identical_runs_give_the_same_series(tmp_path):
     for out in ("first", "second"):
         assert main(["series", "--spectra", str(tmp_path / "spectra"),
                      "--peaks", str(DNAJA1 / "DNAJA1.txt"), "--mode", "titration",
-                     "--peak-source", "cascade", "--out", str(tmp_path / out)]) == 0
+                     "--peak-source", "cascade", "--params", str(params),
+                     "--out", str(tmp_path / out)]) == 0
         runs.append(pd.read_csv(tmp_path / out / "series_analysis_tidy.csv"))
     pd.testing.assert_frame_equal(runs[0], runs[1])

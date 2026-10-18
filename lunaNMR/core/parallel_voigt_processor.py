@@ -65,7 +65,7 @@ class ParallelVoigtProcessor:
     - Result compilation
     """
     
-    def __init__(self, enhanced_voigt_fitter, max_workers=None, enable_adaptive=True,
+    def __init__(self, enhanced_voigt_fitter, max_workers=None, enable_adaptive=False,
                  in_process=False):
         """
         Initialize parallel Voigt processor
@@ -73,7 +73,7 @@ class ParallelVoigtProcessor:
         Args:
             enhanced_voigt_fitter: Original EnhancedVoigtFitter instance
             max_workers: Maximum number of worker processes (default: 75% of cores)
-            enable_adaptive: Enable adaptive parameter optimization (default: True)
+            enable_adaptive: Enable adaptive parameter optimization (default: False)
             in_process: Run every cluster task, and the adaptive search, in this process
                 rather than over a pool. The same pipeline: this is sequential mode.
         """

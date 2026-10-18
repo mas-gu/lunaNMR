@@ -646,6 +646,9 @@ def _default_series_params(parallel=False):
             'centroid_noise_multiplier': 2.0,
             'use_ps2d_multi_peak': True,
             'use_ps2d_linewidth_reuse': False,
+            # The fitting-window grid search; off unless asked for (it chose the
+            # smallest window on every real titration and broke CSP positions)
+            'use_adaptive_optimization': False,
             'collect_training_data': False,
             'height_threshold': 0.1,
             'distance_factor': 2.0,

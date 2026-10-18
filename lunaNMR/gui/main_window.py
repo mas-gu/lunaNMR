@@ -398,7 +398,7 @@ class LunaNMRMainWindow(BaseWindow):
         # For now, just initialize placeholders
         self.use_voigt_fitting = True
         self.use_parallel_processing = True
-        self.use_adaptive_optimization = True  # Grid search for optimal radF1/radF2
+        self.use_adaptive_optimization = False  # Grid search for optimal radF1/radF2
         self.use_ps2d_multi_peak = True
         self.fix_linewidths = False
         self.fix_positions = False
