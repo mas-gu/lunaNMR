@@ -400,6 +400,17 @@ class TestExportKd:
         assert pdf.exists() and pdf.stat().st_size > 0
         assert not (figs / "csp").exists()          # no per-residue PNG dir in pdf mode
 
+    @pytest.mark.parametrize("per_page", ["0", "-5"])
+    def test_a_page_with_no_panels_is_refused(self, tmp_path, per_page):
+        """range(0, n, -5) is empty, so no PDF was written while the summary still
+        listed it; 0 raised only after summary.csv was written."""
+        from lunaNMR.cli import main
+        jf = self._make_kd_json(tmp_path, "csp")
+        figs = tmp_path / "figs"
+        assert main(["export", "kd", "--json", str(jf), "--out", str(figs),
+                     "--per-page", per_page]) == 2
+        assert not figs.exists()
+
     def test_export_png_format_writes_per_residue(self, tmp_path):
         from lunaNMR.cli import main
         jf = self._make_kd_json(tmp_path, "csp")

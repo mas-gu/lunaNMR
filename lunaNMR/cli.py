@@ -32,6 +32,14 @@ def _str_list(text):
     return [x.strip() for x in text.split(',') if x.strip() != '']
 
 
+def _positive_int(text):
+    """An integer of at least 1, e.g. a count of panels per page."""
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
 def _choice_list(*allowed):
     """A comma-separated list whose members are checked, since argparse's own `choices`
     validates the whole string rather than the items inside it. A misspelling otherwise
@@ -2388,7 +2396,7 @@ def build_parser():
                        default=['pdf'], dest='fig_format',
                        help='pdf (multi-page grid per observable) and/or png (one file per '
                             'residue); comma-separated for both, e.g. pdf,png (default: pdf)')
-    ex_kd.add_argument('--per-page', type=int, default=20, dest='per_page',
+    ex_kd.add_argument('--per-page', type=_positive_int, default=20, dest='per_page',
                        help='Panels per PDF page (default: 20 = 5x4, like T1/T2)')
     ex_kd.add_argument('--kind', type=_str_list,
                        default=['curves', 'ref-bars', 'kd-bars', 'global-fit'],
