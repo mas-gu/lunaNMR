@@ -302,7 +302,8 @@ marker `b` or `_2`), which returns every delay in ms. Exit code 1 if nothing fit
 
 `--time-units` labels the output (summary, fit JSON, plot axes); it does not rescale. Left
 out, it is taken from `series_metadata.json` beside the input, else `ms` — the unit the
-parser returns and `series` writes.
+parser returns and `series` writes. On headers that state a unit, any value but `ms` is
+refused: those delays are already in ms.
 
 ### dynamixs hetnoe
 ```bash
@@ -361,11 +362,14 @@ python -m lunaNMR dynamixs modelfree [--dual] \
 ```
 - **Field count follows `--dual`** — the `--method` prefix is derived; you only pick the
   `087`/`jwh` variant. Omit `--method` for the `087` default.
-- **Per-series time units:** the T→R conversion needs each series' delay units. A T1 series in
-  seconds with a T2 in ms → `--f1-t1-units s`. Cleanly `ms`-labelled headers (`..._300msb`)
-  need no flag, and neither does a matrix produced by `series` — those are already normalised
-  to ms (`series_metadata.json` records `value_units`). The flag is for tables `series` did not
-  write: a hand-built or DynamiXs-format T1 in seconds beside a T2 in ms puts R1 out by 1000×.
+- **Per-series time units:** the T→R conversion needs each series' delay units. Headers that
+  state a unit (`..._300msb`, `..._2o4s`) need no flag: the parser reads them as ms whatever
+  unit they state, and any flag but `ms` is refused for them — `s` on `..._2o4s` headers would
+  convert them a second time. Neither does a matrix produced by `series`, which is already
+  normalised to ms (`series_metadata.json` records `value_units`; a flag contradicting it is
+  refused too). The flag is for bare-number headers `series` did not write: a hand-built or
+  DynamiXs-format T1 in seconds (`0.1, 0.4, …`) beside a T2 in ms → `--f1-t1-units s`, without
+  which R1 is out by 1000×.
 - **Outputs:** `<prefix>_field{1,2}_hetnoe.pdf`, `<prefix>_spectral_density_basic.csv` (one row
   per residue — this is the per-residue result), `_detailed.csv`, and
   `<prefix>_spectral_density_plots.pdf`.

@@ -3,6 +3,11 @@
 
 import re
 
+# Trailing numeric token, an optional unit (ms/s/us), and an optional repeat-acquisition
+# marker written as a single trailing letter (e.g. the 'b' in '300msb' or '0o0b') or an
+# '_2'-style suffix. 'o' stands in for '.' to keep column headers filesystem-safe.
+_DELAY_TAIL = re.compile(r"(?:^|_)(\d+(?:[o.]\d+)?)(ms|s|us)?([a-z]|_\d+)?$", re.IGNORECASE)
+
 
 def parse_delay_column(col_name):
     """Parse a delay-column header to a delay in ms.
@@ -25,15 +30,7 @@ def parse_delay_column(col_name):
     if bare:
         return float(bare.group(1))
 
-    # Descriptive name: trailing numeric token, an optional unit (ms/s/us), and an
-    # optional repeat-acquisition marker written as a single trailing letter (e.g.
-    # the 'b' in '300msb' or '0o0b') or an '_2'-style suffix. 'o' stands in for '.'
-    # to keep column headers filesystem-safe.
-    tail = re.search(
-        r"(?:^|_)(\d+(?:[o.]\d+)?)(ms|s|us)?([a-z]|_\d+)?$",
-        col_str,
-        flags=re.IGNORECASE,
-    )
+    tail = _DELAY_TAIL.search(col_str)
     if tail:
         num_part = tail.group(1).replace("o", ".")
         try:
@@ -62,6 +59,18 @@ def parse_delay_column(col_name):
         return float(col_str)
     except ValueError:
         return None
+
+
+def stated_unit(col_name):
+    """The time unit a delay header writes out ('ms', 's' or 'us'), else None.
+
+    parse_delay_column converts such a header to ms, so its delay is in ms by the time
+    it is fitted whatever unit it states. A bare number states none.
+    """
+    if parse_delay_column(col_name) is None:
+        return None
+    tail = _DELAY_TAIL.search(str(col_name).strip())
+    return tail.group(2).lower() if tail and tail.group(2) else None
 
 
 def parse_delay_columns(headers):

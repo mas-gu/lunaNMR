@@ -338,12 +338,30 @@ def _check_unparsed_delays(sidecar, allow):
     )
 
 
-def _resolve_time_units(flag, sidecar, flag_name='--time-units'):
+def _headers_stating_units(input_path):
+    """The delay headers of a matrix that write out their unit ('..._2o4s', '..._300ms').
+
+    The delay parser has converted those to ms before anything is fitted, whatever unit
+    they state. Needs the dynamiXs_T1_T2 folder on sys.path, as the fitters do.
+    """
+    import csv
+    from delay_parser import stated_unit
+    if not os.path.isfile(input_path):
+        return []          # the fitter reports the missing file in its own words
+    with open(input_path, newline='') as fh:
+        header = next(csv.reader(fh), [])
+    return [h for h in header if stated_unit(h)]
+
+
+def _resolve_time_units(flag, sidecar, flag_name='--time-units', input_path=None):
     """Delay units: an explicit flag, else the sidecar's, else the documented default.
 
     A flag that contradicts the sidecar is refused rather than preferred. One of the
     two is wrong, and picking either way is how a T1 in seconds meets a T2 in
     milliseconds and puts R1 out by 1000x.
+
+    So is any flag but ms on a matrix whose delay headers state their unit: the parser
+    has already converted those to ms, and a seconds flag converts them a second time.
     """
     recorded = (sidecar or {}).get('value_units')
     if flag is None:
@@ -354,6 +372,15 @@ def _resolve_time_units(flag, sidecar, flag_name='--time-units'):
             f"{recorded!r}. One of them is wrong; guessing puts R1 out by 1000x. "
             f"Drop the flag to use the recorded units, or re-run `series` if the "
             f"sidecar is stale."
+        )
+    stated = _headers_stating_units(input_path) if input_path and flag != 'ms' else []
+    if stated:
+        from delay_parser import parse_delay_column
+        raise ValueError(
+            f"{flag_name} says {flag!r} but the delay headers of {input_path} state their "
+            f"own units, and are read as ms: {stated[0]!r} is "
+            f"{parse_delay_column(stated[0]):g} ms. Reading those ms as {flag!r} is a "
+            f"1000x error. Drop the flag, or pass ms."
         )
     return flag
 
@@ -603,7 +630,7 @@ def _run_dynamixs_t1t2(args):
     sidecar = _series_sidecar(args.input)
     if sidecar:
         _check_unparsed_delays(sidecar, args.allow_unparsed)
-    time_units = _resolve_time_units(args.time_units, sidecar)
+    time_units = _resolve_time_units(args.time_units, sidecar, input_path=args.input)
     os.makedirs(args.out, exist_ok=True)
     params = {
         'input_csv_file': args.input,
@@ -656,7 +683,7 @@ def _run_dynamixs_methyl(args):
     sidecar = _series_sidecar(args.input)
     if sidecar:
         _check_unparsed_delays(sidecar, args.allow_unparsed)
-    time_units = _resolve_time_units(args.time_units, sidecar)
+    time_units = _resolve_time_units(args.time_units, sidecar, input_path=args.input)
     os.makedirs(args.out, exist_ok=True)
     params = {
         'input_csv_file': args.input,
@@ -1754,15 +1781,16 @@ def _run_dynamixs_t1rho(args):
 
     # Both series are fitted here, so both sidecars matter; they must agree with each
     # other as well as with the flag, or the tilt correction mixes two time bases.
-    sidecars = {label: _series_sidecar(path)
-                for label, path in (('--input', args.input), ('--t1', args.t1))}
+    series_paths = {'--input': args.input, '--t1': args.t1}
+    sidecars = {label: _series_sidecar(path) for label, path in series_paths.items()}
     for label, sidecar in sidecars.items():
         if sidecar:
             _check_unparsed_delays(sidecar, args.allow_unparsed)
     time_units = args.time_units
     for label, sidecar in sidecars.items():
         time_units = _resolve_time_units(time_units, sidecar,
-                                         flag_name=f'--time-units (against {label})')
+                                         flag_name=f'--time-units (against {label})',
+                                         input_path=series_paths[label])
     os.makedirs(args.out, exist_ok=True)
 
     def _fit(input_csv, label):
@@ -1944,7 +1972,8 @@ def _run_dynamixs_modelfree(args):
             _check_unparsed_delays(sidecar, args.allow_unparsed)
             sidecars[f'{field}-{exp}'] = _sidecar_summary(sidecar)
         units[key] = _resolve_time_units(getattr(args, key), sidecar,
-                                         flag_name=f'--{field}-{exp}-units')
+                                         flag_name=f'--{field}-{exp}-units',
+                                         input_path=path)
     out_dir = os.path.abspath(args.out)
     os.makedirs(out_dir, exist_ok=True)
     p = IntegratedAnalysisParameters()
@@ -2372,7 +2401,9 @@ def build_parser():
     t1rho.add_argument('--prefix', default='field1', help='Output filename prefix')
     t1rho.add_argument('--time-units', choices=['ms', 's', 'us'], default=None, dest='time_units',
                        help='Units of the delay values (RESCALES the fitted rates). '
-                            'Default: taken from series_metadata.json beside the input, else ms')
+                            'Default: taken from series_metadata.json beside the input, else ms. '
+                            'Headers that state a unit (_2o4s) are read as ms; any other value '
+                            'is refused for them')
     t1rho.add_argument('--allow-unparsed-delays', action='store_true', dest='allow_unparsed',
                        help='Fit anyway when the series sidecar records spectra whose '
                             'filename carried no delay (those points are dropped)')
@@ -2421,7 +2452,9 @@ def build_parser():
                             dest=f'{f}_{exp}_units',
                             help=f'Delay units of the {f.upper()} {exp.upper()} series '
                                  f'(RESCALES the rates). Default: from that series\''
-                                 f' series_metadata.json, else ms')
+                                 f' series_metadata.json, else ms. Headers that state a '
+                                 f'unit (_2o4s) are read as ms; any other value is refused '
+                                 f'for them')
     mf.add_argument('--allow-unparsed-delays', action='store_true', dest='allow_unparsed',
                     help='Fit anyway when a series sidecar records spectra whose '
                          'filename carried no delay (those points are dropped)')
@@ -2522,7 +2555,9 @@ def _add_relaxation_flags(p):
                    help='Spectrometer field frequency in MHz (default: 600)')
     p.add_argument('--time-units', choices=['ms', 's', 'us'], default=None, dest='time_units',
                    help='Units of the delay values (labels output; does not rescale). '
-                        'Default: taken from series_metadata.json beside the input, else ms')
+                        'Default: taken from series_metadata.json beside the input, else ms. '
+                        'Headers that state a unit (_2o4s) are read as ms; any other value '
+                        'is refused for them')
     p.add_argument('--allow-unparsed-delays', action='store_true', dest='allow_unparsed',
                    help='Fit anyway when the series sidecar records spectra whose '
                         'filename carried no delay (those points are dropped)')
