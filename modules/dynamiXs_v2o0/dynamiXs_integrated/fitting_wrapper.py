@@ -67,7 +67,8 @@ def fit_relaxation_data(input_csv: str,
     """
     # Import the fitting module (prefer multicore version for performance)
     fitting_module_path = Path(__file__).parent.parent / 'dynamiXs_T1_T2'
-    sys.path.insert(0, str(fitting_module_path))
+    if str(fitting_module_path) not in sys.path:
+        sys.path.insert(0, str(fitting_module_path))
 
     try:
         # Try multicore version first (5-8x faster)

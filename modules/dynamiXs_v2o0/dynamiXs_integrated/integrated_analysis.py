@@ -464,7 +464,8 @@ class IntegratedAnalysisPipeline:
 
         # Import spectral density module
         density_module_path = Path(__file__).parent.parent / 'dynamiXs_density_functions'
-        sys.path.insert(0, str(density_module_path))
+        if str(density_module_path) not in sys.path:
+            sys.path.insert(0, str(density_module_path))
 
         # Determine which multicore script to use
         method_map = {
