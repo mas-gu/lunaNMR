@@ -111,12 +111,79 @@ class TestObservableChoice:
         assert dialog.value == 'fit_area'
         dialog.close()
 
+    def test_the_results_open_on_the_region_sum_by_default(self, page):
+        """The region sum is the observable that conserves across a conversion; the
+        integrate-1d CLI defaults to it too."""
+        page.load_folder(folder=str(REAL_DIR))
+        page.add_peak_at(PEAK_A)
+        page.integrate(show_table=False)
+        dialog = page.show_results_table()
+        assert page.observable.currentText() == 'Area (region sum)'
+        assert dialog.value == 'area'
+        dialog.close()
+
     def test_the_fit_columns_reach_the_results(self, page):
         page.load_folder(folder=str(REAL_DIR))
         page.add_peak_at(PEAK_A)
         rows = page.integrate(show_table=False)
         assert all(r['fit_area'] is not None for r in rows)
         assert all(r['r_squared'] > 0.9 for r in rows)
+
+
+@needs_series
+class TestSeriesOrder:
+    """The series is tracked from each point to the next, so it must be loaded in
+    series order: pt_2 before pt_10, as the integrate-1d CLI orders a folder."""
+
+    NAMES = ['pt_1.ft1', 'pt_2.ft1', 'pt_3.ft1', 'pt_10.ft1', 'pt_11.ft1', 'pt_20.ft1']
+
+    def _linked(self, tmp_path):
+        sources = sorted(REAL_DIR.glob('*.ft1'))
+        for name, source in zip(self.NAMES, sources):
+            (tmp_path / name).symlink_to(source)
+        return tmp_path
+
+    def test_a_folder_loads_in_natural_order(self, page, tmp_path):
+        page.load_folder(folder=str(self._linked(tmp_path)))
+        assert [p.name for p in page.paths] == self.NAMES
+
+    def test_chosen_files_load_in_natural_order(self, page, tmp_path):
+        folder = self._linked(tmp_path)
+        page.load_spectra(paths=[str(folder / n) for n in reversed(self.NAMES)])
+        assert [p.name for p in page.paths] == self.NAMES
+
+
+@needs_series
+class TestPeaksOutsideASpectrum:
+    """A picked position that a checked spectrum's sweep does not reach measures
+    nothing there; the run is refused, as integrate-1d refuses such --peaks."""
+
+    def _with_narrow_sweep(self, tmp_path):
+        import nmrglue as ng
+        sources = sorted(REAL_DIR.glob('*.ft1'))[:2]
+        (tmp_path / sources[0].name).symlink_to(sources[0])
+        dic, data = ng.pipe.read(str(sources[1]))
+        uc = ng.pipe.make_uc(dic, data)
+        dic, data = ng.pipe_proc.ext(dic, data, x1=uc('9.0 ppm'), xn=uc('8.25 ppm'))
+        ng.pipe.write(str(tmp_path / 'narrow.ft1'), dic, data)
+        return tmp_path
+
+    def test_a_peak_outside_a_checked_sweep_is_refused(self, page, tmp_path):
+        page.load_folder(folder=str(self._with_narrow_sweep(tmp_path)))
+        page.show_spectrum(0)
+        page.add_peak_at(PEAK_A)
+        assert page.integrate(show_table=False) is None
+        assert page.table_rows == []
+        assert f"{page.peaks[0]['position']:.4f}" in page.status.text()
+
+    def test_unchecking_the_narrow_spectrum_lets_the_run_proceed(self, page, tmp_path):
+        from PySide6.QtCore import Qt
+        page.load_folder(folder=str(self._with_narrow_sweep(tmp_path)))
+        page.show_spectrum(0)
+        page.add_peak_at(PEAK_A)
+        names = [p.name for p in page.paths]
+        page.spectrum_list.item(names.index('narrow.ft1')).setCheckState(Qt.Unchecked)
+        assert page.integrate(show_table=False) is not None
 
 
 @needs_series

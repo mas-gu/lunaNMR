@@ -2310,18 +2310,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         peak['center_x'] = peak['ppm_x'] = peak['pos_f2'] = x_ppm
         peak['center_y'] = peak['ppm_y'] = peak['pos_f1'] = y_ppm
 
-    @staticmethod
-    def _quality_from_r2(r2):
-        if r2 is None:
-            return 'Unknown'
-        if r2 >= 0.9:
-            return 'Excellent'
-        if r2 >= 0.8:
-            return 'Good'
-        if r2 >= 0.5:
-            return 'Fair'
-        return 'Poor'
-
     # Position freedom for the constrained re-fit is scaled to the reference
     # spectrum's linewidth (window = factor x LW): a broad/shifted peak needs a
     # wider window to reach its true center than a sharp one. Capped to avoid
@@ -2418,9 +2406,11 @@ class MultiSpectrumViewerDialog(BaseDialog):
         if not result or not result.get('success') or not result.get('peaks'):
             return None
         r2 = result.get('r_squared')
-        # Write back every peak in the group (simultaneous fit refined them all).
+        # Write back every peak in the group (simultaneous fit refined them all),
+        # labelled by the rule the series labels a 2D fit's members with.
         for fp in result['peaks']:
-            self._write_back_fit(spec_idx, fp.get('assignment'), fp, r2)
+            quality = integ._assign_quality_to_fitted_peak(r2, fp) if r2 is not None else None
+            self._write_back_fit(spec_idx, fp.get('assignment'), fp, r2, quality)
         return r2
 
     def _cluster_for_anchor(self, integ, context, x_ppm, y_ppm, assignment):
@@ -2465,8 +2455,12 @@ class MultiSpectrumViewerDialog(BaseDialog):
         return {'lw_f2_median': float(np.median(lwx)),
                 'lw_f1_median': float(np.median(lwy))}
 
-    def _write_back_fit(self, spec_idx, assignment, fp, r2):
-        """Update the in-memory fitted peak for (spectrum, assignment) from a fit result."""
+    def _write_back_fit(self, spec_idx, assignment, fp, r2, quality=None):
+        """Update the in-memory fitted peak for (spectrum, assignment) from a fit result.
+
+        The bound flags and detection sigma are the refit's own, as the height is: left
+        from the series fit, they would blank a repaired point or pass a pinned one.
+        """
         new_x, new_y = fp.get('pos_f2'), fp.get('pos_f1')
         if new_x is None or new_y is None:
             return False  # don't stamp None over a good position
@@ -2475,11 +2469,18 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 self._set_peak_position(peak, new_x, new_y)
                 if r2 is not None:
                     peak['r_squared'] = peak['R_Squared'] = r2
-                    peak['quality'] = peak['Quality'] = self._quality_from_r2(r2)
+                if quality is not None:
+                    peak['quality'] = peak['Quality'] = quality
                 for src, dst in (('height', 'height'), ('volume', 'volume'),
                                  ('lw_gau_f2', 'lw_x'), ('lw_gau_f1', 'lw_y')):
                     if src in fp:
                         peak[dst] = fp[src]
+                for key in ('position_pinned', 'intensity_pinned', 'detection_sigma'):
+                    if key in fp:
+                        peak[key] = fp[key]
+                if 'detection_sigma' in fp:
+                    # The series reports a 2D fit's S/N as its detection sigma.
+                    peak['snr'] = peak['SNR'] = fp['detection_sigma']
                 return True
         return False
 
@@ -2562,22 +2563,22 @@ class MultiSpectrumViewerDialog(BaseDialog):
                                 f"comprehensive_peak_tracking.csv not found in:\n{folder}")
             return
 
-        df = pd.read_csv(tracking)
-        # Point labels in column order (prefix before "_Position_X").
-        labels = [c[:-len("_Position_X")] for c in df.columns if c.endswith("_Position_X")]
-        if len(labels) != len(self.spectra):
-            QMessageBox.warning(
-                self, "Mismatch",
-                f"CSV has {len(labels)} points but viewer has {len(self.spectra)} spectra; "
-                "cannot map them safely.")
+        labels = self._point_labels(folder)
+        if labels is None:
+            self.edit_status_label.setText(
+                "Not saved: series_metadata.json, which maps each spectrum to its point's "
+                "columns, is missing from the series folder. Re-run the series to write it.")
             return
 
+        from lunaNMR.processors.multi_spectrum_processor import (
+            _reported_pinned, _stands_above_noise)
+        df = pd.read_csv(tracking, dtype={'Assignment': str})
         assign_col = df['Assignment'].astype(str)
         saved, skipped = 0, 0
         for (spec_idx, assignment) in sorted(self._edited):
-            label = labels[spec_idx]
+            label = labels.get(os.path.basename(self.spectra[spec_idx]['name']))
             peak = self._find_peak_obj(spec_idx, assignment)
-            if peak is None:
+            if peak is None or label is None:
                 skipped += 1
                 continue
             rows = df.index[assign_col == str(assignment)].tolist()
@@ -2592,9 +2593,16 @@ class MultiSpectrumViewerDialog(BaseDialog):
                              (f"{label}_Volume", peak.get('volume')),
                              (f"{label}_LW_X", peak.get('lw_x')),
                              (f"{label}_LW_Y", peak.get('lw_y')),
-                             (f"{label}_Quality", peak.get('quality'))):
+                             (f"{label}_Quality", peak.get('quality')),
+                             (f"{label}_SNR", peak.get('detection_sigma'))):
                 if col in df.columns and val is not None:
                     df.at[row, col] = val
+            # Flags as the series writes them: 1.0/0.0, an unreported flag as 0.0.
+            for col, val in ((f"{label}_Detected", _stands_above_noise(peak)),
+                             (f"{label}_Position_Pinned", _reported_pinned(peak, 'position_pinned')),
+                             (f"{label}_Intensity_Pinned", _reported_pinned(peak, 'intensity_pinned'))):
+                if col in df.columns:
+                    df.at[row, col] = float(val)
             saved += 1
 
         df.to_csv(tracking, index=False)
@@ -2610,6 +2618,19 @@ class MultiSpectrumViewerDialog(BaseDialog):
         msg += " Intensity/volume matrices are not rewritten."
         self.edit_status_label.setText(msg)
 
+    def _point_labels(self, folder):
+        """{spectrum file name: its point label in the series CSVs}, from the series'
+        series_metadata.json, or None without one. The viewer orders spectra by its own
+        name parsing, which is not the order of the CSV columns."""
+        import json
+        import os
+        path = os.path.join(folder, "series_metadata.json")
+        if not os.path.exists(path):
+            return None
+        with open(path) as fh:
+            columns = json.load(fh).get('columns', [])
+        return {os.path.basename(c['spectrum']): str(c['column']) for c in columns}
+
     def _update_tidy_csv(self, folder, labels):
         """Update series_analysis_tidy.csv for the edited peaks. Returns rows updated or None."""
         import os
@@ -2617,7 +2638,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
         tidy = os.path.join(folder, "series_analysis_tidy.csv")
         if not os.path.exists(tidy):
             return None
-        td = pd.read_csv(tidy)
+        # Point labels and flags read as written: parsed as numbers, a titration's
+        # '3' becomes 3.0 and matches no label.
+        td = pd.read_csv(tidy, dtype={'spectrum_name': str, 'assignment': str,
+                                      'position_pinned': object, 'intensity_pinned': object})
         if 'spectrum_name' not in td.columns or 'assignment' not in td.columns:
             return None
         spec_col = td['spectrum_name'].astype(str)
@@ -2627,8 +2651,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
             peak = self._find_peak_obj(spec_idx, assignment)
             if peak is None:
                 continue
-            label = labels[spec_idx]
-            mask = (spec_col == str(label)) & (assign_col == str(assignment))
+            label = labels.get(os.path.basename(self.spectra[spec_idx]['name']))
+            if label is None:
+                continue
+            mask = (spec_col == label) & (assign_col == str(assignment))
             rows = td.index[mask].tolist()
             if not rows:
                 continue
@@ -2636,9 +2662,16 @@ class MultiSpectrumViewerDialog(BaseDialog):
             for col, val in (('ppm_x', cx), ('ppm_y', cy),
                              ('height', peak.get('height')), ('volume', peak.get('volume')),
                              ('r_squared', peak.get('r_squared')),
-                             ('quality', peak.get('quality'))):
+                             ('quality', peak.get('quality')),
+                             ('snr', peak.get('detection_sigma')),
+                             ('detection_sigma', peak.get('detection_sigma'))):
                 if col in td.columns and val is not None:
                     td.at[rows[0], col] = val
+            # Flags as the series writes them: True/False, blank when unreported.
+            for col in ('position_pinned', 'intensity_pinned'):
+                if col in td.columns:
+                    val = peak.get(col)
+                    td.at[rows[0], col] = str(bool(val)) if val is not None and pd.notna(val) else ''
             updated += 1
         td.to_csv(tidy, index=False)
         return updated

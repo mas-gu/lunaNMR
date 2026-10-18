@@ -1,6 +1,7 @@
 # ABOUTME: 1D integration page - load a series, pick peaks interactively, integrate all points.
 # ABOUTME: Wires the plotter's selections to the series extraction and writes the results CSV.
 
+import re
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -25,6 +26,19 @@ SPECTRUM_FILTER = ("1D spectra (*.ft1 *.ft *.ft2 *.ft3 *.dat);;"
 
 # Which series-row key each entry of the observable box opens the results table on.
 OBSERVABLE_KEYS = ('height', 'area', 'fit_area')
+
+# The region sum is the one to quantify on: on a 1:1 conversion it conserves the total
+# to 6.4%, height to 11.5% (a broadening peak loses height at constant area) and the
+# fitted area to 38% (a close neighbour leaves the tails it integrates unsampled).
+QUANTITATIVE_OBSERVABLE = 'area'
+
+
+def series_order(paths):
+    """Spectra in series order, numbers in a name compared as numbers (pt_2 before
+    pt_10): each point is tracked from the one before it."""
+    def natural_key(path):
+        return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', path.name)]
+    return sorted(paths, key=natural_key)
 
 
 class OneDIntegrationPage(QWidget):
@@ -88,6 +102,11 @@ class OneDIntegrationPage(QWidget):
         self.observable = QComboBox()
         self.observable.addItems(['Intensity (height)', 'Area (region sum)',
                                   'Area (Voigt fit)'])
+        self.observable.setCurrentIndex(OBSERVABLE_KEYS.index(QUANTITATIVE_OBSERVABLE))
+        self.observable.setToolTip(
+            "Quantify on the region sum. Height stops tracking concentration when the "
+            "linewidth changes; the Voigt-fit area integrates tails the window did not "
+            "sample. The fit's R² and linewidth are diagnostics.")
 
         self.integrate_button = QPushButton("Integrate series")
         self.integrate_button.clicked.connect(self.integrate)
@@ -154,23 +173,23 @@ class OneDIntegrationPage(QWidget):
         if not paths:
             return
 
-        self._set_paths([Path(p) for p in paths])
+        self._set_paths(series_order(Path(p) for p in paths))
 
     def load_folder(self, _=None, folder=None):
-        """Load every spectrum in a folder, in name order."""
+        """Load every spectrum in a folder, in series order."""
         folder = folder or QFileDialog.getExistingDirectory(self, "Folder of 1D spectra")
         if not folder:
             return
 
         paths = []
         for pattern in SPECTRUM_PATTERNS:
-            paths.extend(sorted(Path(folder).glob(pattern)))
+            paths.extend(Path(folder).glob(pattern))
 
         if not paths:
             self.status.setText(f"No 1D spectra found in {folder}")
             return
 
-        self._set_paths(sorted(paths))
+        self._set_paths(series_order(paths))
 
     def _set_paths(self, paths):
         """Keep the files that load as 1D, reporting the ones that do not.
@@ -417,6 +436,18 @@ class OneDIntegrationPage(QWidget):
 
         if not spectra:
             self.status.setText("None of the checked spectra could be read.")
+            return None
+
+        # A position a checked spectrum's sweep does not reach measures nothing there,
+        # and would be reported as just another unmatched point.
+        low = max(float(s.ppm_axis.min()) for s in spectra)
+        high = min(float(s.ppm_axis.max()) for s in spectra)
+        outside = [p['position'] for p in self.peaks if not low <= p['position'] <= high]
+        if outside:
+            self.status.setText(
+                f"Not integrated: peak(s) at {', '.join(f'{ppm:.4f}' for ppm in outside)} ppm "
+                f"lie outside the range every checked spectrum covers ({high:.4f} to "
+                f"{low:.4f} ppm). Uncheck the spectra that do not reach them.")
             return None
 
         rows_by_path = [self.paths.index(p) for p in usable]
