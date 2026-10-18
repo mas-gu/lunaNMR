@@ -89,7 +89,7 @@ class SeriesTableDialog(QDialog):
 
         self.hint = QLabel("Select cells and press Ctrl+C, or use Copy all, "
                            "to paste into a spreadsheet.")
-        self.hint.setStyleSheet("color: #666; font-size: 10px;")
+        self.hint.setStyleSheet("color: #666; font-size: 10pt;")
 
         layout = QVBoxLayout(self)
         layout.addLayout(controls)

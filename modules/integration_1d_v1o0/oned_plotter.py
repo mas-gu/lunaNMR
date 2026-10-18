@@ -104,7 +104,7 @@ class OneDPlotter(QWidget):
 
         hint = QLabel("scroll: zoom  ·  scroll on Y axis: scale trace  ·  "
                       "middle-drag: pan  ·  middle-click: pick peak")
-        hint.setStyleSheet("color: #666; font-size: 10px;")
+        hint.setStyleSheet("color: #666; font-size: 10pt;")
         self.controls.addWidget(hint)
         self.controls.addWidget(self.reset_button)
 

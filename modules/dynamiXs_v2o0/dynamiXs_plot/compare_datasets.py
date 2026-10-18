@@ -33,7 +33,6 @@ SECONDARY STRUCTURE VISUALIZATION (SS VERSION):
 
 import pandas as pd
 import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend for thread safety
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse

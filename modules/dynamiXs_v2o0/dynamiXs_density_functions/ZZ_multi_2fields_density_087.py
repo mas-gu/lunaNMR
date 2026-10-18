@@ -23,9 +23,7 @@ FIX VERSION: Fixed residue numbering issue by ensuring proper 0-based sequential
 
 import numpy as np
 import pandas as pd
-import matplotlib
-matplotlib.use('Agg')  # Non-interactive backend (must be before pyplot import)
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from scipy import stats
 from scipy.optimize import minimize
 
@@ -763,7 +761,8 @@ class DualFieldSpectralDensityAnalysis:
         save_plots : bool
                 Whether to save plots to files
         """
-        fig, axes = plt.subplots(4, 3, figsize=(18, 20))
+        fig = Figure(figsize=(18, 20))
+        axes = fig.subplots(4, 3)
         fig.suptitle(f'Dual-Field Spectral Density Analysis Results\n{self.field1_freq} MHz vs {self.field2_freq} MHz', fontsize=16)
         
         # Filter successful fits
@@ -976,15 +975,12 @@ class DualFieldSpectralDensityAnalysis:
                                 axes[i,j].set_xticks(tick_positions)
                                 axes[i,j].tick_params(axis='x', rotation=0)
 
-        plt.tight_layout()
+        fig.tight_layout()
         
         if save_plots:
                 filename = plot_filename or 'dual_field_analysis_results.pdf'
-                plt.savefig(filename, dpi=300, bbox_inches='tight')
+                fig.savefig(filename, dpi=300, bbox_inches='tight')
                 print(f"Plots saved as '{filename}'")
-                plt.close(fig)  # Close figure to free memory
-        else:
-                plt.close(fig)  # Always close to prevent memory leaks
 
     def save_dual_field_results(self, results_df, filename='dual_field_detailed_results.csv'):
         """

@@ -18,9 +18,7 @@ cross-correlation effects and dipolar-CSA interference in the relaxation mechani
 
 import numpy as np
 import pandas as pd
-import matplotlib
-matplotlib.use('Agg')  # Non-interactive backend (must be before pyplot import)
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from scipy import stats
 from scipy.optimize import minimize
 
@@ -710,7 +708,8 @@ class ReducedSpectralDensityAnalysis:
         save_plots : bool
             Whether to save plots to files
         """
-        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        fig = Figure(figsize=(15, 10))
+        axes = fig.subplots(2, 3)
         fig.suptitle('Reduced Spectral Density Analysis Results (J(0.87ωH))', fontsize=16)
         
         # Filter successful fits
@@ -767,15 +766,12 @@ class ReducedSpectralDensityAnalysis:
             ax.set_xlabel('Residue')
             ax.grid(True, alpha=0.3)
             
-        plt.tight_layout()
+        fig.tight_layout()
 
         if save_plots:
             filename = plot_filename or 'ZZ_rsdm_multicore_analysis_results_087.pdf'
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            fig.savefig(filename, dpi=300, bbox_inches='tight')
             print(f"Plots saved as '{filename}'")
-            plt.close(fig)  # Close figure to free memory
-        else:
-            plt.close(fig)  # Always close to prevent memory leaks
 
     def save_detailed_results(self, results_df, filename='ZZ_multicore_detailed_results_087.csv'):
         """
