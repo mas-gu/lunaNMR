@@ -683,8 +683,10 @@ class ProjectManager:
         summary = {
             'project_name': project_path.stem,
             'loaded_items': [],
-            'dynamixs': {}
+            'dynamixs': {},
+            'skipped': [],
         }
+        self._skipped = summary['skipped']   # what a loader found but could not read
 
         try:
             # Load and validate manifest
@@ -749,6 +751,12 @@ class ProjectManager:
         mw.dynamixs_analyses = None
         mw.kd_analyses = None
         mw.spectral_inspector_state = None
+
+    def _skip(self, item: str) -> None:
+        """Report, in the load summary, an item the bundle has but could not be read."""
+        skipped = getattr(self, '_skipped', None)
+        if skipped is not None:
+            skipped.append(item)
 
     def _holds_region_data(self) -> bool:
         """Whether a fit or series row in the session carries its region's intensity."""
@@ -1129,7 +1137,7 @@ class ProjectManager:
         series_dir = bundle_path / "series_results"
 
         if not series_dir.exists():
-            return True  # No series results to load
+            return False  # No series results to load
 
         # Initialize saved_series dict
         self.main_window.saved_series = {}
@@ -1148,6 +1156,7 @@ class ProjectManager:
 
                 if not batch_file.exists():
                     logger.warning(f"Series '{series_name}' data not found, skipping")
+                    self._skip(f"Series '{series_name}' (no batch_results.json)")
                     continue
 
                 with open(batch_file, 'r') as f:
@@ -1185,7 +1194,7 @@ class ProjectManager:
 
                 logger.info(f"Loaded legacy series results: {len(batch_results.results)} spectra")
 
-        return True
+        return bool(self.main_window.saved_series)
 
     def _deserialize_spectrum_result(self, result: dict) -> dict:
         """Deserialize spectrum result, converting lists back to numpy arrays.
@@ -1382,6 +1391,7 @@ class ProjectManager:
                 file_refs = json.loads(rf.read_text()) if rf.exists() else {}
             except (ValueError, OSError) as e:
                 logger.warning(f"Skipping unreadable DynamiXs analysis '{adir.name}': {e}")
+                self._skip(f"DynamiXs analysis '{adir.name}' (unreadable)")
                 continue
             self._repoint_dynamixs_results(state, adir / "results")
             loaded[adir.name] = {'state': state, 'file_refs': file_refs}
@@ -1473,6 +1483,7 @@ class ProjectManager:
                 meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
             except (ValueError, OSError) as e:
                 logger.warning(f"Skipping unreadable Kd analysis '{adir.name}': {e}")
+                self._skip(f"Kd analysis '{adir.name}' (unreadable)")
                 continue
             loaded[adir.name] = {
                 'fit_data': fit_data, 'meta': meta, 'fit_data_path': str(fit_path),

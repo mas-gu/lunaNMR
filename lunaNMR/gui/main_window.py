@@ -8154,21 +8154,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             lines.append("")
             lines.append("DynamiXs Analysis:")
 
-            if 't1t2_fitting' in dynamixs:
-                t1t2 = dynamixs['t1t2_fitting']
-                experiments = t1t2.get('fitted_experiments', [])
-                if experiments:
-                    exp_str = ', '.join(e.replace('_', ' ').title() for e in experiments)
-                    lines.append(f"  • T1/T2 Fitting: {exp_str}")
-
-            if 'spectral_density' in dynamixs:
-                lines.append("  • Spectral Density: Analysis complete")
-
-            if 'model_free' in dynamixs:
-                lines.append("  • Model Free: Analysis complete")
-
-            if 'methyl_t2' in dynamixs:
-                lines.append("  • Methyl T2: Fit complete")
+            for name in dynamixs.get('analyses', []):
+                lines.append(f"  • {name}")
 
         if not dynamixs and len(summary.get('saved_items', [])) <= 2:
             lines.append("")
@@ -8201,27 +8188,21 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             lines.append("")
             lines.append("DynamiXs Analysis:")
 
-            if 't1t2_fitting' in dynamixs:
-                t1t2 = dynamixs['t1t2_fitting']
-                experiments = t1t2.get('fitted_experiments', [])
-                if experiments:
-                    exp_str = ', '.join(e.replace('_', ' ').title() for e in experiments)
-                    lines.append(f"  • T1/T2 Fitting: {exp_str}")
-
-            if 'spectral_density' in dynamixs:
-                lines.append("  • Spectral Density: Analysis complete")
-
-            if 'model_free' in dynamixs:
-                lines.append("  • Model Free: Analysis complete")
-
-            if 'methyl_t2' in dynamixs:
-                lines.append("  • Methyl T2: Fit complete")
+            for name in dynamixs.get('analyses', []):
+                lines.append(f"  • {name}")
 
             lines.append("")
             lines.append("Open DynamiXs to view results.")
         else:
             lines.append("")
             lines.append("No DynamiXs analysis results in project.")
+
+        # Found in the bundle but not read: without this, an absent item looks loaded
+        if summary.get('skipped'):
+            lines.append("")
+            lines.append("Could not be loaded:")
+            for item in summary['skipped']:
+                lines.append(f"  • {item}")
 
         logger.info("Showing load summary popup")
         msg = QMessageBox(self)

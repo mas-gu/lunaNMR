@@ -439,3 +439,59 @@ def test_the_save_box_starts_from_how_the_project_was_saved(app, monkeypatch, tm
     finally:
         window.close()
         window.deleteLater()
+
+
+# ---------- the load summary says what loaded and what did not ----------
+
+def test_a_bundle_without_series_does_not_report_series(empty_bundle):
+    assert "Series results" not in _loaded(empty_bundle)[2]["loaded_items"]
+
+
+def test_what_could_not_be_read_is_reported(bundle_a, tmp_path):
+    bundle = _copy(bundle_a, tmp_path)
+    (bundle / "series_results" / SERIES / "batch_results.json").unlink()
+    (bundle / "kd" / "analyses" / KD / "fit_data.json").write_text("{not json")
+    (bundle / "dynamixs" / "analyses" / METHYL_T2 / "state.json").write_text("{not json")
+    window, _, summary = _loaded(bundle)
+    assert "Series results" not in summary["loaded_items"]
+    assert "Kd titration" not in summary["loaded_items"]
+    assert summary["dynamixs"] == {}
+    assert sorted(summary["skipped"]) == sorted([
+        f"Series '{SERIES}' (no batch_results.json)",
+        f"Kd analysis '{KD}' (unreadable)",
+        f"DynamiXs analysis '{METHYL_T2}' (unreadable)",
+    ])
+
+
+def _popup_text(monkeypatch, show):
+    from PySide6.QtWidgets import QMessageBox
+    shown = []
+
+    def answer(box):
+        shown.append(box.text())
+        return QMessageBox.Ok
+
+    monkeypatch.setattr(QMessageBox, "exec", answer)
+    show()
+    [text] = shown
+    return text
+
+
+def test_the_popups_name_the_dynamixs_analyses_and_what_was_skipped(app, monkeypatch,
+                                                                     tmp_path):
+    from lunaNMR.gui.main_window import LunaNMRMainWindow
+    window = LunaNMRMainWindow()
+    try:
+        loaded = _popup_text(monkeypatch, lambda: window._show_load_summary(
+            tmp_path / "P.lunaNMR",
+            {"loaded_items": ["Project manifest"], "dynamixs": {"analyses": [METHYL_T2]},
+             "skipped": [f"Kd analysis '{KD}' (unreadable)"]}))
+        assert METHYL_T2 in loaded
+        assert f"Kd analysis '{KD}' (unreadable)" in loaded
+        saved = _popup_text(monkeypatch, lambda: window._show_save_summary(
+            tmp_path / "P.lunaNMR",
+            {"saved_items": ["Project manifest"], "dynamixs": {"analyses": [METHYL_T2]}}))
+        assert METHYL_T2 in saved
+    finally:
+        window.close()
+        window.deleteLater()
