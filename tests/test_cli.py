@@ -582,9 +582,11 @@ class TestExportKd:
         from lunaNMR.cli import main
         jf = self._make_kd_json(tmp_path, "csp")
         figs = tmp_path / "figs_fonttype"
-        matplotlib.rcParams['pdf.fonttype'] = 3
-        assert main(["export", "kd", "--json", str(jf), "--out", str(figs)]) == 0
-        assert matplotlib.rcParams['pdf.fonttype'] == 42
+        with matplotlib.rc_context({'pdf.fonttype': 3}):
+            assert main(["export", "kd", "--json", str(jf), "--out", str(figs)]) == 0
+        pdf = (figs / "csp_fits.pdf").read_bytes()
+        assert b"/FontFile2" in pdf          # an embedded TrueType font program
+        assert b"/Type3" not in pdf
 
     def test_export_missing_json_errors(self, tmp_path):
         from lunaNMR.cli import main
