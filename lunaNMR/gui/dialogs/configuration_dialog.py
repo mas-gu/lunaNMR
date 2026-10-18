@@ -279,7 +279,6 @@ class ConfigurationDialog(BaseDialog):
 
         # Detection Parameters
         config_info += "Detection Parameters:\n"
-        config_info += f"  Noise Threshold: {getattr(mw, 'noise_threshold', 3.0):.2f}\n"
         config_info += f"  Search Window X: ±{getattr(mw, 'search_window_x', 0.05):.3f} ppm\n"
         config_info += f"  Search Window Y: ±{getattr(mw, 'search_window_y', 0.5):.2f} ppm\n"
         config_info += f"  Use Reference Detection: {getattr(mw, 'use_reference_detection', True)}\n"
@@ -439,7 +438,6 @@ class ConfigurationDialog(BaseDialog):
         series_opts = config.get('series_options', {})
 
         # Update main window attributes from config
-        mw.noise_threshold = proc_params.get('noise_threshold', 3.0)
         mw.search_window_x = proc_params.get('search_window_x', 0.08)
         mw.search_window_y = proc_params.get('search_window_y', 0.8)
         mw.fix_positions = proc_params.get('fix_positions', False)
@@ -448,8 +446,6 @@ class ConfigurationDialog(BaseDialog):
         # Update GUI controls if they exist
         try:
             # Expert panel controls
-            if hasattr(mw, 'expert_noise_spin'):
-                mw.expert_noise_spin.setValue(mw.noise_threshold)
             if hasattr(mw, 'expert_search_x_spin'):
                 mw.expert_search_x_spin.setValue(mw.search_window_x)
             if hasattr(mw, 'expert_search_y_spin'):
@@ -462,9 +458,8 @@ class ConfigurationDialog(BaseDialog):
             # Update integrator if available
             if hasattr(mw, 'integrator') and mw.integrator:
                 mw.integrator.set_search_window(mw.search_window_x, mw.search_window_y)
-                mw.integrator.set_threshold_multiplier(mw.noise_threshold)
 
-            logger.info(f"Config applied to GUI: noise={mw.noise_threshold}, "
+            logger.info(f"Config applied to GUI: "
                        f"search_x={mw.search_window_x}, search_y={mw.search_window_y}")
 
         except Exception as e:

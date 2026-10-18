@@ -88,10 +88,21 @@ def test_cancel_ends_the_run_and_frees_the_dialog(app, dialog):
 
     assert _wait_until_stopped(app, dialog)
     assert dialog.start_btn.isEnabled()
-    assert not dialog.cancel_btn.isEnabled() and not dialog.pause_btn.isEnabled()
+    assert not dialog.cancel_btn.isEnabled()
     assert dialog.close_btn.isEnabled()
     assert "Cancelled" in dialog.status_label.text()
     assert dialog.boxes == []
+
+
+def test_a_run_offers_cancel_and_no_pause(app, dialog):
+    """Nothing in the series read a pause; the button paused nothing."""
+    from PySide6.QtWidgets import QPushButton
+    dialog._start_processing()
+
+    labels = [b.text() for b in dialog.findChildren(QPushButton) if b.isVisibleTo(dialog)]
+    assert dialog.cancel_btn.isEnabled()
+    assert not any("Pause" in label or "Resume" in label for label in labels)
+    assert not hasattr(dialog.worker, "set_paused")
 
 
 def test_the_dialog_stays_open_while_its_run_goes_on(app, dialog):

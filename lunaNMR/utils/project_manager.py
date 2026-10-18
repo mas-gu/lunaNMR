@@ -359,7 +359,7 @@ class ProjectManager:
         'use_ps2d_multi_peak', 'fix_linewidths', 'fix_positions',
 
         # Peak detection parameters
-        'noise_threshold', 'search_window_x', 'search_window_y',
+        'search_window_x', 'search_window_y',
         'detection_square_size', 'detection_rectangle_y',
         'centroid_window_x_ppm', 'centroid_window_y_ppm',
         'use_centroid_refinement', 'centroid_noise_multiplier',

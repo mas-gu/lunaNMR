@@ -60,7 +60,7 @@ from lunaNMR.gui.styles.design_system import (
 
 # Import core processing components
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
-from lunaNMR.core.ps2d_config import (set_ps2d_config, get_ps2d_config, mark_ps2d_config_as_base,
+from lunaNMR.core.ps2d_config import (SEARCH_WINDOW_PPM, set_ps2d_config, get_ps2d_config, mark_ps2d_config_as_base,
                                       reset_ps2d_config)
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.utils.config_manager import ConfigurationManager, UserPreferences, ProcessingParameters
@@ -81,22 +81,27 @@ class PeakDetectionWorker(QThread):
         progress_updated: (int, str) - Progress percentage and status message
         detection_complete: (list) - Detected peaks list
         detection_failed: (str) - Error message if detection fails
+        detection_cancelled: () - The stop event ended the detection; it returned nothing
     """
 
     progress_updated = Signal(int, str)  # progress_percent, status_message
     detection_complete = Signal(list)     # detected_peaks
     detection_failed = Signal(str)        # error_message
+    detection_cancelled = Signal()
 
-    def __init__(self, integrator, workflow_mode: str):
+    def __init__(self, integrator, workflow_mode: str, stop=None):
         """Initialize the peak detection worker.
 
         Args:
             integrator: Core integrator instance with nmr_data loaded
             workflow_mode: 'peak_list' or 'sn_threshold'
+            stop: Optional threading.Event; setting it ends the detection before its next
+                candidate or reference peak
         """
         super().__init__()
         self.integrator = integrator
         self.workflow_mode = workflow_mode
+        self.stop = stop
 
     def run(self):
         """Run peak detection in background thread."""
@@ -120,10 +125,10 @@ class PeakDetectionWorker(QThread):
             # Call appropriate detection method based on workflow mode
             if self.workflow_mode == 'sn_threshold':
                 # S/N native detection
-                detected_peaks = self.integrator.detect_peaks_sn_native()
+                detected_peaks = self.integrator.detect_peaks_sn_native(stop=self.stop)
             else:
                 # Peak list mode - use process_peaks
-                detected_peaks = self.integrator.process_peaks()
+                detected_peaks = self.integrator.process_peaks(stop=self.stop)
 
             self.progress_updated.emit(80, "Processing results...")
 
@@ -138,6 +143,9 @@ class PeakDetectionWorker(QThread):
             # Emit results
             self.detection_complete.emit(detected_peaks)
 
+        except Cancelled:
+            logger.info("Peak detection stopped by its stop event")
+            self.detection_cancelled.emit()
         except Exception as e:
             logger.error(f"Peak detection failed: {e}", exc_info=True)
             self.detection_failed.emit(f"Detection error: {str(e)}")
@@ -414,11 +422,9 @@ class LunaNMRMainWindow(BaseWindow):
         self.fix_positions = False
 
         # ===== Peak Detection Parameters (Expert Mode) =====
-        # Detection parameters from parameter_manager defaults
-        self.noise_threshold = 3.0
         # Nucleus-adaptive search windows (from ps2d_config)
-        self.search_window_x = 0.070  # 1H dimension (ppm) - F2
-        self.search_window_y = 0.070  # 15N/13C dimension (ppm) - F1
+        self.search_window_x = SEARCH_WINDOW_PPM  # 1H dimension (ppm) - F2
+        self.search_window_y = SEARCH_WINDOW_PPM  # 15N/13C dimension (ppm) - F1
         self.detection_square_size = 3  # X-dimension/1H (pixels)
         self.detection_rectangle_y = 1  # Y-dimension/15N (pixels)
         self.detection_square_ppm_x = "0.000"  # Auto-calculated ppm conversion
@@ -2277,16 +2283,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.expert_search_y_spin.valueChanged.connect(self._on_expert_param_change)
         params_frame_layout.addWidget(self.expert_search_y_spin, 0, 2)
 
-        # Row 1: Noise Threshold
-        params_frame_layout.addWidget(QLabel("Noise Threshold:"), 1, 0)
-        self.expert_noise_spin = QDoubleSpinBox()
-        self.expert_noise_spin.setRange(0.1, 10.0)  # set_threshold_multiplier refuses below 0.1
-        self.expert_noise_spin.setSingleStep(0.1)
-        self.expert_noise_spin.setDecimals(2)
-        self.expert_noise_spin.setValue(self.noise_threshold)
-        self.expert_noise_spin.valueChanged.connect(self._on_expert_param_change)
-        params_frame_layout.addWidget(self.expert_noise_spin, 1, 1)
-
         # Row 2: Detection rectangle size (pixels)
         params_frame_layout.addWidget(QLabel("X×Y (pixels):"), 2, 0)
         self.expert_det_x_spin = QSpinBox()
@@ -2871,8 +2867,6 @@ class LunaNMRMainWindow(BaseWindow):
             self.expert_search_x_spin.setValue(self.search_window_x)
         if hasattr(self, 'expert_search_y_spin'):
             self.expert_search_y_spin.setValue(self.search_window_y)
-        if hasattr(self, 'expert_noise_spin'):
-            self.expert_noise_spin.setValue(self.noise_threshold)
 
         # PS2D config parameters
         if hasattr(self, 'expert_rad_x_spin'):
@@ -2973,16 +2967,14 @@ class LunaNMRMainWindow(BaseWindow):
         """Handle detection parameter changes from Expert Mode spinboxes."""
         self.search_window_x = self.expert_search_x_spin.value()
         self.search_window_y = self.expert_search_y_spin.value()
-        self.noise_threshold = self.expert_noise_spin.value()
         self.centroid_window_x_ppm = self.expert_centroid_x_spin.value()
         self.centroid_window_y_ppm = self.expert_centroid_y_spin.value()
 
         # Update integrator if available
         if hasattr(self, 'integrator') and self.integrator:
             self.integrator.set_search_window(self.search_window_x, self.search_window_y)
-            self.integrator.set_threshold_multiplier(self.noise_threshold)
 
-        logger.info(f"Expert params updated: search_x={self.search_window_x}, search_y={self.search_window_y}, noise={self.noise_threshold}")
+        logger.info(f"Expert params updated: search_x={self.search_window_x}, search_y={self.search_window_y}")
 
     def _on_auto_add_dummy_change(self, state):
         """Handle auto-add dummy peaks checkbox change."""
@@ -3082,14 +3074,17 @@ class LunaNMRMainWindow(BaseWindow):
         self._show_ps2d_config()
 
         # Update nucleus-adaptive search windows
-        self.search_window_y = config.search_window_f1  # F1 (15N/13C)
-        self.search_window_x = config.search_window_f2  # F2 (1H)
+        window_y = config.search_window_f1  # F1 (15N/13C)
+        window_x = config.search_window_f2  # F2 (1H)
+        self.search_window_y = window_y
+        self.search_window_x = window_x
 
-        # Update search window spinboxes
+        # Update search window spinboxes: each spinbox's change reads both into the
+        # state, so both are set from the config, never from the state
         if hasattr(self, 'expert_search_x_spin'):
-            self.expert_search_x_spin.setValue(self.search_window_x)
+            self.expert_search_x_spin.setValue(window_x)
         if hasattr(self, 'expert_search_y_spin'):
-            self.expert_search_y_spin.setValue(self.search_window_y)
+            self.expert_search_y_spin.setValue(window_y)
 
         # Update integrator search windows
         if hasattr(self, 'integrator') and self.integrator:
@@ -3453,12 +3448,10 @@ class LunaNMRMainWindow(BaseWindow):
             self.fix_positions_checkbox.setChecked(False)
 
         # Expert Mode parameters (if expanded)
-        if hasattr(self, 'expert_noise_spin') and self.expert_noise_spin:
-            self.expert_noise_spin.setValue(3.0)
         if hasattr(self, 'expert_search_x_spin') and self.expert_search_x_spin:
-            self.expert_search_x_spin.setValue(0.01)
+            self.expert_search_x_spin.setValue(SEARCH_WINDOW_PPM)
         if hasattr(self, 'expert_search_y_spin') and self.expert_search_y_spin:
-            self.expert_search_y_spin.setValue(0.04)
+            self.expert_search_y_spin.setValue(SEARCH_WINDOW_PPM)
         if hasattr(self, 'expert_centroid_x_spin') and self.expert_centroid_x_spin:
             self.expert_centroid_x_spin.setValue(0.01)
         if hasattr(self, 'expert_centroid_y_spin') and self.expert_centroid_y_spin:
@@ -6004,7 +5997,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 # Update detection parameters
                 self.param_manager.current_params['search_window_x'] = self.search_window_x
                 self.param_manager.current_params['search_window_y'] = self.search_window_y
-                self.param_manager.current_params['noise_threshold'] = self.noise_threshold
 
                 # Update centroid parameters if available
                 if hasattr(self, 'centroid_window_x_ppm'):
@@ -6069,7 +6061,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     detection_params['search_window_x'],
                     detection_params['search_window_y']
                 )
-                self.integrator.set_threshold_multiplier(detection_params['noise_threshold'])
 
                 # Update fitting parameters
                 if hasattr(self.integrator, 'fitting_parameters'):
@@ -6084,7 +6075,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             else:
                 # Direct sync without parameter manager (fallback)
                 self.integrator.set_search_window(self.search_window_x, self.search_window_y)
-                self.integrator.set_threshold_multiplier(self.noise_threshold)
 
             # Sync S/N threshold and workflow mode (v0.9 main_gui.py:739-760)
             # Read from spinbox widgets directly (not from plain attributes)
@@ -6233,9 +6223,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             return
 
         # CRITICAL: Sync GUI parameters BEFORE detection
-        # This ensures Expert Mode settings (search windows, noise threshold, etc.) are passed
+        # This ensures Expert Mode settings (search windows, etc.) are passed
         self.sync_parameters_to_integrator()
-        logger.info(f"Parameters synced for detection: search_window=({self.search_window_x}, {self.search_window_y}), noise_threshold={self.noise_threshold}")
+        logger.info(f"Parameters synced for detection: search_window=({self.search_window_x}, {self.search_window_y})")
 
         # Validate NMR data is loaded
         if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
@@ -6259,8 +6249,12 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             title="Peak Detection"
         )
 
+        # Cancel sets the stop event: the detection ends before its next peak
+        stop = threading.Event()
+        progress_dialog.cancelled.connect(stop.set)
+
         # Create and configure worker
-        self.detection_worker = PeakDetectionWorker(self.integrator, self.workflow_mode)
+        self.detection_worker = PeakDetectionWorker(self.integrator, self.workflow_mode, stop=stop)
         # The detection replaces fitted_peaks itself; a cancelled one puts these back
         previous_peaks = self.integrator.fitted_peaks
 
@@ -6272,6 +6266,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         )
         self.detection_worker.detection_failed.connect(
             lambda error: self.on_detection_failed(error, progress_dialog)
+        )
+        self.detection_worker.detection_cancelled.connect(
+            lambda: self._discard_cancelled_detection(previous_peaks)
         )
         # Do not auto-close - let user review log and close manually
         self.detection_worker.finished.connect(
@@ -6287,9 +6284,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         progress_dialog.exec()
 
     def _discard_cancelled_detection(self, previous_peaks):
-        """A detection the user cancelled finished: keep the peaks it was started over."""
+        """A detection the user cancelled ended: keep the peaks it was started over."""
         self.integrator.fitted_peaks = previous_peaks
-        logger.info("Cancelled peak detection finished; its peaks were discarded")
+        logger.info("Cancelled peak detection ended; its peaks were discarded")
         self.update_status("Detection cancelled - its results were discarded")
 
     @Slot(list)

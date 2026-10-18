@@ -69,13 +69,13 @@ class ProcessingWorker(QObject):
     error = Signal(str)
     cancelled = Signal()  # the run stopped after a cancel
 
-    def __init__(self, processor, nmr_files, reference_peaks, peak_source_mode, voigt_params,
+    def __init__(self, nmr_files, reference_peaks, peak_source_mode, voigt_params,
                  extract_delays: bool = False, series_mode: str = "time",
                  pre_detected_peaks=None, sn_from_gui_locked=None,
                  peak_list_contour_min: float = None, lock_detection_threshold: bool = True,
                  series_name: str = None):
         super().__init__()
-        self.processor = processor
+        self.processor = None  # the run's MultiSpectrumProcessor, once it starts
         self.nmr_files = nmr_files
         self.reference_peaks = reference_peaks
         self.peak_source_mode = peak_source_mode
@@ -89,16 +89,9 @@ class ProcessingWorker(QObject):
         self.series_name = series_name
         # Set by cancel(); the series checks it before each spectrum and each cluster
         self._stop = threading.Event()
-        self._paused = False
 
     def cancel(self):
         self._stop.set()
-
-    def set_paused(self, paused: bool):
-        """Set pause state."""
-        self._paused = paused
-        if self.processor:
-            self.processor.paused = paused
 
     def progress_callback(self, progress_pct, task_desc, log_msg, failed=False):
         """OutputManager callback for the series thread: every message drives the
@@ -225,9 +218,6 @@ class SeriesIntegrationDialog(BaseDialog):
         self.current_spectrum_name = ""
         self.first_spectrum_time = None  # Time to complete first spectrum (for ETA)
         self.last_spectrum_start = None  # When current spectrum started
-
-        # State flags
-        self._is_paused = False
 
         # Build UI
         self.setup_ui()
@@ -495,14 +485,6 @@ class SeriesIntegrationDialog(BaseDialog):
         self.start_btn.setStyleSheet(self._get_green_button_style())
         self.start_btn.clicked.connect(self._start_processing)
         layout.addWidget(self.start_btn)
-
-        # Pause button - Red with icon (matching Voigt Fitting style)
-        self.pause_btn = QPushButton("⏸ Pause")
-        self.pause_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
-        self.pause_btn.setStyleSheet(self._get_red_button_style())
-        self.pause_btn.clicked.connect(self._on_pause_clicked)
-        self.pause_btn.setEnabled(False)
-        layout.addWidget(self.pause_btn)
 
         # Cancel button - Red with icon (matching Voigt Fitting style)
         self.cancel_btn = QPushButton("✕ Cancel")
@@ -952,8 +934,6 @@ class SeriesIntegrationDialog(BaseDialog):
         self.start_btn.setEnabled(False)
         self.close_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
-        self.pause_btn.setEnabled(True)
-        self.pause_btn.setText("⏸ Pause")
         self.progress_bar.setValue(0)
         self.status_label.setText("Starting...")
         self.log_text.clear()
@@ -967,7 +947,6 @@ class SeriesIntegrationDialog(BaseDialog):
         self.current_spectrum_name = ""
         self.first_spectrum_time = None
         self.last_spectrum_start = datetime.now()
-        self._is_paused = False
         self.stats_label.setText("Starting...")
 
         if extract_delays:
@@ -977,13 +956,12 @@ class SeriesIntegrationDialog(BaseDialog):
         self._log(f"Starting series integration: {len(self.nmr_files)} spectra, {len(reference_peaks)} peaks{delay_msg}")
         self.tracking_statement = self._tracking_statement(peak_source_mode)
         self._log(self.tracking_statement)
-        self._log("Noise Threshold does not apply to a series: series detection runs at its own S/N threshold")
         self._log("Adaptive radius search: off for a series")
 
         # Create worker and thread
         self.thread = QThread()
         self.worker = ProcessingWorker(
-            None, self.nmr_files, reference_peaks, peak_source_mode, voigt_params,
+            self.nmr_files, reference_peaks, peak_source_mode, voigt_params,
             extract_delays=extract_delays,
             series_mode=series_mode,
             pre_detected_peaks=pre_detected_peaks,
@@ -1026,7 +1004,6 @@ class SeriesIntegrationDialog(BaseDialog):
         if self.worker:
             self.worker.cancel()
         self.cancel_btn.setEnabled(False)
-        self.pause_btn.setEnabled(False)
         self._log("Cancelling... the fit stops before its next cluster")
         self.status_label.setText("Cancelling...")
 
@@ -1034,7 +1011,6 @@ class SeriesIntegrationDialog(BaseDialog):
         """The run stopped after a cancel; the series wrote no files and nothing is saved."""
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
-        self.pause_btn.setEnabled(False)
         self.status_label.setText("Cancelled - nothing written")
         self._log("Series integration cancelled - nothing written")
 
@@ -1055,20 +1031,6 @@ class SeriesIntegrationDialog(BaseDialog):
             event.ignore()
             return
         super().closeEvent(event)
-
-    def _on_pause_clicked(self):
-        """Toggle pause state."""
-        self._is_paused = not self._is_paused
-
-        if self._is_paused:
-            self.pause_btn.setText("▶ Resume")
-            self.status_label.setText("Paused...")
-            if self.worker:
-                self.worker.set_paused(True)
-        else:
-            self.pause_btn.setText("⏸ Pause")
-            if self.worker:
-                self.worker.set_paused(False)
 
     def _on_progress(self, current: int, total: int, message: str):
         """Handle progress update with elapsed time and ETA."""
@@ -1134,7 +1096,6 @@ class SeriesIntegrationDialog(BaseDialog):
         """Handle processing completion."""
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
-        self.pause_btn.setEnabled(False)
         self.progress_bar.setValue(100)
 
         # Calculate total time
@@ -1242,7 +1203,6 @@ class SeriesIntegrationDialog(BaseDialog):
         """Handle processing error."""
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
-        self.pause_btn.setEnabled(False)
         self.status_label.setText(f"Error: {error_msg}")
         self._log(f"ERROR: {error_msg}", is_error=True)
 
@@ -1452,7 +1412,6 @@ class SeriesIntegrationDialog(BaseDialog):
             'detection_params': {
                 'search_window_x': getattr(self.main_window, 'search_window_x', 0.08),
                 'search_window_y': getattr(self.main_window, 'search_window_y', 0.8),
-                'noise_threshold': getattr(self.main_window, 'noise_threshold', 3.0),
             },
             # GUI parameters for fitting control
             'gui_params': {

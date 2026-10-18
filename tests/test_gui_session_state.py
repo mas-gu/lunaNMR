@@ -106,7 +106,7 @@ def _run_series(window, data):
     from lunaNMR.gui.dialogs.series_integration_dialog import ProcessingWorker, SeriesIntegrationDialog
     window.load_peak_file(data["ten"])
     dialog = SeriesIntegrationDialog(main_window=window)
-    ProcessingWorker(None, [data["spectrum"]], window.integrator.peak_list.copy(), 'reference',
+    ProcessingWorker([data["spectrum"]], window.integrator.peak_list.copy(), 'reference',
                      dialog._get_voigt_params(), series_name='nucleus').run()
     dialog.deleteLater()
 
@@ -247,9 +247,9 @@ class TestTheExpertPanelIsWhatTheFitUses:
 
 
 class TestCancelStopsTheRunFromCounting:
-    """Cancel closes the progress dialog. A fit stops before its next cluster; a detection
-    cannot be interrupted and runs on. Neither one's results may land, and no second run
-    may start beside them."""
+    """Cancel closes the progress dialog. A fit stops before its next cluster, a detection
+    before its next peak. Neither one's results may land, and no second run may start
+    beside them."""
 
     @pytest.fixture
     def cancel_at_once(self, monkeypatch):

@@ -81,11 +81,11 @@ def _dialog(app, main_window):
 
 @pytest.fixture(scope="module")
 def failed_run(app, fitted_peaks, tmp_path_factory):
-    """A run that fits nothing: the engine refuses a noise threshold below 0.1."""
+    """A run that fits nothing: neither of its two files is a spectrum."""
     folder = tmp_path_factory.mktemp("nothing_fitted")
     for name in (FIRST, SECOND):
-        (folder / name).symlink_to(DNAJA1 / name)
-    main_window = _main_window(app, folder, fitted_peaks, noise_threshold=0.05)
+        (folder / name).write_bytes(b"not a spectrum")
+    main_window = _main_window(app, folder, fitted_peaks)
     dialog = _dialog(app, main_window)
     text = _run(dialog, app)
     yield dialog, main_window, text
@@ -108,7 +108,7 @@ class TestARunThatFitsNothing:
 
     def test_the_log_carries_the_engines_error_and_names_each_spectrum(self, failed_run):
         log = failed_run[0].log_text.toPlainText()
-        assert "Threshold multiplier must be between 0.1 and 10.0" in log
+        assert f"Failed to process {FIRST}: All loading methods failed" in log
         assert f"{FIRST} produced no fits" in log
         assert f"{SECOND} produced no fits" in log
 
@@ -133,7 +133,7 @@ def partial_run(app, fitted_peaks, tmp_path_factory):
     folder = tmp_path_factory.mktemp("partial")
     (folder / FIRST).symlink_to(DNAJA1 / FIRST)
     (folder / "2D_unreadable.ft").write_bytes(b"not a spectrum")
-    main_window = _main_window(app, folder, fitted_peaks, noise_threshold=3.0)
+    main_window = _main_window(app, folder, fitted_peaks)
     dialog = _dialog(app, main_window)
     text = _run(dialog, app)
     yield dialog, main_window, text
@@ -188,7 +188,7 @@ def test_a_warning_from_the_run_reaches_the_log(app, fitted_peaks, tmp_path):
     from lunaNMR.gui.dialogs.series_integration_dialog import ProcessingWorker
     from lunaNMR.utils.output_manager import OutputManager, log_error, log_warning
     dialog = _dialog(app, _main_window(app, tmp_path, fitted_peaks))
-    worker = ProcessingWorker(None, [], None, "detected", {})
+    worker = ProcessingWorker([], None, "detected", {})
     worker.notice.connect(dialog._on_notice)
     worker.progress.connect(dialog._on_progress)
     OutputManager.set_callback(worker.progress_callback)
@@ -203,25 +203,25 @@ def test_a_warning_from_the_run_reaches_the_log(app, fitted_peaks, tmp_path):
     dialog.deleteLater()
 
 
-def test_the_dialog_states_the_noise_threshold_does_not_apply(partial_run):
-    """Series detection runs at its own S/N threshold; the CLI refuses the key."""
-    assert "Noise Threshold does not apply to a series" in partial_run[0].log_text.toPlainText()
+def test_the_log_names_no_noise_threshold(partial_run):
+    """Neither detection nor the fit reads a noise threshold the dialog could state."""
+    assert "Noise Threshold" not in partial_run[0].log_text.toPlainText()
 
 
-def test_the_noise_threshold_spinner_offers_only_what_the_engine_accepts(app):
-    """set_threshold_multiplier refuses a value below 0.1, and a series then fits nothing."""
+def test_the_expert_panel_offers_no_noise_threshold(app):
+    """Its spinner reached set_threshold_multiplier only, whose value no detection, fit or
+    contour reads: Detect Peaks found the same peaks at 3 and at 9."""
     from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QLabel
     from lunaNMR.gui.main_window import LunaNMRMainWindow
-
-    def type_a_value_and_close():
-        window.expert_noise_spin.setValue(0.05)
-        window._expert_dialog.reject()
 
     with contextlib.redirect_stdout(io.StringIO()):
         window = LunaNMRMainWindow()
-        QTimer.singleShot(0, type_a_value_and_close)
+        QTimer.singleShot(0, lambda: window._expert_dialog.reject())
         window.on_expert_mode()   # the Expert Mode dialog, answered by the timer above
-    assert window.expert_noise_spin.minimum() == 0.1
-    assert window.noise_threshold == 0.1
+    labels = [label.text() for label in window._expert_dialog.findChildren(QLabel)]
+    assert not any("Noise Threshold" in text for text in labels)
+    assert not hasattr(window, "expert_noise_spin")
+    assert not hasattr(window, "noise_threshold")
     window.close()
     window.deleteLater()

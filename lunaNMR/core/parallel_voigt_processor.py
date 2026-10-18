@@ -32,7 +32,7 @@ import os
 
 
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
-from lunaNMR.utils.cancellation import Cancelled, raise_if_stopped
+from lunaNMR.utils.cancellation import Cancelled, raise_if_stopped, result_unless_stopped
 
 # Adaptive optimization imports
 from lunaNMR.core.adaptive_optimizer import (
@@ -402,7 +402,8 @@ class ParallelVoigtProcessor:
                         progress_callback=progress_callback,
                         use_parallel=not self.in_process,
                         shared_context=shared_context_adaptive,  # Spectrum in shared memory
-                        all_peaks_context=all_peaks_context
+                        all_peaks_context=all_peaks_context,
+                        stop=self.stop
                     )
 
                     if optimal_params and optimal_params.get('success'):
@@ -1275,14 +1276,9 @@ class ParallelVoigtProcessor:
         """A pool task's result (timeout None: no limit). Over the pool with a stop event,
         the wait is polled so that setting the event ends it (Cancelled) instead of the
         task's own end."""
-        if self.stop is None or self.in_process:
+        if self.in_process:
             return async_result.get(timeout=timeout)
-        deadline = time.monotonic() + (timeout if timeout is not None else float('inf'))
-        while not async_result.ready() and time.monotonic() < deadline:
-            raise_if_stopped(self.stop)
-            async_result.wait(0.1)
-        raise_if_stopped(self.stop)
-        return async_result.get(timeout=0 if timeout is not None else None)
+        return result_unless_stopped(async_result, timeout, self.stop)
         
     def _consolidate_cluster_results(self, cluster_results, peak_list, peak_metadata):
         """

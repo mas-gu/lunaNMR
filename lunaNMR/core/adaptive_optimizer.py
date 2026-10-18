@@ -31,6 +31,8 @@ from datetime import datetime
 import multiprocessing as mp
 import time
 
+from lunaNMR.utils.cancellation import Cancelled, raise_if_stopped, result_unless_stopped
+
 
 def _fit_peak_worker(args):
     """
@@ -260,7 +262,8 @@ class AdaptiveOptimizer:
                  progress_callback: callable = None,
                  use_parallel: bool = False,
                  shared_context: Dict = None,
-                 all_peaks_context: List[Dict] = None) -> Dict[str, Any]:
+                 all_peaks_context: List[Dict] = None,
+                 stop=None) -> Dict[str, Any]:
         """
         Run grid search optimization to find optimal radF1/radF2.
 
@@ -287,6 +290,9 @@ class AdaptiveOptimizer:
             Shared context for parallel mode (spectrum in shared memory, etc.)
         all_peaks_context : list of dict, optional
             List of all peaks for overlap detection (required for parallel mode)
+        stop : threading.Event, optional
+            Once set, the search raises Cancelled: in sequential mode before the next
+            candidate radius or peak fit, in parallel mode while waiting on a peak.
 
         Returns
         -------
@@ -304,13 +310,13 @@ class AdaptiveOptimizer:
         if use_parallel and shared_context is not None:
             return self._optimize_parallel(
                 isolated_peaks, median_lw_f1, median_lw_f2,
-                shared_context, all_peaks_context, progress_callback
+                shared_context, all_peaks_context, progress_callback, stop
             )
 
         # Sequential mode (original implementation)
         return self._optimize_sequential(
             isolated_peaks, median_lw_f1, median_lw_f2,
-            fit_function, progress_callback
+            fit_function, progress_callback, stop
         )
 
     def _optimize_sequential(self,
@@ -318,7 +324,8 @@ class AdaptiveOptimizer:
                             median_lw_f1: float,
                             median_lw_f2: float,
                             fit_function: callable,
-                            progress_callback: callable = None) -> Dict[str, Any]:
+                            progress_callback: callable = None,
+                            stop=None) -> Dict[str, Any]:
         """
         Sequential grid search optimization (original implementation).
 
@@ -338,6 +345,7 @@ class AdaptiveOptimizer:
         self.search_history = []
 
         for combo_idx, (mult_f1, mult_f2) in enumerate([(m1, m2) for m1 in self.MULTIPLIERS for m2 in self.MULTIPLIERS]):
+            raise_if_stopped(stop)
             combo_start = time.time()
             radF1 = mult_f1 * median_lw_f1
             radF2 = mult_f2 * median_lw_f2
@@ -356,6 +364,7 @@ class AdaptiveOptimizer:
                     task_desc = f"OPTIMIZE [{combo_idx+1}/{n_combinations}]: {len(train_scores)}/{peak_idx+1} peaks"
                     detail = f"F1={mult_f1:.1f}×, F2={mult_f2:.1f}× (train {peak_idx+1}/{len(train_peaks)})"
                     progress_callback(progress, task_desc, detail)
+                raise_if_stopped(stop)
 
                 try:
                     result = fit_function(peak, radF1, radF2)
@@ -395,6 +404,7 @@ class AdaptiveOptimizer:
                     task_desc = f"OPTIMIZE [{combo_idx+1}/{n_combinations}]: validating"
                     detail = f"F1={mult_f1:.1f}×, F2={mult_f2:.1f}× (val {peak_idx+1}/{len(val_peaks)})"
                     progress_callback(progress, task_desc, detail)
+                raise_if_stopped(stop)
 
                 try:
                     result = fit_function(peak, radF1, radF2)
@@ -478,7 +488,8 @@ class AdaptiveOptimizer:
                           median_lw_f2: float,
                           shared_context: Dict,
                           all_peaks_context: List[Dict],
-                          progress_callback: callable = None) -> Dict[str, Any]:
+                          progress_callback: callable = None,
+                          stop=None) -> Dict[str, Any]:
         """
         Parallel grid search optimization using multiprocessing.
 
@@ -563,7 +574,8 @@ class AdaptiveOptimizer:
                 completed = 0
                 for async_result in async_results:
                     try:
-                        peak_idx, is_train, scores_by_combo = async_result.get(timeout=600)
+                        peak_idx, is_train, scores_by_combo = result_unless_stopped(
+                            async_result, 600, stop)
 
                         # Aggregate scores by combination
                         for combo_idx, score, success in scores_by_combo:
@@ -581,6 +593,8 @@ class AdaptiveOptimizer:
                             detail = f"Completed peak {peak_idx + 1}"
                             progress_callback(progress, task_desc, detail)
 
+                    except Cancelled:
+                        raise
                     except mp.TimeoutError:
                         # Skip this peak if it times out
                         completed += 1
@@ -590,6 +604,8 @@ class AdaptiveOptimizer:
                         completed += 1
                         continue
 
+        except Cancelled:
+            raise
         except Exception as e:
             # Fallback to sequential mode on error
             from lunaNMR.utils.output_manager import log_warning

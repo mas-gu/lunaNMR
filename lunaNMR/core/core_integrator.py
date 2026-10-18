@@ -25,6 +25,7 @@ from scipy.optimize import curve_fit
 from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
 from lunaNMR.core.ps2d_config import get_ps2d_config
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
+from lunaNMR.utils.cancellation import raise_if_stopped
 
 # Import enhanced Voigt fitter
 try:
@@ -3496,18 +3497,23 @@ class VoigtIntegrator(BaseIntegrator):
         ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
         return 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
 
-    def detect_peaks_professional(self, **kwargs):
-        """Professional peak detection - enhanced version with reference option"""
+    def detect_peaks_professional(self, stop=None, **kwargs):
+        """Professional peak detection - enhanced version with reference option.
+
+        stop: Optional threading.Event; once set, the detection raises Cancelled before
+            its next candidate or reference peak and leaves fitted_peaks as it was.
+        """
         # If we have a peak list loaded, use reference-based detection
         if hasattr(self, 'peak_list') and self.peak_list is not None:
-            return self._detect_peaks_reference_based()
+            return self._detect_peaks_reference_based(stop=stop)
         else:
             # No peak list - use fallback
             log_error("No peak list loaded for standard detection mode. Please load a peak list or switch to S/N threshold mode")
             return []
 
-    def _detect_peaks_reference_based(self):
-        """Detect all peaks then match closest to peak list (exact backup approach)"""
+    def _detect_peaks_reference_based(self, stop=None):
+        """Detect all peaks then match closest to peak list (exact backup approach).
+        A set stop event raises Cancelled before the next candidate or reference peak."""
         if self.peak_list is None:
             raise ValueError("Peak list must be loaded before detection")
         if self.nmr_data is None:
@@ -3532,7 +3538,7 @@ class VoigtIntegrator(BaseIntegrator):
             log_info(f"Step 1: Detecting all peaks (S/N threshold={threshold_multiplier}, signal_threshold={signal_threshold:.2e})")
 
         # Detect all peaks using the existing threshold method
-        all_detected_peaks = self._detect_peaks_by_threshold(signal_threshold)
+        all_detected_peaks = self._detect_peaks_by_threshold(signal_threshold, stop=stop)
 
         log_info(f"Found {len(all_detected_peaks)} peaks total")
 
@@ -3546,6 +3552,7 @@ class VoigtIntegrator(BaseIntegrator):
         used_peaks = set()  # Track which detected peaks have been used
 
         for idx, peak_row in self.peak_list.iterrows():
+            raise_if_stopped(stop)
             try:
                 ref_x_ppm = float(peak_row['Position_X'])
                 ref_y_ppm = float(peak_row['Position_Y'])
@@ -3891,12 +3898,15 @@ class VoigtIntegrator(BaseIntegrator):
         else:
             raise ValueError(f"Unknown processing mode: {self.processing_mode}")
 
-    def detect_peaks_sn_native(self, **kwargs):
+    def detect_peaks_sn_native(self, stop=None, **kwargs):
         """Native S/N threshold-based peak detection without peak list
 
         Supports two modes:
         1. Standard S/N mode: threshold = noise_level × sn_threshold
         2. From-GUI mode: threshold = max_intensity × contour_min (absolute)
+
+        stop: Optional threading.Event; once set, the detection raises Cancelled before
+            its next candidate peak and leaves fitted_peaks as it was.
         """
         if self.nmr_data is None:
             log_error("No NMR data loaded")
@@ -3913,7 +3923,7 @@ class VoigtIntegrator(BaseIntegrator):
             log_info(f"Absolute threshold: {signal_threshold:.2e}, Effective S/N: {effective_sn:.1f}")
 
             # Detect ALL peaks above threshold (ignore expected_peak_count)
-            detected_peaks = self._detect_peaks_by_threshold(signal_threshold)
+            detected_peaks = self._detect_peaks_by_threshold(signal_threshold, stop=stop)
             log_info(f"S/N from-GUI detection complete: {len(detected_peaks)} peaks")
 
             detection_method = 'sn_from_gui'
@@ -3927,7 +3937,7 @@ class VoigtIntegrator(BaseIntegrator):
 
             log_info(f"Noise: {noise_level:.2e}, S/N: {self.sn_threshold}, Threshold: {signal_threshold:.2e}")
 
-            detected_peaks = self._detect_peaks_by_threshold(signal_threshold)
+            detected_peaks = self._detect_peaks_by_threshold(signal_threshold, stop=stop)
 
             # Apply expected count cutoff
             if len(detected_peaks) > self.expected_peak_count:
@@ -4186,10 +4196,13 @@ class VoigtIntegrator(BaseIntegrator):
 
         return final_x, final_y
 
-    def _detect_peaks_by_threshold(self, signal_threshold):
+    def _detect_peaks_by_threshold(self, signal_threshold, stop=None):
         """Detect peaks whose magnitude exceeds signal_threshold. A negative peak (saturated
-        hetNOE, edited HSQC, folded) is found as a positive one is, and keeps its sign."""
+        hetNOE, edited HSQC, folded) is found as a positive one is, and keeps its sign.
+        A set stop event raises Cancelled before the next candidate peak."""
         from scipy.ndimage import maximum_filter, minimum_filter, label
+
+        raise_if_stopped(stop)
 
         magnitude = np.abs(self.nmr_data)
 
@@ -4236,6 +4249,7 @@ class VoigtIntegrator(BaseIntegrator):
         detected_peaks = []
 
         for peak_id in range(1, num_peaks + 1):
+            raise_if_stopped(stop)
             # Get peak region
             peak_region = labeled_peaks == peak_id
             peak_indices = np.where(peak_region)
