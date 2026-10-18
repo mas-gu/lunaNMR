@@ -84,3 +84,47 @@ class TestTheT1T2PageReportsTheFit:
         assert "completed successfully" not in log
         assert "No residue fitted" in log
         assert "field1_t1" not in t1t2_page.fitted_experiments
+
+
+class TestAFileChosenForASlotReplacesTheSeriesThere:
+    """A slot that once held a dropped series is fitted from the file chosen after it,
+    not from the series still in memory."""
+
+    @pytest.fixture
+    def page(self, app, tmp_path, series_from_tidy):
+        br, _ = series_from_tidy(T1_SERIES / "series_analysis_tidy.csv")
+        d = _dialog(types.SimpleNamespace(saved_series={"t1_series": br},
+                                          current_project_path=None))
+        page = d.t1t2_page
+        page.output_dir = str(tmp_path / "out")
+        os.makedirs(page.output_dir)
+        page._on_series_dropped("field1_t1", "t1_series",
+                                str(T1_SERIES / "series_analysis_tidy.csv"))
+        yield page
+        d.deleteLater()
+
+    def _run(self, app, page):
+        page.analysis_combo.setCurrentIndex(0)
+        page._start_analysis()
+        _wait(app, page)
+        return page.results_text.toPlainText()
+
+    def test_the_dropped_series_is_fitted_from_memory(self, app, page):
+        assert "Using data from series 't1_series' in memory" in self._run(app, page)
+
+    def test_browsing_a_file_replaces_it(self, app, page, tmp_path, monkeypatch):
+        import dynamiXs_gui
+        matrix = _matrix(tmp_path)
+        monkeypatch.setattr(dynamiXs_gui, "open_file_dialog", lambda *a, **k: str(matrix))
+        page._browse_data_file("field1_t1")
+        assert "in memory" not in self._run(app, page)
+        assert page.field1_t1_file == str(matrix)
+
+    def test_auto_loading_a_folder_replaces_it(self, app, page, tmp_path, monkeypatch):
+        import dynamiXs_gui
+        folder = tmp_path / "folder"
+        folder.mkdir()
+        pd.read_csv(T1_MATRIX).to_csv(folder / "T1_matrix.csv", index=False)
+        monkeypatch.setattr(dynamiXs_gui, "open_directory_dialog", lambda *a, **k: str(folder))
+        page._auto_load_folder("field1")
+        assert "in memory" not in self._run(app, page)

@@ -806,11 +806,17 @@ class T1T2FittingPage(BasePage):
             filter="CSV files (*.csv);;All files (*.*)"
         )
         if filename:
-            setattr(self, f"{field_name}_file", filename)
-            display = getattr(self, f"{field_name}_display", None)
-            if display:
-                display.setText(os.path.basename(filename))
-                display.setToolTip(filename)
+            self._assign_data_file(field_name, filename)
+
+    def _assign_data_file(self, field_name: str, path: str):
+        """Make `path` the slot's data. A series dropped there before no longer is: a
+        fit reads a dropped series from memory first."""
+        setattr(self, f"{field_name}_file", path)
+        getattr(self, 'source_series_map', {}).pop(field_name, None)
+        display = getattr(self, f"{field_name}_display", None)
+        if display:
+            display.setText(os.path.basename(path))
+            display.setToolTip(path)
 
     # =========================================================================
     # SERIES PICKER METHODS
@@ -1011,11 +1017,7 @@ class T1T2FittingPage(BasePage):
 
         # Update file displays
         for exp, filepath in found_files.items():
-            setattr(self, f"{field}_{exp}_file", filepath)
-            display = getattr(self, f"{field}_{exp}_display", None)
-            if display:
-                display.setText(os.path.basename(filepath))
-                display.setToolTip(filepath)
+            self._assign_data_file(f"{field}_{exp}", filepath)
 
         if found_files:
             self.results_text.appendPlainText(
