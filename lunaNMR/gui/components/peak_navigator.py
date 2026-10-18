@@ -29,11 +29,11 @@ from PySide6.QtWidgets import (
     QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QLineEdit
 )
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QFont
 
 from lunaNMR.gui.styles.design_system import (
     # Colors
-    PRIMARY_TEXT, SECONDARY_TEXT, SUCCESS_GREEN, WARNING_ORANGE, ERROR_RED,
+    PRIMARY_TEXT, SECONDARY_TEXT,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, DESTRUCTIVE_BUTTON_BG, DESTRUCTIVE_BUTTON_HOVER,
@@ -41,6 +41,7 @@ from lunaNMR.gui.styles.design_system import (
     # Spacing
     SPACING_XS, SPACING_SM, BUTTON_WIDTH_ICON, FONT_SIZE_SECTION_LABEL, FONT_SIZE_BODY, FONT_SIZE_SMALL
 )
+from lunaNMR.gui.styles.quality_colors import navigator_row_display, peak_quality_label
 
 logger = logging.getLogger(__name__)
 
@@ -703,9 +704,10 @@ class PeakNavigator(QWidget):
                     x_coord = float(row.get('Position_X', 0))
                     y_coord = float(row.get('Position_Y', 0))
                     height = row.get('Height', row.get('Intensity', ''))
-                    # R² at index 4 for reference peaks (used by refresh_peak_list)
+                    # R² at index 4, quality label at index 5 (used by refresh_peak_list)
                     r_squared = row.get('R_Squared', None)
-                    self.reference_peaks.append([assignment, x_coord, y_coord, height, r_squared])
+                    self.reference_peaks.append([assignment, x_coord, y_coord, height, r_squared,
+                                                 peak_quality_label(row)])
 
             # Handle numpy array or list
             # v0.9 format from main_window: [assignment, x_coord, y_coord, height, peak_id]
@@ -758,8 +760,9 @@ class PeakNavigator(QWidget):
                     if x_coord != 0 and y_coord != 0:
                         height = peak.get('height', peak.get('intensity', peak.get('amplitude', "")))
                         r_squared = peak.get('r_squared', None)
-                        # Format: [assignment, x, y, height, peak_id, r_squared]
-                        self.detected_peaks.append([assignment, float(x_coord), float(y_coord), height, i, r_squared])
+                        # Format: [assignment, x, y, height, peak_id, r_squared, quality]
+                        self.detected_peaks.append([assignment, float(x_coord), float(y_coord), height, i, r_squared,
+                                                    peak_quality_label(peak)])
 
             # Handle pandas DataFrame
             elif hasattr(fitted_peaks, 'iloc') and hasattr(fitted_peaks, 'columns'):
@@ -770,7 +773,8 @@ class PeakNavigator(QWidget):
                     if x_coord != 0 and y_coord != 0:
                         height = row.get('Height', row.get('Intensity', ''))
                         r_squared = row.get('R_Squared', None)
-                        self.detected_peaks.append([assignment, x_coord, y_coord, height, i, r_squared])
+                        self.detected_peaks.append([assignment, x_coord, y_coord, height, i, r_squared,
+                                                    peak_quality_label(row)])
 
         except Exception as e:
             print(f"Peak Navigator: Error loading detected peaks: {e}")
@@ -802,19 +806,19 @@ class PeakNavigator(QWidget):
             y_coord = float(peak[2])
             height = peak[3] if len(peak) > 3 else ""
 
-            # Extract R² value based on peak type
-            # Reference peaks: [assignment, x, y, height, r_squared] - R² at index 4
-            # Detected peaks: [assignment, x, y, height, peak_id, r_squared] - R² at index 5
-            if self.selected_peak_type == "reference":
-                r_squared = peak[4] if len(peak) > 4 else None
-            else:
-                r_squared = peak[5] if len(peak) > 5 else None
+            # Extract R² value and quality label based on peak type
+            # Reference peaks: [assignment, x, y, height, r_squared, quality] - R² at index 4
+            # Detected peaks: [assignment, x, y, height, peak_id, r_squared, quality] - R² at index 5
+            r2_index = 4 if self.selected_peak_type == "reference" else 5
+            r_squared = peak[r2_index] if len(peak) > r2_index else None
+            quality = peak[r2_index + 1] if len(peak) > r2_index + 1 else None
 
             # Format R² display
             r2_str = f"{r_squared:.3f}" if r_squared is not None else "—"
 
-            # Add quality indicator to assignment (using R² thresholds)
-            assignment_display = self._add_quality_indicator(assignment, r_squared, r2_str)
+            # Quality indicator and row color, as the peak's spectrum marker is coloured
+            quality_symbol, row_color = navigator_row_display(quality)
+            assignment_display = f"{quality_symbol} {assignment}" if quality_symbol else assignment
 
             # Insert row
             row = self.table.rowCount()
@@ -831,8 +835,6 @@ class PeakNavigator(QWidget):
             y_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             r2_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            # Apply color coding based on R² quality thresholds
-            row_color = self._get_quality_color(r_squared, r2_str)
             if row_color:
                 for item in [assignment_item, x_item, y_item, r2_item]:
                     item.setBackground(row_color)
@@ -875,6 +877,7 @@ class PeakNavigator(QWidget):
                 status_map[assignment] = {
                     'fitted': fitted,
                     'r_squared': float(r_squared) if r_squared else 0.0,
+                    'quality': peak_quality_label(result),
                     'height_available': bool(height)
                 }
 
@@ -896,16 +899,17 @@ class PeakNavigator(QWidget):
                 else:
                     display_height = height_value
 
-                # Update peak data: [assignment, x, y, height, peak_id?, r_squared]
+                # Update peak data: [assignment, x, y, height, peak_id?, r_squared, quality]
                 # Ensure we have at least 4 elements
                 while len(self.detected_peaks[i]) < 4:
                     self.detected_peaks[i].append("")
                 self.detected_peaks[i][3] = display_height
 
-                # Store R² as element 5 (index 5, after peak_id at index 4)
-                while len(self.detected_peaks[i]) < 6:
+                # Store R² as element 5 (index 5, after peak_id at index 4), quality at 6
+                while len(self.detected_peaks[i]) < 7:
                     self.detected_peaks[i].append(None)
                 self.detected_peaks[i][5] = r_squared
+                self.detected_peaks[i][6] = status['quality']
 
         # Update reference peaks similarly
         for i, peak in enumerate(self.reference_peaks):
@@ -925,16 +929,17 @@ class PeakNavigator(QWidget):
                 else:
                     display_height = height_value
 
-                # Update peak data: [assignment, x, y, height, r_squared]
+                # Update peak data: [assignment, x, y, height, r_squared, quality]
                 # Ensure we have at least 4 elements
                 while len(self.reference_peaks[i]) < 4:
                     self.reference_peaks[i].append("")
                 self.reference_peaks[i][3] = display_height
 
-                # Store R² as element 4 for reference peaks (no peak_id)
-                while len(self.reference_peaks[i]) < 5:
+                # Store R² as element 4 for reference peaks (no peak_id), quality at 5
+                while len(self.reference_peaks[i]) < 6:
                     self.reference_peaks[i].append(None)
                 self.reference_peaks[i][4] = r_squared
+                self.reference_peaks[i][5] = status['quality']
 
         # Refresh display
         self.refresh_peak_list()
@@ -951,8 +956,8 @@ class PeakNavigator(QWidget):
                              assignment: Optional[str], new_x: float, new_y: float) -> bool:
         """Update a cached peak's coordinates so saves reflect moves made in the plot.
 
-        Detected cache format: [assignment, x, y, height, peak_id, r_squared] — matched by peak_id.
-        Reference cache format: [assignment, x, y, height, r_squared] — matched by assignment
+        Detected cache format: [assignment, x, y, height, peak_id, r_squared, quality] — matched by peak_id.
+        Reference cache format: [assignment, x, y, height, r_squared, quality] — matched by assignment
         (reference_peaks carries no peak_id field).
 
         Returns True if an entry was updated. Caller should refresh_peak_list() after.
@@ -977,65 +982,6 @@ class PeakNavigator(QWidget):
                         entry[2] = float(new_y)
                         return True
         return False
-
-    def _add_quality_indicator(self, assignment: str, r_squared: Optional[float], r2_str: str) -> str:
-        """Add quality indicator emoji to assignment based on R² thresholds.
-
-        Unified thresholds (consistent with PeakNavigatorTable):
-            - ❌ Red: R² == 0 or failed fit
-            - 🟠 Orange: R² < 0.7 (low quality)
-            - ✅ Green: R² >= 0.7 (good fit)
-
-        Args:
-            assignment: Peak assignment name
-            r_squared: R² value from fitting (None if not fitted)
-            r2_str: R² display string (for fallback quality detection)
-
-        Returns:
-            Assignment string with quality emoji prefix
-        """
-        # Use R² thresholds if available
-        if r_squared is not None:
-            if r_squared == 0:
-                return f"❌ {assignment}"
-            elif r_squared < 0.7:
-                return f"🟠 {assignment}"
-            else:  # r_squared >= 0.7
-                return f"✅ {assignment}"
-
-        # Fallback: no R² available, check if display string exists
-        if r2_str and r2_str not in ["", "—"]:
-            return f"✅ {assignment}"
-        return assignment
-
-    def _get_quality_color(self, r_squared: Optional[float], r2_str: str) -> Optional[QColor]:
-        """Get background color based on R² quality thresholds.
-
-        Unified thresholds (consistent with PeakNavigatorTable):
-            - Red: R² == 0 or failed fit
-            - Orange: R² < 0.7 (low quality)
-            - Green: R² >= 0.7 (good fit)
-
-        Args:
-            r_squared: R² value from fitting (None if not fitted)
-            r2_str: R² display string (for fallback quality detection)
-
-        Returns:
-            QColor for row background, or None for default
-        """
-        # Use R² thresholds if available
-        if r_squared is not None:
-            if r_squared == 0:
-                return QColor(ERROR_RED).lighter(180)
-            elif r_squared < 0.7:
-                return QColor(WARNING_ORANGE).lighter(180)
-            else:  # r_squared >= 0.7
-                return QColor(SUCCESS_GREEN).lighter(180)
-
-        # Fallback: no R² available, check if display string exists
-        if r2_str and r2_str not in ["", "—"]:
-            return QColor(SUCCESS_GREEN).lighter(180)
-        return None
 
     def _update_edit_button_states(self):
         """Update edit button states based on current selection and peak type."""

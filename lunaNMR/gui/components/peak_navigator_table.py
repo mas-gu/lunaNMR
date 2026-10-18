@@ -21,10 +21,9 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QHeaderView, QAbstractItemView
 )
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QColor
 
 from lunaNMR.gui.styles.design_system import (
-    PRIMARY_TEXT, SECONDARY_TEXT, SUCCESS_GREEN, WARNING_ORANGE, ERROR_RED,
+    PRIMARY_TEXT, SECONDARY_TEXT,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER,
@@ -32,6 +31,7 @@ from lunaNMR.gui.styles.design_system import (
     BUTTON_CORNER_RADIUS,
     FONT_SIZE_LARGE_HEADER, FONT_SIZE_BODY, FONT_SIZE_SMALL
 )
+from lunaNMR.gui.styles.quality_colors import navigator_row_display, peak_quality_label
 
 
 def _to_scalar(value):
@@ -254,10 +254,9 @@ class PeakNavigatorTable(QWidget):
         # Use None as default to distinguish "no fitting data" from "failed fit (r²=0)"
         raw_r2 = peak.get('r_squared', peak.get('r2', peak.get('avg_r_squared', None)))
         r_squared = _to_scalar(raw_r2) if raw_r2 is not None else None
-        quality = peak.get('fitting_quality', peak.get('quality', peak.get('Quality', '')))
 
-        # Determine quality indicator and color
-        quality_indicator, row_color = self._get_quality_display(r_squared, quality)
+        # Quality indicator and color, as the peak's spectrum marker is coloured
+        quality_indicator, row_color = navigator_row_display(peak_quality_label(peak))
 
         # Create table items
         assignment_item = QTableWidgetItem(f"{quality_indicator} {assignment}")
@@ -280,51 +279,6 @@ class PeakNavigatorTable(QWidget):
         self.table.setItem(row, 1, x_item)
         self.table.setItem(row, 2, y_item)
         self.table.setItem(row, 3, r2_item)
-
-    def _get_quality_display(self, r_squared, quality: str) -> tuple:
-        """Get quality indicator emoji and row color.
-
-        Unified thresholds (consistent with PeakNavigator):
-            - No indicator: No fitting data (r_squared is None)
-            - ❌ Red: Failed fit (quality says 'failed' or r_squared == 0)
-            - 🟠 Orange: R² < 0.7 (low quality)
-            - ✅ Green: R² >= 0.7 (good fit)
-
-        Args:
-            r_squared: R² value, or None if no fitting data
-            quality: Quality string from fitting result
-
-        Returns:
-            Tuple of (emoji, QColor or None)
-        """
-        quality_lower = str(quality).lower() if quality else ''
-
-        # No fitting data at all - show no indicator (Peak Mode)
-        if r_squared is None and not quality_lower:
-            return "", None
-
-        # Explicitly failed fit (quality string says failed)
-        if 'failed' in quality_lower:
-            return "❌", QColor(ERROR_RED).lighter(180)
-
-        # R² == 0 means failed fit (but only if we have fitting data)
-        if r_squared is not None and r_squared == 0:
-            return "❌", QColor(ERROR_RED).lighter(180)
-
-        # Good fit (R² >= 0.7 or quality string indicates good/excellent)
-        if 'excellent' in quality_lower or 'good' in quality_lower:
-            return "✅", QColor(SUCCESS_GREEN).lighter(180)
-        if r_squared is not None and r_squared >= 0.7:
-            return "✅", QColor(SUCCESS_GREEN).lighter(180)
-
-        # Low quality (R² < 0.7 or quality string indicates poor/fair)
-        if 'poor' in quality_lower or 'fair' in quality_lower:
-            return "🟠", QColor(WARNING_ORANGE).lighter(180)
-        if r_squared is not None and r_squared < 0.7:
-            return "🟠", QColor(WARNING_ORANGE).lighter(180)
-
-        # Default: no indicator
-        return "", None
 
     def _on_selection_changed(self):
         """Handle table selection change."""

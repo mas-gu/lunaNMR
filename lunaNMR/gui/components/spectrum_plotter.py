@@ -28,12 +28,8 @@ from PySide6.QtCore import Signal
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
 from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
 from lunaNMR.gui.components.signed_contours import draw_signed_contours
-from lunaNMR.gui.styles.design_system import (
-    SUCCESS_GREEN,
-    ERROR_RED,
-    WARNING_ORANGE,
-    NEGATIVE_CONTOUR_COLOR
-)
+from lunaNMR.gui.styles.design_system import NEGATIVE_CONTOUR_COLOR
+from lunaNMR.gui.styles.quality_colors import peak_quality_label, quality_color
 
 
 class SpectrumPlotter(MatplotlibWidget):
@@ -376,20 +372,8 @@ class SpectrumPlotter(MatplotlibWidget):
                 detected_x.append(float(x))
                 detected_y.append(float(y))
 
-                # Extract quality from multiple possible field names
-                quality = p.get('quality') or p.get('Quality') or p.get('fitting_quality') or 'Unknown'
-
-                # Map quality to color
-                if quality in ['Excellent', 'excellent']:
-                    colors.append('lime')
-                elif quality in ['Good', 'good']:
-                    colors.append(SUCCESS_GREEN)
-                elif quality in ['Fair', 'fair']:
-                    colors.append(WARNING_ORANGE)
-                elif quality in ['Poor', 'poor']:
-                    colors.append(ERROR_RED)
-                else:
-                    colors.append(ERROR_RED)  # No quality info = detected but not fitted
+                # No quality label = detected but not fitted, coloured as unrated
+                colors.append(quality_color(peak_quality_label(p)))
 
         if detected_x:
             # Plot with quality-based colors
