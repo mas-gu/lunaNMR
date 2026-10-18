@@ -201,21 +201,15 @@ class TestStdoutStaysCleanUnderParallelism:
 
 
 class TestTheTimeUnitsDefaultsArePinned:
-    """The three --time-units defaults differ deliberately: labels-only on t1t2 defaults
-    to s, the two that rescale default to ms. Nothing pinned them, so a tidy-up that
-    unified them would silently rescale published numbers -- and each flag now defaults
-    to None so the sidecar can supply the value, which makes the intended fallback
-    invisible in the parser.
+    """Every relaxation subcommand falls back to ms, the unit the delay parser returns.
+    On t1rho and modelfree the value rescales the rates, so a change to it moves
+    published numbers -- and each flag defaults to None so the sidecar can supply the
+    value, which makes the fallback invisible in the parser.
     """
 
-    @pytest.mark.parametrize("subcommand,expected", [
-        ("_TIME_UNITS_DEFAULT", "s"),
-        ("_T1RHO_TIME_UNITS_DEFAULT", "ms"),
-        ("_MODELFREE_UNITS_DEFAULT", "ms"),
-    ])
-    def test_the_documented_fallback(self, subcommand, expected):
+    def test_the_documented_fallback(self):
         import lunaNMR.cli as cli
-        assert getattr(cli, subcommand) == expected
+        assert cli._TIME_UNITS_DEFAULT == "ms"
 
     @pytest.mark.parametrize("argv,dest", [
         (["dynamixs", "t1t2"], "time_units"),

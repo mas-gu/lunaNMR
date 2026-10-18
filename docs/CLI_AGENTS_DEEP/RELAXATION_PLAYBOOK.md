@@ -72,8 +72,8 @@ beside a T2 in ms puts R1 out by 1000×, and neither value looks wrong afterward
 
 **`--time-units` does not mean the same thing everywhere.** On `t1t2`/`methyl-t2` it only
 *labels* the output; on `t1rho` and via `--f{1,2}-t{1,2}-units` on `modelfree` it **rescales**.
-The defaults differ to match (`s` vs `ms`) and are deliberately not unified, since changing
-either moves numbers that have already been published. The full table is in `CLI_AGENT.md`.
+All of them fall back to `ms`, the unit the delay parser returns and `series` writes. The
+full table is in `CLI_AGENT.md`.
 
 Notes: symlink hetNOE planes to explicit `*_saturated.ft` / `*_unsaturated.ft` names before
 integrating, and keep NMRPipe intermediates (`test.ft`) out of the folder glob.

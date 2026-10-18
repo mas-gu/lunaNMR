@@ -278,15 +278,14 @@ def _add_modules_path(*parts):
     return path
 
 
-# Documented per-subcommand defaults for the delay units. They differ on purpose and are
-# NOT unified: on t1t2/methyl-t2 the value only labels the output, while on t1rho and
-# modelfree it rescales, so changing either default silently moves published numbers.
-# Kept as constants because the flags default to None -- the handler has to tell "the
-# user asked for seconds" from "the user said nothing", to know whether a sidecar may
-# supply the answer.
-_TIME_UNITS_DEFAULT = 's'          # dynamixs t1t2 / methyl-t2 (labels only)
-_T1RHO_TIME_UNITS_DEFAULT = 'ms'   # dynamixs t1rho (rescales)
-_MODELFREE_UNITS_DEFAULT = 'ms'    # dynamixs modelfree --f{1,2}-t{1,2}-units (rescales)
+# The delay units every relaxation subcommand falls back to (t1t2, methyl-t2, t1rho and
+# modelfree's --f{1,2}-t{1,2}-units): ms, because that is what the data is in. The delay
+# parser returns every header in ms, `series` writes its matrices in ms, and the fitters
+# themselves default to ms. On t1t2/methyl-t2 the value labels the output; on t1rho and
+# modelfree it drives the T->R conversion. A constant rather than the flags' default
+# because those default to None -- the handler has to tell "the user asked for seconds"
+# from "the user said nothing", to know whether a sidecar may supply the answer.
+_TIME_UNITS_DEFAULT = 'ms'
 
 _SIDECAR_NAME = 'series_metadata.json'
 
@@ -339,22 +338,49 @@ def _check_unparsed_delays(sidecar, allow):
     )
 
 
-def _resolve_time_units(flag, sidecar, default, flag_name='--time-units'):
+def _headers_stating_units(input_path):
+    """The delay headers of a matrix that write out their unit ('..._2o4s', '..._300ms').
+
+    The delay parser has converted those to ms before anything is fitted, whatever unit
+    they state. Needs the dynamiXs_T1_T2 folder on sys.path, as the fitters do.
+    """
+    import csv
+    from delay_parser import stated_unit
+    if not os.path.isfile(input_path):
+        return []          # the fitter reports the missing file in its own words
+    with open(input_path, newline='') as fh:
+        header = next(csv.reader(fh), [])
+    return [h for h in header if stated_unit(h)]
+
+
+def _resolve_time_units(flag, sidecar, flag_name='--time-units', input_path=None):
     """Delay units: an explicit flag, else the sidecar's, else the documented default.
 
     A flag that contradicts the sidecar is refused rather than preferred. One of the
     two is wrong, and picking either way is how a T1 in seconds meets a T2 in
     milliseconds and puts R1 out by 1000x.
+
+    So is any flag but ms on a matrix whose delay headers state their unit: the parser
+    has already converted those to ms, and a seconds flag converts them a second time.
     """
     recorded = (sidecar or {}).get('value_units')
     if flag is None:
-        return recorded or default
+        return recorded or _TIME_UNITS_DEFAULT
     if recorded and recorded != flag:
         raise ValueError(
             f"{flag_name} says {flag!r} but {sidecar['path']} records the delays as "
             f"{recorded!r}. One of them is wrong; guessing puts R1 out by 1000x. "
             f"Drop the flag to use the recorded units, or re-run `series` if the "
             f"sidecar is stale."
+        )
+    stated = _headers_stating_units(input_path) if input_path and flag != 'ms' else []
+    if stated:
+        from delay_parser import parse_delay_column
+        raise ValueError(
+            f"{flag_name} says {flag!r} but the delay headers of {input_path} state their "
+            f"own units, and are read as ms: {stated[0]!r} is "
+            f"{parse_delay_column(stated[0]):g} ms. Reading those ms as {flag!r} is a "
+            f"1000x error. Drop the flag, or pass ms."
         )
     return flag
 
@@ -604,7 +630,7 @@ def _run_dynamixs_t1t2(args):
     sidecar = _series_sidecar(args.input)
     if sidecar:
         _check_unparsed_delays(sidecar, args.allow_unparsed)
-    time_units = _resolve_time_units(args.time_units, sidecar, _TIME_UNITS_DEFAULT)
+    time_units = _resolve_time_units(args.time_units, sidecar, input_path=args.input)
     os.makedirs(args.out, exist_ok=True)
     params = {
         'input_csv_file': args.input,
@@ -657,7 +683,7 @@ def _run_dynamixs_methyl(args):
     sidecar = _series_sidecar(args.input)
     if sidecar:
         _check_unparsed_delays(sidecar, args.allow_unparsed)
-    time_units = _resolve_time_units(args.time_units, sidecar, _TIME_UNITS_DEFAULT)
+    time_units = _resolve_time_units(args.time_units, sidecar, input_path=args.input)
     os.makedirs(args.out, exist_ok=True)
     params = {
         'input_csv_file': args.input,
@@ -1755,15 +1781,16 @@ def _run_dynamixs_t1rho(args):
 
     # Both series are fitted here, so both sidecars matter; they must agree with each
     # other as well as with the flag, or the tilt correction mixes two time bases.
-    sidecars = {label: _series_sidecar(path)
-                for label, path in (('--input', args.input), ('--t1', args.t1))}
+    series_paths = {'--input': args.input, '--t1': args.t1}
+    sidecars = {label: _series_sidecar(path) for label, path in series_paths.items()}
     for label, sidecar in sidecars.items():
         if sidecar:
             _check_unparsed_delays(sidecar, args.allow_unparsed)
     time_units = args.time_units
     for label, sidecar in sidecars.items():
-        time_units = _resolve_time_units(time_units, sidecar, _T1RHO_TIME_UNITS_DEFAULT,
-                                         flag_name=f'--time-units (against {label})')
+        time_units = _resolve_time_units(time_units, sidecar,
+                                         flag_name=f'--time-units (against {label})',
+                                         input_path=series_paths[label])
     os.makedirs(args.out, exist_ok=True)
 
     def _fit(input_csv, label):
@@ -1938,15 +1965,15 @@ def _run_dynamixs_modelfree(args):
                              ('f2', 't1', args.f2_t1), ('f2', 't2', args.f2_t2)):
         key = f'{field}_{exp}_units'
         if not path:
-            units[key] = getattr(args, key) or _MODELFREE_UNITS_DEFAULT
+            units[key] = getattr(args, key) or _TIME_UNITS_DEFAULT
             continue
         sidecar = _series_sidecar(path)
         if sidecar:
             _check_unparsed_delays(sidecar, args.allow_unparsed)
             sidecars[f'{field}-{exp}'] = _sidecar_summary(sidecar)
         units[key] = _resolve_time_units(getattr(args, key), sidecar,
-                                         _MODELFREE_UNITS_DEFAULT,
-                                         flag_name=f'--{field}-{exp}-units')
+                                         flag_name=f'--{field}-{exp}-units',
+                                         input_path=path)
     out_dir = os.path.abspath(args.out)
     os.makedirs(out_dir, exist_ok=True)
     p = IntegratedAnalysisParameters()
@@ -1994,6 +2021,8 @@ def _run_dynamixs_modelfree(args):
     with _engine_stdout(args):
         result = IntegratedAnalysisPipeline(p, progress_callback=cb).run_complete_analysis()
     out_files = result.get('output_files', {})
+    capped = result.get('at_iteration_cap_residues') or []
+    n_capped = result.get('n_at_iteration_cap', 0)
     _emit(args, _recorded(args,
           {'command': 'dynamixs modelfree', 'method': result.get('method'),
            'time_units': units, 'series_metadata': sidecars or None,
@@ -2003,8 +2032,14 @@ def _run_dynamixs_modelfree(args):
            'residue_counts': result.get('residue_counts') or {},
            'excluded_residues': result.get('excluded_residues') or {},
            'n_residues': result.get('n_residues'), 'n_successful': result.get('n_successful'),
+           # n_successful counts these too: the optimiser reports success whether it
+           # converged or ran out of iterations, so the capped ones are named apart.
+           'n_at_iteration_cap': n_capped,
+           'at_iteration_cap_residues': capped,
            'output_files': out_files}),
           f"Model-free complete: {result.get('n_successful')}/{result.get('n_residues')} residues",
+          f"  {n_capped} fits stopped at the iteration cap without converging"
+          + (f": {', '.join(capped)}" if capped else ""),
           *[f"  {k}: {v}" for k, v in out_files.items()])
     return 0
 
@@ -2381,7 +2416,9 @@ def build_parser():
     t1rho.add_argument('--prefix', default='field1', help='Output filename prefix')
     t1rho.add_argument('--time-units', choices=['ms', 's', 'us'], default=None, dest='time_units',
                        help='Units of the delay values (RESCALES the fitted rates). '
-                            'Default: taken from series_metadata.json beside the input, else ms')
+                            'Default: taken from series_metadata.json beside the input, else ms. '
+                            'Headers that state a unit (_2o4s) are read as ms; any other value '
+                            'is refused for them')
     t1rho.add_argument('--allow-unparsed-delays', action='store_true', dest='allow_unparsed',
                        help='Fit anyway when the series sidecar records spectra whose '
                             'filename carried no delay (those points are dropped)')
@@ -2430,7 +2467,9 @@ def build_parser():
                             dest=f'{f}_{exp}_units',
                             help=f'Delay units of the {f.upper()} {exp.upper()} series '
                                  f'(RESCALES the rates). Default: from that series\''
-                                 f' series_metadata.json, else ms')
+                                 f' series_metadata.json, else ms. Headers that state a '
+                                 f'unit (_2o4s) are read as ms; any other value is refused '
+                                 f'for them')
     mf.add_argument('--allow-unparsed-delays', action='store_true', dest='allow_unparsed',
                     help='Fit anyway when a series sidecar records spectra whose '
                          'filename carried no delay (those points are dropped)')
@@ -2531,7 +2570,9 @@ def _add_relaxation_flags(p):
                    help='Spectrometer field frequency in MHz (default: 600)')
     p.add_argument('--time-units', choices=['ms', 's', 'us'], default=None, dest='time_units',
                    help='Units of the delay values (labels output; does not rescale). '
-                        'Default: taken from series_metadata.json beside the input, else s')
+                        'Default: taken from series_metadata.json beside the input, else ms. '
+                        'Headers that state a unit (_2o4s) are read as ms; any other value '
+                        'is refused for them')
     p.add_argument('--allow-unparsed-delays', action='store_true', dest='allow_unparsed',
                    help='Fit anyway when the series sidecar records spectra whose '
                         'filename carried no delay (those points are dropped)')

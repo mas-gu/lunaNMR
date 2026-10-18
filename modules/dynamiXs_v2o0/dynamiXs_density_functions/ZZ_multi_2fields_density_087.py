@@ -334,11 +334,15 @@ class DualFieldSpectralDensityAnalysis:
         ensemble_size = len(ensemble)
         
         # Monte Carlo optimization
+        # Convergence is the loop's only early exit, so a fit that never takes it
+        # used every iteration: reported, since fit_success is True for it as well.
+        at_iteration_cap = True
         for i in range(niter):
             f = exp(-10.0 * i / float(niter))  # Cooling factor
 
             ensemble.sort()
             if ensemble[0][0] < 1e-5:  # Converged  Was 1e-10 (unrealistic)
+                at_iteration_cap = False
                 break
 
             prevScore, s2, te, rex1, rex2, t1_calc_f1, t2_calc_f1, t1_calc_f2, t2_calc_f2 = ensemble[-1]
@@ -429,7 +433,8 @@ class DualFieldSpectralDensityAnalysis:
                 'Rex_f2_err': np.std(rex2_values),
                 'fit_success': True,
                 'chi2': score,
-                'iterations': i
+                'iterations': i,
+                'at_iteration_cap': at_iteration_cap
             }
         else:
             return {

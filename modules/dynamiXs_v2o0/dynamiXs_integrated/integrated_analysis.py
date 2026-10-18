@@ -65,7 +65,7 @@ except ImportError:
 # in single- and dual-field output. Everything else is per-field.
 FIELD_INDEPENDENT_COLUMNS = frozenset({
     'Index', 'Residue', 'S2', 'S2_err', 'S2_95CI', 'tc', 'te', 'te_err', 'te_95CI',
-    'fit_success', 'chi2', 'iterations', 'mc_success_rate',
+    'fit_success', 'chi2', 'iterations', 'at_iteration_cap', 'mc_success_rate',
 })
 
 
@@ -578,6 +578,10 @@ class IntegratedAnalysisPipeline:
 
         # Return summary
         success_count = results_df['fit_success'].sum() if 'fit_success' in results_df.columns else len(results_df)
+        # fit_success is True for a fit that ran out of iterations as well, so the
+        # residues that did are reported beside it rather than hidden in the CSV.
+        capped = results_df.get('at_iteration_cap', pd.Series(False, index=results_df.index)).eq(True)
+        capped_residues = results_df.loc[capped, 'Residue'].astype(str).tolist() if 'Residue' in results_df else []
 
         results = {
             'method': self.params.analysis_method,
@@ -590,6 +594,8 @@ class IntegratedAnalysisPipeline:
             'status': 'completed',
             'n_residues': len(results_df),
             'n_successful': int(success_count),
+            'n_at_iteration_cap': int(capped.sum()),
+            'at_iteration_cap_residues': capped_residues,
             'results_dataframe': results_df
         }
 

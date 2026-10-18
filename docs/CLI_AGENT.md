@@ -161,7 +161,7 @@ python -m lunaNMR <cmd> ... --format json --dry-run
   Every summary carries `ok`, `schema_version` and the full `command` path (`dynamixs t1t2`, not `dynamixs`) — including dry-runs, which add `dry_run: true`. Keys are only ever added within a `schema_version`, so read the ones you know and ignore the rest. **Non-finite numbers serialise as `null`**, not `NaN`: a run where nothing fitted stays parseable. `batch` has no `--format` flag and is outside this contract.
 - **`--dry-run`** → validates required inputs exist, prints the plan, runs nothing. Exit 1 if any input missing, else 0.
 - **`--parallel`** → `series` only (two-pass processor, ~2.7×). **`--no-parallel` → `density` only.** `modelfree` also parallelizes internally but hard-codes `use_multiprocessing=True`, so its CPU use cannot be bounded — `modelfree --no-parallel` exits 2 with `unrecognized arguments`.
-- **Exit codes:** `2` = no subcommand, or a rejected command line (unrecognised flag, bad value, refused flag combination) — under `--format json` an `ok: false` object with `error.type` `UsageError`. `1` = bad input (reported as `error: …` on stderr, no traceback), or a dry-run with a missing input. In-process, `cli.main()` returns the code (`0` for `--help`) and never raises `SystemExit`. `diagnose` also returns `1` on any `FAIL` finding (`WARN` needs `--strict`), and so does `series --dry-run --deep`; `series`/`t1t2`/`methyl-t2` return `1` when nothing fit and `t1rho` when the R2 table is empty. `hetnoe`/`density`/`modelfree`/`kd`/`export kd` return `0` on any completed run even with residues dropped — check `n_fitted`/`n_successful` against its total, not the exit code. Full table: [`CLI.md`](CLI.md#exit-codes).
+- **Exit codes:** `2` = no subcommand, or a rejected command line (unrecognised flag, bad value, refused flag combination) — under `--format json` an `ok: false` object with `error.type` `UsageError`. `1` = bad input (reported as `error: …` on stderr, no traceback), or a dry-run with a missing input. In-process, `cli.main()` returns the code (`0` for `--help`) and never raises `SystemExit`. `diagnose` also returns `1` on any `FAIL` finding (`WARN` needs `--strict`), and so does `series --dry-run --deep`; `series`/`t1t2`/`methyl-t2` return `1` when nothing fit and `t1rho` when the R2 table is empty. `hetnoe`/`density`/`modelfree`/`kd`/`export kd` return `0` on any completed run even with residues dropped — check `n_fitted`/`n_successful` against its total, not the exit code. On `modelfree` `n_successful` includes fits that stopped at the optimiser's iteration cap without converging; `n_at_iteration_cap` / `at_iteration_cap_residues` name them. Full table: [`CLI.md`](CLI.md#exit-codes).
 
 ## Input file shapes
 - **Peak list** (`series --peaks`): header `Assignment, Position_X, Position_Y[, Height]` (comma or tab; column aliases standardized).
@@ -198,18 +198,19 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 - **`diagnose --format json`** (and `series --dry-run --deep`'s `checks` key): `experiments[]` each with `spectra[]` (`dx`, `dy`, `capture`, `capture_rate`, `median_snr`, `weak`, `decayed`, `is_reference`), `delays` (`parsed`, `unparsed`, `repeats`), `peak_list`, `hetnoe`, `subseries`; plus a flat `findings[]` of `{severity, check, message}` with severity `FAIL`/`WARN`.
 
 ## Gotchas (silent-corruption risks)
-- **`--time-units` means three different things.** Same spelling, different effect and
-  different default, so read the row before using it:
+- **`--time-units` does two different things.** Same spelling, different effect, so read
+  the row before using it:
 
   | command | flag | effect | default when you say nothing |
   |---|---|---|---|
-  | `dynamixs t1t2` / `methyl-t2` | `--time-units` | **labels output only** — no rescaling | the sidecar's `value_units`, else `s` |
+  | `dynamixs t1t2` / `methyl-t2` | `--time-units` | **labels output only** — no rescaling | the sidecar's `value_units`, else `ms` |
   | `dynamixs t1rho` | `--time-units` | **rescales** (T→R for both `--input` and `--t1`) | the sidecar's `value_units`, else `ms` |
   | `dynamixs modelfree` | `--f{1,2}-t{1,2}-units` | **rescales** (drives the T→R conversion) | that series' sidecar, else `ms` |
 
-  The defaults are deliberately not unified: changing either would silently move numbers
-  that have already been published. A T1 in seconds against a T2 in ms puts R1 out by
-  1000×, which is what the rescaling rows exist to prevent.
+  The fallback is `ms` everywhere because that is what the data is in: the delay parser
+  returns every header in ms and `series` writes its matrices in ms. A T1 in seconds
+  against a T2 in ms puts R1 out by 1000×, which is what the rescaling rows exist to
+  prevent.
 - **`quality`, `r_squared` and `success` cannot say "there is no peak here".** `success` is true on flat noise, and R² is per *cluster*, so a member with nothing at its position rides its neighbours' R² (measured: 0.58σ under a cluster R² of 0.9884). The bound flags in `series_analysis_tidy.csv` are what tell the two near-zero states apart, and they need **opposite** handling:
 
   | state | flag | CSP / positions | I/I₀ (T1, T2, titration intensity) |
@@ -239,7 +240,7 @@ python -m lunaNMR <cmd> ... --format json --dry-run
   them. **`--field2-freq` has no default**: it is required with `--dual` on both `modelfree`
   and `density`, because there is no conventional second field, and analysing an 800 MHz
   dataset at 700 surfaces as the τc mismatch the QC table above blames on the data.
-- **You rarely need to state the units at all.** Every relaxation subcommand reads `series_metadata.json` beside its input and takes `value_units` from it, so the flag is for hand-built and DynamiXs-format tables, which have no sidecar. **A flag that contradicts the sidecar is refused**, not preferred — one of the two is wrong and guessing is the 1000× error. The run summary reports `series_metadata` and the `time_units` it resolved.
+- **You rarely need to state the units at all.** Every relaxation subcommand reads `series_metadata.json` beside its input and takes `value_units` from it, so the flag is for hand-built and DynamiXs-format tables, which have no sidecar. **A flag that contradicts the sidecar is refused**, not preferred — one of the two is wrong and guessing is the 1000× error. So is any flag but `ms` on a matrix whose delay headers state a unit (`..._2o4s`, `..._300ms`): the parser has already read those as ms, and `s` would convert them twice. The flag only means something for bare-number headers. The run summary reports `series_metadata` and the `time_units` it resolved.
 - **model-free CSV columns differ single vs dual.** Dual: `R1_f1`/`R1_f2`, `Rex_f1_err`, `Rex_f1_95CI`, … Single: the bare names `R1`, `Rex_err`, `Rex_95CI` **plus `_f1` aliases of each**, so a reader written against the dual spelling works on both. Shared, never suffixed: `Residue, S2, tc, te, S2_err, te_err, chi2, fit_success`. CSVs written before the aliases existed carry only the bare names, and a `_f1` selection on those returns an **empty selection** rather than raising — which reads as "no exchange anywhere".
 - **`export kd` curves vs ref-bars differ on observable.** `curves` (`<obs>_fits.pdf`) render only fitted observables (follow the JSON / `--observable`); `ref-bars` (`<obs>_ref_vs_point.pdf`) are model-free (raw series) and default to BOTH csp+intensity even for a single-observable fit — `--observable` still restricts. Ref-bars need embedded per-point `series` + ≥2 points.
 
