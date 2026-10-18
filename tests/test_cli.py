@@ -92,20 +92,30 @@ class TestKdSubcommand:
 
 
 class TestBatchDelegation:
-    def test_batch_is_intercepted_and_argv_forwarded(self, monkeypatch):
-        # `batch` must be routed to the batch CLI with its own args untouched,
-        # before the top-level argparse can choke on flags like -h.
+    """`batch` is routed to the batch CLI with its own arguments untouched, before the
+    top-level argparse can choke on flags only batch knows (-h, --preset)."""
+
+    def test_help_is_batchs_own(self, capsys):
         from lunaNMR import cli
-        captured = {}
+        assert cli.main(["batch", "-h"]) == 0
+        assert "--preset" in capsys.readouterr().out
 
-        def spy(argv):
-            captured['argv'] = argv
-            return 0
+    def test_its_own_flags_reach_it(self, tmp_path, capsys):
+        dnaja1 = Path(__file__).resolve().parents[2] / "data_test" / "data_binding" / "DNAJA1_HSPA8"
+        if not dnaja1.exists():
+            pytest.skip("data_test not present")
+        from lunaNMR import cli
+        (tmp_path / "spectra").mkdir()
+        (tmp_path / "spectra" / "2D_DNAJA1_0o0.ft").symlink_to(dnaja1 / "2D_DNAJA1_0o0.ft")
+        capsys.readouterr()
+        assert cli.main(["batch", "--preset", "15N1H", str(tmp_path / "spectra"),
+                         "--dry-run", "--format", "json"]) == 0
+        assert json.loads(capsys.readouterr().out)["spectra_found"] == 1
 
-        monkeypatch.setattr(cli, "_run_batch", spy)
-        code = cli.main(["batch", "--preset", "1H", "myfolder"])
-        assert code == 0
-        assert captured['argv'] == ["--preset", "1H", "myfolder"]
+    def test_a_flag_it_rejects_is_its_own_usage_error(self, capsys):
+        from lunaNMR import cli
+        assert cli.main(["batch", "--preset", "no_such_preset", "x", "--format", "json"]) == 2
+        assert json.loads(capsys.readouterr().out)["error"]["type"] == "UsageError"
 
 
 class TestDynamixsT1T2:
