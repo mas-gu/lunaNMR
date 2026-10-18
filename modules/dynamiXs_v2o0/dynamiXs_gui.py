@@ -3340,6 +3340,8 @@ class IntegratedAnalysisPage(BasePage):
         self.progress_text.appendPlainText("\n" + "="*50)
         self.progress_text.appendPlainText("INTEGRATED ANALYSIS COMPLETE!")
         self.progress_text.appendPlainText("="*50)
+        for line in self._fit_report(results):
+            self.progress_text.appendPlainText(line)
 
         # Store session results for project save/load
         results_prefix = self.prefix_edit.text()
@@ -3358,6 +3360,26 @@ class IntegratedAnalysisPage(BasePage):
         # Auto-open viewers
         self._open_results_viewer()
         self._open_fit_viewer()
+
+    @staticmethod
+    def _fit_report(results: dict) -> list:
+        """The page's account of a finished model-free run: what the CLI's modelfree
+        summary reports."""
+        capped = results.get('at_iteration_cap_residues') or []
+        lines = [f"Model-free complete: {results.get('n_successful')}/"
+                 f"{results.get('n_residues')} residues",
+                 f"{results.get('n_at_iteration_cap', 0)} fits stopped at the iteration cap "
+                 f"without converging" + (f": {', '.join(capped)}" if capped else "")]
+        for field, excluded in (results.get('excluded_residues') or {}).items():
+            if excluded:
+                lines.append(f"{field.replace('field', 'Field ')}: {len(excluded)} residues "
+                             f"excluded at the merge (not in all datasets): "
+                             f"{', '.join(map(str, excluded))}")
+        flagged = {k: v for k, v in (results.get('validation_warnings') or {}).items() if v}
+        if flagged:
+            lines.append("Validation warnings (residues per check, all fields): " + ", ".join(
+                f"{k.replace('_', ' ')} {v}" for k, v in flagged.items()))
+        return lines
 
     @Slot(str)
     def _on_error(self, error_msg: str):

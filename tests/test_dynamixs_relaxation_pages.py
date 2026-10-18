@@ -157,3 +157,55 @@ class TestTheMethylPageReportsTheFit:
         assert n > 0
         assert (f"{result['n_fitted']}/{result['n_total']} residues fitted, "
                 f"{n} of them bi-exp unidentifiable") in log
+
+
+class TestTheModelFreePageReportsTheFit:
+
+    @pytest.fixture(scope="class")
+    def run(self, app, tmp_path_factory):
+        """The real page's single-field model-free fit of the 600 MHz data."""
+        d = _dialog()
+        page = d.integrated_page
+        noe = RUN / "results" / "hetnoe"
+        page.field1_t1_file = str(T1_MATRIX)
+        page.field1_t2_file = str(RUN / "series" / "600_T2" / "peak_intensity_matrix.csv")
+        page.field1_noe_sat_file = str(noe / "f600_noe_sat.csv")
+        page.field1_noe_unsat_file = str(noe / "f600_noe_unsat.csv")
+        page.field1_freq_spin.setValue(600.0)
+        next(radio for radio, value in page.method_radios if value == "single_jwh").setChecked(True)
+        page.mc_spin.setValue(2)
+        page.output_dir = str(tmp_path_factory.mktemp("modelfree"))
+        results = []
+        # The page opens both viewers when the fit finishes, and each reports its load
+        # in a message box: answered here, since nothing closes a modal offscreen.
+        import visualization.fit_viewer as fit_viewer
+        import visualization.results_viewer as results_viewer
+        with pytest.MonkeyPatch.context() as mp:
+            for viewer in (fit_viewer, results_viewer):
+                for box in ("show_info", "show_warning", "show_error"):
+                    mp.setattr(viewer, box, lambda *a, **k: None)
+            page._start_analysis()
+            page.worker.finished.connect(results.append)
+            _wait(app, page)
+        yield page.progress_text.toPlainText(), results[0]
+        for viewer in ("results_viewer", "fit_viewer"):
+            if getattr(page, viewer, None) is not None:
+                getattr(page, viewer).close()
+        d.deleteLater()
+
+    def test_the_log_gives_the_fitted_count_out_of_the_total(self, run):
+        log, result = run
+        assert (f"Model-free complete: {result['n_successful']}/{result['n_residues']} "
+                f"residues") in log
+
+    def test_the_log_counts_the_fits_at_the_iteration_cap(self, run):
+        log, result = run
+        assert (f"{result['n_at_iteration_cap']} fits stopped at the iteration cap "
+                f"without converging") in log
+
+    def test_the_log_names_the_residues_the_merge_dropped(self, run):
+        log, result = run
+        excluded = result["excluded_residues"]["field1"]
+        assert excluded
+        assert (f"Field 1: {len(excluded)} residues excluded at the merge (not in all "
+                f"datasets): {', '.join(excluded)}") in log
