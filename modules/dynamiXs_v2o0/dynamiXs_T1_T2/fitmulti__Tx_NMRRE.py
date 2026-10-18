@@ -168,8 +168,10 @@ def fit_single_residue_parallel(args):
         y_all = np.asarray(y, dtype=float)
         x, y = measured_points(x_all, y_all)
         n_free = 3 if fit_baseline else 2
-        if len(y) < n_free:
-            raise ValueError(f"{len(y)} measured points, need {n_free}")
+        # One point beyond the parameters: with none spare the fit is exact by
+        # construction and would report an error of zero, not an unknown one.
+        if len(y) <= n_free:
+            raise ValueError(f"{len(y)} measured points, need {n_free + 1}")
 
         # Data-driven initial guesses (fixed A=5/t2=100 fail to converge when the
         # amplitude or time-scale differ by orders of magnitude).

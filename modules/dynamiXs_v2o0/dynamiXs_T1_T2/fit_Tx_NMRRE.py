@@ -374,9 +374,11 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
     x, y = measured_points(x_all, y_all)
 
     n_free = 3 if fit_baseline else 2
-    if len(y) < n_free:
+    # One point beyond the parameters: with none spare the fit is exact by construction,
+    # its residual is zero and the error it would report is zero, not unknown.
+    if len(y) <= n_free:
         print(f"Fitting residue: {residue_name}  ->  {len(y)} measured points, "
-              f"need {n_free}, excluded")
+              f"need {n_free + 1}, excluded")
         return {
             'residue': residue_name,
             'A': np.nan, 't2': np.nan, 'C': np.nan,

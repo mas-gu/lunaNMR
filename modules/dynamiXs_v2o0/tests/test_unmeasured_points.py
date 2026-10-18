@@ -142,3 +142,33 @@ def test_single_core_plot_survives_a_residue_with_no_measurement(tmp_path):
     r = fit_single_residue(X, np.full_like(Y, np.nan), "A1")
     create_plots([r], str(tmp_path / 'p'))
     assert (tmp_path / 'p_fit_results_fig1.pdf').exists()
+
+
+def _real_t1_first_residue_on_two_delays():
+    """Residue 1 of the real T1 matrix with every delay after the second left empty."""
+    from delay_parser import parse_delay_columns
+    matrix = pd.read_csv(REAL_T1)
+    x, keep, _ = parse_delay_columns(list(matrix.columns[4:]))
+    y = matrix.iloc[0, 4:].astype(float).to_numpy()[keep]
+    y[np.argsort(x)[2:]] = np.nan
+    return x, y
+
+
+@needs_real_t1
+def test_single_core_refuses_a_fit_with_no_spare_point():
+    """Two points fit two parameters exactly: the residual is zero because nothing is
+    left over, and an error of zero then reports a guess as perfectly known."""
+    from fit_Tx_NMRRE import fit_single_residue
+    x, y = _real_t1_first_residue_on_two_delays()
+    r = fit_single_residue(x, y, "R1")
+    assert r['success'] is False
+    assert not (r['t2_err'] == 0.0)
+
+
+@needs_real_t1
+def test_multicore_refuses_a_fit_with_no_spare_point():
+    from fitmulti__Tx_NMRRE import fit_single_residue_parallel
+    x, y = _real_t1_first_residue_on_two_delays()
+    r = fit_single_residue_parallel((x, y, "R1", None, None, None, 0, 'analytical', 0, 1))
+    assert r['success'] is False
+    assert not (r['t2_err'] == 0.0)
