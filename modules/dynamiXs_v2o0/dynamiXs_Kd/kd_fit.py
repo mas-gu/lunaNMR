@@ -246,6 +246,10 @@ def fit_residue_intensity(L, obs, P0=None, kd_init=None, n_bootstrap=0):
     L, y = _clean(L, obs)
     if len(L) < _MIN_POINTS:
         return {'success': False, 'reason': 'too few points'}
+    if np.ptp(y) <= 1e-12 * max(float(np.max(np.abs(y))), 1.0):
+        # No decay to put a Kd on: any Kd fits a flat line, and the optimiser would
+        # report whichever bound it stopped at as a success with an error of 0.
+        return {'success': False, 'reason': 'the intensity does not change across the titration'}
     kd0 = kd_init if kd_init else max(np.max(L) / 2.0, 1.0)
     i0 = max(float(y[0]), 1e-12)
     inf0 = max(float(np.min(y)), 0.0)            # plateau ~ lowest observed point

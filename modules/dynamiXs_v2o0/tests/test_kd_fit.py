@@ -460,3 +460,12 @@ class TestRunAnalysis:
         assert s['ppm_y'][0] == pytest.approx(120.0)
         assert s['ppm_y'][-1] == pytest.approx(124.0)   # raw N positions preserved
         assert s['height'][-1] == pytest.approx(1000.0 - 3 * 4)
+
+
+def test_an_intensity_that_does_not_change_is_not_fitted():
+    """A flat I/I0 has no decay to put a Kd on: the fit used to report success with Kd on
+    a bound and an error of 0."""
+    from kd_fit import fit_residue_intensity
+    fit = fit_residue_intensity([0.0, 6.25, 12.5, 25.0, 50.0, 100.0, 150.0], [1.0] * 7)
+    assert fit['success'] is False
+    assert 'does not change' in fit['reason']
