@@ -433,17 +433,21 @@ class DynamiXsMainWindow(QMainWindow):
 # =============================================================================
 
 def resolve_series_csv(batch_results):
-    """Path to a series' series_analysis_tidy.csv for the Kd input, or "" if it is not
-    on disk.
+    """Path to a series' series_analysis_tidy.csv for the Kd input.
 
     A series opened from a project reads the copy bundled beside its
     batch_results.json, never its recorded run folder, which may hold a later run; a
-    series run in this session reads its own run's.
+    series run in this session reads its own run's. If none exists on disk, returns
+    "" for a series opened from a project, else the recorded csv_path for display.
     """
     _ensure_lunaNMR_path()
     from lunaNMR.utils.project_manager import series_csv_path
     path = series_csv_path(batch_results, "series_analysis_tidy.csv")
-    return str(path) if path is not None else ""
+    if path is not None:
+        return str(path)
+    if getattr(batch_results, 'bundled_folder', None):
+        return ""
+    return (getattr(batch_results, 'metadata', None) or {}).get('csv_path') or ""
 
 
 class BasePage(QWidget):
