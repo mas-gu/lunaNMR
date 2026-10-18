@@ -356,15 +356,31 @@ class KdTitrationPage(BasePage):
 
     # ---------- importable binding parameters ----------
 
-    def _apply_params(self, params, n_points):
+    def _apply_params(self, params, n_points, stated=None):
         """Populate the Binding-parameters panel from a normalized params dict. Per-point
         lists ([L], intensity scales) are applied only when their length matches the
-        detected points, so a mismatched file can't silently corrupt the run."""
-        from kd_params import observables_to_combo_index
+        detected points, so a mismatched file can't silently corrupt the run.
+
+        Concentrations and their units are one statement, as in `kd`: applied together,
+        or not at all. A source that records no concentrations but states its units
+        (`stated`: the keys it actually records; None for a dict that states them all)
+        names the units of the point labels. Returns why the concentrations were not
+        applied, or None."""
+        from kd_params import observables_to_combo_index, points_mismatch
+        stated = set(params) if stated is None else stated
         concs = params.get('concentrations')
-        if concs and len(concs) == n_points:
-            for spin, val in zip(self.conc_spins, concs):
-                spin.setValue(float(val))
+        not_applied = None
+        if concs:
+            not_applied = (points_mismatch(params, self.detected_points)
+                           if self.detected_points else None)
+            if not_applied is None and len(concs) != n_points:
+                not_applied = f"{len(concs)} concentrations for {n_points} titration points"
+            if not_applied is None:
+                for spin, val in zip(self.conc_spins, concs):
+                    spin.setValue(float(val))
+                self._set_conc_units(params.get('conc_units', 'absolute'))
+        elif 'conc_units' in stated:
+            self._set_conc_units(params['conc_units'])
         scales = params.get('intensity_scales')
         if scales and len(scales) == n_points:
             for spin, val in zip(self.scale_spins, scales):
@@ -373,24 +389,33 @@ class KdTitrationPage(BasePage):
         self.alpha_spin.setValue(float(params.get('alpha', 0.14)))
         self.obs_combo.setCurrentIndex(observables_to_combo_index(params.get('observables')))
         self.intvalue_combo.setCurrentText(str(params.get('intensity_value', 'height')))
-        self._set_conc_units(params.get('conc_units', 'absolute'))
         self.boot_spin.setValue(int(params.get('n_bootstrap', 0)))
+        return not_applied
 
     def _maybe_apply_params_json(self, csv_path, points):
         """Auto-detect a sibling binding-parameters JSON (or a prior fit JSON) next to the
         input CSV and populate the panel. Values stay editable; absent → manual entry."""
         try:
-            from kd_params import find_params_source, load_params
+            from kd_params import find_params_source
             skipped = []
             src = find_params_source(csv_path, points=points, rejected=skipped)
             for s in skipped:
                 self._log(f"Not using {os.path.basename(s['path'])}: {s['reason']}")
             if not src:
                 return
-            self._apply_params(load_params(src), n_points=len(points))
-            self._log(f"Loaded binding parameters from {os.path.basename(src)}")
+            self._load_params_file(src)
         except Exception as e:
             self._log(f"Could not read binding-parameters JSON: {e}")
+
+    def _load_params_file(self, path):
+        """Apply a params source to the panel and say on the page what it supplied."""
+        from kd_params import load_params, recorded_keys
+        not_applied = self._apply_params(load_params(path), n_points=len(self.conc_spins),
+                                         stated=recorded_keys(path))
+        msg = f"Loaded binding parameters from {os.path.basename(path)}"
+        if not_applied:
+            msg += f" - not using its concentrations and units: {not_applied}"
+        self._log(msg)
 
     def _gather_params_dict(self):
         """The current panel values as a params dict (for saving a params JSON)."""
@@ -419,9 +444,7 @@ class KdTitrationPage(BasePage):
         if not path:
             return
         try:
-            from kd_params import load_params
-            self._apply_params(load_params(path), n_points=len(self.conc_spins))
-            self._log(f"Loaded binding parameters from {os.path.basename(path)}")
+            self._load_params_file(path)
         except Exception as e:
             show_error(self, "Could not load parameters", str(e))
 

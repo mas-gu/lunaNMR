@@ -135,11 +135,19 @@ def _newest(pattern):
     return max(matches, key=os.path.getmtime) if matches else None
 
 
-def _mismatch(path, stored, csv_path, points):
-    """Why a stored params file does not describe this input, or None if it does."""
+def points_mismatch(stored, points):
+    """Why the titration points a params source records are not `points`, or None."""
     recorded = stored.get('points')
     if recorded is not None and [float(p) for p in recorded] != [float(p) for p in points]:
         return f"its titration points {recorded} are not this input's {list(points)}"
+    return None
+
+
+def _mismatch(path, stored, csv_path, points):
+    """Why a stored params file does not describe this input, or None if it does."""
+    reason = points_mismatch(stored, points)
+    if reason:
+        return reason
     name = os.path.basename(csv_path)
     if stored.get('input') is not None:
         return None if stored['input'] == name else f"it was written for {stored['input']}"

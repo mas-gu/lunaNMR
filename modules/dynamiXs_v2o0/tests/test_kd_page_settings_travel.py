@@ -96,3 +96,61 @@ class TestTheUnitsTravelWithTheConcentrations:
         reopened.restore_session_state(page.get_session_state())
         again = _run(app, reopened)["global"]["intensity"]["Kd"]
         assert again == pytest.approx(first)
+
+
+class TestALoadedFileKeepsItsPair:
+    """Concentrations and their units are one statement. A file whose concentrations do
+    not fit this input must not switch the units under the [L] values on screen."""
+
+    def test_mismatched_concentrations_leave_the_units(self, app, csv, tmp_path):
+        page = _page()
+        page._set_input_file(str(csv))
+        page.conc_units_combo.setCurrentIndex(1)
+        other = tmp_path / "other_kd_params.json"
+        other.write_text(json.dumps({
+            "points": [0, 10, 20, 40, 80, 160],
+            "concentrations": [0, 10, 20, 40, 80, 160], "conc_units": "absolute",
+            "protein_conc": 30.0}))
+
+        page._load_params_file(str(other))
+
+        assert page._conc_units() == "equivalents"
+        assert [s.value() for s in page.conc_spins] == EQUIVALENTS
+        assert page.p0_spin.value() == 30.0
+        assert "not using its concentrations" in page.log_text.toPlainText()
+
+    def test_matching_concentrations_bring_their_units(self, app, csv, tmp_path):
+        page = _page()
+        page._set_input_file(str(csv))
+        page.conc_units_combo.setCurrentIndex(1)
+        other = tmp_path / "other_kd_params.json"
+        absolute = [0.0, 6.25, 12.5, 25.0, 50.0, 100.0, 150.0]
+        other.write_text(json.dumps({"points": EQUIVALENTS, "concentrations": absolute,
+                                     "conc_units": "absolute"}))
+
+        page._load_params_file(str(other))
+
+        assert page._conc_units() == "absolute"
+        assert [s.value() for s in page.conc_spins] == absolute
+
+    def test_a_file_silent_on_units_does_not_switch_them(self, app, csv, tmp_path):
+        """load_params fills 'absolute' in; the file never said it."""
+        page = _page()
+        page._set_input_file(str(csv))
+        page.conc_units_combo.setCurrentIndex(1)
+        other = tmp_path / "other_kd_params.json"
+        other.write_text(json.dumps({"protein_conc": 30.0}))
+
+        page._load_params_file(str(other))
+
+        assert page._conc_units() == "equivalents"
+
+    def test_units_alone_name_the_point_labels(self, app, csv, tmp_path):
+        page = _page()
+        page._set_input_file(str(csv))
+        other = tmp_path / "other_kd_params.json"
+        other.write_text(json.dumps({"conc_units": "equivalents"}))
+
+        page._load_params_file(str(other))
+
+        assert page._conc_units() == "equivalents"
