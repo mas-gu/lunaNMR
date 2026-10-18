@@ -3,12 +3,10 @@
 Core Batch Processing Engine for LunaNMR
 
 This module provides the core functionality for batch processing multiple NMR spectra
-for automated analysis and ML training data generation. It operates independently
-from the GUI interface and integrates seamlessly with existing ML data collection.
+for automated analysis. It operates independently from the GUI interface.
 
 Features:
 - Automated spectrum loading and processing
-- Integration with existing ML training data collection
 - Robust error handling with individual spectrum failure recovery
 - Progress tracking and detailed logging
 - Support for multiple nucleus types (1H, 15N, 13C)
@@ -38,7 +36,7 @@ class BatchProcessor:
     Core batch processing engine for automated NMR spectrum analysis.
 
     This class handles the automated processing of multiple NMR spectra,
-    including S/N detection, peak fitting, and ML training data collection.
+    including S/N detection and peak fitting.
     It operates completely independently from the GUI interface.
     """
 
@@ -146,7 +144,6 @@ class BatchProcessor:
             'failed_files': 0,
             'total_peaks_detected': 0,
             'total_peaks_fitted': 0,
-            'total_ml_samples': 0,
             'processing_start_time': None,
             'processing_end_time': None,
             'failed_files_list': []
@@ -629,7 +626,6 @@ class BatchProcessor:
             'success': False,
             'peaks_detected': 0,
             'peaks_fitted': 0,
-            'ml_samples_collected': 0,
             'processing_time': 0,
             'error': None
         }
@@ -703,14 +699,13 @@ class BatchProcessor:
 
     def _perform_voigt_fitting(self, detected_peaks: List[Dict], parameters: Dict[str, Any]) -> int:
         """
-        Perform comprehensive Voigt fitting on detected peaks with parallel processing and enhanced ML data collection.
+        Perform comprehensive Voigt fitting on detected peaks with parallel processing.
 
         This method implements the complete Voigt fitting pipeline:
         1. Parallel or sequential Voigt profile fitting
         2. Progress tracking and detailed logging
         3. Comprehensive error handling and recovery
-        4. Enhanced ML data collection integration
-        5. Quality assessment and filtering
+        4. Quality assessment and filtering
 
         Args:
             detected_peaks: List of detected peak dictionaries from S/N detection
@@ -743,10 +738,10 @@ class BatchProcessor:
             failed_peaks = []
             processing_start_time = time.time()
 
-            # Use direct enhanced_peak_fitting calls for guaranteed ML data collection
+            # Use direct enhanced_peak_fitting calls
             # with fallback to SingleSpectrumProcessor for compatibility
             try:
-                self.logger.info("     Using direct enhanced_peak_fitting (guaranteed ML collection)")
+                self.logger.info("     Using direct enhanced_peak_fitting")
                 fitted_results = self._fit_peaks_with_enhanced_peak_fitting(
                     detected_peaks, parameters, use_parallel
                 )
@@ -794,7 +789,7 @@ class BatchProcessor:
                     else:
                         failed_fits.append(r)
 
-                # Store results in integrator for ML data collection
+                # Store results in integrator
                 self.integrator.fitted_peaks = successful_fits
 
                 success_count = len(successful_fits)
@@ -857,7 +852,6 @@ class BatchProcessor:
             peak_list = pd.DataFrame(peak_list_data)
 
             # CRITICAL: Store peak list in integrator exactly like GUI does
-            # This is essential for ML data collection to work properly
             self.integrator.peak_list = peak_list
 
             # Create parameter manager (same as GUI setup)
@@ -953,10 +947,10 @@ class BatchProcessor:
 
     def _fit_peaks_with_enhanced_peak_fitting(self, detected_peaks: List[Dict], parameters: Dict[str, Any], use_parallel: bool) -> List[Dict]:
         """
-        Direct enhanced_peak_fitting implementation with guaranteed ML data collection.
+        Direct enhanced_peak_fitting implementation.
 
         This method uses the exact same enhanced_peak_fitting calls as GUI individual peak fitting,
-        ensuring 100% ML data collection compatibility with optional multiprocessing support.
+        with optional thread parallelism.
         """
 
         total_peaks = len(detected_peaks)
@@ -1011,13 +1005,15 @@ class BatchProcessor:
         return fitted_results
 
     def _fit_peaks_parallel_direct(self, detected_peaks: List[Dict], parameters: Dict[str, Any]) -> List[Dict]:
-        """Parallel direct enhanced_peak_fitting using threading for ML data collection compatibility"""
+        """Parallel direct enhanced_peak_fitting using threading"""
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         fitted_results = []
         total_peaks = len(detected_peaks)
 
-        # Use threading instead of multiprocessing to maintain ML data collector access
+        # Threads, not processes: every worker calls the one self.integrator, which holds the
+        # loaded spectrum. A process pool would have to pickle it, and fit_single_peak is a
+        # nested function, which cannot be pickled.
         max_workers = min(os.cpu_count() or 4, 8)  # Reasonable limit
 
         self.logger.info(f"     🚀 Threading parallel: {max_workers} workers")
@@ -1417,7 +1413,6 @@ class BatchProcessor:
                         self.stats['processed_files'] += 1
                         self.stats['total_peaks_detected'] += result['peaks_detected']
                         self.stats['total_peaks_fitted'] += result['peaks_fitted']
-                        self.stats['total_ml_samples'] += result['ml_samples_collected']
                     else:
                         self.stats['failed_files'] += 1
                         self.stats['failed_files_list'].append({
@@ -1534,7 +1529,7 @@ if __name__ == "__main__":
     # Basic command-line usage
     import argparse
 
-    parser = argparse.ArgumentParser(description="Batch process NMR spectra for ML training")
+    parser = argparse.ArgumentParser(description="Batch process NMR spectra")
     parser.add_argument("folder", help="Path to folder containing NMR spectra")
     parser.add_argument("--nucleus", choices=['15N1H', '13C1H', '1H'],
                        help="Nucleus type (if not specified, will auto-detect)")
@@ -1549,7 +1544,6 @@ if __name__ == "__main__":
         results = processor.process_folder(args.folder, args.nucleus, args.auto_optimize)
         print("\nBatch processing completed successfully!")
         print(f"Processed {results['processed_files']}/{results['total_files']} files")
-        print(f"ML training samples collected: {results['total_ml_samples']}")
     except Exception as e:
         print(f"Batch processing failed: {e}")
         sys.exit(1)

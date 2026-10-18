@@ -87,12 +87,7 @@ class ParallelVoigtProcessor:
         self.optimal_params = None  # Stores grid search optimization results
         self.series_params = None   # Locked params for series integration
 
-        # Intermediate results for ML training data collection
-        self.timing_info = {}       # Timing for each processing phase
-        self.cluster_info = {}      # Clustering information
-        self.pass1_results = None   # PASS1 (isolated) results
-        self.pass1bis_results = None  # PASS1-bis (refit) results
-        self.pass2_results = None   # PASS2 (multi-peak) results
+        self.pass1_results = None   # PASS1 (isolated) results of the last run
 
         # Configure worker processes
         if max_workers is None:
@@ -163,12 +158,7 @@ class ParallelVoigtProcessor:
             log_info(f"Per-peak linewidth reuse enabled: {len(reference_linewidths)} reference linewidths")
         start_time = time.time()
 
-        # Reset intermediate results for ML training data collection
-        self.timing_info = {'total': 0, 'pass1': 0, 'adaptive': 0, 'pass1bis': 0, 'pass2': 0}
-        self.cluster_info = {}
         self.pass1_results = None
-        self.pass1bis_results = None
-        self.pass2_results = None
 
         try:
             # STEP 1: Build all_peaks_context (identical to sequential mode)
@@ -305,7 +295,6 @@ class ParallelVoigtProcessor:
                     spectrum_statistics = self._collect_linewidth_statistics(isolated_results)
 
                     pass1_time = time.time() - pass1_start
-                    self.timing_info['pass1'] = pass1_time
                     self.pass1_results = isolated_results  # Store PASS1 results
 
                     if spectrum_statistics:
@@ -416,7 +405,6 @@ class ParallelVoigtProcessor:
                         self.optimal_params = optimal_params
 
                         adaptive_time = time.time() - adaptive_start
-                        self.timing_info['adaptive'] = adaptive_time
                         log_info(f"Adaptive optimization completed in {adaptive_time:.1f}s")
                         log_info(f"  → Selected: radF1={optimal_params['radF1']:.4f}, radF2={optimal_params['radF2']:.5f} (mult: {optimal_params['multiplier_f1']:.1f}×, {optimal_params['multiplier_f2']:.1f}×)")
 
@@ -495,8 +483,6 @@ class ParallelVoigtProcessor:
                 spectrum_statistics = self._collect_linewidth_statistics(isolated_results)
 
                 pass1bis_time = time.time() - pass1bis_start
-                self.timing_info['pass1bis'] = pass1bis_time
-                self.pass1bis_results = isolated_results  # Store PASS1-bis results
                 log_info(f"PASS 1-bis completed in {pass1bis_time:.1f}s")
 
             # ========== PASS 2: Fit remaining clusters using learned/pre-learned statistics ==========
@@ -529,8 +515,6 @@ class ParallelVoigtProcessor:
                 multi_peak_results = self._execute_parallel_cluster_fitting(pass2_tasks, progress_callback, pass_name="PASS 2")
 
                 pass2_time = time.time() - pass2_start
-                self.timing_info['pass2'] = pass2_time
-                self.pass2_results = multi_peak_results  # Store PASS2 results
                 log_info(f"PASS 2 completed in {pass2_time:.1f}s")
             else:
                 log_warning("No clusters to fit in Pass 2")
@@ -538,14 +522,6 @@ class ParallelVoigtProcessor:
             # ========== Consolidate results from both passes ==========
             all_cluster_results = isolated_results + multi_peak_results
             consolidated_results = self._consolidate_cluster_results(all_cluster_results, peak_list, peak_metadata)
-
-            # Store cluster info for ML training
-            self.cluster_info = {
-                'n_clusters': len(clusters),
-                'n_isolated_clusters': len(isolated_clusters),
-                'n_multi_peak_clusters': len(multi_peak_clusters),
-                'cluster_sizes': [len(c) for c in clusters],
-            }
 
             # ========== Create series_params if adaptive optimization succeeded ==========
             if self.optimal_params and self.optimal_params.get('success'):
@@ -603,7 +579,6 @@ class ParallelVoigtProcessor:
                 log_info(f"Stored {len(locked_clusters_by_assignment)} clusters for series integration (no adaptive optimization)")
 
             elapsed_time = time.time() - start_time
-            self.timing_info['total'] = elapsed_time
             log_info(f"Two-pass parallel fitting completed in {elapsed_time:.1f}s")
             log_info(f"Results: {len(consolidated_results)} successful fits from {len(clusters)} clusters")
             if spectrum_statistics:
@@ -1598,7 +1573,7 @@ def _parallel_cluster_worker(cluster_task):
                             'peak_position': (best_match['pos_f2'], best_match['pos_f1']),
                             'peak_x': peak_x,
                             'peak_y': peak_y,
-                            'intensity': best_match['intensity'],  # Fitted Voigt parameter (for ML training)
+                            'intensity': best_match['intensity'],  # Fitted Voigt parameter
                             'amplitude': best_match.get('amplitude', best_match['intensity']),
                             'height': best_match.get('height', best_match['intensity']),
                             'volume': best_match.get('volume', best_match['intensity']),
@@ -1617,7 +1592,7 @@ def _parallel_cluster_worker(cluster_task):
                             'fitted': True,
                             'method': '2d_simultaneous_multi_peak',
                             'processing_mode': 'parallel',
-                            'cluster_idx': cluster_task['cluster_idx'],  # Cluster ID for ML training
+                            'cluster_idx': cluster_task['cluster_idx'],  # Cluster ID
                             'cluster_size': cluster_size,
                             'overlap_group_size': cluster_size,
                             # Visualization data

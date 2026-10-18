@@ -223,7 +223,7 @@ class VoigtFittingWorker(QThread):
             # Process peak list using SingleSpectrumProcessor (exact v0o9 logic)
             # This internally handles PS2D multi-peak fitting
             # Returns tuple: (fitted_results, learned_statistics)
-            fitted_results, learned_statistics = processor.process_peak_list(
+            fitted_results, _ = processor.process_peak_list(
                 peak_list,
                 self.processing_options,
                 progress_callback,
@@ -240,7 +240,6 @@ class VoigtFittingWorker(QThread):
 
             # Add fitted_results to summary for GUI update
             summary['fitted_results'] = fitted_results
-            summary['learned_statistics'] = learned_statistics
 
             self.progress_updated.emit(100, "Fitting complete", "")
             logger.info(f"Voigt fitting complete: {summary['successful_peaks']}/{summary['total_peaks']} successful")
@@ -4707,19 +4706,9 @@ class LunaNMRMainWindow(BaseWindow):
         integration_1d_action.triggered.connect(self.launch_integration_1d)
         modules_menu.addAction(integration_1d_action)
 
-        series_qc_action = QAction("Series QC Analysis", self)
-        series_qc_action.triggered.connect(self.launch_series_qc)
-        modules_menu.addAction(series_qc_action)
-
         spectral_inspector_action = QAction("Spectral Inspector", self)
         spectral_inspector_action.triggered.connect(self.launch_spectral_inspector)
         modules_menu.addAction(spectral_inspector_action)
-
-        modules_menu.addSeparator()
-
-        ml_learning_action = QAction("ML Learning Center...", self)
-        ml_learning_action.triggered.connect(self.show_ml_learning_center)
-        modules_menu.addAction(ml_learning_action)
 
         # === Help Menu (v0o9 lines 1043-1047) ===
         help_menu = menu_bar.addMenu("&Help")
@@ -5651,24 +5640,6 @@ class LunaNMRMainWindow(BaseWindow):
             dialog.kd_page.open_saved_analysis(entry, name=name)
         return True
 
-    def launch_series_qc(self):
-        """Launch Series QC Analysis dialog.
-
-        Opens the Series QC dialog for analyzing and comparing
-        series integration results from training_data.json files.
-        """
-        from lunaNMR.gui.dialogs import SeriesQCDialog
-
-        # Reuse existing dialog if already open
-        if hasattr(self, 'series_qc_dialog') and self.series_qc_dialog and self.series_qc_dialog.isVisible():
-            self.series_qc_dialog.raise_()
-            self.series_qc_dialog.activateWindow()
-            return
-
-        # Create and show new dialog
-        self.series_qc_dialog = SeriesQCDialog(parent=self, main_window=self)
-        self.series_qc_dialog.show()
-
     def launch_spectral_inspector(self):
         """Launch Spectral Inspector as a standalone top-level window.
 
@@ -5790,40 +5761,6 @@ class LunaNMRMainWindow(BaseWindow):
                 "No files loaded to validate.")
 
         return results
-
-    # =================== ML LEARNING CENTER ===================
-
-    def show_ml_learning_center(self):
-        """Show ML Learning Center dialog.
-
-        Opens the ML Learning Center panel for viewing and controlling
-        ML prediction settings, training status, and configuration.
-        """
-        from lunaNMR.ml.gui import MLLearningPanel
-        from lunaNMR.ml import ModelManager
-
-        # Get or create model manager
-        model_manager = getattr(self, '_ml_model_manager', None)
-        if model_manager is None:
-            try:
-                model_manager = ModelManager()
-                self._ml_model_manager = model_manager
-            except Exception as e:
-                logger.warning(f"Could not create ModelManager: {e}")
-                model_manager = None
-
-        dialog = MLLearningPanel(
-            parent=self,
-            model_manager=model_manager,
-            main_window=self
-        )
-        dialog.exec()
-
-        # Apply any config changes
-        if model_manager:
-            dialog.apply_config()
-
-        self.update_status("ML Learning Center closed")
 
     # =================== HELP MENU HANDLERS ===================
 

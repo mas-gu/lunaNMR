@@ -86,7 +86,6 @@
   <h2>Reference</h2>
   <a href="#quality">Quality colors</a>
   <a href="#formats">File formats</a>
-  <a href="#ml">ML subsystem</a>
   <a href="#gotchas">Gotchas</a>
 </nav>
 
@@ -124,9 +123,9 @@ pip install -r requirements.txt
 python3 lunaNMR/validation/verify_installation.py   # verify
 python3 launch_lunaNMR.py                            # run
 python -m pytest tests/                              # tests</code></pre>
-<p><strong>Key dependencies:</strong> numpy, pandas, scipy, scikit-learn, networkx, matplotlib (backend
+<p><strong>Key dependencies:</strong> numpy, pandas, scipy, networkx, matplotlib (backend
 forced to <code>QtAgg</code>), nmrglue, <strong>PySide6 ≥ 6.6</strong> (required), <strong>numba</strong>
-(required — 3–5× faster 2D fitting; without it large clusters are impractical). Optional: PyTorch (CNN peak classifier).</p>
+(required — 3–5× faster 2D fitting; without it large clusters are impractical).</p>
 </section>
 
 <section id="workflow">
@@ -158,7 +157,6 @@ analysis modules (DynamiXs, Kd) consume.</p>
 │   │   ├── ps2d_*.py                       # 2D simultaneous multi-peak fitting
 │   │   └── adaptive_optimizer.py          # grid search for PS2D radii
 │   ├── gui/                     # PySide6/Qt6 UI (main_window, dialogs, components)
-│   ├── ml/                      # ML + statistics parameter prediction
 │   ├── processors/              # single & multi-spectrum workflows
 │   ├── utils/                   # config, parameter, output, file, project managers
 │   └── validation/             # install verification
@@ -192,8 +190,7 @@ log area; in CLI mode they fall back to <code>print()</code>. Thread-local callb
 <p><code>core/enhanced_peak_picker.py</code> uses <strong>network-based clustering</strong> (via
 <code>networkx</code>) with <strong>prominence analysis</strong> for robust detection, then quality
 assessment with R² and uncertainty. Detection supports manual region restriction and nucleus-adaptive
-search windows. An optional CNN classifier (<code>ml/cnn_peak_classifier.py</code>, PyTorch) can filter
-candidate peaks.</p>
+search windows.</p>
 </section>
 
 <section id="voigt">
@@ -376,14 +373,6 @@ lists apart), while single-spectrum views use the quality colors above.</p>
   <li><strong>Decimals convention</strong>: filesystem-safe <code>o</code>-for-<code>.</code> in titration
   filenames (<code>1o0</code> = 1.0), shared with the dynamiXs parsers.</li>
 </ul>
-</section>
-
-<section id="ml">
-<h2>ML subsystem (optional)</h2>
-<p>A dual-path predictor with graceful fallback: <code>decision_engine.py</code> chooses between an ML
-predictor (<code>ml_predictor.py</code>) and a statistical fallback (<code>stats_predictor.py</code>) for fit
-parameters. An <code>adaptation_engine.py</code> refines the model from user corrections, surfaced through the
-standalone <strong>ML Learning Center</strong>. The CNN peak classifier requires PyTorch and is optional.</p>
 </section>
 
 <section id="gotchas">

@@ -4,12 +4,12 @@ Parameter Optimization Engine for Batch Processing
 
 This module provides intelligent parameter optimization for different spectrum types
 and characteristics. It automatically tunes S/N thresholds and other parameters
-to maximize the quality and quantity of ML training data collected.
+to maximize the quality and quantity of the fitted peaks.
 
 Features:
 - Spectrum quality assessment
 - Adaptive S/N threshold optimization
-- Peak count targeting for optimal training data
+- Peak count targeting
 - Parameter feedback loops based on fitting success
 """
 
@@ -22,7 +22,7 @@ class ParameterOptimizer:
     Intelligent parameter optimization for batch NMR processing.
 
     This class analyzes spectrum characteristics and optimizes processing
-    parameters to maximize the quality and quantity of ML training data.
+    parameters to maximize the quality and quantity of the fitted peaks.
     """
 
     def __init__(self, config: Optional[Dict] = None):

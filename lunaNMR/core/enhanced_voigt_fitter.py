@@ -3222,7 +3222,7 @@ class EnhancedVoigtFitter:
         log_progress(f"Using parallel Voigt fitting for {len(peak_list)} peaks")
         parallel_processor = ParallelVoigtProcessor(self, enable_adaptive=enable_adaptive,
                                                     in_process=in_process, stop=stop)
-        self.parallel_processor = parallel_processor  # Store for ML training data collection
+        self.parallel_processor = parallel_processor
 
         # Pass series_params if available (for subsequent spectra in series)
         # Skip if skip_series_params=True (Independent mode wants fresh adaptive each spectrum)

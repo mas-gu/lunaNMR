@@ -32,7 +32,7 @@ from tkinter import messagebox, ttk
 
 def check_dependencies():
     """Check if all required dependencies are available"""
-    required_modules = ["pandas", "numpy", "matplotlib", "scipy", "sklearn", "nmrglue"]
+    required_modules = ["pandas", "numpy", "matplotlib", "scipy", "nmrglue"]
 
     missing_modules = []
     for module in required_modules:

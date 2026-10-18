@@ -49,7 +49,6 @@ PySide6/Qt6 suite for NMR peak detection, Voigt profile fitting, and integration
 - **Dynamics (DynamiXs)**: T₁/T₂, methyl T₂ (bi-exponential), T₁ρ, spectral density, model-free.
 - **1D integration**: peak picking on a 1D spectrum, then height / region-sum / Voigt-area measurement across a series.
 - **Parallel processing**: two-pass cluster-based, ~2.7× speedup.
-- **ML/statistics**: dual-path fit-parameter prediction with statistical fallback (optional CNN classifier).
 - **Headless CLI**: `python -m lunaNMR` — every analysis is scriptable with no display. Subcommand reference: [docs/CLI.md](docs/CLI.md).
 
 **File formats**: Bruker TopSpin (`.2ii`, `.2rr`), Varian/Agilent (`.fid`, `.ft`), NMRPipe (`.ft`, `.pipe`), SPARKY (`.ucsf`). Export: CSV, JSON, PNG, PDF, SVG, EPS.
@@ -68,7 +67,7 @@ python3 launch_lunaNMR.py                                 # GUI launcher (LunaNM
 python -m lunaNMR --help                                  # headless CLI
 ```
 
-Requires **numba** (2D multi-peak fitting) and **PySide6** (GUI). `torch`/`torchvision` optional (CNN classifier).
+Requires **numba** (2D multi-peak fitting) and **PySide6** (GUI).
 
 ---
 
@@ -112,7 +111,6 @@ lunaNMR_v1o0/
 │   ├── gui/                   # PySide6/Qt6 interface
 │   ├── processors/            # single/multi-spectrum workflows
 │   ├── batch_processing/      # CLI batch automation
-│   ├── ml/                    # ML/statistics parameter prediction
 │   ├── integrators/           # specialized integrators
 │   ├── utils/                 # config, project bundles, output routing
 │   └── validation/            # installation verification + `diagnose` pre-flight checks
