@@ -1,6 +1,9 @@
 # ABOUTME: Reads the LunaNMR series tidy CSV into per-residue titration observables.
 # ABOUTME: Positions (for CSP) and intensities (for ratio), aligned to sorted points.
 
+import json
+import math
+import os
 import re
 
 import numpy as np
@@ -55,6 +58,61 @@ def _refuse_unread_points(labels):
             f"no titration point can be read from {len(unread)} spectrum label(s): "
             f"{', '.join(unread)}. Each spectrum must be named by its point "
             f"(e.g. '0.5', '0o5' or '..._001').")
+
+
+# Written by `series` beside its CSVs: every column with the spectrum it came from, and the
+# point it parsed from the filename (`value: null` when it could not).
+SERIES_METADATA_NAME = 'series_metadata.json'
+
+
+def point_labels(csv_path):
+    """The titration point labels of a titration CSV, as written, in file order."""
+    cols = list(pd.read_csv(csv_path, nrows=0).columns)
+    if 'spectrum_name' in cols:
+        names = pd.read_csv(csv_path, usecols=['spectrum_name'], dtype=str)['spectrum_name']
+        return list(dict.fromkeys(names.str.strip()))
+    if any(c.endswith('_Position_X') for c in cols):
+        return [c[:-len('_Position_X')] for c in cols if c.endswith('_Position_X')]
+    return [c for c in cols if _to_point(c) is not None]
+
+
+def _unparsed_series_columns(csv_path):
+    """The columns `series` named after a file stem because it read no point from the
+    filename, or None when no readable series_metadata.json sits beside the CSV."""
+    path = os.path.join(os.path.dirname(os.path.abspath(csv_path)), SERIES_METADATA_NAME)
+    try:
+        with open(path) as fh:
+            columns = json.load(fh)['columns']
+        return {str(c['column']) for c in columns if c.get('value') is None}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _is_number_label(label):
+    """Whether a label is a number, as `series` writes titration points ('0.125', '3'),
+    a '_<n>' repeat suffix allowed ('1_2'). 'o' reads as the decimal point ('0o5')."""
+    s = re.sub(r'_\d+$', '', str(label).strip())
+    if '_' in s:
+        return False
+    try:
+        return math.isfinite(float(s.replace('o', '.')))
+    except ValueError:
+        return False
+
+
+def labels_without_points(csv_path):
+    """The point labels of `csv_path` that do not name a titration point.
+
+    Those `series` marked unparsed in the series_metadata.json beside the CSV, or, with
+    no such file, every label that is not a number. Such a label still orders the points
+    (_to_point reads its trailing digits), but its digits are an acquisition index, not a
+    concentration.
+    """
+    labels = point_labels(csv_path)
+    unparsed = _unparsed_series_columns(csv_path)
+    if unparsed is not None:
+        return [lbl for lbl in labels if lbl in unparsed]
+    return [lbl for lbl in labels if not _is_number_label(lbl)]
 
 
 def load_titration_tidy(csv_path):

@@ -11,7 +11,7 @@ from scipy.optimize import curve_fit, least_squares
 from scipy.optimize import OptimizeWarning
 
 from kd_models import csp_model, intensity_decay, residue_sort_key, REF_MAX_RATIO
-from kd_input import load_titration, csp_series, intensity_ratio_series
+from kd_input import load_titration, csp_series, intensity_ratio_series, labels_without_points
 
 _MIN_POINTS = 3
 _GLOBAL_R2_MIN = 0.8    # a residue must fit its own decay this well to pool into a global Kd
@@ -550,12 +550,32 @@ def _bootstrap_global_intensity(L, series, masks, names, popt, lo, hi, n):
         return float('nan')
 
 
+def _refuse_labels_as_concentrations(csv_path):
+    """Raise if the point labels that would stand in for concentrations do not name points.
+
+    A label `series` could not parse is a file stem, and its trailing digits are an
+    acquisition index: `sample_2` read as 2 eq is the confident wrong Kd that refusing
+    a run without concentrations exists to prevent.
+    """
+    unread = labels_without_points(csv_path)
+    if unread:
+        raise ValueError(
+            f"{len(unread)} point label(s) of {os.path.basename(csv_path)} name no "
+            f"titration point, so they cannot be read as concentrations: "
+            f"{', '.join(unread)}. Either `series` could not parse a point from these "
+            f"spectrum names (series_metadata.json gives them no value), or, with no "
+            f"series_metadata.json beside the input, the label is not a number. Give the "
+            f"concentrations with --conc.")
+
+
 def load_inputs(params):
     """Load a titration CSV and resolve concentrations, scaling and observable choice.
 
     Shared by the fit and the survey so both read a dataset the same way.
     """
     points, residues = load_titration(params['input_csv_file'])
+    if not params.get('concentrations'):
+        _refuse_labels_as_concentrations(params['input_csv_file'])
     concs = list(params.get('concentrations') or points)
     if len(concs) != len(points):
         raise ValueError(f"{len(concs)} concentrations given but {len(points)} titration points found")

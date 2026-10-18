@@ -316,7 +316,11 @@ it (`--conc-units`, default `absolute`), never in units a stored file recorded. 
 `--conc` both come from the stored file, and a `--conc-units` that contradicts the stored
 units is refused. With neither, `--conc-units` alone (or a stored file that states only
 `conc_units`, as a survey run without `--conc` writes) says the spectrum names carry the
-concentrations (`..._3o0.ft` = 3.0 eq with `equivalents`). **With none of these the run
+concentrations (`..._3o0.ft` = 3.0 eq with `equivalents`). A label `series` could not
+parse is the file stem (`sample_2`; `value: null` in `series_metadata.json`) and is never
+read as a concentration: such a run is refused, naming the labels, until `--conc` gives
+them. With no `series_metadata.json` beside the input a label counts only if it is a
+number (`0.125`, `3`, `1_2` for a repeat). **With none of these the run
 is refused** (`--survey` too) - point labels or acquisition indices fitted as micromolar
 gave a confident Kd wrong by up to `--p0`.
 
