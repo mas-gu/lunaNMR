@@ -529,7 +529,10 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
             ax.set_ylabel(f"Signal ({signal_units})")
             ax.legend()
             ax.set_xlim(0, max(x)*1.1)
-            ax.set_ylim(min(y)*0.9, max(y)*1.1)
+            # An empty cell is an unmeasured point: the limits come from the rest.
+            _, y_measured = measured_points(x, y)
+            if y_measured.size:
+                ax.set_ylim(y_measured.min()*0.9, y_measured.max()*1.1)
         
         # Hide unused subplots
         for idx in range(end_idx - start_idx, len(axes)):
