@@ -330,8 +330,8 @@ class PeakUndoManager(QObject):
         self.undo_stack.setUndoLimit(self.MAX_UNDO_DEPTH)
 
         # Connect signals
-        self.undo_stack.canUndoChanged.connect(self.can_undo_changed.emit)
-        self.undo_stack.canRedoChanged.connect(self.can_redo_changed.emit)
+        self.undo_stack.canUndoChanged.connect(self.can_undo_changed)
+        self.undo_stack.canRedoChanged.connect(self.can_redo_changed)
 
     def push(self, command: QUndoCommand):
         """Push a command onto the undo stack.
