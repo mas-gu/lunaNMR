@@ -28,6 +28,8 @@ from lunaNMR.gui.styles.design_system import (
     PANEL_BG_COLOR,
     PRIMARY_TEXT,
     SPACING_SM,
+    FONT_SIZE_MEDIUM_HEADER,
+    FONT_SIZE_SECTION_LABEL,
 )
 
 
@@ -317,7 +319,7 @@ class IntensityDecayWidget(QWidget):
         self.title_label.setStyleSheet(f"""
             QLabel {{
                 font-weight: bold;
-                font-size: 13px;
+                font-size: {FONT_SIZE_MEDIUM_HEADER}pt;
                 color: {PRIMARY_TEXT};
                 padding: 4px;
             }}
@@ -335,7 +337,7 @@ class IntensityDecayWidget(QWidget):
         self.value_type_combo.currentIndexChanged.connect(self._on_value_type_changed)
         self.value_type_combo.setStyleSheet(f"""
             QComboBox {{
-                font-size: 11px;
+                font-size: {FONT_SIZE_SECTION_LABEL}pt;
                 padding: 2px 6px;
                 min-width: 100px;
             }}

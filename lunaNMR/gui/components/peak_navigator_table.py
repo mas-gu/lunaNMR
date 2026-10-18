@@ -30,7 +30,7 @@ from lunaNMR.gui.styles.design_system import (
     SECONDARY_BUTTON_BORDER,
     SPACING_XS, SPACING_SM, SPACING_MD,
     BUTTON_CORNER_RADIUS,
-    FONT_SIZE_BODY, FONT_SIZE_SMALL
+    FONT_SIZE_LARGE_HEADER, FONT_SIZE_BODY, FONT_SIZE_SMALL
 )
 
 
@@ -180,7 +180,7 @@ class PeakNavigatorTable(QWidget):
                 border: 1px solid {SECONDARY_BUTTON_BORDER};
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_XS}px {SPACING_SM}px;
-                font-size: 16px;
+                font-size: {FONT_SIZE_LARGE_HEADER}pt;
                 min-width: 32px;
             }}
             QPushButton:hover {{
@@ -202,7 +202,7 @@ class PeakNavigatorTable(QWidget):
                 border: none;
                 border-radius: {BUTTON_CORNER_RADIUS}px;
                 padding: {SPACING_XS}px {SPACING_SM}px;
-                font-size: 16px;
+                font-size: {FONT_SIZE_LARGE_HEADER}pt;
                 min-width: 32px;
             }}
             QPushButton:hover {{

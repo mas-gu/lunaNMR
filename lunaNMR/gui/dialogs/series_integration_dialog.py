@@ -23,7 +23,7 @@ from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.utils.cancellation import Cancelled
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
-    FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
+    FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL, FONT_SIZE_MONOSPACE,
     PRIMARY_TEXT, SECONDARY_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
@@ -461,14 +461,14 @@ class SeriesIntegrationDialog(BaseDialog):
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setMaximumHeight(100)
-        self.log_text.setStyleSheet("""
-            QTextEdit {
+        self.log_text.setStyleSheet(f"""
+            QTextEdit {{
                 font-family: monospace;
-                font-size: 10px;
+                font-size: {FONT_SIZE_MONOSPACE}pt;
                 background-color: #F5F5F5;
                 border: 1px solid #C7C7CC;
                 border-radius: 6px;
-            }
+            }}
         """)
         layout.addWidget(self.log_text)
 

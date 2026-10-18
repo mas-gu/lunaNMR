@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
-    FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
+    FONT_SIZE_LARGE_HEADER, FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT, DISABLED_TEXT,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
@@ -110,7 +110,7 @@ class MissingFilesDialog(BaseDialog):
         warning_icon = QLabel("\u26A0")  # Warning sign unicode
         warning_icon.setStyleSheet(f"""
             QLabel {{
-                font-size: 24px;
+                font-size: {FONT_SIZE_LARGE_HEADER}pt;
                 color: {WARNING_ORANGE};
                 padding-right: {SPACING_SM}px;
             }}

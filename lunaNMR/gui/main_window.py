@@ -51,6 +51,7 @@ from lunaNMR.gui.components.peak_navigator import PeakNavigator
 from lunaNMR.gui.styles.design_system import (
     PANEL_BG_COLOR, FRAME_BG_COLOR, PRIMARY_TEXT, SECONDARY_TEXT,
     SPACING_SM, SPACING_MD, SPACING_XS,
+    FONT_SIZE_LARGE_HEADER, FONT_SIZE_MEDIUM_HEADER,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT, SECONDARY_BUTTON_BORDER,
@@ -2298,7 +2299,7 @@ class LunaNMRMainWindow(BaseWindow):
         params_frame_layout.addWidget(self.expert_det_y_spin, 2, 2)
 
         self.expert_det_ppm_label = QLabel(self.detection_square_ppm_x)
-        self.expert_det_ppm_label.setStyleSheet("font-size: 10px; color: gray;")
+        self.expert_det_ppm_label.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: gray;")
         params_frame_layout.addWidget(self.expert_det_ppm_label, 2, 3)
 
         # Row 3: Peak Centroid Detection header
@@ -2457,7 +2458,7 @@ class LunaNMRMainWindow(BaseWindow):
         nucleus_row.addWidget(self.expert_nucleus_combo)
 
         nucleus_hint = QLabel("(for 2D overlap fitting)")
-        nucleus_hint.setStyleSheet("font-size: 10px; color: gray;")
+        nucleus_hint.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: gray;")
         nucleus_row.addWidget(nucleus_hint)
         nucleus_row.addStretch()
         ps2d_config_layout.addLayout(nucleus_row)
@@ -2617,7 +2618,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.expert_fix_lw_check.stateChanged.connect(self._on_fix_linewidths_change)
         fix_lw_row.addWidget(self.expert_fix_lw_check)
         fix_lw_hint = QLabel("(Hold linewidths constant during multi-peak fitting)")
-        fix_lw_hint.setStyleSheet("font-size: 10px; color: gray;")
+        fix_lw_hint.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: gray;")
         fix_lw_row.addWidget(fix_lw_hint)
         fix_lw_row.addStretch()
         fit_params_layout.addLayout(fix_lw_row)
@@ -2629,7 +2630,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.expert_fix_pos_check.stateChanged.connect(self._on_fix_positions_change)
         fix_pos_row.addWidget(self.expert_fix_pos_check)
         fix_pos_hint = QLabel("(Hold peak positions constant during multi-peak fitting)")
-        fix_pos_hint.setStyleSheet("font-size: 10px; color: gray;")
+        fix_pos_hint.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: gray;")
         fix_pos_row.addWidget(fix_pos_hint)
         fix_pos_row.addStretch()
         fit_params_layout.addLayout(fix_pos_row)
@@ -2641,7 +2642,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.expert_custom_lw_check.stateChanged.connect(self._on_custom_lw_toggle)
         custom_lw_row.addWidget(self.expert_custom_lw_check)
         custom_lw_hint = QLabel("(Override defaults: Lor/Gauss 1H=0.001/0.03, 15N=0.0001/0.3)")
-        custom_lw_hint.setStyleSheet("font-size: 10px; color: gray;")
+        custom_lw_hint.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: gray;")
         custom_lw_row.addWidget(custom_lw_hint)
         custom_lw_row.addStretch()
         fit_params_layout.addLayout(custom_lw_row)
@@ -2710,7 +2711,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.expert_adaptive_check.stateChanged.connect(self._on_adaptive_optimization_change)
         adaptive_row.addWidget(self.expert_adaptive_check)
         adaptive_hint = QLabel("(Grid search for optimal radF1/radF2 after PASS1)")
-        adaptive_hint.setStyleSheet("font-size: 10px; color: gray;")
+        adaptive_hint.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: gray;")
         adaptive_row.addWidget(adaptive_hint)
         adaptive_row.addStretch()
         fit_params_layout.addLayout(adaptive_row)
@@ -2775,7 +2776,7 @@ class LunaNMRMainWindow(BaseWindow):
         )
         drift_limit_row.addWidget(self.expert_cascade_drift_check)
         drift_limit_hint = QLabel("(15N: ±0.025/±0.005, 13C: ±0.01/±0.005 ppm)")
-        drift_limit_hint.setStyleSheet("font-size: 10px; color: gray;")
+        drift_limit_hint.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: gray;")
         drift_limit_row.addWidget(drift_limit_hint)
         drift_limit_row.addStretch()
         series_layout.addLayout(drift_limit_row)
@@ -2794,7 +2795,7 @@ class LunaNMRMainWindow(BaseWindow):
         )
         lock_clusters_row.addWidget(self.expert_lock_clusters_check)
         lock_clusters_hint = QLabel("(Independent mode only)")
-        lock_clusters_hint.setStyleSheet("font-size: 10px; color: gray;")
+        lock_clusters_hint.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: gray;")
         lock_clusters_row.addWidget(lock_clusters_hint)
         lock_clusters_row.addStretch()
         series_layout.addLayout(lock_clusters_row)
@@ -3667,9 +3668,9 @@ class LunaNMRMainWindow(BaseWindow):
 
         # Layer visibility group (bold text, 25% larger font)
         layer_group = QGroupBox("Layer Visibility")
-        layer_group.setStyleSheet("""
-            QGroupBox { font-weight: bold; font-size: 15px; }
-            QCheckBox { font-weight: bold; font-size: 15px; }
+        layer_group.setStyleSheet(f"""
+            QGroupBox {{ font-weight: bold; font-size: {FONT_SIZE_LARGE_HEADER}pt; }}
+            QCheckBox {{ font-weight: bold; font-size: {FONT_SIZE_LARGE_HEADER}pt; }}
         """)
         layer_layout = QHBoxLayout(layer_group)
         layer_layout.setContentsMargins(8, 3, 8, 3)
@@ -3717,7 +3718,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.color_scheme_3d_dropdown.currentTextChanged.connect(self._on_color_scheme_change_3d)
         # Make dropdown larger with larger text
         self.color_scheme_3d_dropdown.setMinimumWidth(120)
-        self.color_scheme_3d_dropdown.setStyleSheet("QComboBox { font-size: 13px; padding: 4px 8px; }")
+        self.color_scheme_3d_dropdown.setStyleSheet(f"QComboBox {{ font-size: {FONT_SIZE_MEDIUM_HEADER}pt; padding: 4px 8px; }}")
         color_scheme_layout.addWidget(self.color_scheme_3d_dropdown)
 
         row1_layout.addWidget(color_scheme_group)
@@ -3778,7 +3779,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: none;
                 padding: {SPACING_MD}px;
                 font-family: Courier;
-                font-size: 9px;
+                font-size: {FONT_SIZE_SMALL}pt;
             }}
         """)
         layout.addWidget(self.peak_params_text)

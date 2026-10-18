@@ -16,6 +16,7 @@ REJECTED_COLOURS = {
 }
 
 FONT_TOKEN_AS_PX = re.compile(r"FONT_SIZE_[A-Z_]+\}px")
+LITERAL_PX_FONT_SIZE = re.compile(r"font-size:\s*\d+(\.\d+)?\s*px")
 
 
 def gui_python_files():
@@ -47,6 +48,26 @@ def test_font_size_tokens_are_never_interpolated_as_pixels():
     assert not offenders, (
         f"{len(offenders)} font-size token(s) interpolated as px instead of pt:\n  "
         + "\n  ".join(offenders[:15])
+    )
+
+
+def test_font_sizes_are_never_literal_pixels():
+    """A literal `font-size: 13px` has the same 96-DPI shrink as an interpolated token,
+    and bypasses the design system; the size must come from a FONT_SIZE_* token in pt.
+
+    Under gui/styles/ the stylesheet itself is the design system and is not scanned.
+    """
+    offenders = []
+    for path in gui_python_files():
+        if "styles" in path.relative_to(GUI_DIR).parts:
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if LITERAL_PX_FONT_SIZE.search(line):
+                offenders.append(f"{path.relative_to(GUI_DIR)}:{lineno}: {line.strip()}")
+
+    assert not offenders, (
+        f"{len(offenders)} literal px font-size rule(s); use a FONT_SIZE_* token in pt:\n  "
+        + "\n  ".join(offenders)
     )
 
 

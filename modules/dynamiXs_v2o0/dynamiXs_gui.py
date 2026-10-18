@@ -3143,7 +3143,7 @@ class IntegratedAnalysisPage(BasePage):
         timer_row.setLayout(timer_layout)
         timer_layout.addWidget(create_label("Elapsed Time:"))
         self.elapsed_time_label = create_label("--:--")
-        self.elapsed_time_label.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {PRIMARY_TEXT};")
+        self.elapsed_time_label.setStyleSheet(f"font-weight: bold; font-size: {FONT_SIZE_LARGE_HEADER}pt; color: {PRIMARY_TEXT};")
         timer_layout.addWidget(self.elapsed_time_label)
         timer_layout.addStretch()
         log_layout.addWidget(timer_row)
