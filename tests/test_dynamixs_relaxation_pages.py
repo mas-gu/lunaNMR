@@ -232,3 +232,19 @@ class TestASeriesDroppedOnTheModelFreePage:
                                 str(T1_SERIES / "series_analysis_tidy.csv"))
         assert page.field1_noe_sat_file is None
         assert "hetNOE" in page.progress_text.toPlainText()
+
+
+def test_the_analysis_name_prompt_suggests_a_name_the_project_does_not_hold(app, monkeypatch):
+    import lunaNMR.gui.dialogs.dynamixs_dialog as dynamixs_dialog
+    suggested = []
+
+    def answer(parent, title, label, text=""):     # the name box, answered as offered
+        suggested.append(text)
+        return text, True
+    monkeypatch.setattr(dynamixs_dialog.QInputDialog, "getText", staticmethod(answer))
+    d = _dialog(types.SimpleNamespace(dynamixs_analyses={"Analysis_1": {}, "Analysis_2": {}}))
+    try:
+        assert d._prompt_analysis_name("T1/T2 Fitting") == "Analysis_3"
+        assert suggested == ["Analysis_3"]
+    finally:
+        d.deleteLater()
