@@ -510,8 +510,12 @@ number (`0.125`, `3`, `1_2` for a repeat). With none of
 these the run — survey included — is refused rather than fitting point labels as µM. The
 summary's `params_source` names the file read and `params_skipped` every file passed over,
 with the reason; a run refused for want of concentrations names them in its message and,
-under `--format json`, in `error.details.params_skipped`. Only concentrations, intensity scales and the survey thresholds are restored;
-`--p0`, `--alpha`, `--intensity-from` and `--observable` are taken from the command line.
+under `--format json`, in `error.details.params_skipped`. A params file records only what is
+restored: the concentrations with their `conc_units` (when stated), the intensity scales and the
+survey thresholds, plus the input and titration points it was written for. `--p0`, `--alpha`,
+`--intensity-from` and `--observable` are taken from the command line on every run; the fit
+JSON's metadata records the values a fit used. The Kd page applies the same keys from such a
+file and leaves its other controls as they are.
 
 `export kd` writes PDFs in `--out` and its CSV/JSON under `<out>/data/`: `summary.csv` plus,
 per `--kind`, all prefixed with `--prefix` if given (default: none, i.e. unprefixed

@@ -806,8 +806,7 @@ def run_kd_analysis_with_params(params, progress_callback=None):
     # Importable binding-parameters JSON, so re-running needs no manual re-entry.
     # The run's own params, in the units the caller gave: `concs` has already had
     # equivalents multiplied by P0, so persisting it under the caller's conc_units would
-    # convert twice on read-back. normalize_params keeps the schema keys and drops the
-    # rest, so a setting added later round-trips without being enumerated here.
+    # convert twice on read-back. dump_params_json keeps only kd_params.STORED_KEYS.
     from kd_params import dump_params_json, PARAMS_SUFFIX
     params_file = os.path.join(data_dir, f"{prefix}{PARAMS_SUFFIX}")
     dump_params_json(params_file, {**params, 'points': points})

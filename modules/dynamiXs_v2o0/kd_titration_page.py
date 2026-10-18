@@ -408,16 +408,17 @@ class KdTitrationPage(BasePage):
     # ---------- importable binding parameters ----------
 
     def _apply_params(self, params, n_points, stated=None):
-        """Populate the Binding-parameters panel from a normalized params dict. Per-point
-        lists ([L], intensity scales) are applied only when their length matches the
-        detected points, so a mismatched file can't silently corrupt the run.
+        """Populate the Binding-parameters panel from a normalized params dict. Only the
+        keys the source records (`stated`) are applied; every other control is left as
+        it is. Per-point lists ([L], intensity scales) are applied only when their length
+        matches the detected points, so a mismatched file can't silently corrupt the run.
 
         Concentrations and their units are one statement, as in `kd`: applied together,
         or not at all. A source that records no concentrations but states its units
         (`stated`: the keys it actually records; None for a dict that states them all)
         names the units of the point labels. Returns why the concentrations were not
         applied, or None."""
-        from kd_params import observables_to_combo_index, points_mismatch, thresholds
+        from kd_params import THRESHOLD_KEYS, observables_to_combo_index, points_mismatch
         stated = set(params) if stated is None else stated
         concs = params.get('concentrations')
         not_applied = None
@@ -436,12 +437,17 @@ class KdTitrationPage(BasePage):
         if scales and len(scales) == n_points:
             for spin, val in zip(self.scale_spins, scales):
                 spin.setValue(float(val))
-        self.p0_spin.setValue(float(params.get('protein_conc', 50.0)))
-        self.alpha_spin.setValue(float(params.get('alpha', 0.14)))
-        self.obs_combo.setCurrentIndex(observables_to_combo_index(params.get('observables')))
-        self.intvalue_combo.setCurrentText(str(params.get('intensity_value', 'height')))
-        self.boot_spin.setValue(int(params.get('n_bootstrap', 0)))
-        self.thresholds = thresholds(params)
+        if 'protein_conc' in stated:
+            self.p0_spin.setValue(float(params['protein_conc']))
+        if 'alpha' in stated:
+            self.alpha_spin.setValue(float(params['alpha']))
+        if stated & {'observables', 'observable'}:
+            self.obs_combo.setCurrentIndex(observables_to_combo_index(params['observables']))
+        if 'intensity_value' in stated:
+            self.intvalue_combo.setCurrentText(str(params['intensity_value']))
+        if stated & {'n_bootstrap', 'bootstrap'}:
+            self.boot_spin.setValue(int(params['n_bootstrap']))
+        self.thresholds.update({k: params[k] for k in THRESHOLD_KEYS if k in stated})
         return not_applied
 
     def _maybe_apply_params_json(self, csv_path, points):
@@ -465,14 +471,16 @@ class KdTitrationPage(BasePage):
     def _load_params_file(self, path):
         """Apply a params source to the panel and say on the page what it supplied."""
         from kd_params import load_params, recorded_keys, thresholds
+        recorded = recorded_keys(path)
         not_applied = self._apply_params(load_params(path), n_points=len(self.conc_spins),
-                                         stated=recorded_keys(path))
+                                         stated=recorded)
         msg = f"Loaded binding parameters from {os.path.basename(path)}"
         if not_applied:
             msg += f" - not using its concentrations and units: {not_applied}"
         self._log(msg)
         defaults = thresholds()
-        stored = [f"{k}={v:g}" for k, v in self.thresholds.items() if v != defaults[k]]
+        stored = [f"{k}={v:g}" for k, v in self.thresholds.items()
+                  if k in recorded and v != defaults[k]]
         if stored:
             self._log("Thresholds from that file: " + ", ".join(stored))
 
