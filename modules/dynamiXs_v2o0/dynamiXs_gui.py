@@ -3077,44 +3077,42 @@ class IntegratedAnalysisPage(BasePage):
     def _on_series_dropped(self, field_name: str, series_name: str, csv_path: str):
         """Handle a series being dropped on a data field.
 
+        A T1 or T2 slot takes the series' intensity matrix, the file `dynamixs modelfree`
+        reads. A hetNOE slot takes no series: it reads one plane's intensities, and a
+        hetNOE series holds both planes in one matrix.
+
         Args:
             field_name: Target field (e.g., 'field1_t1', 'field2_noe_sat')
             series_name: Name of the dropped series
             csv_path: Path to series_analysis_tidy.csv
         """
-        # Set the file path
-        if csv_path:
-            setattr(self, f"{field_name}_file", csv_path)
-        else:
-            # CSV path not found - warn user
-            show_warning(
-                self,
-                "CSV Not Found",
-                f"Could not find series_analysis_tidy.csv for series '{series_name}'.\n\n"
-                "The series was saved but the CSV output file could not be located.\n"
-                "Please use the Browse button to select the CSV file manually."
-            )
-
-        # Update the display
+        label = field_name.replace('_', ' ').title()
+        if 'noe' in field_name:
+            self.progress_text.appendPlainText(
+                f"{label} takes one plane's intensities (residue,intensity[,error]), not a "
+                f"series: compute the hetNOE planes from series '{series_name}' and browse "
+                f"for the file.")
+            return
+        matrix = self._series_intensity_matrix(series_name)
         display = getattr(self, f"{field_name}_display", None)
+        if not matrix:
+            self.progress_text.appendPlainText(
+                f"Series '{series_name}' has no peak_intensity_matrix.csv beside its outputs: "
+                f"browse for the {label} file.")
+            if display:
+                display.setText(f"⚠️ {series_name} (no intensity matrix)")
+            return
+        setattr(self, f"{field_name}_file", matrix)
         if display:
-            if csv_path:
-                display.setText(f"📊 {series_name}")
-                display.setToolTip(f"Series: {series_name}\nCSV: {csv_path}")
-            else:
-                display.setText(f"⚠️ {series_name} (CSV not found)")
-                display.setToolTip(f"Series: {series_name}\nCSV: Not found - use Browse to select")
+            display.setText(f"📊 {series_name}")
+            display.setToolTip(f"Series: {series_name}\nMatrix: {matrix}")
 
         # Store source_series metadata for later use in Inspect Peak
         if not hasattr(self, 'source_series_map'):
             self.source_series_map = {}
         self.source_series_map[field_name] = series_name
 
-        # Log to results area
-        if hasattr(self, 'results_text'):
-            self.results_text.appendPlainText(
-                f"Assigned series '{series_name}' to {field_name.replace('_', ' ').title()}"
-            )
+        self.progress_text.appendPlainText(f"Assigned series '{series_name}' to {label}")
 
     def _on_mf_error_method_changed(self, index: int):
         """Show/hide bootstrap iterations based on error method selection."""

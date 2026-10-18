@@ -209,3 +209,26 @@ class TestTheModelFreePageReportsTheFit:
         assert excluded
         assert (f"Field 1: {len(excluded)} residues excluded at the merge (not in all "
                 f"datasets): {', '.join(excluded)}") in log
+
+
+class TestASeriesDroppedOnTheModelFreePage:
+
+    @pytest.fixture
+    def page(self, app, series_from_tidy):
+        br, _ = series_from_tidy(T1_SERIES / "series_analysis_tidy.csv")
+        br.metadata["output_folder"] = str(T1_SERIES)
+        d = _dialog(types.SimpleNamespace(saved_series={"t1_series": br},
+                                          current_project_path=None))
+        yield d.integrated_page
+        d.deleteLater()
+
+    def test_a_relaxation_slot_takes_the_series_intensity_matrix(self, page):
+        page._on_series_dropped("field1_t1", "t1_series",
+                                str(T1_SERIES / "series_analysis_tidy.csv"))
+        assert page.field1_t1_file == str(T1_MATRIX)
+
+    def test_a_hetnoe_slot_is_not_given_the_tidy_csv(self, page):
+        page._on_series_dropped("field1_noe_sat", "t1_series",
+                                str(T1_SERIES / "series_analysis_tidy.csv"))
+        assert page.field1_noe_sat_file is None
+        assert "hetNOE" in page.progress_text.toPlainText()
