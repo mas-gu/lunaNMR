@@ -1,8 +1,10 @@
-# ABOUTME: Shared pytest fixtures for the lunaNMR test suite.
-# ABOUTME: A short real DNAJA1 titration series, run once per session through `lunaNMR series`.
+# ABOUTME: Shared pytest fixtures for the lunaNMR test suite: a short real DNAJA1 titration run
+# ABOUTME: once per session through `lunaNMR series`, and a series rebuilt in memory from a tidy CSV.
 
+import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 DNAJA1 = Path(__file__).resolve().parents[2] / "data_test" / "data_binding" / "DNAJA1_HSPA8"
@@ -30,3 +32,24 @@ def dnaja1_titration_series(tmp_path_factory):
     assert code == 0
     (root / "summary.json").write_text(summary.getvalue())
     return root / "out"
+
+
+@pytest.fixture
+def series_from_tidy():
+    """Build a series as the GUI holds it (BatchResults) from a series folder's tidy CSV:
+    one result per spectrum, carrying the per-peak fields the tidy CSV was written from.
+    Returns (BatchResults, the tidy frame)."""
+    from lunaNMR.processors.multi_spectrum_processor import BatchResults
+
+    def build(tidy_csv):
+        meta = json.loads((Path(tidy_csv).parent / "series_metadata.json").read_text())
+        spectrum_of = {c['column']: c['spectrum'] for c in meta['columns']}
+        tidy = pd.read_csv(tidy_csv, dtype={'spectrum_name': str})
+        br = BatchResults()
+        for column, rows in tidy.groupby('spectrum_name'):
+            peaks = [{k: (None if pd.isna(v) else v) for k, v in row.items()
+                      if k != 'spectrum_name'} for row in rows.to_dict('records')]
+            br.add_result(spectrum_of[column], {'status': 'success', 'success': True,
+                                                'integration_results': peaks})
+        return br, tidy
+    return build
