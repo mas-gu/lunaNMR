@@ -68,8 +68,10 @@ territory: 0.49 × the distance to its nearest neighbour), so no peak can reach 
 
 Read from main-window state into `gui_params` (default **OFF**). They gate PS2D L-M stages:
 
-- **Fix Positions** → skips Stage 2 (position refinement); positions locked to reference.
-- **Fix Linewidths** → skips Stage 1 (linewidth optimization); only intensities vary.
+- **Fix Positions** → skips Stage 2 (position refinement) and holds positions in the final
+  stage; positions stay at their seed (the reference, or the previous point in cascade).
+- **Fix Linewidths** → holds the linewidths in every stage; Stage 1 still runs and fits
+  the intensities, so only intensities vary.
 
 Guidance: relaxation/titration usually leave positions to the chosen peak-source mode and
 linewidths free; fix linewidths only when they are known to be constant.
