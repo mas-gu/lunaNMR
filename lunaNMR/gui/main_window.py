@@ -5391,11 +5391,13 @@ class LunaNMRMainWindow(BaseWindow):
         # Sort by spectrum name for consistent ordering
         all_results.sort(key=lambda x: x.get('spectrum_name', ''))
 
-        # Open multi-spectrum viewer dialog
+        # Open multi-spectrum viewer dialog; corrections are saved into the series' CSVs
+        from lunaNMR.utils.project_manager import series_folder
         dialog = MultiSpectrumViewerDialog(
             parent=self,
             all_results=all_results,
-            file_manager=self.file_manager
+            file_manager=self.file_manager,
+            output_folder=series_folder(batch_results)
         )
         dialog.show()  # Non-modal
 

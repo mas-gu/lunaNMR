@@ -46,7 +46,7 @@ def test_save_copies_tidy_csv_into_bundle(tmp_path):
     assert copied.read_text() == tidy.read_text()
 
 
-# ---------- resolve side: bundled copy preferred, falls back correctly ----------
+# ---------- resolve side: a loaded series' bundled copy, a live series' own ----------
 
 def _resolve():
     from dynamiXs_gui import resolve_series_csv
@@ -70,7 +70,9 @@ def test_resolve_prefers_bundled_copy(tmp_path):
     assert resolve_series_csv(batch) == str(bundled)
 
 
-def test_resolve_falls_back_to_recorded_path(tmp_path):
+def test_resolve_never_reads_a_loaded_series_run_folder(tmp_path):
+    """The run folder may hold a later run: a loaded series without its bundled copy
+    has no CSV."""
     resolve_series_csv = _resolve()
     bundle = tmp_path / "proj.lunaNMR"          # no bundled copy present
     (bundle / "series_results" / "S1").mkdir(parents=True)
@@ -81,7 +83,7 @@ def test_resolve_falls_back_to_recorded_path(tmp_path):
     batch = BatchResults()
     batch.metadata.update({'csv_path': str(orig), 'output_folder': str(orig.parent)})
     batch.bundled_folder = str(bundle / "series_results" / "S1")
-    assert resolve_series_csv(batch) == str(orig)
+    assert resolve_series_csv(batch) == ""
 
 
 def test_resolve_no_extra_lunaNMR_component(tmp_path):

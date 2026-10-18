@@ -433,19 +433,17 @@ class DynamiXsMainWindow(QMainWindow):
 # =============================================================================
 
 def resolve_series_csv(batch_results):
-    """Path to a series' series_analysis_tidy.csv for the Kd input.
+    """Path to a series' series_analysis_tidy.csv for the Kd input, or "" if it is not
+    on disk.
 
     A series opened from a project reads the copy bundled beside its
-    batch_results.json (so a moved/renamed source run folder still resolves); a
-    series run in this session reads its own run's. If none exists on disk, returns
-    the recorded csv_path for display.
+    batch_results.json, never its recorded run folder, which may hold a later run; a
+    series run in this session reads its own run's.
     """
     _ensure_lunaNMR_path()
     from lunaNMR.utils.project_manager import series_csv_path
-    path = series_csv_path(batch_results, "series_analysis_tidy.csv", bundled_first=True)
-    if path is not None:
-        return str(path)
-    return (getattr(batch_results, 'metadata', None) or {}).get('csv_path') or ""
+    path = series_csv_path(batch_results, "series_analysis_tidy.csv")
+    return str(path) if path is not None else ""
 
 
 class BasePage(QWidget):
@@ -509,13 +507,13 @@ class BasePage(QWidget):
 
     def _series_intensity_matrix(self, series_name):
         """A series' intensity matrix, or None: for a series opened from a project, the
-        copy bundled beside it (the run folder may have moved), then the one beside the
-        series' outputs."""
+        copy bundled beside it; for a series run in this session, the one beside its
+        outputs."""
         _ensure_lunaNMR_path()
         from lunaNMR.utils.project_manager import series_csv_path
         main = self._lunanmr_main_window()
         batch = (getattr(main, 'saved_series', {}) or {}).get(series_name)
-        path = series_csv_path(batch, "peak_intensity_matrix.csv", bundled_first=True)
+        path = series_csv_path(batch, "peak_intensity_matrix.csv")
         return str(path) if path is not None else None
 
     def _add_series_panel(self, layout, hint, empty_text, include=None, max_height=120):
