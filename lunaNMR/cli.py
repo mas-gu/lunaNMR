@@ -785,10 +785,11 @@ def _default_series_params(parallel=False):
     (gui/dialogs/series_integration_dialog.py::_get_voigt_parameters); a headless run
     just uses the defaults directly. `parallel` enables the two-pass parallel processor.
     """
+    from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM
     return {
         'detection_params': {
-            'search_window_x': 0.070,
-            'search_window_y': 0.070,
+            'search_window_x': SEARCH_WINDOW_PPM,
+            'search_window_y': SEARCH_WINDOW_PPM,
             'noise_threshold': 3.0,
         },
         'gui_params': {

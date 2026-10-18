@@ -60,7 +60,7 @@ from lunaNMR.gui.styles.design_system import (
 
 # Import core processing components
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
-from lunaNMR.core.ps2d_config import (set_ps2d_config, get_ps2d_config, mark_ps2d_config_as_base,
+from lunaNMR.core.ps2d_config import (SEARCH_WINDOW_PPM, set_ps2d_config, get_ps2d_config, mark_ps2d_config_as_base,
                                       reset_ps2d_config)
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.utils.config_manager import ConfigurationManager, UserPreferences, ProcessingParameters
@@ -420,8 +420,8 @@ class LunaNMRMainWindow(BaseWindow):
         # Detection parameters from parameter_manager defaults
         self.noise_threshold = 3.0
         # Nucleus-adaptive search windows (from ps2d_config)
-        self.search_window_x = 0.070  # 1H dimension (ppm) - F2
-        self.search_window_y = 0.070  # 15N/13C dimension (ppm) - F1
+        self.search_window_x = SEARCH_WINDOW_PPM  # 1H dimension (ppm) - F2
+        self.search_window_y = SEARCH_WINDOW_PPM  # 15N/13C dimension (ppm) - F1
         self.detection_square_size = 3  # X-dimension/1H (pixels)
         self.detection_rectangle_y = 1  # Y-dimension/15N (pixels)
         self.detection_square_ppm_x = "0.000"  # Auto-calculated ppm conversion
@@ -3288,14 +3288,17 @@ class LunaNMRMainWindow(BaseWindow):
         self._show_ps2d_config()
 
         # Update nucleus-adaptive search windows
-        self.search_window_y = config.search_window_f1  # F1 (15N/13C)
-        self.search_window_x = config.search_window_f2  # F2 (1H)
+        window_y = config.search_window_f1  # F1 (15N/13C)
+        window_x = config.search_window_f2  # F2 (1H)
+        self.search_window_y = window_y
+        self.search_window_x = window_x
 
-        # Update search window spinboxes
+        # Update search window spinboxes: each spinbox's change reads both into the
+        # state, so both are set from the config, never from the state
         if hasattr(self, 'expert_search_x_spin'):
-            self.expert_search_x_spin.setValue(self.search_window_x)
+            self.expert_search_x_spin.setValue(window_x)
         if hasattr(self, 'expert_search_y_spin'):
-            self.expert_search_y_spin.setValue(self.search_window_y)
+            self.expert_search_y_spin.setValue(window_y)
 
         # Update integrator search windows
         if hasattr(self, 'integrator') and self.integrator:
@@ -3662,9 +3665,9 @@ class LunaNMRMainWindow(BaseWindow):
         if hasattr(self, 'expert_noise_spin') and self.expert_noise_spin:
             self.expert_noise_spin.setValue(3.0)
         if hasattr(self, 'expert_search_x_spin') and self.expert_search_x_spin:
-            self.expert_search_x_spin.setValue(0.01)
+            self.expert_search_x_spin.setValue(SEARCH_WINDOW_PPM)
         if hasattr(self, 'expert_search_y_spin') and self.expert_search_y_spin:
-            self.expert_search_y_spin.setValue(0.04)
+            self.expert_search_y_spin.setValue(SEARCH_WINDOW_PPM)
         if hasattr(self, 'expert_centroid_x_spin') and self.expert_centroid_x_spin:
             self.expert_centroid_x_spin.setValue(0.01)
         if hasattr(self, 'expert_centroid_y_spin') and self.expert_centroid_y_spin:

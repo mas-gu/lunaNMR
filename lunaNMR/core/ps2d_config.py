@@ -18,6 +18,10 @@ Author: Claude Code (architectural refactoring)
 from contextlib import contextmanager
 from typing import Dict, Any, Optional
 
+# Detection search window (ppm), the same in 1H and in the indirect dimension of every
+# nucleus: a wider indirect window lets a low-S/N peak match noise
+SEARCH_WINDOW_PPM = 0.070
+
 
 class PS2DConfig:
     """
@@ -100,8 +104,8 @@ class PS2DConfig:
             # Detection search windows (nucleus-adaptive)
             # ================================================================
             # Maximum distance from reference peak to search for detected peak
-            'search_window_f1': 0.05,      # 15N search window (ppm)
-            'search_window_f2': 0.02,      # 1H search window (ppm)
+            'search_window_f1': SEARCH_WINDOW_PPM,  # 15N search window (ppm)
+            'search_window_f2': SEARCH_WINDOW_PPM,  # 1H search window (ppm)
 
             # ================================================================
             # Position bounds (fitting movement limits)
@@ -192,8 +196,8 @@ class PS2DConfig:
             # Detection search windows (nucleus-adaptive)
             # ================================================================
             # Maximum distance from reference peak to search for detected peak
-            'search_window_f1': 0.05,      # 13C search window (ppm)
-            'search_window_f2': 0.02,      # 1H search window (ppm)
+            'search_window_f1': SEARCH_WINDOW_PPM,  # 13C search window (ppm)
+            'search_window_f2': SEARCH_WINDOW_PPM,  # 1H search window (ppm)
 
             # ================================================================
             # Position bounds (fitting movement limits)
