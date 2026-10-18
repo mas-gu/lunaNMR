@@ -41,7 +41,7 @@ FORBIDDEN = {
 }
 
 # Binary payloads and this test cannot meaningfully be scanned.
-SKIP_SUFFIXES = {".joblib", ".pt", ".ft", ".ft1", ".ucsf", ".png", ".pdf"}
+SKIP_SUFFIXES = {".ft", ".ft1", ".ucsf", ".png", ".pdf"}
 SKIP_PATHS = {
     Path(__file__).relative_to(REPO_ROOT).as_posix(),
     # Minified bundle: base64 payloads coincidentally contain these tokens.
