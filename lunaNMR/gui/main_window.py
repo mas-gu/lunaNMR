@@ -8248,6 +8248,15 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         if hasattr(self, 'undo_manager') and self.undo_manager is not None:
             self.undo_manager.on_file_load()
 
+        # The Kd and DynamiXs windows show the previous project's fits, and a project
+        # save captures what they show; reopened, they start from this project.
+        for attr in ('kd_titration_dialog', 'dynamixs_dialog'):
+            dialog = getattr(self, attr, None)
+            if dialog is not None:
+                dialog.close()
+                dialog.deleteLater()
+                setattr(self, attr, None)
+
         # Update file labels
         self.update_file_status_labels(
             nmr_file=self.current_nmr_file,
@@ -8256,8 +8265,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         # Sync fit results to integrator.fitted_peaks BEFORE loading spectrum
         # (load_nmr_file uses integrator.fitted_peaks for peak display)
+        self.integrator.fitted_peaks = self.last_fitting_results or []
         if self.last_fitting_results:
-            self.integrator.fitted_peaks = self.last_fitting_results
             logger.info(f"Synced {len(self.last_fitting_results)} fit results to integrator.fitted_peaks")
 
         # Refresh spectrum display if NMR file is loaded
@@ -8296,12 +8305,13 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             except Exception as e:
                 logger.warning(f"Could not update Voigt plotter: {e}")
 
-        # Apply restored Spectral Inspector state to an already-open window; a
-        # closed/not-yet-opened one picks it up on the next launch_spectral_inspector.
-        if getattr(self, '_spectral_inspector', None) is not None \
-                and getattr(self, 'spectral_inspector_state', None):
+        # Apply restored Spectral Inspector state to an already-open window - emptied when
+        # the project holds none; a not-yet-opened one picks it up on the next
+        # launch_spectral_inspector.
+        if getattr(self, '_spectral_inspector', None) is not None:
             try:
-                self._spectral_inspector.load_state(self.spectral_inspector_state)
+                self._spectral_inspector.load_state(
+                    getattr(self, 'spectral_inspector_state', None) or {})
             except Exception as e:
                 logger.warning(f"Could not refresh Spectral Inspector after load: {e}")
 

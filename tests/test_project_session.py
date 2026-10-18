@@ -119,3 +119,131 @@ def test_a_bundled_json_folder_survives_a_save_onto_itself(bundle_a, tmp_path):
     window, pm, _ = _loaded(bundle)
     assert pm.save_project(bundle)[0]
     assert (page / "json" / "NBD_field1_methylT2_fit_data.json").exists()
+
+
+# ---------- opening a project starts from a clean session ----------
+
+def test_opening_a_project_keeps_nothing_of_the_one_before(bundle_a, empty_bundle):
+    window, pm, _ = _loaded(bundle_a)
+    window.current_voigt_result = window.last_fitting_results[0]
+    ok, _, summary = pm.load_project(empty_bundle)
+    assert ok
+    assert not window.kd_analyses
+    assert not window.dynamixs_analyses
+    assert not window.saved_series
+    assert window.batch_results is None
+    assert window.last_fitting_results is None
+    assert window.current_voigt_result is None
+    assert window.integrator.peak_list is None
+    assert summary["dynamixs"] == {}
+
+
+def test_saving_the_second_project_writes_nothing_of_the_first(bundle_a, empty_bundle,
+                                                               tmp_path):
+    bundle = _copy(empty_bundle, tmp_path)
+    window, pm, _ = _loaded(bundle_a)
+    assert pm.load_project(bundle)[0]
+    assert pm.save_project(bundle)[0]
+    for held in ("kd", "dynamixs", "series_results", "fit_results", "peak_list.csv"):
+        assert not (bundle / held).exists(), held
+
+
+# ---------- a save prunes what the session no longer holds ----------
+
+def test_deleting_everything_and_saving_removes_it_from_the_bundle(bundle_a, tmp_path):
+    bundle = _copy(bundle_a, tmp_path)
+    window, pm, _ = _loaded(bundle)
+    window.kd_analyses = {}
+    window.dynamixs_analyses = {}
+    window.saved_series = {}
+    window.batch_results = None
+    window.last_fitting_results = None
+    window.integrator.peak_list = None
+    assert pm.save_project(bundle)[0]
+    window, _, _ = _loaded(bundle)
+    assert not window.kd_analyses
+    assert not window.dynamixs_analyses
+    assert not window.saved_series
+    assert window.last_fitting_results is None
+    assert window.integrator.peak_list is None
+
+
+def test_a_renamed_series_leaves_no_folder_under_its_old_name(bundle_a, tmp_path):
+    bundle = _copy(bundle_a, tmp_path)
+    window, pm, _ = _loaded(bundle)
+    window.saved_series = {"renamed": window.saved_series[SERIES]}
+    assert pm.save_project(bundle)[0]
+    assert sorted(p.name for p in (bundle / "series_results").iterdir()) == \
+        ["renamed", "series_manifest.json"]
+    assert list(_loaded(bundle)[0].saved_series) == ["renamed"]
+
+
+def test_save_as_onto_another_bundle_replaces_what_it_held(bundle_a, empty_bundle, tmp_path):
+    target = _copy(bundle_a, tmp_path, "target.lunaNMR")
+    window, pm, _ = _loaded(empty_bundle)
+    assert pm.save_project(target)[0]
+    for held in ("kd", "dynamixs", "series_results", "fit_results", "peak_list.csv"):
+        assert not (target / held).exists(), held
+
+
+def test_a_slim_save_leaves_no_region_arrays_of_an_embedded_one(bundle_a, tmp_path):
+    """fits.json no longer names them; left behind they are only weight."""
+    bundle = _copy(bundle_a, tmp_path)
+    window, pm, _ = _loaded(bundle)
+    for row in window.last_fitting_results:
+        row["region_2d"] = {"f1_ppm": [1.0], "f2_ppm": [2.0], "intensity": [[3.0]]}
+    assert pm.save_project(bundle, embed_region_data=True)[0]
+    assert list((bundle / "fit_results" / "arrays").glob("*.npz"))
+    window, pm, _ = _loaded(bundle)
+    assert pm.save_project(bundle)[0]
+    assert not list((bundle / "fit_results" / "arrays").glob("*.npz"))
+
+
+# ---------- the main window: what still shows the previous project ----------
+
+@pytest.fixture(scope="module")
+def app():
+    import os
+    import sys
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication(sys.argv)
+
+
+def test_opening_a_project_closes_the_windows_showing_the_previous_one(app, bundle_a,
+                                                                       empty_bundle,
+                                                                       tmp_path):
+    """The Kd and DynamiXs windows, and the Spectral Inspector, show the previous
+    project; a save captures what they show."""
+    from lunaNMR.gui.main_window import LunaNMRMainWindow
+    spectrum = DATA / "data_binding" / "DNAJA1_HSPA8" / "2D_DNAJA1_0o0.ft"
+    window = LunaNMRMainWindow()
+    try:
+        pm = window._get_project_manager()
+        assert pm.load_project(bundle_a)[0]
+        window._refresh_after_project_load()
+        assert window.integrator.fitted_peaks
+        window.launch_kd_titration()
+        window.launch_dynamixs()
+        window.launch_spectral_inspector()
+        window._spectral_inspector.load_state({"groups": [{"name": "A", "spectra": [
+            {"display_name": "A", "file_path": str(spectrum)}]}]})
+        assert window._spectral_inspector.groups
+
+        bundle = _copy(empty_bundle, tmp_path)
+        assert pm.load_project(bundle)[0]
+        window._refresh_after_project_load()
+        assert window.kd_titration_dialog is None
+        assert window.dynamixs_dialog is None
+        assert not window.integrator.fitted_peaks
+        assert not window._spectral_inspector.groups
+        assert pm.save_project(bundle)[0]
+        for held in ("kd", "dynamixs", "series_results", "fit_results",
+                     "spectral_inspector"):
+            assert not (bundle / held).exists(), held
+    finally:
+        if window._spectral_inspector is not None:
+            window._spectral_inspector.close()
+            window._spectral_inspector.deleteLater()
+        window.close()
+        window.deleteLater()

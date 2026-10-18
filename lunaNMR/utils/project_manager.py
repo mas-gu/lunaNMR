@@ -500,6 +500,7 @@ class ProjectManager:
 
         # Fallback: save reference peak list if no fit results
         if not self._has_peak_list():
+            (bundle_path / "peak_list.csv").unlink(missing_ok=True)
             return True  # Nothing to save
 
         peak_list = self.main_window.integrator.peak_list.copy()
@@ -524,19 +525,18 @@ class ProjectManager:
         be re-sliced on load. When embed_region_data is True, the raw intensity is
         also stored so the project opens without the original spectrum.
         """
-        if not self._has_fit_results():
-            return True  # Nothing to save
-
-        # Create fit_results directory structure
+        import shutil
+        # Written whole each save: what a previous save stored is either rewritten
+        # below or no longer part of the session. Loaded fits hold their arrays in memory.
         fit_dir = bundle_path / "fit_results"
-        fit_dir.mkdir(exist_ok=True)
-        arrays_dir = fit_dir / "arrays"
-        arrays_dir.mkdir(exist_ok=True)
+        shutil.rmtree(fit_dir, ignore_errors=True)
 
-        # Get fit results from main_window
         fit_results = getattr(self.main_window, 'last_fitting_results', None)
-        if fit_results is None or len(fit_results) == 0:
-            return True
+        if not fit_results:
+            return False  # Nothing to save
+
+        arrays_dir = fit_dir / "arrays"
+        arrays_dir.mkdir(parents=True)
 
         integrator = getattr(self.main_window, 'integrator', None)
 
@@ -667,6 +667,7 @@ class ProjectManager:
                 return False, ["project.json not found or invalid"], summary
 
             summary['loaded_items'].append('Project manifest')
+            self._clear_session()
 
             # Check file references
             missing_files = self._validate_file_references(manifest)
@@ -703,6 +704,21 @@ class ProjectManager:
         except Exception as e:
             logger.error(f"Failed to load project: {e}")
             return False, [str(e)], summary
+
+    def _clear_session(self) -> None:
+        """Empty everything a bundle can hold, so a project opened after another keeps
+        nothing the second does not hold - and the next save writes none of it."""
+        mw = self.main_window
+        integrator = getattr(mw, 'integrator', None)
+        if integrator is not None:
+            integrator.peak_list = None
+        mw.last_fitting_results = None
+        mw.current_voigt_result = None
+        mw.saved_series = {}
+        mw.batch_results = None
+        mw.dynamixs_analyses = None
+        mw.kd_analyses = None
+        mw.spectral_inspector_state = None
 
     def _load_manifest(self, bundle_path: Path) -> Optional[Dict]:
         """Load and validate project.json."""
@@ -981,9 +997,8 @@ class ProjectManager:
         except ImportError:
             process_events = lambda: None  # No-op if not in GUI context
 
-        # Create series_results directory
+        import shutil
         series_dir = bundle_path / "series_results"
-        series_dir.mkdir(exist_ok=True)
 
         # Get all saved series
         saved_series = getattr(self.main_window, 'saved_series', {}) or {}
@@ -996,7 +1011,9 @@ class ProjectManager:
                 saved_series = {'default': batch_results}
 
         if not saved_series:
-            return True  # Nothing to save
+            shutil.rmtree(series_dir, ignore_errors=True)
+            return False  # Nothing to save
+        series_dir.mkdir(exist_ok=True)
 
         # Save manifest listing all series
         manifest = {
@@ -1034,6 +1051,16 @@ class ProjectManager:
         manifest_file = series_dir / "series_manifest.json"
         with open(manifest_file, 'w') as f:
             json.dump(manifest, f)
+
+        # Prune what the session no longer holds: a deleted or renamed series. Only now,
+        # after every copy, since a renamed series' CSVs may come from its old folder.
+        kept = set(saved_series) | {manifest_file.name}
+        for sub in series_dir.iterdir():
+            if sub.name not in kept:
+                if sub.is_dir():
+                    shutil.rmtree(sub, ignore_errors=True)
+                else:
+                    sub.unlink()
 
         logger.info(f"Saved {len(saved_series)} series integrations")
         return True
@@ -1192,8 +1219,10 @@ class ProjectManager:
             except Exception as e:
                 logger.warning(f"Could not auto-capture current DynamiXs analysis: {e}")
 
+        import shutil
         analyses = getattr(self.main_window, 'dynamixs_analyses', None)
         if not isinstance(analyses, dict) or not analyses:
+            shutil.rmtree(bundle_path / "dynamixs", ignore_errors=True)
             return False
 
         analyses_dir = bundle_path / "dynamixs" / "analyses"
@@ -1214,7 +1243,6 @@ class ProjectManager:
                           default=self._json_serializer)
             self._copy_dynamixs_results(state, adir / "results")
 
-        import shutil
         for sub in analyses_dir.iterdir():
             if sub.is_dir() and sub.name not in kept:
                 shutil.rmtree(sub, ignore_errors=True)
@@ -1356,8 +1384,10 @@ class ProjectManager:
             except Exception as e:
                 logger.warning(f"Could not auto-capture current Kd fit: {e}")
 
+        import shutil
         analyses = getattr(self.main_window, 'kd_analyses', None)
         if not isinstance(analyses, dict) or not analyses:
+            shutil.rmtree(bundle_path / "kd", ignore_errors=True)
             return False
 
         analyses_dir = bundle_path / "kd" / "analyses"
@@ -1378,7 +1408,6 @@ class ProjectManager:
                           default=self._json_serializer)
 
         # Prune folders for analyses the user deleted from the session.
-        import shutil
         for sub in analyses_dir.iterdir():
             if sub.is_dir() and sub.name not in kept:
                 shutil.rmtree(sub, ignore_errors=True)
