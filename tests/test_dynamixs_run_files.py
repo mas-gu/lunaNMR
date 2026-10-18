@@ -205,3 +205,58 @@ class TestTheMethylPageNamesItsFilesAfterItsPrefix:
                 "NBD_field1_methylT2_fit_data.json"]
         finally:
             run._viewer.close()
+
+
+class TestAStateRecordingNoRunFilesBundlesAndOpensNothing:
+
+    def test_a_page_recording_no_file_prefixes_bundles_none_of_its_folder(self, tmp_path,
+                                                                          caplog):
+        import logging
+        from lunaNMR.utils.project_manager import ProjectManager
+        out = tmp_path / "out"
+        (out / "json").mkdir(parents=True)
+        (out / "a_field1_T1_fit_results.txt").write_text("x")
+        (out / "json" / "a_field1_T1_fit_data.json").write_text("{}")
+        mw = types.SimpleNamespace(dynamixs_dialog=None, dynamixs_analyses={
+            "run": {"state": {"t1t2": {"output_dir": str(out)}}, "file_refs": {}}})
+        bundle = tmp_path / "proj.lunaNMR"
+        bundle.mkdir()
+        with caplog.at_level(logging.WARNING, logger="lunaNMR.utils.project_manager"):
+            ProjectManager(mw)._save_dynamixs_state(bundle)
+        assert not (bundle / "dynamixs" / "analyses" / "run" / "results" / "t1t2").exists()
+        said = [r.getMessage() for r in caplog.records if "t1t2" in r.getMessage()]
+        assert len(said) == 1 and "file prefixes" in said[0]
+
+    def test_a_t1t2_session_recording_no_json_file_opens_no_viewer(self, app, two_t1t2_runs,
+                                                                  quiet_viewers):
+        _, _, state_b, _ = two_t1t2_runs
+        state = json.loads(json.dumps(state_b["t1t2"]))
+        for field in state["session_results"].values():
+            for entry in (field or {}).values():
+                if isinstance(entry, dict):
+                    entry.pop("json_file", None)
+        d = _dialog()
+        try:
+            page = d.t1t2_page
+            page.restore_session_state(state)
+            page._open_fit_viewer()
+            assert getattr(page, "fit_viewer", None) is None
+            assert "no fit JSON" in page.results_text.toPlainText().splitlines()[-1]
+        finally:
+            d.deleteLater()
+
+    def test_a_modelfree_session_recording_no_json_files_opens_no_viewer(self, app,
+                                                                         two_t1t2_runs,
+                                                                         quiet_viewers):
+        out = two_t1t2_runs[0]
+        d = _dialog()
+        try:
+            page = d.integrated_page
+            page.output_dir = str(out)
+            page.session_results = {"analysis_complete": True, "results_prefix": "A",
+                                    "output_dir": str(out), "json_folder": str(out / "json")}
+            page._open_fit_viewer()
+            assert getattr(page, "fit_viewer", None) is None
+            assert "no fit JSON" in page.progress_text.toPlainText().splitlines()[-1]
+        finally:
+            d.deleteLater()

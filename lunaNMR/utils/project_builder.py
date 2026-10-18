@@ -124,9 +124,9 @@ def t1t2_analysis(records, name, staging, t1rho_records=()):
     The GUI page holds both fields and every experiment together; the CLI fits each one
     separately, into its own folder and often on the same default --prefix. Field 1 is
     the lower frequency. Each experiment's fit JSON goes into `json_<field>_<exp>/` under
-    `staging` and its results file beside them under a name of the same key, so the
-    project save copies one folder per page as it does for the GUI, and no experiment
-    can land on another's file.
+    `staging` and its results file beside them, both under names starting with that
+    key - the experiment's file prefix - so the project save copies one folder per page
+    as it does for the GUI, and no experiment can land on another's file.
 
     A `t1rho` run fills its field's T1rho slot and brings the field's acquisition
     parameters (tilt, spin-lock field, carrier) and peak list. It also fitted a T1 and
@@ -165,13 +165,14 @@ def t1t2_analysis(records, name, staging, t1rho_records=()):
         source[key] = record['record_file']
         json_dir = staging / f'json_{key}'
         json_dir.mkdir()
+        staged_json = json_dir / f"{key}_{Path(json_file).name}" if json_file else None
         if json_file:
-            shutil.copy2(json_file, json_dir)
+            shutil.copy2(json_file, staged_json)
         results = staging / f"{key}_{Path(results_file).name}"
         shutil.copy2(results_file, results)
         session[field][exp] = {'output_dir': str(staging), 'json_folder': str(json_dir),
-                               'json_file': (str(json_dir / Path(json_file).name)
-                                             if json_file else None),
+                               'json_file': str(staged_json) if staged_json else None,
+                               'file_prefix': key,
                                'results_file': str(results),
                                'n_fitted': record['summary'].get('n_fitted'),
                                'frequency_mhz': float(record['args']['field_freq'])}
@@ -197,6 +198,7 @@ def t1t2_analysis(records, name, staging, t1rho_records=()):
             results = staging / f'{field}_T2_from_T1rho_fit_results.txt'
             write_t2_fit_results(pd.read_csv(table, dtype={'residue': str}), results)
             session[field]['t2'] = {'output_dir': str(staging), 'json_folder': None,
+                                    'file_prefix': f'{field}_T2_from_T1rho',
                                     'results_file': str(results),
                                     'n_fitted': summary.get('n_residues'),
                                     'frequency_mhz': float(args['field_freq']),
@@ -207,6 +209,8 @@ def t1t2_analysis(records, name, staging, t1rho_records=()):
         page[f'{prefix}omega1'] = args['omega1']
         page[f'{field}_carrier'] = args['carrier']
         page['peak_list_file'] = refs['peak_list_file'] = args['peaks']
+    page['file_prefixes'] = sorted({e['file_prefix'] for f in session.values() if f
+                                    for e in f.values() if isinstance(e, dict)})
     return {'state': _analysis_state(name, T1T2_PAGE, 't1t2', 't1t2', page, all_records),
             'file_refs': {'t1t2': refs}}
 
@@ -222,8 +226,8 @@ def modelfree_analysis(record, name, out):
     args, out = record['args'], str(out)
     variant = 'jwh' if (args.get('method') or '').endswith('jwh') else '087'
     page = {
-        'session_results': {'analysis_complete': True, 'output_dir': out,
-                            'json_folder': None},
+        'session_results': {'analysis_complete': True, 'results_prefix': args['prefix'],
+                            'output_dir': out, 'json_folder': None},
         'field1_t1_file': args.get('f1_t1'), 'field1_t2_file': args.get('f1_t2'),
         'field1_noe_sat_file': args.get('f1_noe_sat'),
         'field1_noe_unsat_file': args.get('f1_noe_unsat'),
@@ -238,7 +242,8 @@ def modelfree_analysis(record, name, out):
         't1_initial_time': args.get('init_t1'), 't2_initial_time': args.get('init_t2'),
         'bootstrap_iterations': args.get('n_bootstrap'),
         'monte_carlo_iterations': args.get('n_monte_carlo'),
-        'output_dir': out, 'prefix': args['prefix'], 'json_folder_name': 'json',
+        'output_dir': out, 'prefix': args['prefix'], 'file_prefixes': [args['prefix']],
+        'json_folder_name': 'json',
     }
     page = {k: v for k, v in page.items() if v is not None}
     refs = {key: page[key] for key in page if key.endswith('_file')}
@@ -259,6 +264,7 @@ def methyl_t2_analysis(record, name, out):
     page = {'input_file': args['input'], 'output_dir': str(out),
             'last_json_folder': str(out),
             'last_results_file': str(out / Path(summary['results_file']).name),
+            'file_prefixes': [args['prefix']],
             'field_freq': args.get('field_freq'), 'bootstrap_iter': args.get('bootstrap')}
     page = {k: v for k, v in page.items() if v is not None}
     return {'state': _analysis_state(name, METHYL_T2_PAGE, 'methyl_t2', 'methyl_t2',
@@ -272,6 +278,7 @@ def hetnoe_analysis(record, name, out):
     args, summary, out = record['args'], record['summary'], Path(out)
     page = {'mode': 1, 'sat_file': args['sat'], 'unsat_file': args['unsat'],
             'output_dir': str(out), 'prefix': args['prefix'],
+            'file_prefixes': [args['prefix']],
             'last_results_file': str(out / Path(summary['output']).name)}
     return {'state': _analysis_state(name, HETNOE_PAGE, 'hetnoe', 'hetnoe', page, [record]),
             'file_refs': {'hetnoe': {'sat_file': args['sat'], 'unsat_file': args['unsat']}}}
@@ -298,7 +305,7 @@ def density_analysis(record, name, out):
             'field1_freq': args.get('field1_freq'), 'field2_freq': args.get('field2_freq'),
             'rnh_angstrom': args.get('rnh'), 'csa_ppm': args.get('csa'),
             'monte_carlo': bool(args.get('monte_carlo')), 'n_samples': args.get('n_samples'),
-            'prefix': args['prefix']}
+            'prefix': args['prefix'], 'file_prefixes': [args['prefix']]}
     page = {k: v for k, v in page.items() if v is not None}
     refs = {k: page[k] for k in ('input_file1', 'input_file2') if k in page}
     return {'state': _analysis_state(name, SPECTRAL_PAGE, 'spectral_density', 'spectral',
