@@ -4713,10 +4713,6 @@ class LunaNMRMainWindow(BaseWindow):
         integration_1d_action.triggered.connect(self.launch_integration_1d)
         modules_menu.addAction(integration_1d_action)
 
-        series_qc_action = QAction("Series QC Analysis", self)
-        series_qc_action.triggered.connect(self.launch_series_qc)
-        modules_menu.addAction(series_qc_action)
-
         spectral_inspector_action = QAction("Spectral Inspector", self)
         spectral_inspector_action.triggered.connect(self.launch_spectral_inspector)
         modules_menu.addAction(spectral_inspector_action)
@@ -5650,24 +5646,6 @@ class LunaNMRMainWindow(BaseWindow):
         if dialog is not None and hasattr(dialog, 'kd_page'):
             dialog.kd_page.open_saved_analysis(entry, name=name)
         return True
-
-    def launch_series_qc(self):
-        """Launch Series QC Analysis dialog.
-
-        Opens the Series QC dialog for analyzing and comparing
-        series integration results from training_data.json files.
-        """
-        from lunaNMR.gui.dialogs import SeriesQCDialog
-
-        # Reuse existing dialog if already open
-        if hasattr(self, 'series_qc_dialog') and self.series_qc_dialog and self.series_qc_dialog.isVisible():
-            self.series_qc_dialog.raise_()
-            self.series_qc_dialog.activateWindow()
-            return
-
-        # Create and show new dialog
-        self.series_qc_dialog = SeriesQCDialog(parent=self, main_window=self)
-        self.series_qc_dialog.show()
 
     def launch_spectral_inspector(self):
         """Launch Spectral Inspector as a standalone top-level window.

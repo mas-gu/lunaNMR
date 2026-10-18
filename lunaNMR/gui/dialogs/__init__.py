@@ -13,7 +13,6 @@ from .results_browser_dialog import ResultsBrowserDialog
 from .missing_files_dialog import MissingFilesDialog
 from .dynamixs_dialog import DynamiXsDialog
 from .kd_titration_dialog import KdTitrationDialog
-from .series_qc_dialog import SeriesQCDialog
 from .spectral_inspector import SpectralInspector
 from .integration_1d_dialog import Integration1DDialog
 
@@ -29,7 +28,6 @@ __all__ = [
     'MissingFilesDialog',
     'DynamiXsDialog',
     'KdTitrationDialog',
-    'SeriesQCDialog',
     'SpectralInspector',
     'Integration1DDialog',
 ]
