@@ -44,6 +44,10 @@ class CLIInterface:
         """Initialize the CLI interface."""
         self.logger = logging.getLogger(__name__)
         self.interrupted = False
+        # What the last dry run or run found, and why it failed, for a caller that
+        # reports them as data
+        self.last_summary = None
+        self.last_error = None
 
     def _signal_handler(self, _signum, frame):
         """Handle interrupt signals for graceful shutdown."""
@@ -369,6 +373,9 @@ Examples:
         Args:
             args: Parsed command line arguments
             config: Configuration dictionary
+
+        Returns:
+            True if there is something to process, False otherwise
         """
         print("=== DRY RUN - No actual processing will be performed ===\n")
 
@@ -394,6 +401,16 @@ Examples:
 
         except Exception as e:
             print(f"Error during dry run: {e}")
+            self.last_error = str(e)
+            return False
+        self.last_summary = {'dry_run': True, 'spectra_found': len(spectrum_files),
+                             'spectra': [p.name for p in spectrum_files]}
+        if not spectrum_files:
+            # A run would process nothing: the plan is not OK, as series --dry-run says
+            self.last_error = f"no spectrum files found in {args.folder}"
+            print(f"Error: {self.last_error}")
+            return False
+        return True
 
     def run_batch_processing(self, args: argparse.Namespace, config: Dict[str, Any]) -> bool:
         """
@@ -428,6 +445,10 @@ Examples:
                 auto_optimize=args.optimize
             )
 
+            self.last_summary = {key: results[key] for key in
+                                 ('total_files', 'processed_files', 'failed_files',
+                                  'total_ml_samples') if key in results}
+
             # Report final results
             if not args.quiet:
                 print("\n" + "="*60)
@@ -447,6 +468,7 @@ Examples:
             return False
         except Exception as e:
             print(f"Error during batch processing: {e}")
+            self.last_error = str(e)
             return False
 
     def main(self, argv: Optional[List[str]] = None) -> int:
@@ -533,8 +555,7 @@ Examples:
 
             # Handle dry run
             if args.dry_run:
-                self.perform_dry_run(args, config)
-                return 0
+                return 0 if self.perform_dry_run(args, config) else 1
 
             # Run batch processing
             success = self.run_batch_processing(args, config)

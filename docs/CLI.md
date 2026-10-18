@@ -22,7 +22,8 @@ The CLI imports no Qt: `lunaNMR/__init__.py` is lazy, and matplotlib is forced t
   is missing. Accepted by every subcommand that writes something. `diagnose` takes `--format`
   only: it is read-only, so a dry-run has nothing to mean. `project inventory` likewise takes
   `--format` only; `project export`, `remove` and `build` take both `--format` and `--dry-run`.
-  `batch` takes no `--format`, and its own `--dry-run` lists the files as text.
+  `batch` takes `--format {text,json}` (under json its own text goes to stderr) and its own
+  `--dry-run`, which lists the files and exits 1 when it finds none.
 
 ### Exit codes
 

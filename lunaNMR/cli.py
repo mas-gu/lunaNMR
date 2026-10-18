@@ -2299,10 +2299,52 @@ def _validate_integrate_1d(parser, args):
                      'spectrum')
 
 
+def _pop_format(argv):
+    """`argv` without its --format flag, and the format it named (default text)."""
+    rest, fmt, i = [], 'text', 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == '--format' and i + 1 < len(argv):
+            fmt, i = argv[i + 1], i + 2
+            continue
+        if arg.startswith('--format='):
+            fmt = arg.split('=', 1)[1]
+        else:
+            rest.append(arg)
+        i += 1
+    return rest, fmt
+
+
 def _run_batch(batch_argv):
-    """Delegate to the existing batch CLI, passing through all of its flags."""
+    """Delegate to the existing batch CLI, passing through all of its flags.
+
+    `--format json` is this CLI's, not batch's: batch's own text goes to stderr and what
+    it found or did is reported in the one envelope, as every other subcommand's is.
+    batch parses with its own argparse, whose SystemExit is turned into a return code
+    here - main() returns, it does not raise.
+    """
+    import types
     from lunaNMR.batch_processing.cli_interface import CLIInterface
-    return CLIInterface().main(batch_argv)
+    argv, fmt = _pop_format(batch_argv)
+    args = types.SimpleNamespace(command='batch', format=fmt)
+    if fmt not in ('text', 'json'):
+        _emit_error(args, ValueError(f"--format must be text or json, not {fmt!r}"))
+        return 2
+    batch = CLIInterface()
+    try:
+        with _engine_stdout(args):
+            code = batch.main(argv)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 2)
+    if fmt == 'json':
+        error = None
+        if code == 2:
+            error = ('UsageError', 'batch rejected its arguments; its report is on stderr')
+        elif code:
+            error = ('BatchFailed', batch.last_error
+                     or f'batch exited {code}; its report is on stderr')
+        _emit(args, batch.last_summary or {}, error=error)
+    return code
 
 
 def build_parser():

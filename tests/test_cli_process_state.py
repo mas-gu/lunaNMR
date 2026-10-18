@@ -4,6 +4,9 @@
 import logging
 import signal
 import threading
+from pathlib import Path
+
+import pytest
 
 from lunaNMR import cli
 
@@ -35,6 +38,11 @@ class TestBatchLeavesTheProcessAsItFoundIt:
         log file in the working directory."""
         monkeypatch.chdir(tmp_path)
         (tmp_path / 'spectra').mkdir()
+        # One real spectrum: a dry run that finds none is a failure
+        dnaja1 = Path(__file__).resolve().parents[2] / 'data_test' / 'data_binding' / 'DNAJA1_HSPA8'
+        if not dnaja1.exists():
+            pytest.skip('data_test not present')
+        (tmp_path / 'spectra' / '2D_DNAJA1_0o0.ft').symlink_to(dnaja1 / '2D_DNAJA1_0o0.ft')
         before = _process_state()
         assert cli.main(['batch', str(tmp_path / 'spectra'), '--dry-run']) == 0
         assert _process_state() == before
