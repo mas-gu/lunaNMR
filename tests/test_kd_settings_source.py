@@ -123,3 +123,27 @@ def test_a_survey_reports_the_command_it_was_run_as(folder):
     assert code == 0
     assert summary["command"] == "kd"
     assert summary["survey_file"]
+
+
+def test_a_refusal_names_the_stored_file_it_passed_over(folder):
+    """The refusal said no stored settings were found when one was found and skipped,
+    and named it only on stderr: the envelope carries it as the success summary does."""
+    _survey(folder, "DNAJA1_HSPA8_tidy.csv", "DNAJA1", "--conc", ABSOLUTE)
+    code, summary = _kd("--input", str(folder / "ERDJ6_HSPA8_tidy.csv"),
+                        "--out", str(folder / "fit"))
+    assert code == 1
+    error = summary["error"]
+    (skipped,) = error["details"]["params_skipped"]
+    assert Path(skipped["path"]).name == "DNAJA1_kd_params.json"
+    assert "DNAJA1_HSPA8_tidy.csv" in skipped["reason"]
+    assert "were found" not in error["message"]
+    assert "DNAJA1_kd_params.json" in error["message"]
+    assert skipped["reason"] in error["message"]
+
+
+def test_a_refusal_with_nothing_stored_says_so(folder):
+    code, summary = _kd("--input", str(folder / "ERDJ6_HSPA8_tidy.csv"),
+                        "--out", str(folder / "fit"))
+    assert code == 1
+    assert summary["error"]["details"]["params_skipped"] == []
+    assert "No stored settings for this input were found" in summary["error"]["message"]

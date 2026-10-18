@@ -39,7 +39,8 @@ code is `0`. A run that returns `1` after producing its summary — the findings
 dry-run with a missing input — keeps the summary's keys and adds `ok: false` with an `error`
 of type `MissingInput`, `NothingFitted`, `PreflightFailed` or (`batch`) `BatchFailed`. A
 `series` that fits nothing reports `NothingFitted` with no summary keys; any other failure
-names the exception's class (`ValueError`, `FileNotFoundError`, …), and one no input should
+names the exception's class (`ValueError`, `FileNotFoundError`, …), with an `error.details`
+object where the failure has more to say (see `kd`), and one no input should
 cause is marked `error.internal: true`, with its traceback on stderr. Called in-process,
 `lunaNMR.cli.main()` returns these codes — including `0` for `--help`/`--version` — rather
 than raising `SystemExit`.
@@ -503,7 +504,8 @@ input, or `kd_analysis/` beside it); a `--conc-units` contradicting it is refuse
 neither, `--conc-units` alone says the spectrum names are the concentrations. With none of
 these the run — survey included — is refused rather than fitting point labels as µM. The
 summary's `params_source` names the file read and `params_skipped` every file passed over,
-with the reason. Only concentrations, intensity scales and the survey thresholds are restored;
+with the reason; a run refused for want of concentrations names them in its message and,
+under `--format json`, in `error.details.params_skipped`. Only concentrations, intensity scales and the survey thresholds are restored;
 `--p0`, `--alpha`, `--intensity-from` and `--observable` are taken from the command line.
 
 `export kd` writes PDFs in `--out` and its CSV/JSON under `<out>/data/`: `summary.csv` plus,

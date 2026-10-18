@@ -190,11 +190,14 @@ def _emit_error(args, exc, internal=False):
     Under --format json the documented usage is `json.loads(proc.stdout)`; every failure
     path wrote to stderr and left stdout empty, so that parse raised on every error and
     the exception said nothing about the cause. Text mode keeps the bare stderr line.
-    `internal` marks an exception no input should cause - a bug, not bad input.
+    `internal` marks an exception no input should cause - a bug, not bad input. An
+    exception carrying a `details` dict reports it as `error.details`.
     """
     import json
     if getattr(args, 'format', 'text') == 'json':
         error = {'type': type(exc).__name__, 'message': str(exc)}
+        if isinstance(getattr(exc, 'details', None), dict):
+            error['details'] = exc.details
         if internal:
             error['internal'] = True
         print(json.dumps({'ok': False, 'schema_version': SCHEMA_VERSION,
@@ -377,7 +380,7 @@ def _sidecar_summary(sidecar):
 _PERSISTED_INPUTS = {'intensity_scales': 'intensity_scale'}
 
 
-def _apply_concentrations(args, params, stored, stated):
+def _apply_concentrations(args, params, stored, stated, skipped=()):
     """Concentrations and their units, always as one pair from one place.
 
     Typed on the command line, they are in the units typed beside them (absolute unless
@@ -386,7 +389,9 @@ def _apply_concentrations(args, params, stored, stated):
     stored file. With neither, the units alone - --conc-units, or a conc_units the stored
     file states (`stated`: the keys it actually records) - declare that the spectrum
     names carry the concentrations; without even that the run is refused, rather than
-    fitting point labels or acquisition indices as micromolar.
+    fitting point labels or acquisition indices as micromolar. The refusal names each
+    stored file passed over (`skipped`) and why, in its message and as
+    `details['params_skipped']`.
     """
     if args.conc is not None:
         params['concentrations'] = args.conc
@@ -404,10 +409,17 @@ def _apply_concentrations(args, params, stored, stated):
     elif 'conc_units' in stated:
         params['conc_units'] = stored['conc_units']
     else:
-        raise ValueError(
+        if skipped:
+            stored_note = "Stored settings were passed over: " + "; ".join(
+                f"{s['path']} ({s['reason']})" for s in skipped) + "."
+        else:
+            stored_note = "No stored settings for this input were found."
+        exc = ValueError(
             "No concentrations: pass --conc (with --conc-units equivalents if they are "
             "equivalents), or --conc-units alone if the spectrum names are the "
-            "concentrations. No stored settings for this input were found.")
+            f"concentrations. {stored_note}")
+        exc.details = {'params_skipped': list(skipped)}
+        raise exc
 
 
 def _apply_thresholds(args, params):
@@ -425,7 +437,8 @@ def _apply_thresholds(args, params):
     stored = load_params(src) if src else {}
     for s in skipped:
         print(f"  warning: not using {s['path']}: {s['reason']}", file=sys.stderr)
-    _apply_concentrations(args, params, stored, recorded_keys(src) if src else set())
+    _apply_concentrations(args, params, stored, recorded_keys(src) if src else set(),
+                          skipped)
     for key in THRESHOLD_KEYS:
         flag = getattr(args, key, None)
         if flag is not None:
