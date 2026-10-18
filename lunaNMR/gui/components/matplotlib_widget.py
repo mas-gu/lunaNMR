@@ -156,10 +156,11 @@ class MatplotlibWidget(QWidget):
 
     def clear(self):
         """
-        Clear the axes without removing labels or settings.
+        Clear the axes, as matplotlib's Axes.clear() does.
 
-        This removes all plotted data but preserves axis labels, limits,
-        and other settings. Use clear_full() to completely reset.
+        This removes all plotted data and resets the title, axis labels,
+        limits, ticks and axis inversion; the background colour is kept.
+        clear_full() also resets the background to the design-system colour.
         """
         self.axes.clear()
 

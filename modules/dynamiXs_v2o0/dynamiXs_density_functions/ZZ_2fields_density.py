@@ -76,7 +76,7 @@ class DualFieldSpectralDensityAnalysis:
         Calculate dipolar coupling constant (d²) - field-independent
 
         Returns d² as defined in Farrow et al. J. Biomol. NMR, 6 (1995) 153-162
-        d² = [μ₀ħγNγH/(8π²r³NH)]²
+        d² = [μ₀ħγNγH/(4πr³NH)]² = [μ₀hγNγH/(8π²r³NH)]²
         """
         mu0_h_bar = REDUCED_PERM_VACUUM * REDUCED_PLANK
         d_squared = (mu0_h_bar * GAMMA_N * GAMMA_H / (4 * PI * self.rNH**3))**2

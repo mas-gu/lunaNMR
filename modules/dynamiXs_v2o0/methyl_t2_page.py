@@ -60,7 +60,7 @@ class MethylT2FittingPage(BasePage):
         desc = create_label(
             "Methyl bi-exponential T2 fit (shared amplitude):\n"
             "    I(t) = ½ · A · [ exp(-t / T2a) + exp(-t / T2b) ]\n"
-            "Post-fit ordering enforces T2a ≥ T2b; ratio η = T2a / T2b is reported."
+            "The fit bounds ΔT2 = T2a − T2b ≥ 0, so T2a ≥ T2b; ratio η = T2a / T2b is reported."
         )
         desc.setStyleSheet(f"color: {SECONDARY_TEXT};")
         desc.setWordWrap(True)
