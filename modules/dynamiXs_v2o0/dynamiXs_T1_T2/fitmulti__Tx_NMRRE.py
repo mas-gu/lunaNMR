@@ -18,7 +18,6 @@ Features:
 import os
 
 import numpy as np
-from matplotlib.figure import Figure
 from lmfit import Model
 # One definition of the fit conventions, shared with the single-core fitter.
 try:
@@ -26,12 +25,14 @@ try:
                               MARGINAL_TMAX_OVER_T, _is_reliable_t2, delay_window,
                               fit_data_entry, measured_points, results_columns,
                               results_file_from_json, results_row)
+    from fit_Tx_NMRRE import create_plots as plot_fit_results
 except ImportError:  # imported as dynamiXs_T1_T2.fitmulti__Tx_NMRRE (parent dir on path)
     from dynamiXs_T1_T2.fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
                                              MARGINAL_TMAX_OVER_T, _is_reliable_t2,
                                              delay_window, fit_data_entry,
                                              measured_points, results_columns,
                                              results_file_from_json, results_row)
+    from dynamiXs_T1_T2.fit_Tx_NMRRE import create_plots as plot_fit_results
 import pandas as pd
 import multiprocessing
 from multiprocessing import cpu_count
@@ -309,57 +310,8 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
     n_figures = int(np.ceil(n_datasets / n_plots_per_figure))
 
     print(f"Creating {n_figures} figure(s) with {n_datasets} successful fits...")
-
-    for fig_idx in range(n_figures):
-        fig = Figure(figsize=(20, 25))
-        axes = fig.subplots(5, 4, sharex=True)
-        axes = axes.flatten()
-        start_idx = fig_idx * n_plots_per_figure
-        end_idx = min((fig_idx + 1) * n_plots_per_figure, n_datasets)
-
-        for idx, result_idx in enumerate(range(start_idx, end_idx)):
-            if result_idx >= len(successful_results):
-                break
-
-            result = successful_results[result_idx]
-            x = result['x']
-            y = result['y']
-            residue = result['residue']
-            a = result['A']
-            t2 = result['t2']
-            t2_err = result['t2_err']
-            c = result.get('C', 0.0)
-
-            # Generate fit curve
-            x_fit = np.linspace(0, max(x)*1.2, 50)
-            y_fit = a * np.exp(-x_fit / t2) + c
-
-            ax = axes[idx]
-            ax.plot(x, y, 'ko', lw=2, ms=8, label="Data")
-            ax.plot(x_fit, y_fit, 'r-', linewidth=2, label="Fit")
-
-            # Add fitting results text
-            textstr = f"{experiment_type} = {t2:.2f} ± {t2_err:.2f} {time_units}"
-            ax.text(0.05, 0.95, textstr, transform=ax.transAxes,
-                    fontsize=10, verticalalignment='top', horizontalalignment='left',
-                    bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
-
-            ax.set_title(f"Residue: {residue}")
-            ax.set_xlabel(f"Time ({time_units})")
-            ax.set_ylabel(f"Signal ({signal_units})")
-            ax.legend()
-            ax.set_xlim(0, max(x)*1.1)
-            # An empty cell is an unmeasured point: the limits come from the rest.
-            _, y_measured = measured_points(x, y)
-            if y_measured.size:
-                ax.set_ylim(y_measured.min()*0.9, y_measured.max()*1.1)
-
-        # Hide unused subplots
-        for idx in range(end_idx - start_idx, len(axes)):
-            axes[idx].set_visible(False)
-
-        fig.tight_layout()
-        fig.savefig(f"{output_prefix}_fit_results_fig{fig_idx + 1}.pdf", format='pdf', dpi=300)
+    plot_fit_results(successful_results, output_prefix, n_plots_per_figure,
+                     experiment_type, time_units, signal_units)
 
 
 def save_results(results_list, output_file, experiment_type="T1"):

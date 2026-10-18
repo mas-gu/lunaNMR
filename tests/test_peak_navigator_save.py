@@ -1,125 +1,104 @@
 #!/usr/bin/env python3
-# ABOUTME: Regression test for Peak Navigator save button — must save reference peaks too
-# ABOUTME: Exercises _save_peak_changes for both reference and detected peak types
+# ABOUTME: The Peak Navigator's save button writes whichever list it shows, reference peaks included.
+# ABOUTME: Real LunaNMRMainWindow offscreen on the DNAJA1 0-eq spectrum, its peak list and a real detection.
 
-import importlib.util
 import os
 import sys
-import types
 from pathlib import Path
-from unittest.mock import patch
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+DNAJA1 = Path(__file__).resolve().parents[2] / "data_test" / "data_binding" / "DNAJA1_HSPA8"
+SPECTRUM = "2D_DNAJA1_0o0.ft"
 
-def _install_namespace_packages():
-    """Register lunaNMR.* as namespace packages to avoid heavy __init__ side effects."""
-    for dotted in ("lunaNMR", "lunaNMR.gui", "lunaNMR.gui.styles", "lunaNMR.gui.components"):
-        if dotted in sys.modules:
-            continue
-        sub_path = REPO_ROOT / Path(*dotted.split("."))
-        pkg = types.ModuleType(dotted)
-        pkg.__path__ = [str(sub_path)]
-        sys.modules[dotted] = pkg
+pytestmark = pytest.mark.skipif(not DNAJA1.exists(), reason="data_test not present")
 
 
-def _load_module(dotted: str, file_path: Path):
-    spec = importlib.util.spec_from_file_location(dotted, file_path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[dotted] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-_install_namespace_packages()
-_load_module(
-    "lunaNMR.gui.styles.design_system",
-    REPO_ROOT / "lunaNMR/gui/styles/design_system.py",
-)
-peak_navigator = _load_module(
-    "lunaNMR.gui.components.peak_navigator",
-    REPO_ROOT / "lunaNMR/gui/components/peak_navigator.py",
-)
-PeakNavigator = peak_navigator.PeakNavigator
-
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
-
-
-def _app():
+@pytest.fixture(scope="module")
+def app():
+    from PySide6.QtWidgets import QApplication
     return QApplication.instance() or QApplication(sys.argv)
 
 
-def _read(path):
-    with open(path, encoding="utf-8") as f:
-        return f.read()
+@pytest.fixture
+def window(app):
+    from lunaNMR.core.ps2d_config import set_ps2d_config
+    from lunaNMR.gui.main_window import LunaNMRMainWindow
+    set_ps2d_config('15N')
+    w = LunaNMRMainWindow()
+    w.load_nmr_file(str(DNAJA1 / SPECTRUM))
+    w.load_peak_file(str(DNAJA1 / "DNAJA1.txt"))
+    yield w
+    app.processEvents()
+    w.close()
+    w.deleteLater()
+    set_ps2d_config('15N')
 
 
-def test_save_reference_peaks_writes_file(tmp_path):
-    _app()
-    nav = PeakNavigator()
-    nav.load_reference_peaks([
-        ["A1", 8.12, 120.5, 1.0e5],
-        ["A2", 7.34, 118.2, 2.5e5],
-    ])
+def _detect(window):
+    """Run the detection worker in this thread and hand its result to the window's slot."""
+    from lunaNMR.gui.main_window import PeakDetectionWorker
+    window.sync_parameters_to_integrator()
+    worker = PeakDetectionWorker(window.integrator, window.workflow_mode)
+    worker.detection_complete.connect(lambda peaks: window.on_detection_complete(peaks, None))
+    worker.run()
+
+
+def _save(nav, target, monkeypatch):
+    """Press save, answering the file dialog with `target`; returns the message boxes shown."""
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        lambda *a, **k: (str(target), "Text files (*.txt)"))
+    shown = []
+    for box in ("information", "warning", "critical"):
+        monkeypatch.setattr(QMessageBox, box, lambda *a, _box=box, **k: shown.append(_box))
+    nav._save_peak_changes()
+    return shown
+
+
+def _rows(target):
+    lines = target.read_text().splitlines()
+    return lines[0], {line.split(",")[0]: line for line in lines[1:]}
+
+
+def test_the_save_button_is_enabled_for_a_loaded_reference_list(window):
+    nav = window.peak_navigator
     nav.peak_type_combo.setCurrentText("Reference Peaks")
+
     assert nav.selected_peak_type == "reference"
-
-    target = tmp_path / "refs.txt"
-    with patch.object(
-        QFileDialog, "getSaveFileName",
-        return_value=(str(target), "Text files (*.txt)"),
-    ), patch.object(QMessageBox, "information"), patch.object(QMessageBox, "warning"), \
-            patch.object(QMessageBox, "critical"):
-        nav._save_peak_changes()
-
-    assert target.exists(), "reference peak save must produce a file"
-    content = _read(target)
-    assert "Assignment" in content
-    assert "A1" in content and "A2" in content
-    assert "8.120000" in content
-    assert "120.500000" in content
+    assert len(nav.reference_peaks) > 0
+    assert nav.save_btn.isEnabled()
 
 
-def test_save_detected_peaks_still_works(tmp_path):
-    _app()
-    nav = PeakNavigator()
-    nav.load_detected_peaks([
-        {"assignment": "D1", "ppm_x": 8.5, "ppm_y": 121.0, "height": 5.0e5, "r_squared": 0.92},
-    ])
-    assert nav.selected_peak_type == "detected"
-
-    target = tmp_path / "det.txt"
-    with patch.object(
-        QFileDialog, "getSaveFileName",
-        return_value=(str(target), "Text files (*.txt)"),
-    ), patch.object(QMessageBox, "information"), patch.object(QMessageBox, "warning"), \
-            patch.object(QMessageBox, "critical"):
-        nav._save_peak_changes()
-
-    assert target.exists()
-    content = _read(target)
-    assert "D1" in content
-    assert "8.500000" in content
-
-
-def test_save_button_enabled_for_reference():
-    _app()
-    nav = PeakNavigator()
-    nav.load_reference_peaks([["A1", 8.0, 120.0, 1.0]])
+def test_saving_reference_peaks_writes_every_reference_peak(window, tmp_path, monkeypatch):
+    nav = window.peak_navigator
     nav.peak_type_combo.setCurrentText("Reference Peaks")
-    nav._update_edit_button_states()
-    assert nav.save_btn.isEnabled(), "save button must be enabled when reference peaks are loaded"
+    target = tmp_path / "refs.txt"
+
+    shown = _save(nav, target, monkeypatch)
+
+    assert shown == ["information"]
+    header, rows = _rows(target)
+    assert header == "Assignment, Position_X, Position_Y, Height"
+    assert len(rows) == len(nav.reference_peaks)
+    for name, x, y in (peak[:3] for peak in nav.reference_peaks):
+        assert rows[str(name)].startswith(f"{name}, {x:.6f}, {y:.6f}")
 
 
-if __name__ == "__main__":
-    import tempfile
-    with tempfile.TemporaryDirectory() as d:
-        test_save_reference_peaks_writes_file(Path(d))
-        print("OK: test_save_reference_peaks_writes_file")
-    with tempfile.TemporaryDirectory() as d:
-        test_save_detected_peaks_still_works(Path(d))
-        print("OK: test_save_detected_peaks_still_works")
-    test_save_button_enabled_for_reference()
-    print("OK: test_save_button_enabled_for_reference")
-    print("All tests passed")
+def test_saving_detected_peaks_writes_every_detected_peak(window, tmp_path, monkeypatch):
+    _detect(window)
+    nav = window.peak_navigator
+    assert nav.selected_peak_type == "detected"
+    assert len(nav.detected_peaks) > 0
+    target = tmp_path / "det.txt"
+
+    shown = _save(nav, target, monkeypatch)
+
+    assert shown == ["information"]
+    header, rows = _rows(target)
+    assert header == "Assignment, Position_X, Position_Y, Height"
+    assert len(rows) == len(nav.detected_peaks)
+    for name, x, y in (peak[:3] for peak in nav.detected_peaks):
+        assert rows[str(name)].startswith(f"{name}, {x:.6f}, {y:.6f}")
