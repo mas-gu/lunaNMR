@@ -1676,18 +1676,17 @@ def _run_export_kd(args):
     # Kd-per-residue bars (+ the shared global-Kd line) for each observable. PDF only.
     if not args.summary_only and 'kd-bars' in args.kind and 'pdf' in args.fig_format:
         from matplotlib.backends.backend_pdf import PdfPages
+        from kd_export import kd_bars_pool
         global_fit = data.get('global', {}) or {}
         for obs in observables:
             # Only residues whose Kd is actually reported — i.e. those in the shared
             # fit's pool. Drawing every residue put insignificant and unmeasured ones
             # beside the ones that count, with nothing saying which was which.
-            pool = (global_fit.get(obs, {}) or {}).get('residues')
+            pool_fits, note = kd_bars_pool(fits, global_fit, meta, obs)
             names, kds, errs = [], [], []
-            for f in fits:
+            for f in pool_fits:
                 fit = f.get(obs) or {}
                 ok = fit.get('success') and isinstance(fit.get('Kd'), (int, float))
-                if pool is not None and f.get('residue') not in pool:
-                    continue
                 names.append(f.get('residue', 'peak'))
                 kds.append(float(fit['Kd']) if ok else float('nan'))
                 e = fit.get('Kd_err')
@@ -1699,11 +1698,8 @@ def _run_export_kd(args):
             with PdfPages(pdf_path) as pdf:
                 fig, ax = plt.subplots(figsize=(11, 6))
                 _draw_kd_bars(ax, names, kds, errs, obs, gkd)
-                excl = data.get('metadata', {}).get('csp_pool_excluded') or {}
-                if obs == 'csp' and excl:
-                    ax.set_title(f"{ax.get_title()}  —  {len(names)} of "
-                                 f"{len(names) + len(excl)} residues "
-                                 f"(see csp_pool_excluded for the rest)", fontsize=9)
+                if note:
+                    ax.set_title(f"{ax.get_title()}  —  {note}", fontsize=9)
                 fig.tight_layout()
                 pdf.savefig(fig)
                 plt.close(fig)

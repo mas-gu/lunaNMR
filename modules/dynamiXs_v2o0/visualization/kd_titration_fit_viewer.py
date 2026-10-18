@@ -27,7 +27,10 @@ from kd_models import (csp_model, intensity_decay,  # noqa: E402
                        residue_sort_key as _residue_sort_key)
 from kd_fit import (fit_residue_csp, fit_residue_intensity, json_safe,  # noqa: E402
                     _GLOBAL_R2_MIN)
+from kd_export import global_pool, kd_bars_pool  # noqa: E402
 
+
+_OUTSIDE_POOL_EDGE = "#999999"   # hollow bar: a residue the global fit did not pool
 
 _KD_OUTLIER_K = 3.5   # Hampel: drop a Kd more than k robust-SD (1.4826·MAD) from the median
 
@@ -251,20 +254,27 @@ class KdTitrationFitViewer(QMainWindow):
             combo.blockSignals(False)
 
     def _clean_kds(self, obs):
-        """Per-residue Kd for `obs` used in the summary: successful, not user-excluded,
-        well-fit (R² ≥ _GLOBAL_R2_MIN), then a Hampel reject to drop residues whose Kd is
-        off by multiples of the median even though their own fit is good."""
+        """Per-residue Kd for `obs` used in the summary: successful and not user-excluded,
+        from the residues the global fit pooled - the ones its Kd rests on. A fit with no
+        recorded pool keeps the well-fit ones (R² ≥ _GLOBAL_R2_MIN), then a Hampel reject
+        to drop residues whose Kd is off by multiples of the median even though their own
+        fit is good."""
         excl = self.excluded_residues.get(obs, set())
+        pool = global_pool(self.data.get("global"), obs)
         vals = []
         for f in self.fits:
             fit = f.get(obs, {})
             v = fit.get("Kd")
             r2 = fit.get("r_squared")
-            if (fit.get("success") and f.get("residue") not in excl
-                    and isinstance(v, (int, float)) and np.isfinite(v)
-                    and isinstance(r2, (int, float)) and r2 >= _GLOBAL_R2_MIN):
+            if not (fit.get("success") and f.get("residue") not in excl
+                    and isinstance(v, (int, float)) and np.isfinite(v)):
+                continue
+            if pool is not None:
+                if f.get("residue") in pool:
+                    vals.append(float(v))
+            elif isinstance(r2, (int, float)) and r2 >= _GLOBAL_R2_MIN:
                 vals.append(float(v))
-        return _hampel_keep(vals)
+        return vals if pool is not None else _hampel_keep(vals)
 
     def _mean_kd(self, obs):
         """Mean of the cleaned per-residue Kd (see _clean_kds). Returns (mean, n) or
@@ -357,10 +367,12 @@ class KdTitrationFitViewer(QMainWindow):
         sym = "CSP" if obs == "csp" else "I/I₀"
         ax.set_title(f"{sym}:  {labels[i]} → {labels[j]}  (ref → point)")
 
-    def _plot_residue_bars(self, ax, names, vals, color, errs=None, ymax=None, obs=None):
+    def _plot_residue_bars(self, ax, names, vals, color, errs=None, ymax=None, obs=None,
+                           outside=()):
         """Bar chart of value-per-residue. Residues with no value (NaN — missing
         assignment or failed fit) draw as a full-height grey bar so the gap is visible;
-        residues the user excluded (problematic values) draw hatched. In edit mode the
+        residues the user excluded (problematic values) draw hatched; residues in
+        `outside` (not in the global fit's pool) draw hollow. In edit mode the
         bars are pickable so a click toggles that residue's exclusion. `obs` selects
         which observable's exclusion set to honor (defaults to the current view). `ymax` fixes the
         y-axis top (e.g. 1.0 for an I/I₀ ratio); None auto-scales to the data."""
@@ -382,16 +394,20 @@ class KdTitrationFitViewer(QMainWindow):
         for n, v in zip(names, vals):
             if n in excl:
                 facecolors.append("#e08585")          # excluded → muted red (hatched below)
-            elif np.isfinite(v):
-                facecolors.append(color)
-            else:
+            elif not np.isfinite(v):
                 facecolors.append("#d0d0d0")           # missing → grey full-height
+            elif n in outside:
+                facecolors.append("none")              # outside the pool → hollow
+            else:
+                facecolors.append(color)
         bar_errs = ([e if np.isfinite(v) and n not in excl else 0.0
                      for v, e, n in zip(vals, errs, names)] if errs is not None else None)
         bars = ax.bar(x, heights, color=facecolors, yerr=bar_errs, capsize=2)
-        for n, patch in zip(names, bars):
+        for n, v, patch in zip(names, vals, bars):
             if n in excl:
                 patch.set_hatch("//")
+            elif n in outside and np.isfinite(v):
+                patch.set_edgecolor(_OUTSIDE_POOL_EDGE)
             if self.edit_mode:
                 patch.set_picker(True)
                 self._pick_registry[id(patch)] = (n, "RESIDUE", None)
@@ -449,10 +465,22 @@ class KdTitrationFitViewer(QMainWindow):
             ax.set_ylim(*_INTENSITY_YLIM)
         ax.legend()
 
-    def _plot_summary(self, ax, key, err_key, title, ylab, obs=None):
+    def _plot_summary(self, ax, key, err_key, title, ylab, obs=None, pool_only=False):
+        """Bars of `key` per residue. For Kd, the residues outside the global fit's pool
+        draw hollow, or with `pool_only` are left out and the title says how many of how
+        many are shown."""
         obs = obs or self._obs_key()
+        fits, note, outside = self.fits, "", set()
+        if key == "Kd":
+            if pool_only:
+                fits, note = kd_bars_pool(self.fits, self.data.get("global"),
+                                          self.data.get("metadata"), obs)
+            else:
+                pool = global_pool(self.data.get("global"), obs)
+                if pool is not None:
+                    outside = {f["residue"] for f in self.fits} - pool
         names, vals, errs = [], [], []
-        for f in self.fits:
+        for f in fits:
             fit = f.get(obs, {})
             ok = fit.get("success") and isinstance(fit.get(key), (int, float))
             names.append(f["residue"])
@@ -463,25 +491,37 @@ class KdTitrationFitViewer(QMainWindow):
             ax.text(0.5, 0.5, f"No {obs} fits", ha="center", va="center", transform=ax.transAxes)
             return
         # Missing/failed residues show as full-height grey bars (see _plot_residue_bars).
-        self._plot_residue_bars(ax, names, vals, "steelblue", errs=errs, obs=obs)
+        self._plot_residue_bars(ax, names, vals, "steelblue", errs=errs, obs=obs,
+                                outside=outside)
         if key == "Kd":
             g = self.data.get("global", {}).get(obs, {})
             gkd = g.get("Kd")
-            drew = False
             if g.get("success") and gkd is not None and np.isfinite(gkd):
                 lbl = "global Kd" if obs == "csp" else "global apparent Kd"
                 ax.axhline(gkd, color="red", ls="--",
                            label=f"{lbl}={_kd_with_err(gkd, g.get('Kd_err'), '.3g', '.2g')}")
-                drew = True
             mean_kd, n_mean = self._mean_kd(obs)
             if mean_kd is not None:
                 ax.axhline(mean_kd, color="green", ls=":",
                            label=f"per-residue avg={mean_kd:.3g} (n={n_mean})")
-                drew = True
-            if drew:
-                ax.legend()
+            handles, _ = ax.get_legend_handles_labels()
+            if outside:
+                from matplotlib.patches import Patch
+                handles.append(Patch(facecolor="none", edgecolor=_OUTSIDE_POOL_EDGE,
+                                     label="not in the global fit's pool"))
+            if handles:
+                ax.legend(handles=handles)
         ax.set_ylabel(ylab)
-        ax.set_title(f"{title}  ({obs})")
+        if note:
+            ax.set_title(f"{title}  ({obs})  —  {note}", fontsize=9)
+        else:
+            ax.set_title(f"{title}  ({obs})")
+
+    def _plot_kd_vs_residue_export(self, ax, obs):
+        """The exported Kd-vs-residue figure: the global fit's pool only, as `export kd`
+        draws it."""
+        self._plot_summary(ax, "Kd", "Kd_err", "Kd vs residue", "Kd", obs=obs,
+                           pool_only=True)
 
     # ---------- exclude / refit (dynamiXs pattern) ----------
 
@@ -690,7 +730,7 @@ class KdTitrationFitViewer(QMainWindow):
         with self._vector_pdf(path) as pdf:
             fig = Figure(figsize=(11, 6))
             ax = fig.add_subplot(111)
-            self._plot_summary(ax, "Kd", "Kd_err", "Kd vs residue", "Kd", obs=obs)
+            self._plot_kd_vs_residue_export(ax, obs)
             fig.tight_layout()
             pdf.savefig(fig)
         return 1

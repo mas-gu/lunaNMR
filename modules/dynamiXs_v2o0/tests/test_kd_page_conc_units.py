@@ -41,23 +41,24 @@ class TestConcentrationUnitsAreReachableFromTheGui:
     def test_the_control_exists(self, app):
         assert _page().conc_units_combo is not None
 
-    def test_it_defaults_to_absolute(self, app):
-        """Existing behaviour must not change for anyone who never touches it."""
+    def test_it_defaults_to_unstated(self, app):
+        """Nobody has said what the [L] values are until someone chooses."""
         page = _page()
-        assert page._gather_params_dict()["conc_units"] == "absolute"
+        assert page._gather_params_dict()["conc_units"] is None
 
     def test_choosing_equivalents_reaches_the_params(self, app):
         page = _page()
         page.conc_units_combo.setCurrentIndex(1)
         assert page._gather_params_dict()["conc_units"] == "equivalents"
 
-    def test_it_offers_exactly_the_two_documented_units(self, app):
+    def test_it_offers_the_two_documented_units_and_unstated(self, app):
         page = _page()
         labels = [page.conc_units_combo.itemText(i).lower()
                   for i in range(page.conc_units_combo.count())]
-        assert len(labels) == 2
+        assert len(labels) == 3
         assert any("absolute" in text for text in labels)
         assert any("equivalent" in text for text in labels)
+        assert any("state the units" in text for text in labels)
 
 
 class TestTheSettingRoundTrips:
@@ -75,11 +76,13 @@ class TestTheSettingRoundTrips:
         page._apply_params(_normalised({"conc_units": "absolute"}), n_points=3)
         assert page._gather_params_dict()["conc_units"] == "absolute"
 
-    def test_a_params_file_without_the_key_leaves_the_default(self, app):
-        """An older params JSON predates this setting and must not break loading."""
+    def test_a_params_file_without_the_key_leaves_them_unstated(self, app, tmp_path):
+        """A params JSON that never mentions units loads, and states none."""
+        path = tmp_path / "kd_params.json"
+        path.write_text(json.dumps({"protein_conc": 50.0}))
         page = _page()
-        page._apply_params(_normalised({"protein_conc": 50.0}), n_points=3)
-        assert page._gather_params_dict()["conc_units"] == "absolute"
+        page._load_params_file(str(path))
+        assert page._gather_params_dict()["conc_units"] is None
 
     def test_it_survives_a_json_round_trip(self, app, tmp_path):
         page = _page()

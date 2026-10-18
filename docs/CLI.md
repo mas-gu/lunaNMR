@@ -464,8 +464,9 @@ if given (default: none, i.e. unprefixed `summary.csv`/`<obs>_fits.pdf`/...):
 - `ref-bars` — `<obs>_ref_vs_point.pdf`, the observable per residue between point 0 and each
   later titration point (one page per point). Also writes `<obs>_ref_vs_point.csv` (wide,
   Excel-ready) and `.json`. Matches the GUI viewer's export.
-- `kd-bars` — `<obs>_kd_vs_residue.pdf`, per-residue Kd bars + the shared global-Kd line
-  (**PDF only**). The intensity Kd is an apparent decay constant (see the global-fit caveat),
+- `kd-bars` — `<obs>_kd_vs_residue.pdf`, per-residue Kd bars for the residues in the shared
+  fit's pool, titled "N of M residues", + the shared global-Kd line (**PDF only**). Matches
+  the GUI viewer's export. The intensity Kd is an apparent decay constant (see the global-fit caveat),
   not a thermodynamic dissociation constant.
 - `global-fit` — `<obs>_global_fit.pdf`, per-residue observed data + the **single shared-Kd**
   global-model curve (one Kd for all residues, per-residue amplitudes), 20 panels/page. Also

@@ -66,8 +66,8 @@ def _fit(app, tmp_path, equivalents):
     page = mod.KdTitrationPage(_fake_main_window())
     page._set_input_file(str(csv))
     page.series_name = "HSPA8"                       # as if a named series was dropped
-    if equivalents:
-        page.conc_units_combo.setCurrentIndex(1)     # DNAJA1's points are equivalents
+    # DNAJA1's points are equivalents; absolute is chosen deliberately, never defaulted.
+    page.conc_units_combo.setCurrentIndex(1 if equivalents else 0)
     page._start_analysis()
     assert page.worker.wait(300_000), "the fit did not finish"
     app.processEvents()
