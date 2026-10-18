@@ -244,3 +244,64 @@ class TestTheExpertPanelIsWhatTheFitUses:
 
         config = get_ps2d_config()
         assert (config.nucleus_type, config.radF1, config.max_cluster_size) == ('13C', 0.2, 5)
+
+
+class TestCancelStopsTheRunFromCounting:
+    """Cancel closes the progress dialog; the worker cannot be interrupted mid-fit, so it
+    runs on. Its results must not land, and no second run may start beside it."""
+
+    @pytest.fixture
+    def cancel_at_once(self, monkeypatch):
+        from lunaNMR.gui.components import ProgressDialog
+
+        def exec_then_cancel(self):
+            self._on_cancel_clicked()
+            return 0
+        monkeypatch.setattr(ProgressDialog, "exec", exec_then_cancel)
+
+    def _buttons(self, window):
+        return (window.detect_peaks_button.isEnabled(), window.fit_all_peaks_button.isEnabled(),
+                window.series_button.isEnabled())
+
+    def test_a_cancelled_fit_leaves_the_results_it_found(self, app, window, data, monkeypatch,
+                                                         cancel_at_once):
+        _load(window, monkeypatch, data["spectrum"], data["ten"])
+        _detect(window)
+        detected = window.integrator.fitted_peaks
+
+        window.on_fit_spectrum()
+        _wait_for(app, window.fitting_worker)
+
+        assert window.integrator.fitted_peaks is detected
+        assert window.last_fitting_results is None
+        assert not list(data["folder"].glob("*_fitting_results.csv"))
+
+    def test_nothing_else_starts_while_a_cancelled_fit_runs(self, app, window, data, monkeypatch,
+                                                            cancel_at_once):
+        _load(window, monkeypatch, data["spectrum"], data["ten"])
+        window.on_fit_spectrum()
+        first = window.fitting_worker
+        assert first.isRunning()
+        assert self._buttons(window) == (False, False, False)
+
+        window.on_fit_spectrum()
+        window.on_detect_peaks()
+        _load(window, monkeypatch, data["spectrum"], data["five"])
+
+        assert window.fitting_worker is first
+        assert getattr(window, 'detection_worker', None) is None
+        assert len(window.integrator.peak_list) == 10
+        _wait_for(app, first)
+        assert self._buttons(window) == (True, True, True)
+
+    def test_a_cancelled_detection_leaves_the_previous_one(self, app, window, data, monkeypatch,
+                                                           cancel_at_once):
+        _load(window, monkeypatch, data["spectrum"], data["ten"])
+        _detect(window)
+        previous = window.integrator.fitted_peaks
+
+        window.on_detect_peaks()
+        _wait_for(app, window.detection_worker)
+
+        assert window.integrator.fitted_peaks is previous
+        assert self._buttons(window) == (True, True, True)

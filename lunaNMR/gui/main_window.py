@@ -1336,6 +1336,24 @@ class LunaNMRMainWindow(BaseWindow):
         self.fit_all_peaks_button.setStyleSheet(self._get_blue_button_style())
         self.series_button.setStyleSheet(self._get_blue_button_style())
 
+    def _refuse_while_running(self) -> bool:
+        """True, with the reason in the status bar, while a detection or fit is running.
+
+        A cancelled run cannot be interrupted mid-fit and runs on in its thread, on this
+        window's integrator and the process-wide PS2D config; nothing else may start
+        beside it or change the data under it.
+        """
+        for worker in (getattr(self, 'detection_worker', None), getattr(self, 'fitting_worker', None)):
+            if worker is not None and worker.isRunning():
+                self.update_status("A peak detection or fit is still running - wait for it to finish")
+                return True
+        return False
+
+    def _set_run_controls_enabled(self, enabled: bool):
+        """Enable or disable the buttons that start a detection, a fit or a series."""
+        for button in (self.detect_peaks_button, self.fit_all_peaks_button, self.series_button):
+            button.setEnabled(enabled)
+
     def create_control_center_section(self) -> QGroupBox:
         """Create the Control Center section with main action buttons.
 
@@ -3494,6 +3512,8 @@ class LunaNMRMainWindow(BaseWindow):
         Resets ALL state: parameters, results, loaded files, GUI widgets.
         """
         logger.info("Reset Results button clicked")
+        if self._refuse_while_running():
+            return
 
         # Confirm destructive action
         reply = QMessageBox.question(
@@ -4454,6 +4474,8 @@ class LunaNMRMainWindow(BaseWindow):
         6. Show success/error messages
         """
         logger.info("Load Data button clicked")
+        if self._refuse_while_running():
+            return
 
         # Import dialog
         from lunaNMR.gui.dialogs import DataLoadingDialog
@@ -5157,6 +5179,9 @@ class LunaNMRMainWindow(BaseWindow):
         Processes multiple spectra using MultiSpectrumProcessor.
         Opens SeriesIntegrationDialog for configuration and progress tracking.
         """
+        if self._refuse_while_running():
+            return
+
         # CRITICAL: Sync GUI parameters BEFORE series integration
         self.sync_parameters_to_integrator()
         logger.info(f"Parameters synced for series: fix_positions={self.fix_positions}, fix_linewidths={self.fix_linewidths}")
@@ -6396,6 +6421,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         5. Update GUI with results (peaks, plots, statistics)
         """
         logger.info("Detect Peaks button clicked")
+        if self._refuse_while_running():
+            return
 
         # CRITICAL: Sync GUI parameters BEFORE detection
         # This ensures Expert Mode settings (search windows, noise threshold, etc.) are passed
@@ -6426,11 +6453,14 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         # Create and configure worker
         self.detection_worker = PeakDetectionWorker(self.integrator, self.workflow_mode)
+        # The detection replaces fitted_peaks itself; a cancelled one puts these back
+        previous_peaks = self.integrator.fitted_peaks
 
         # Connect worker signals to dialog and handlers
         self.detection_worker.progress_updated.connect(progress_dialog.update_progress)
         self.detection_worker.detection_complete.connect(
-            lambda peaks: self.on_detection_complete(peaks, progress_dialog)
+            lambda peaks: self._discard_cancelled_detection(previous_peaks)
+            if progress_dialog.is_cancelled else self.on_detection_complete(peaks, progress_dialog)
         )
         self.detection_worker.detection_failed.connect(
             lambda error: self.on_detection_failed(error, progress_dialog)
@@ -6439,12 +6469,20 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         self.detection_worker.finished.connect(
             lambda: progress_dialog.complete("Detection complete - click Close to continue")
         )
+        self.detection_worker.finished.connect(lambda: self._set_run_controls_enabled(True))
 
         # Start worker and show progress
         logger.info(f"Starting peak detection (mode={self.workflow_mode})")
         self.update_status("Detecting peaks...")
+        self._set_run_controls_enabled(False)
         self.detection_worker.start()
         progress_dialog.exec()
+
+    def _discard_cancelled_detection(self, previous_peaks):
+        """A detection the user cancelled finished: keep the peaks it was started over."""
+        self.integrator.fitted_peaks = previous_peaks
+        logger.info("Cancelled peak detection finished; its peaks were discarded")
+        self.update_status("Detection cancelled - its results were discarded")
 
     @Slot(list)
     def on_detection_complete(self, detected_peaks, progress_dialog):
@@ -6551,6 +6589,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         5. Update GUI with results (peaks, plots, statistics)
         """
         logger.info("Fit Spectrum button clicked")
+        if self._refuse_while_running():
+            return
 
         # Clear undo stack before major fitting operation
         # (fitted_peaks will be completely replaced, making undo impossible)
@@ -6565,6 +6605,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         # Clear cached series_params to ensure fresh clustering with current settings.
         # This prevents stale cluster assignments from being reused when the user
         # changes parameters like max_cluster_size between fits.
+        # A cancelled fit puts the clusters of the fit before it back
+        previous_series_params = getattr(self.integrator.enhanced_fitter, 'series_params', None)
         if self.integrator.enhanced_fitter is not None:
             self.integrator.enhanced_fitter.series_params = None
 
@@ -6662,7 +6704,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         self.fitting_worker.progress_updated.connect(on_fitting_progress)
         self.fitting_worker.fitting_complete.connect(
-            lambda summary: self.on_fitting_complete(summary, progress_dialog)
+            lambda summary: self._discard_cancelled_fit(previous_series_params)
+            if progress_dialog.is_cancelled else self.on_fitting_complete(summary, progress_dialog)
         )
         self.fitting_worker.fitting_failed.connect(
             lambda error: self.on_fitting_failed(error, progress_dialog)
@@ -6671,12 +6714,21 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         self.fitting_worker.finished.connect(
             lambda: progress_dialog.complete("Fitting complete - click Close to continue")
         )
+        self.fitting_worker.finished.connect(lambda: self._set_run_controls_enabled(True))
 
         # Start worker and show progress
         logger.info(f"Starting Voigt fitting for {len(self.integrator.peak_list)} peaks")
         self.update_status(f"Fitting {len(self.integrator.peak_list)} peaks...")
+        self._set_run_controls_enabled(False)
         self.fitting_worker.start()
         progress_dialog.exec()
+
+    def _discard_cancelled_fit(self, previous_series_params):
+        """A fit the user cancelled finished: its results are neither shown nor saved."""
+        if self.integrator.enhanced_fitter is not None:
+            self.integrator.enhanced_fitter.series_params = previous_series_params
+        logger.info("Cancelled fit finished; its results were discarded")
+        self.update_status("Fitting cancelled - its results were discarded")
 
     @Slot(dict)
     def on_fitting_complete(self, summary, progress_dialog):
@@ -7007,6 +7059,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         Based on v0.9 main_gui.py lines 4452-4510.
         """
         logger.info("Fit Series button clicked")
+        if self._refuse_while_running():
+            return
 
         # CRITICAL: Sync GUI parameters BEFORE series integration
         # This ensures Expert Mode settings are up-to-date for the dialog to read
