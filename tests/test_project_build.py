@@ -189,3 +189,14 @@ def test_series_folders_of_one_name_are_all_found(tmp_path, folders):
     found = find_series(tmp_path)
     assert sorted(p.parent.relative_to(tmp_path).as_posix() for p in found.values()) \
         == sorted(folders)
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_a_spectrum_that_does_not_exist_is_refused(run_dir, tmp_path, dry_run):
+    """The bundle reopens its spectrum by path; a path to nothing is a bundle that cannot."""
+    from lunaNMR.cli import main
+    out = tmp_path / "C.lunaNMR"
+    assert main(["project", "build", str(run_dir), "--out", str(out),
+                 "--spectrum", str(tmp_path / "nonexistent.ft"),
+                 *(["--dry-run"] if dry_run else [])]) == 1
+    assert not out.exists()

@@ -1032,6 +1032,9 @@ def _run_project_build(args):
         _emit_error(args, FileExistsError(
             f"{args.out} exists; a build never overwrites a bundle"))
         return 1
+    if args.spectrum and not os.path.exists(args.spectrum):
+        _emit_error(args, FileNotFoundError(f"--spectrum not found: {args.spectrum}"))
+        return 1
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
     if args.dry_run:
         # The whole build, into a folder that is then thrown away: every input is read
