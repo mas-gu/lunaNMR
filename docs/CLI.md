@@ -232,8 +232,11 @@ full grid before correcting anything.
 python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
     [--mode {time,titration}] [--peak-source {reference,cascade,detected,independent}] [--parallel]
 ```
-- Peak list: `Assignment, Position_X, Position_Y[, Height]` header.
+- Peak list: `Assignment, Position_X, Position_Y[, Height]` header. Every assignment must be
+  unique: the series matches peaks by assignment, so a duplicated label is refused, naming it.
 - `--mode time` (relaxation, default) or `titration` (forces cascade tracking + wider margins).
+  `--peak-source independent` is refused with `titration`: it detects every point against the
+  reference list, which anchors each point to the free state instead of tracking it.
 - Filename values: `time` mode reads a trailing delay with an explicit unit (`_300ms`, `_2.4s`,
   `_2400us`). `titration` mode reads a trailing `_<value>` whose value carries a **decimal
   separator** — `o` or `.` (`_0o0`, `_0o5`, `_2.4`). Digits alone (`sample_2.ft`, `ref_100.ft`)
@@ -244,20 +247,27 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   deep-merged over the defaults so naming one key leaves the rest alone:
   ```json
   {"detection_params": {"search_window_x": 0.05},
-   "fitting_params":   {"min_r_squared": 0.8},
-   "gui_params":       {"max_peaks_fit": 120}}
+   "gui_params":       {"fix_linewidths": true}}
   ```
   **An unknown key is refused, with a suggestion** — a knob that is accepted, does nothing and
   still reports success is the failure mode this whole surface exists to prevent, and it is
   checked during `--dry-run` too. Command-line flags (`--parallel`, `--peak-source`) win over
   the file, so a stale tuning file cannot silently override what you just typed. The run
-  summary records the effective `params`.
+  summary records the effective `params`. A key the defaults carry but nothing on the series
+  path reads is refused as having no effect: `gui_params.use_centroid_refinement`,
+  `centroid_noise_multiplier`, `use_ps2d_multi_peak`, `height_threshold`, `distance_factor`,
+  `prominence_threshold`, `smoothing_sigma`, `max_peaks_fit`, `max_optimization_iterations`,
+  `fitting_params.min_r_squared`, `processing_options.use_global_optimization`, and
+  `use_parallel_processing` in either section (`--parallel` sets it). With `--mode titration`,
+  `processing_options.use_original_reference_for_detection: true` is refused too.
 - `"gui_params": {"use_adaptive_optimization": true}` turns on the fitting-window grid
   search (1.0 / 1.5 / 2.0 x the median linewidth). It is **off by default**: on the DNAJA1
   and ERDJ6 titrations it chose 1.0x both times, a window that cuts the peak at half height,
   and ERDJ6's CSP Kd went from 282 µM to pinned at its 1500 µM bound.
 - Writes `peak_intensity_matrix.csv`, `_volume_matrix`, `comprehensive_peak_tracking.csv`,
   `series_analysis_tidy.csv`, `series_metadata.json`, per-spectrum CSVs.
+  `peak_detection_matrix.csv` (and each `{pt}_Detected` tracking column) is 1 where the fit
+  stands at least 3 sigma above the noise (`detection_sigma`, the Kd loader's floor), else 0.
 
 **Repeat acquisitions are measured for you.** When two spectra share a series value,
 `series_metadata.json`'s `repeat_scale` gives the median ratio of the second to

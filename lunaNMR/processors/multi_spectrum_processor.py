@@ -20,6 +20,7 @@ from lunaNMR.core.ps2d_config import get_ps2d_config, restore_base_ps2d_config, 
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
 from lunaNMR.utils.parameter_manager import NMRParameterManager
+from lunaNMR.utils.quality_categories import DETECTION_SIGMA_FLOOR
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
 
@@ -43,6 +44,23 @@ def resolve_titration_tracking(series_mode, peak_source_mode, enable_drift_limit
         return peak_source_mode, enable_drift_limit, False
 
     return "cascade", False, True
+
+
+def refuse_duplicate_assignments(peak_list: pd.DataFrame):
+    """Raise ValueError naming every assignment that labels more than one peak.
+
+    Clusters, the cascade seed, the matrices and the tidy CSV all look a peak up by
+    its assignment, so two peaks under one label come out as one peak's values on
+    both rows.
+    """
+    if peak_list is None or 'Assignment' not in peak_list.columns:
+        return
+    labels = peak_list['Assignment'].astype(str)
+    counts = labels[labels.duplicated(keep=False)].value_counts(sort=False)
+    if len(counts):
+        named = ', '.join(f"{label!r} x{n}" for label, n in counts.items())
+        raise ValueError(f"Peak list has duplicate assignments: {named}. Every peak "
+                         f"needs its own label; the series matches peaks by assignment.")
 
 
 def build_series_metadata(spectrum_names, delay_mapping, series_mode: str = "time") -> Dict[str, Any]:
@@ -145,6 +163,13 @@ TIDY_COLUMNS = {
     'position_pinned': None,
     'intensity_pinned': None,
 }
+
+
+def _stands_above_noise(peak: Dict[str, Any]) -> bool:
+    """Whether a fitted peak is detected: |height| / noise at or above the floor the
+    Kd loader drops undetected positions at. A fit that reported no sigma is not."""
+    sigma = peak.get('detection_sigma')
+    return sigma is not None and np.isfinite(sigma) and sigma >= DETECTION_SIGMA_FLOOR
 
 
 def _reported_pinned(peak: Dict[str, Any], flag: str) -> bool:
@@ -394,11 +419,15 @@ class MultiSpectrumProcessor:
                                Each spectrum computes: threshold = max_intensity * contour_min * 1.05
             lock_detection_threshold: If True, use spectrum 1 threshold for all spectra (default True)
         """
+        refuse_duplicate_assignments(reference_peaks)
+
         # A series is a fresh run: it starts from the base PS2D config, not from the
         # radii a previous run's adaptive search left (they size detection's dummies too)
         restore_base_ps2d_config()
 
         self.reference_peaks = reference_peaks.copy()
+        # Dummies detected on the first spectrum, fitted at every point like listed peaks
+        self.dummy_peaks = pd.DataFrame()
         self.pre_detected_peaks = pre_detected_peaks  # Store for cascade mode spectrum 1
         self.output_folder = output_folder
         self.progress_callback = progress_callback
@@ -684,13 +713,13 @@ class MultiSpectrumProcessor:
         # DETECTION-BASED MATCHING: Choose reference source based on mode
         if self.peak_source_mode == 'reference':
             # REFERENCE MODE: Always use original reference peaks
-            self.integrator.peak_list = self.reference_peaks.copy()
+            self.integrator.peak_list = self._listed_and_dummy_peaks()
 
         elif self.peak_source_mode == 'independent':
             # INDEPENDENT MODE: Always use original reference peaks for detection
             # Full detection + fitting pipeline runs for each spectrum
             log_info(f"Spectrum {spectrum_number}: Independent mode - using original reference for detection")
-            self.integrator.peak_list = self.reference_peaks.copy()
+            self.integrator.peak_list = self._listed_and_dummy_peaks()
 
         elif self.peak_source_mode in ['cascade', 'detected']:
             # CASCADE/DETECTED MODE: Use n-1 fitted results for spectrum 2+
@@ -698,18 +727,18 @@ class MultiSpectrumProcessor:
             if spectrum_number > 1 and self.previous_fitted_results is not None:
                 if self.use_original_reference_for_detection:
                     log_info(f"Spectrum {spectrum_number}: Using original reference (override enabled)")
-                    self.integrator.peak_list = self.reference_peaks.copy()
+                    self.integrator.peak_list = self._listed_and_dummy_peaks()
                 else:
                     # Convert previous fitted results to reference DataFrame format
                     detection_reference = self._convert_fitted_results_to_reference_df(self.previous_fitted_results)
                     self.integrator.peak_list = detection_reference.copy()
             else:
                 # Spectrum 1: Use provided reference peaks
-                self.integrator.peak_list = self.reference_peaks.copy()
+                self.integrator.peak_list = self._listed_and_dummy_peaks()
         else:
             # Fallback for unknown mode
             log_warning(f"Unknown peak_source_mode '{self.peak_source_mode}', using reference peaks")
-            self.integrator.peak_list = self.reference_peaks.copy()
+            self.integrator.peak_list = self._listed_and_dummy_peaks()
 
         # OPTION A: SKIP DETECTION FOR SPECTRUM 2+ IN CASCADE MODE
         # In cascade mode, spectrum 1 runs full detection to find peak positions.
@@ -786,6 +815,10 @@ class MultiSpectrumProcessor:
                 # CRITICAL: Replace peak_list with detected positions (not reference positions)
                 # This ensures fitting uses DETECTED/RECENTERED positions, just like GUI
                 self.integrator.peak_list = detected_df
+
+                if spectrum_number == 1:
+                    is_dummy = detected_df['Assignment'].astype(str).str.startswith('dummy_')
+                    self.dummy_peaks = detected_df[is_dummy].reset_index(drop=True)
 
             else:
                 log_warning("No peaks detected - using reference positions as fallback")
@@ -1050,6 +1083,13 @@ class MultiSpectrumProcessor:
             'fitting_fallbacks': self._fitting_fallbacks(fitted_results),
             'integration_results': self._convert_to_integration_format(fitted_results)
         }
+
+    def _listed_and_dummy_peaks(self) -> pd.DataFrame:
+        """The reference peak list plus the dummies the first spectrum's detection added,
+        at the positions detection found them there."""
+        if self.dummy_peaks.empty:
+            return self.reference_peaks.copy()
+        return pd.concat([self.reference_peaks, self.dummy_peaks], ignore_index=True)
 
     @staticmethod
     def _fitting_fallbacks(fitted_results) -> List[str]:
@@ -1691,7 +1731,7 @@ class MultiSpectrumProcessor:
                             peak_row['Assignment'])
 
                         if peak_assignment == row_assignment:
-                            peak_row[f'{spectrum_key}_Detected'] = True
+                            peak_row[f'{spectrum_key}_Detected'] = _stands_above_noise(peak)
                             peak_row[f'{spectrum_key}_Height'] = peak.get('Height', 0.0)
                             peak_row[f'{spectrum_key}_Volume'] = peak.get('Volume', 0.0)
                             peak_row[f'{spectrum_key}_SNR'] = peak.get('SNR', 0.0)

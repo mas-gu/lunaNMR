@@ -124,7 +124,7 @@ python -m lunaNMR diagnose <root> [--quick] [--sample] [--mode {time,titration}]
 python -m lunaNMR series --spectra 600/T1 --peaks 600/T1/peaks.txt --out RUN/T1 \
   --dry-run --deep [--quick] [--sample]
 
-# Series (titration adds --mode titration; --mode time is default)
+# Series (titration adds --mode titration; --mode time is default; titration refuses --peak-source independent)
 python -m lunaNMR series --spectra 600/T1 --peaks 600/T1/peaks.txt --out RUN/T1 \
   [--mode {time,titration}] [--peak-source {reference,cascade,detected,independent}] [--parallel]
 
