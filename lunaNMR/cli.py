@@ -184,18 +184,21 @@ def _emit(args, summary, *human_lines, error=None):
             print(line)
 
 
-def _emit_error(args, exc):
+def _emit_error(args, exc, internal=False):
     """Report a failure in the caller's own format.
 
     Under --format json the documented usage is `json.loads(proc.stdout)`; every failure
     path wrote to stderr and left stdout empty, so that parse raised on every error and
     the exception said nothing about the cause. Text mode keeps the bare stderr line.
+    `internal` marks an exception no input should cause - a bug, not bad input.
     """
     import json
     if getattr(args, 'format', 'text') == 'json':
+        error = {'type': type(exc).__name__, 'message': str(exc)}
+        if internal:
+            error['internal'] = True
         print(json.dumps({'ok': False, 'schema_version': SCHEMA_VERSION,
-                          'command': _full_command(args),
-                          'error': {'type': type(exc).__name__, 'message': str(exc)}}))
+                          'command': _full_command(args), 'error': error}))
     else:
         print(f"error: {exc}", file=sys.stderr)
 
@@ -2727,6 +2730,13 @@ def _main(argv):
         # path, bad concentrations, malformed CSV/JSON missing an expected column/key, an
         # unparseable delay label): report cleanly instead of dumping a traceback.
         _emit_error(args, exc)
+        return 1
+    except Exception as exc:
+        # Anything else is a bug. The caller still gets the envelope it parses, marked
+        # internal, and the traceback goes to stderr for whoever fixes it.
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        _emit_error(args, exc, internal=True)
         return 1
 
 
