@@ -131,3 +131,33 @@ def test_a_stop_while_the_pool_starts_lands_at_once(integrator):
         OutputManager.set_callback(None)
 
     assert time.monotonic() - set_at[0] < 0.5
+
+
+@MODES
+def test_a_stop_during_the_adaptive_radius_search_ends_it_at_once(integrator, in_process):
+    """The search refits the isolated peaks at each candidate radius; the stop is set as it
+    reports its first fit, and nothing after the search is fitted."""
+    from lunaNMR.utils.cancellation import Cancelled
+    stop = threading.Event()
+    set_at = []
+    after = []
+
+    def progress(progress, task, *args):
+        if "OPTIMIZE" in str(task) and not stop.is_set():
+            stop.set()
+            set_at.append(time.monotonic())
+        elif stop.is_set():
+            after.append(task)
+
+    integrator.gui_params = {'use_ps2d_multi_peak': True, 'use_adaptive_optimization': True}
+    try:
+        with pytest.raises(Cancelled):
+            _fit(integrator, in_process, stop=stop, progress_callback=progress)
+        latency = time.monotonic() - set_at[0]
+    finally:
+        integrator.gui_params = {'use_ps2d_multi_peak': True, 'use_adaptive_optimization': False}
+        from lunaNMR.core.ps2d_config import restore_base_ps2d_config
+        restore_base_ps2d_config()
+
+    assert after == []
+    assert latency < 1.0, f"Cancel landed {latency:.2f} s into the search"
