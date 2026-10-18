@@ -236,6 +236,8 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   and ERDJ6's CSP Kd went from 282 µM to pinned at its 1500 µM bound.
 - Writes `peak_intensity_matrix.csv`, `_volume_matrix`, `comprehensive_peak_tracking.csv`,
   `series_analysis_tidy.csv`, `series_metadata.json`, per-spectrum CSVs.
+  `peak_detection_matrix.csv` (and each `{pt}_Detected` tracking column) is 1 where the fit
+  stands at least 3 sigma above the noise (`detection_sigma`, the Kd loader's floor), else 0.
 
 **Repeat acquisitions are measured for you.** When two spectra share a series value,
 `series_metadata.json`'s `repeat_scale` gives the median ratio of the second to

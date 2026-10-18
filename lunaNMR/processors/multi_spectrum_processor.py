@@ -20,6 +20,7 @@ from lunaNMR.core.ps2d_config import get_ps2d_config, restore_base_ps2d_config, 
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
 from lunaNMR.utils.parameter_manager import NMRParameterManager
+from lunaNMR.utils.quality_categories import DETECTION_SIGMA_FLOOR
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
 
@@ -162,6 +163,13 @@ TIDY_COLUMNS = {
     'position_pinned': None,
     'intensity_pinned': None,
 }
+
+
+def _stands_above_noise(peak: Dict[str, Any]) -> bool:
+    """Whether a fitted peak is detected: |height| / noise at or above the floor the
+    Kd loader drops undetected positions at. A fit that reported no sigma is not."""
+    sigma = peak.get('detection_sigma')
+    return sigma is not None and np.isfinite(sigma) and sigma >= DETECTION_SIGMA_FLOOR
 
 
 def _reported_pinned(peak: Dict[str, Any], flag: str) -> bool:
@@ -1723,7 +1731,7 @@ class MultiSpectrumProcessor:
                             peak_row['Assignment'])
 
                         if peak_assignment == row_assignment:
-                            peak_row[f'{spectrum_key}_Detected'] = True
+                            peak_row[f'{spectrum_key}_Detected'] = _stands_above_noise(peak)
                             peak_row[f'{spectrum_key}_Height'] = peak.get('Height', 0.0)
                             peak_row[f'{spectrum_key}_Volume'] = peak.get('Volume', 0.0)
                             peak_row[f'{spectrum_key}_SNR'] = peak.get('SNR', 0.0)
