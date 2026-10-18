@@ -885,10 +885,16 @@ def _run_diagnose(args):
 
 
 def _validate_series(parser, args):
-    """`--deep` inspects the spectra instead of running them, so it needs `--dry-run`."""
+    """`--deep` inspects the spectra instead of running them, so it needs `--dry-run`;
+    a titration cannot use the independent peak source."""
     if getattr(args, 'deep', False) and not args.dry_run:
         parser.error('--deep only applies to --dry-run (it inspects the spectra rather than '
                      'processing them)')
+    # Independent detects every point against the reference list, which would anchor
+    # each titration point to the free state while the run reports cascade tracking.
+    if args.mode == 'titration' and args.peak_source == 'independent':
+        parser.error("--mode titration tracks peaks by cascade (each point seeded from the "
+                     "one before); --peak-source independent cannot be combined with it")
 
 
 def _merge_series_params(defaults, overrides, path):

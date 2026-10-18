@@ -294,7 +294,8 @@ class SeriesIntegrationDialog(BaseDialog):
             "- Uses original reference peaks for detection (no position drift)\n"
             "- Full PASS 1 learning + adaptive optimization\n"
             "- Complete fitting pipeline per spectrum\n"
-            "Best for maximum accuracy when spectra may differ significantly."
+            "Best for maximum accuracy when spectra may differ significantly.\n"
+            "Not available for a titration, which tracks peaks by cascade."
         )
         self.peak_source_group.addButton(self.independent_radio)
         layout.addWidget(self.independent_radio)
@@ -670,6 +671,13 @@ class SeriesIntegrationDialog(BaseDialog):
         """Handle x-axis extraction mode change (off / time / titration)."""
         if not self._xaxis_enabled():
             self.delay_info_label.setVisible(False)
+
+        # Independent detects every point against the reference list, which would
+        # anchor each titration point to the free state instead of tracking it.
+        titration = self._series_mode() == "titration"
+        if titration and self.independent_radio.isChecked():
+            self.cascade_radio.setChecked(True)
+        self.independent_radio.setEnabled(not titration)
 
         # Re-populate file list to show correct order
         self._refresh_file_list_display()

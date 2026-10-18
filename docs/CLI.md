@@ -209,6 +209,8 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
 ```
 - Peak list: `Assignment, Position_X, Position_Y[, Height]` header.
 - `--mode time` (relaxation, default) or `titration` (forces cascade tracking + wider margins).
+  `--peak-source independent` is refused with `titration`: it detects every point against the
+  reference list, which anchors each point to the free state instead of tracking it.
 - Filename values: `time` mode reads a trailing delay with an explicit unit (`_300ms`, `_2.4s`,
   `_2400us`). `titration` mode reads a trailing `_<value>` whose value carries a **decimal
   separator** — `o` or `.` (`_0o0`, `_0o5`, `_2.4`). Digits alone (`sample_2.ft`, `ref_100.ft`)
