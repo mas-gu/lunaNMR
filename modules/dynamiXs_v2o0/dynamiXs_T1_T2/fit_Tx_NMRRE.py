@@ -900,7 +900,8 @@ def run_analysis_with_params(params, progress_callback=None):
         residue = residue_names[col_idx]
 
         result = fit_single_residue(x, y, residue, initial_A, initial_t2,
-                                    n_bootstrap=n_bootstrap, error_method=error_method)
+                                    n_bootstrap=n_bootstrap, error_method=error_method,
+                                    fit_baseline=fit_baseline)
         results_list.append(result)
 
         # Report progress
@@ -980,7 +981,7 @@ def run_analysis_with_params(params, progress_callback=None):
         'mean_error': np.nanmean(t2_errors) if t2_errors else np.nan,
         # Fit provenance, so a caller sees the convention and the sampling quality
         # without opening the per-residue files.
-        'baseline_fixed': not FIT_BASELINE_BY_DEFAULT,
+        'baseline_fixed': not fit_baseline,
         'n_window_marginal': sum(1 for r in results_list
                                  if isinstance(r, dict) and r.get('window_marginal')),
     }
