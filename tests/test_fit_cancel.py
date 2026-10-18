@@ -108,3 +108,26 @@ def test_a_stopped_spectrum_fit_raises_instead_of_reporting_a_failure(integrator
         processor.process_peak_list(integrator.peak_list,
                                     {'use_parallel': False, 'use_voigt_fitting': True,
                                      'skip_series_params': True}, stop=stop)
+
+
+def test_a_stop_while_the_pool_starts_lands_at_once(integrator):
+    """Starting the pool waits on a spawned process importing lunaNMR, seconds on a busy
+    machine; a stop set as the first pass is handed out does not wait for it."""
+    from lunaNMR.utils.cancellation import Cancelled
+    from lunaNMR.utils.output_manager import OutputManager
+    stop = threading.Event()
+    set_at = []
+
+    def log(progress, task, log_msg=None, failed=False):
+        if not stop.is_set() and "Overlap groups" in (log_msg or task or ""):
+            stop.set()
+            set_at.append(time.monotonic())
+
+    OutputManager.set_callback(log)
+    try:
+        with pytest.raises(Cancelled):
+            _fit(integrator, in_process=False, stop=stop)
+    finally:
+        OutputManager.set_callback(None)
+
+    assert time.monotonic() - set_at[0] < 0.5

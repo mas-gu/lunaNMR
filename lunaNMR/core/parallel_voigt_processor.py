@@ -1208,7 +1208,8 @@ class ParallelVoigtProcessor:
                 else:
                     # Test multiprocessing capability first
                     with _SPAWN.Pool(processes=1) as test_pool:
-                        test_result = test_pool.apply(_test_parallel_worker, ("test",))
+                        test_result = self._pool_result(
+                            test_pool.apply_async(_test_parallel_worker, ("test",)), timeout=None)
                         if test_result != "test_success":
                             raise Exception(f"Multiprocessing test failed: {test_result}")
                     raise_if_stopped(self.stop)
@@ -1225,7 +1226,7 @@ class ParallelVoigtProcessor:
                 for task_id, cluster_size, async_result in async_results:
                     raise_if_stopped(self.stop)
                     try:
-                        result = self._cluster_result(async_result, timeout=600)  # 10 minute timeout per cluster
+                        result = self._pool_result(async_result, timeout=600)  # 10 minute timeout per cluster
 
                         if result['success']:
                             cluster_results.append(result)
@@ -1281,17 +1282,18 @@ class ParallelVoigtProcessor:
 
         return cluster_results
 
-    def _cluster_result(self, async_result, timeout):
-        """A cluster task's result. Over the pool with a stop event, the wait is polled so
-        that setting the event ends it (Cancelled) instead of the cluster's own end."""
+    def _pool_result(self, async_result, timeout):
+        """A pool task's result (timeout None: no limit). Over the pool with a stop event,
+        the wait is polled so that setting the event ends it (Cancelled) instead of the
+        task's own end."""
         if self.stop is None or self.in_process:
             return async_result.get(timeout=timeout)
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + (timeout if timeout is not None else float('inf'))
         while not async_result.ready() and time.monotonic() < deadline:
             raise_if_stopped(self.stop)
             async_result.wait(0.1)
         raise_if_stopped(self.stop)
-        return async_result.get(timeout=0)
+        return async_result.get(timeout=0 if timeout is not None else None)
         
     def _consolidate_cluster_results(self, cluster_results, peak_list, peak_metadata):
         """
