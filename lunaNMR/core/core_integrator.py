@@ -22,11 +22,9 @@ import sys
 from typing import List, Dict, Tuple, Any
 from scipy.special import wofz  # Faddeeva function for Voigt profiles
 from scipy.optimize import curve_fit
-import warnings
 from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
 from lunaNMR.core.ps2d_config import get_ps2d_config
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
-warnings.filterwarnings('ignore')
 
 # Import enhanced Voigt fitter
 try:

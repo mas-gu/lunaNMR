@@ -22,8 +22,6 @@ Date: 2025
 import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter, maximum_filter
-import warnings
-warnings.filterwarnings('ignore')
 
 # Import enhanced fitter
 try:

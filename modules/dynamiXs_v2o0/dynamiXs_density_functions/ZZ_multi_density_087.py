@@ -26,8 +26,6 @@ matplotlib.use('Agg')  # Non-interactive backend (must be before pyplot import)
 import matplotlib.pyplot as plt
 from scipy import stats
 from scipy.optimize import minimize
-import warnings
-warnings.filterwarnings('ignore')
 
 # Multiprocessing imports
 import multiprocessing
@@ -58,7 +56,7 @@ PI = 3.14159265359
 OMEGA_H_FACTOR = 0.87  # Factor for more accurate spectral density calculation
 
 # JIT-compiled spectral density calculation for performance
-@jit(nopython=False, cache=True, forceobj=True)
+@jit(cache=True, forceobj=True)
 def _calculate_spectral_density_jit(s2, tc, te, omega):
     """
     Calculate J(w) using Lipari-Szabo model-free approach (JIT-compiled version)

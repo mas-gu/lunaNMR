@@ -28,8 +28,6 @@ matplotlib.use('Agg')  # Non-interactive backend (must be before pyplot import)
 import matplotlib.pyplot as plt
 from scipy import stats
 from scipy.optimize import minimize
-import warnings
-warnings.filterwarnings('ignore')
 
 # Multiprocessing imports
 import multiprocessing
@@ -57,7 +55,7 @@ REDUCED_PLANK = 1.05457180013e-34       # J⋅s
 PI = 3.14159265359
 
 # JIT-compiled spectral density calculation for performance
-@jit(nopython=False, cache=True, forceobj=True)
+@jit(cache=True, forceobj=True)
 def _calculate_spectral_density_jit(s2, tc, te, omega):
     """
     Calculate J(w) using Lipari-Szabo model-free approach (JIT-compiled version)
