@@ -207,7 +207,8 @@ full grid before correcting anything.
 python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
     [--mode {time,titration}] [--peak-source {reference,cascade,detected,independent}] [--parallel]
 ```
-- Peak list: `Assignment, Position_X, Position_Y[, Height]` header.
+- Peak list: `Assignment, Position_X, Position_Y[, Height]` header. Every assignment must be
+  unique: the series matches peaks by assignment, so a duplicated label is refused, naming it.
 - `--mode time` (relaxation, default) or `titration` (forces cascade tracking + wider margins).
   `--peak-source independent` is refused with `titration`: it detects every point against the
   reference list, which anchors each point to the free state instead of tracking it.

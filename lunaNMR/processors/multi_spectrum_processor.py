@@ -45,6 +45,23 @@ def resolve_titration_tracking(series_mode, peak_source_mode, enable_drift_limit
     return "cascade", False, True
 
 
+def refuse_duplicate_assignments(peak_list: pd.DataFrame):
+    """Raise ValueError naming every assignment that labels more than one peak.
+
+    Clusters, the cascade seed, the matrices and the tidy CSV all look a peak up by
+    its assignment, so two peaks under one label come out as one peak's values on
+    both rows.
+    """
+    if peak_list is None or 'Assignment' not in peak_list.columns:
+        return
+    labels = peak_list['Assignment'].astype(str)
+    counts = labels[labels.duplicated(keep=False)].value_counts(sort=False)
+    if len(counts):
+        named = ', '.join(f"{label!r} x{n}" for label, n in counts.items())
+        raise ValueError(f"Peak list has duplicate assignments: {named}. Every peak "
+                         f"needs its own label; the series matches peaks by assignment.")
+
+
 def build_series_metadata(spectrum_names, delay_mapping, series_mode: str = "time") -> Dict[str, Any]:
     """Map every output matrix column back to the spectrum it came from.
 
@@ -394,6 +411,8 @@ class MultiSpectrumProcessor:
                                Each spectrum computes: threshold = max_intensity * contour_min * 1.05
             lock_detection_threshold: If True, use spectrum 1 threshold for all spectra (default True)
         """
+        refuse_duplicate_assignments(reference_peaks)
+
         # A series is a fresh run: it starts from the base PS2D config, not from the
         # radii a previous run's adaptive search left (they size detection's dummies too)
         restore_base_ps2d_config()

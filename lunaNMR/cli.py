@@ -1000,7 +1000,8 @@ def _run_series(args):
     """Wrap MultiSpectrumProcessor.process_nmr_series for a headless series/titration run."""
     import matplotlib
     matplotlib.use('Agg')  # headless guard before any plotting-capable import
-    from lunaNMR.processors.multi_spectrum_processor import MultiSpectrumProcessor
+    from lunaNMR.processors.multi_spectrum_processor import (
+        MultiSpectrumProcessor, refuse_duplicate_assignments)
     from lunaNMR.utils.file_manager import NMRFileManager
 
     file_manager = NMRFileManager()
@@ -1046,6 +1047,11 @@ def _run_series(args):
     reference_peaks = file_manager.load_peak_list(args.peaks)
     if reference_peaks.empty:
         _emit_error(args, ValueError(f"Peak list is empty: {args.peaks}"))
+        return 1
+    try:
+        refuse_duplicate_assignments(reference_peaks)
+    except ValueError as exc:
+        _emit_error(args, ValueError(f"{args.peaks}: {exc}"))
         return 1
 
     os.makedirs(args.out, exist_ok=True)
