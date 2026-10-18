@@ -49,37 +49,34 @@ def test_input_defaults_output_to_kd_analysis_subfolder(app, tmp_path):
     assert Path(page.output_dir) == series_dir / "kd_analysis"
 
 
-class _FakeSignal:
-    def connect(self, *a, **k):
-        pass
+DNAJA1_TIDY = (Path(__file__).resolve().parents[4] / "data_test" / "data_binding" / "tidy"
+               / "DNAJA1_HSPA8_tidy.csv")
 
 
-class _FakeWorker:
-    captured = {}
-
-    def __init__(self, params):
-        _FakeWorker.captured["params"] = params
-        self.progress = _FakeSignal()
-        self.progress_value = _FakeSignal()
-        self.finished = _FakeSignal()
-        self.error = _FakeSignal()
-
-    def start(self):
-        pass
-
-
+@pytest.mark.skipif(not DNAJA1_TIDY.exists(), reason="data_test not present")
 def test_fit_output_prefix_is_series_name(app, tmp_path, monkeypatch):
+    """Every series writes the same generic tidy CSV name, so the fit's files must carry
+    the series' name. The real worker fits the real DNAJA1 titration; only the message
+    box that reports the result is answered, since nothing closes a modal offscreen."""
+    import shutil
     import kd_titration_page as mod
     series_dir = tmp_path / "series_results_ABC"
     series_dir.mkdir()
-    csv = _tidy_csv(series_dir)
+    csv = series_dir / "series_analysis_tidy.csv"
+    shutil.copy(DNAJA1_TIDY, csv)
+
+    reported = []
+    monkeypatch.setattr(mod, "show_info", lambda parent, title, msg: reported.append(title))
+    monkeypatch.setattr(mod, "show_warning", lambda parent, title, msg: reported.append(title))
 
     page = mod.KdTitrationPage(_fake_main_window())
     page._set_input_file(str(csv))
     page.series_name = "HSPA8"                       # as if a named series was dropped
-
-    monkeypatch.setattr(mod, "KdTitrationFittingWorker", _FakeWorker)
     page._start_analysis()
+    assert page.worker.wait(300_000), "the fit did not finish"
+    app.processEvents()
+    assert reported, "the page never reported the finished fit"
 
-    params = _FakeWorker.captured["params"]
-    assert params.output_prefix == "HSPA8"           # files carry the series name
+    written = [f.name for f in (series_dir / "kd_analysis").rglob("*") if f.is_file()]
+    assert written
+    assert all(name.startswith("HSPA8") for name in written), written
