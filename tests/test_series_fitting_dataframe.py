@@ -1,6 +1,13 @@
 # ABOUTME: Tests that BatchResults.to_fitting_dataframe honors the series mode.
 # ABOUTME: Guards the titration column headers and series_mode propagation path.
 
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
 from lunaNMR.processors.multi_spectrum_processor import (
     BatchResults,
     MultiSpectrumProcessor,
@@ -46,3 +53,45 @@ def test_convert_propagates_series_mode():
     proc.series_mode = 'titration'
     batch = proc._convert_to_batch_results({'results': {}, 'summary': {}}, None, None)
     assert batch.series_mode == 'titration'
+
+
+# A real T1 series whose fits include Failed points and points on their intensity floor.
+def _newest_flagged_t1_series():
+    found = sorted((Path(__file__).resolve().parents[2] / "data_test" / "data_asyn").glob(
+        "*/T1_*/series_results_*/series_analysis_tidy.csv"))
+    flagged = [p for p in found if 'intensity_pinned' in p.read_text().splitlines()[0]]
+    return flagged[-1] if flagged else None
+
+
+_SERIES_WITH_UNMEASURED_POINTS = _newest_flagged_t1_series()
+
+
+def _batch_results_from_tidy(tidy_csv):
+    """The series as the GUI holds it: one result per spectrum, carrying the per-peak
+    fields the tidy CSV was written from."""
+    meta = json.loads((tidy_csv.parent / "series_metadata.json").read_text())
+    spectrum_of = {c['column']: c['spectrum'] for c in meta['columns']}
+    tidy = pd.read_csv(tidy_csv, dtype={'spectrum_name': str})
+    br = BatchResults()
+    for column, rows in tidy.groupby('spectrum_name'):
+        peaks = [{k: (None if pd.isna(v) else v) for k, v in row.items() if k != 'spectrum_name'}
+                 for row in rows.to_dict('records')]
+        br.add_result(spectrum_of[column], {'status': 'success', 'success': True,
+                                            'integration_results': peaks})
+    return br, tidy
+
+
+@pytest.mark.skipif(_SERIES_WITH_UNMEASURED_POINTS is None, reason="data_test not present")
+def test_the_fitting_frame_leaves_failed_and_floor_pinned_points_empty():
+    """As the intensity and volume matrices do: those numbers are a placeholder or a
+    bound, not a measurement."""
+    br, tidy = _batch_results_from_tidy(_SERIES_WITH_UNMEASURED_POINTS)
+    frame = br.to_fitting_dataframe(value_column='volume').set_index('Assignment')
+    unmeasured = (tidy.quality == 'Failed') | (tidy.intensity_pinned == True)  # noqa: E712
+    assert unmeasured.sum() > 0
+    for row in tidy.itertuples():
+        cell = frame.loc[row.assignment, row.spectrum_name]
+        if unmeasured[row.Index]:
+            assert np.isnan(cell), (row.assignment, row.spectrum_name)
+        else:
+            assert cell == pytest.approx(row.volume), (row.assignment, row.spectrum_name)

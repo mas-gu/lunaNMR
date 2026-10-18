@@ -182,6 +182,23 @@ def _reported_pinned(peak: Dict[str, Any], flag: str) -> bool:
     return value is not None and pd.notna(value) and bool(value)
 
 
+def _intensity_unmeasured(quality: pd.Series, intensity_pinned: Optional[pd.Series]) -> pd.Series:
+    """True where a fitted intensity is not a measurement, and must reach no relaxation fit.
+
+    A FAILED fit's value is a placeholder. A fit on its intensity floor took the number
+    from that floor - cluster-relative, a product of the neighbours' seeds. A decayed peak
+    is not touched: its low value is the measurement (and a fit inside the noise is
+    labelled Poor, never Failed). Nor is a position pinned on its margin: the intensity
+    does not depend on it (see quality_categories.usable_points). An unreported pin is
+    unknown and kept.
+    """
+    unmeasured = quality.astype(str).str.lower() == 'failed'
+    if intensity_pinned is not None:
+        unmeasured |= intensity_pinned.map(
+            lambda v: v is not None and pd.notna(v) and bool(v)).astype(bool)
+    return unmeasured
+
+
 class MultiSpectrumProcessor:
     """
     Completely independent multi-spectrum processor.
@@ -1825,27 +1842,20 @@ class MultiSpectrumProcessor:
     def _fitted_matrix(tracking_df: pd.DataFrame, suffix: str) -> pd.DataFrame:
         """One column per spectrum of a fitted quantity (`suffix`: '_Height', '_Volume').
 
-        A point whose fit stopped on its intensity floor is left EMPTY. The relaxation
-        analyses read only the matrices, which carry no flags, so a value taken from that
-        floor - cluster-relative, a product of the neighbours' seeds - would be fitted as
-        a decay point. So is a FAILED fit, whose 0.0 is a placeholder, not a measurement.
-        A decayed peak is not touched: its low value is the measurement (and a fit inside
-        the noise is labelled Poor, never Failed).
-        Nor is a position pinned on its margin: the intensity does not depend on it (see
-        quality_categories.usable_points).
+        A point that is not a measurement (_intensity_unmeasured: a Failed fit, or one
+        stopped on its intensity floor) is left EMPTY. The relaxation analyses read only
+        the matrices, which carry no flags, so such a value would be fitted as a decay
+        point.
         """
         matrix = tracking_df[['Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y']].copy()
+        no_quality = pd.Series('', index=tracking_df.index)
         for col in tracking_df.columns:
             if col.endswith(suffix):
                 spectrum_name = col[:-len(suffix)]
                 values = tracking_df[col].astype(float)
-                pinned_col = f'{spectrum_name}_Intensity_Pinned'
-                if pinned_col in tracking_df:
-                    values = values.mask(tracking_df[pinned_col].astype(bool))
-                quality_col = f'{spectrum_name}_Quality'
-                if quality_col in tracking_df:
-                    values = values.mask(tracking_df[quality_col].astype(str).str.lower() == 'failed')
-                matrix[spectrum_name] = values
+                matrix[spectrum_name] = values.mask(_intensity_unmeasured(
+                    tracking_df.get(f'{spectrum_name}_Quality', no_quality),
+                    tracking_df.get(f'{spectrum_name}_Intensity_Pinned')))
         return matrix
 
     def _create_intensity_matrix(self, tracking_df: pd.DataFrame):
@@ -2410,8 +2420,7 @@ class BatchResults:
         directly from memory without requiring a CSV file.
 
         Returns:
-            DataFrame with columns: spectrum_name, assignment, peak_number,
-            ppm_x, ppm_y, height, volume, snr, quality, r_squared
+            DataFrame with the TIDY_COLUMNS of series_analysis_tidy.csv
         """
         tidy_data = []
 
@@ -2426,24 +2435,13 @@ class BatchResults:
             # Extract integration results
             integration_results = result_data.get('integration_results', [])
             for peak in integration_results:
-                row = {
-                    'spectrum_name': spectrum_header,
-                    'assignment': peak.get('assignment', ''),
-                    'peak_number': peak.get('peak_number', 0),
-                    'ppm_x': peak.get('ppm_x', 0.0),
-                    'ppm_y': peak.get('ppm_y', 0.0),
-                    'height': peak.get('height', 0.0),
-                    'volume': peak.get('volume', 0.0),
-                    'snr': peak.get('snr', 0.0),
-                    'quality': peak.get('quality', 'Unknown'),
-                    'r_squared': peak.get('r_squared', 0.0)
-                }
+                row = {name: peak.get(name, default)
+                       for name, default in TIDY_COLUMNS.items()}
+                row['spectrum_name'] = spectrum_header
                 tidy_data.append(row)
 
         if not tidy_data:
-            return pd.DataFrame(columns=['spectrum_name', 'assignment', 'peak_number',
-                                        'ppm_x', 'ppm_y', 'height', 'volume',
-                                        'snr', 'quality', 'r_squared'])
+            return pd.DataFrame(columns=list(TIDY_COLUMNS))
 
         return pd.DataFrame(tidy_data)
 
@@ -2453,7 +2451,8 @@ class BatchResults:
         Creates the wide format expected by the fitting module:
         - Row per peak (identified by assignment)
         - Column per spectrum (numeric delay time)
-        - Values are volumes (or heights)
+        - Values are volumes (or heights); a point that is not a measurement
+          (_intensity_unmeasured) is left empty, as in the intensity matrices
 
         The fitting module expects numeric column names (e.g., "10", "50", "100")
         representing delay times in ms. This method extracts delays from spectrum
@@ -2495,6 +2494,8 @@ class BatchResults:
         # Apply mapping to spectrum_name column
         tidy_df = tidy_df.copy()
         tidy_df['delay_column'] = tidy_df['spectrum_name'].map(delay_mapping)
+        tidy_df[value_column] = tidy_df[value_column].astype(float).mask(
+            _intensity_unmeasured(tidy_df['quality'], tidy_df['intensity_pinned']))
 
         # Pivot: rows=assignment, columns=delay_column, values=volume or height
         pivot_df = tidy_df.pivot_table(
