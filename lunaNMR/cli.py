@@ -995,9 +995,14 @@ def _run_series(args):
     failed = sorted(name for name, data in results.items() if data.get('status') != 'success')
     for name in failed:
         print(f"  warning: {name} produced no fits; its matrix columns are empty", file=sys.stderr)
+    # A spectrum some of whose peaks a fallback algorithm fitted, named with the reason
+    fallbacks = {name: data['fitting_fallbacks'] for name, data in sorted(results.items())
+                 if data.get('fitting_fallbacks')}
+    for name, reasons in fallbacks.items():
+        print(f"  warning: {name} was fitted by a fallback: {'; '.join(reasons)}", file=sys.stderr)
     _emit(args,
           {'command': 'series', 'spectra_fitted': n_success, 'spectra_total': len(results),
-           'failed_spectra': failed, 'output_folder': output_folder, 'outputs': outputs, 'parallel': args.parallel,
+           'failed_spectra': failed, 'fitting_fallbacks': fallbacks, 'output_folder': output_folder, 'outputs': outputs, 'parallel': args.parallel,
            'params_file': getattr(args, 'params', None), 'params': series_params},
           f"Series analysis complete: {n_success}/{len(results)} spectra fitted",
           f"  Output: {output_folder}",

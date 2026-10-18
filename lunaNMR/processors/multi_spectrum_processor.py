@@ -1008,7 +1008,8 @@ class MultiSpectrumProcessor:
             if result and result.get('success', False):
                 # Add spectrum-specific metadata
                 result['spectrum_file'] = spectrum_name
-                result['processing_mode'] = 'series_integration'
+                if 'fitting_fallback' not in result:
+                    result['processing_mode'] = 'series_integration'
                 successful_fits += 1
 
                 # Extract linewidths from reference spectrum (first spectrum only)
@@ -1046,8 +1047,16 @@ class MultiSpectrumProcessor:
             'successful_fits': successful_fits,
             'success_rate': success_rate,
             'spectrum_file': spectrum_name,
+            'fitting_fallbacks': self._fitting_fallbacks(fitted_results),
             'integration_results': self._convert_to_integration_format(fitted_results)
         }
+
+    @staticmethod
+    def _fitting_fallbacks(fitted_results) -> List[str]:
+        """Each distinct fallback algorithm, with its reason, that produced any of
+        `fitted_results` - empty when the cluster pipeline fitted them all."""
+        return sorted({result['fitting_fallback'] for result in fitted_results
+                       if result and result.get('fitting_fallback')})
 
     def _convert_fitted_results_to_reference_df(self, fitted_results):
         """

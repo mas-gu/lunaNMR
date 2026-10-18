@@ -612,11 +612,15 @@ class ParallelVoigtProcessor:
             return (consolidated_results, learned_statistics)
 
         except Exception as e:
+            reason = f"{type(e).__name__}: {e}"
             log_error(f"Parallel Voigt fitting failed: {e}")
-            log_info("Falling back to sequential processing")
+            log_warning(f"Falling back to per-peak fitting, with no clusters, territories or "
+                        f"drift limits, because the cluster pipeline raised {reason}")
             import traceback
             traceback.print_exc()
             results = self._sequential_fallback(peak_list, progress_callback)
+            for result in results:
+                result['fitting_fallback'] = f"per-peak fitting ({reason})"
             return (results, None)  # Sequential fallback doesn't learn statistics
 
         finally:

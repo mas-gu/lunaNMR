@@ -296,6 +296,7 @@ class SingleSpectrumProcessor:
         if force_reference_linewidths and reference_linewidths:
             log_info(f"Parallel mode: Using {len(reference_linewidths)} reference linewidths")
 
+        fallback_reason = "the cluster-based parallel fitter is unavailable"
         # Check if enhanced parallel fitting is available
         if (hasattr(self.integrator, 'enhanced_fitter') and
             hasattr(self.integrator.enhanced_fitter, 'enhanced_peak_fitting_parallel')):
@@ -337,7 +338,9 @@ class SingleSpectrumProcessor:
                 # Add metadata to results
                 for i, result in enumerate(fitted_results):
                     if result:
-                        result['processing_mode'] = 'sequential' if in_process else 'enhanced_parallel'
+                        # A fallback's own mode is the one thing that says it happened
+                        if 'fitting_fallback' not in result:
+                            result['processing_mode'] = 'sequential' if in_process else 'enhanced_parallel'
                         if 'peak_number' not in result:
                             result['peak_number'] = i + 1
 
@@ -361,8 +364,11 @@ class SingleSpectrumProcessor:
                 if in_process:
                     raise
                 log_warning(f"Enhanced parallel processing failed: {e}")
-                log_info("Falling back to original parallel implementation")
+                fallback_reason = f"{type(e).__name__}: {e}"
                 # Fall through to existing parallel implementation
+
+        log_warning(f"Falling back to the original parallel fitter, with no locked clusters "
+                    f"or learned statistics, because {fallback_reason}")
 
         # Fallback to existing ParallelPeakFitter (unchanged)
         try:
@@ -390,6 +396,7 @@ class SingleSpectrumProcessor:
             for i, result in enumerate(fitted_results):
                 if result:
                     result['processing_mode'] = 'original_parallel'
+                    result['fitting_fallback'] = f"original parallel fitting ({fallback_reason})"
                     if 'peak_number' not in result:
                         result['peak_number'] = i + 1
 
