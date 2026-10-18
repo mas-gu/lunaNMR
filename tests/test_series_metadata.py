@@ -160,3 +160,29 @@ class TestMetadataFileWriting:
         meta = json.loads((tmp_path / 'series_metadata.json').read_text())
         assert meta['repeat_scale']['ratio'] == pytest.approx(0.88, abs=1e-6)
         assert meta['repeat_scale']['needs_normalisation'] is True
+
+
+class TestTheFitSettingsAreRecorded:
+    """A refit made later, from the viewer, can fit as the series did only if the series
+    says how it fitted."""
+
+    @staticmethod
+    def _meta(folder):
+        import json
+        return json.loads((folder / 'series_metadata.json').read_text())
+
+    def test_the_ps2d_config_the_series_fitted_with(self, dnaja1_titration_series):
+        from lunaNMR.core.ps2d_config import PS2DConfig
+        config = self._meta(dnaja1_titration_series)['ps2d_config']
+        assert config['nucleus_type'] == '15N'
+        assert set(config) == set(vars(PS2DConfig('15N')))
+
+    def test_every_titration_point_records_its_territories(self, dnaja1_titration_series):
+        import pandas as pd
+        tidy = pd.read_csv(dnaja1_titration_series / 'series_analysis_tidy.csv',
+                           dtype={'spectrum_name': str, 'assignment': str})
+        for column in self._meta(dnaja1_titration_series)['columns']:
+            fitted = set(tidy.loc[tidy['spectrum_name'] == column['column'], 'assignment'])
+            territories = column['territories']
+            assert fitted <= set(territories), column['column']
+            assert all(len(m) == 2 and m[0] > 0 and m[1] > 0 for m in territories.values())

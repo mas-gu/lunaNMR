@@ -63,7 +63,10 @@ def refuse_duplicate_assignments(peak_list: pd.DataFrame):
                          f"needs its own label; the series matches peaks by assignment.")
 
 
-def build_series_metadata(spectrum_names, delay_mapping, series_mode: str = "time") -> Dict[str, Any]:
+def build_series_metadata(spectrum_names, delay_mapping, series_mode: str = "time",
+                          ps2d_config: Optional[Dict[str, Any]] = None,
+                          fit_constraints: Optional[Dict[str, Dict[str, Any]]] = None
+                          ) -> Dict[str, Any]:
     """Map every output matrix column back to the spectrum it came from.
 
     Matrix columns are series values (a delay in ms, or a titration point), so the
@@ -72,6 +75,12 @@ def build_series_metadata(spectrum_names, delay_mapping, series_mode: str = "tim
     sort of the basename, not the acquisition order. A spectrum whose value cannot be
     parsed falls back to a column named after the file stem and reports `value: None`;
     that mix is invisible in the matrix, so it is counted here too.
+
+    It also records how the series fitted, so a later refit of one of its points can fit
+    the same way: `ps2d_config` (the PS2D configuration, nucleus included), and per
+    column, from `fit_constraints` {spectrum: {'territories', 'linewidth_caps'}}, the
+    per-peak position territories and linewidth-total caps that point was fitted with
+    ({assignment: [f1, f2]}, ppm) - each only where that point had them.
     """
     from lunaNMR.utils.delay_extractor import DelayExtractor
 
@@ -79,17 +88,23 @@ def build_series_metadata(spectrum_names, delay_mapping, series_mode: str = "tim
     columns = []
     for name in spectrum_names:
         label = delay_mapping.get(name)
-        columns.append({
+        entry = {
             'column': label if label is not None else os.path.splitext(name)[0],
             'spectrum': name,
             'value': extractor.extract_value(name) if label is not None else None,
-        })
+        }
+        for key, margins in ((fit_constraints or {}).get(name) or {}).items():
+            if margins:
+                entry[key] = {str(a): [float(m[0]), float(m[1])]
+                              for a, m in margins.items() if m is not None}
+        columns.append(entry)
 
     return {
         'series_mode': series_mode,
         'value_units': 'ms' if series_mode == 'time' else 'point',
         'n_spectra': len(columns),
         'n_value_unparsed': sum(1 for c in columns if c['value'] is None),
+        'ps2d_config': ps2d_config,
         'columns': columns,
     }
 
@@ -441,6 +456,10 @@ class MultiSpectrumProcessor:
         # A series is a fresh run: it starts from the base PS2D config, not from the
         # radii a previous run's adaptive search left (they size detection's dummies too)
         restore_base_ps2d_config()
+        # How each point was fitted, for series_metadata.json: the PS2D config (taken
+        # once the first spectrum's nucleus is applied) and the per-peak margins.
+        self.fitted_ps2d_config = None
+        self.fit_constraints = {}
 
         self.reference_peaks = reference_peaks.copy()
         # Dummies detected on the first spectrum, fitted at every point like listed peaks
@@ -688,6 +707,8 @@ class MultiSpectrumProcessor:
         if spectrum_number == 1 and detected and detected != get_ps2d_config().nucleus_type:
             set_ps2d_config(detected)
             log_info(f"PS2D configuration set to {detected} for this series")
+        if spectrum_number == 1:
+            self.fitted_ps2d_config = dict(vars(get_ps2d_config()))
 
         # APPLY LOCKED THRESHOLD FROM GUI (if in from-GUI mode)
         if self.sn_from_gui_locked:
@@ -987,6 +1008,10 @@ class MultiSpectrumProcessor:
             self.integrator.titration_pos_margin_f1 = None
             self.integrator.titration_pos_margin_f2 = None
             self.integrator.titration_pos_margins = None
+
+        self.fit_constraints[spectrum_name] = {
+            'territories': self.integrator.titration_pos_margins,
+            'linewidth_caps': getattr(self.integrator, 'titration_lw_margins', None)}
 
         # This calls _sync_parameters_to_integrator() internally, ensuring proper parameter flow
         # CRITICAL: Use integrator.peak_list which now contains DETECTED positions (not reference_peaks)
@@ -1701,6 +1726,8 @@ class MultiSpectrumProcessor:
             list(batch_results.get('results', {}).keys()),
             getattr(self, 'delay_mapping', {}) or {},
             getattr(self, 'series_mode', 'time'),
+            ps2d_config=getattr(self, 'fitted_ps2d_config', None),
+            fit_constraints=getattr(self, 'fit_constraints', None),
         )
         if intensity_matrix is not None:
             metadata['repeat_scale'] = measure_repeat_scale(intensity_matrix, metadata['columns'])
