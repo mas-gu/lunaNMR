@@ -62,6 +62,7 @@ class ProcessingWorker(QObject):
     """Worker for background series processing."""
 
     progress = Signal(int, int, str)  # current, total, message
+    notice = Signal(str, bool)  # a warning or error from the run, is_error
     finished = Signal(object)  # batch_results
     error = Signal(str)
 
@@ -97,6 +98,19 @@ class ProcessingWorker(QObject):
         if self.processor:
             self.processor.paused = paused
 
+    def progress_callback(self, progress_pct, task_desc, log_msg, failed=False):
+        """OutputManager callback for the series thread: every message drives the
+        progress display, and a warning or error is also forwarded for the log."""
+        if self._cancelled:
+            return False  # Signal to stop
+        if failed or (log_msg or '').startswith('Warning:'):
+            self.notice.emit(log_msg, bool(failed))
+        # Convert to (current, total, message) format
+        total = len(self.nmr_files) if self.nmr_files else 100
+        current = int(progress_pct * total / 100)
+        self.progress.emit(current, total, log_msg or task_desc)
+        return True
+
     def run(self):
         """Run the series processing."""
         try:
@@ -109,15 +123,7 @@ class ProcessingWorker(QObject):
             processor = MultiSpectrumProcessor(self.voigt_params)
             self.processor = processor
 
-            # Set up progress callback that works with MultiSpectrumProcessor format
-            def progress_callback(progress_pct, task_desc, log_msg, failed=False):
-                if self._cancelled:
-                    return False  # Signal to stop
-                # Convert to (current, total, message) format
-                total = len(self.nmr_files) if self.nmr_files else 100
-                current = int(progress_pct * total / 100)
-                self.progress.emit(current, total, log_msg or task_desc)
-                return True
+            progress_callback = self.progress_callback
 
             # Set OutputManager callback for this thread so log_* functions route to GUI
             OutputManager.set_callback(progress_callback)
@@ -202,6 +208,8 @@ class SeriesIntegrationDialog(BaseDialog):
         self.thread = None
         self.nmr_files = []
         self.current_series_name = None  # Name for current series integration
+        self.tracking_statement = ""  # Peak tracking the current run runs
+        self.outcome_box = None  # The last run's outcome box
 
         # Progress tracking
         self.start_time = None  # Set when processing starts
@@ -954,6 +962,8 @@ class SeriesIntegrationDialog(BaseDialog):
         else:
             delay_msg = ""
         self._log(f"Starting series integration: {len(self.nmr_files)} spectra, {len(reference_peaks)} peaks{delay_msg}")
+        self.tracking_statement = self._tracking_statement(peak_source_mode)
+        self._log(self.tracking_statement)
 
         # Create worker and thread
         self.thread = QThread()
@@ -972,6 +982,7 @@ class SeriesIntegrationDialog(BaseDialog):
         # Connect signals
         self.thread.started.connect(self.worker.run)
         self.worker.progress.connect(self._on_progress)
+        self.worker.notice.connect(self._on_notice)
         self.worker.finished.connect(self._on_finished)
         self.worker.error.connect(self._on_error)
         self.worker.finished.connect(self.thread.quit)
@@ -979,6 +990,18 @@ class SeriesIntegrationDialog(BaseDialog):
 
         # Start
         self.thread.start()
+
+    def _tracking_statement(self, peak_source_mode: str) -> str:
+        """The peak tracking the engine runs, beside the one chosen: a titration runs
+        cascade with no absolute drift limit, whatever the peak source says, and the
+        drift limit only ever applies to a tracked (cascade/independent) source."""
+        from lunaNMR.processors.multi_spectrum_processor import resolve_titration_tracking
+        drift_enabled = getattr(self.main_window, 'enable_cascade_drift_limit', True)
+        source, drift, _ = resolve_titration_tracking(
+            self._series_mode(), peak_source_mode, drift_enabled)
+        requested = f" (requested '{peak_source_mode}')" if source != peak_source_mode else ""
+        drift_on = bool(drift) and source in ('cascade', 'independent')
+        return f"Peak tracking: {source}{requested}, drift limit {'on' if drift_on else 'off'}"
 
     def _cancel_processing(self):
         """Cancel the current processing."""
@@ -1051,9 +1074,18 @@ class SeriesIntegrationDialog(BaseDialog):
         if message and 'Loading' in message:
             self._log(message)
 
+    def _on_notice(self, message: str, is_error: bool):
+        """Log a warning or error the series run raised."""
+        self._log(message, is_error=is_error)
+
+    def _show_outcome(self, icon, title: str, text: str):
+        """Show the run's outcome in a box over the dialog without blocking it."""
+        box = QMessageBox(icon, title, text, QMessageBox.Ok, self)
+        box.open()
+        self.outcome_box = box
+
     def _on_finished(self, batch_results):
         """Handle processing completion."""
-        self.batch_results = batch_results
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self.pause_btn.setEnabled(False)
@@ -1066,68 +1098,99 @@ class SeriesIntegrationDialog(BaseDialog):
         else:
             total_time_str = "N/A"
 
-        if batch_results:
-            # Handle both dict format and BatchResults object
-            if hasattr(batch_results, 'get_summary'):
-                summary = batch_results.get_summary()
-            elif isinstance(batch_results, dict):
-                summary = batch_results.get('summary', {})
-            else:
-                summary = {}
-
-            # Update final stats
-            self.stats_label.setText(
-                f"Completed in: {total_time_str}\n"
-                f"Successful: {summary.get('successful', 0)} | Failed: {summary.get('failed', 0)}"
-            )
-
-            self.status_label.setText(
-                f"Complete: {summary.get('successful', 0)}/{summary.get('total_spectra', 0)} spectra processed"
-            )
-            self._log("Series integration complete!")
-            self._log(f"  Total: {summary.get('total_spectra', 0)} spectra")
-            self._log(f"  Successful: {summary.get('successful', 0)}")
-            self._log(f"  Failed: {summary.get('failed', 0)}")
-            self._log(f"  Duration: {summary.get('duration', 'N/A')}")
-
-            # Store results in main window
-            if self.main_window:
-                # Store as current batch_results (for backward compatibility)
-                self.main_window.batch_results = batch_results
-
-                # Also store in saved_series dict with the series name
-                if not hasattr(self.main_window, 'saved_series'):
-                    self.main_window.saved_series = {}
-
-                series_name = self.current_series_name or "Unnamed_Series"
-
-                # Add metadata to batch_results
-                if hasattr(batch_results, 'metadata'):
-                    batch_results.metadata['series_name'] = series_name
-                    batch_results.metadata['spectrum_count'] = len(batch_results.results) if hasattr(batch_results, 'results') else 0
-
-                self.main_window.saved_series[series_name] = batch_results
-                self._log(f"Series saved as: '{series_name}'")
-
-            self.processing_complete.emit(batch_results)
-
-            # Enable results viewer buttons
-            self.browse_results_btn.setEnabled(True)
-            self.overlay_viewer_btn.setEnabled(True)
-
-            QMessageBox.information(
-                self,
-                "Complete",
-                f"Series integration complete!\n\n"
-                f"Processed: {summary.get('total_spectra', 0)} spectra\n"
-                f"Successful: {summary.get('successful', 0)}\n"
-                f"Failed: {summary.get('failed', 0)}\n"
-                f"Duration: {summary.get('duration', 'N/A')}"
-            )
+        # Handle both dict format and BatchResults object
+        if hasattr(batch_results, 'get_summary'):
+            summary = batch_results.get_summary()
+        elif isinstance(batch_results, dict):
+            summary = batch_results.get('summary', {})
         else:
-            self.status_label.setText("Processing completed (no results)")
-            self.stats_label.setText(f"Completed in: {total_time_str}\nNo results available")
-            self._log("Warning: No results returned")
+            summary = {}
+        results = getattr(batch_results, 'results', None) or {}
+        failed_spectra = sorted(name for name, data in results.items()
+                                if data.get('status') != 'success')
+        fallbacks = {name: data['fitting_fallbacks'] for name, data in sorted(results.items())
+                     if data.get('fitting_fallbacks')}
+
+        for err in getattr(batch_results, 'errors', None) or []:
+            where = f"{err['spectrum']}: " if err.get('spectrum') else ""
+            self._log(f"  error: {where}{err.get('error')}", is_error=True)
+        for name in failed_spectra:
+            self._log(f"  {name} produced no fits; its matrix columns are empty", is_error=True)
+        for name, reasons in fallbacks.items():
+            self._log(f"  Warning: {name} was fitted by a fallback: {'; '.join(reasons)}")
+
+        if not summary.get('successful', 0):
+            # process_nmr_series reports failure by returning a result with no
+            # successful spectra (or an empty one on a top-level exception), never by
+            # raising - so a run that fitted nothing is not saved as a series.
+            self.status_label.setText("Failed: no spectrum was fitted")
+            self.stats_label.setText(f"Completed in: {total_time_str}\nNo spectrum was fitted")
+            self._log(f"Series integration failed: no spectrum was fitted "
+                      f"(0 of {len(results)}); not saved", is_error=True)
+            self._show_outcome(
+                QMessageBox.Critical, "Series Failed",
+                f"Series integration failed: no spectrum was fitted (0 of {len(results)}).\n\n"
+                f"The series was not saved. The log names the errors.")
+            return
+
+        self.batch_results = batch_results
+        # Update final stats
+        self.stats_label.setText(
+            f"Completed in: {total_time_str}\n"
+            f"Successful: {summary.get('successful', 0)} | Failed: {summary.get('failed', 0)}"
+        )
+
+        self.status_label.setText(
+            f"Complete: {summary.get('successful', 0)}/{summary.get('total_spectra', 0)} spectra processed"
+        )
+        self._log("Series integration complete!")
+        self._log(f"  Total: {summary.get('total_spectra', 0)} spectra")
+        self._log(f"  Successful: {summary.get('successful', 0)}")
+        self._log(f"  Failed: {summary.get('failed', 0)}")
+        self._log(f"  Duration: {summary.get('duration', 'N/A')}")
+        if self.tracking_statement:
+            self._log(f"  {self.tracking_statement}")
+
+        # Store results in main window
+        if self.main_window:
+            # Store as current batch_results (for backward compatibility)
+            self.main_window.batch_results = batch_results
+
+            # Also store in saved_series dict with the series name
+            if not hasattr(self.main_window, 'saved_series'):
+                self.main_window.saved_series = {}
+
+            series_name = self.current_series_name or "Unnamed_Series"
+
+            # Add metadata to batch_results
+            if hasattr(batch_results, 'metadata'):
+                batch_results.metadata['series_name'] = series_name
+                batch_results.metadata['spectrum_count'] = len(batch_results.results) if hasattr(batch_results, 'results') else 0
+
+            self.main_window.saved_series[series_name] = batch_results
+            self._log(f"Series saved as: '{series_name}'")
+
+        self.processing_complete.emit(batch_results)
+
+        # Enable results viewer buttons
+        self.browse_results_btn.setEnabled(True)
+        self.overlay_viewer_btn.setEnabled(True)
+
+        problems = ""
+        if failed_spectra:
+            problems += "\n\nNo fits (matrix columns empty):\n" + "\n".join(failed_spectra)
+        if fallbacks:
+            problems += "\n\nFitted by a fallback:\n" + "\n".join(fallbacks)
+        self._show_outcome(
+            QMessageBox.Warning if problems else QMessageBox.Information,
+            "Complete",
+            f"Series integration complete!\n\n"
+            f"Processed: {summary.get('total_spectra', 0)} spectra\n"
+            f"Successful: {summary.get('successful', 0)}\n"
+            f"Failed: {summary.get('failed', 0)}\n"
+            f"Duration: {summary.get('duration', 'N/A')}"
+            f"{problems}"
+        )
 
     def _on_error(self, error_msg: str):
         """Handle processing error."""
