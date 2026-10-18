@@ -160,6 +160,12 @@ the second named after where its record sits. Every DynamiXs analysis keeps the 
 it came from (`analysis_metadata.cli_runs`), so inputs the page has no field for - an
 `--f*-r2-table` - stay on record.
 
+Runs that share an `--out` folder are bundled apart: each analysis gets only the files its
+own run wrote - every `dynamixs` output starts with `<prefix>_`, and a file belongs to the
+longest prefix of that folder's runs it starts with, so `a` does not claim `a_b_*`. A
+folder shared by two methyl-t2 runs otherwise gave each analysis both fit JSONs, and its
+viewer, which opens every fit in its folder, showed the other run's fits as its own.
+
 A series is stored slim, by `series` and by the GUI alike: each fit keeps its parameters
 (`all_peaks`) and its region's ppm axes, and the viewers rebuild the region and surfaces
 from the spectrum when a fit is opened - bit-identical to storing them. ~3 MB for a
