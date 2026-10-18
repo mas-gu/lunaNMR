@@ -147,7 +147,8 @@ cannot target, so it is worth seeing. Refuses a non-empty `--out` unless `--forc
 python -m lunaNMR project build <run_dir> --out <bundle.lunaNMR> [--spectrum <file>] [--peaks <file>]
 ```
 Turns an automated run's output folders into a project the GUI opens. Under `<run_dir>` it
-takes, wherever they sit:
+takes, wherever they sit - symlinked folders included, each folder read once however many
+links reach it, so a link back into the run does not loop:
 
 - every series (`batch_results.json`, written by `series`);
 - every Kd fit (`<prefix>_kd_fit_data.json`, written by `kd`). A Kd fit whose prefix

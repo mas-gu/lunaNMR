@@ -19,6 +19,7 @@ the peak list it was fitted against, unless given. Both are referenced by absolu
 never copied: a bundle moved to another machine needs the data at the same place.
 """
 
+import fnmatch
 import json
 import os
 import shutil
@@ -33,10 +34,29 @@ from lunaNMR.utils.project_manager import ProjectManager, batch_results_from_dic
 KD_FIT_SUFFIX = '_kd_fit_data.json'
 
 
+def _files_under(run_dir, pattern):
+    """Every file under `run_dir` whose name matches `pattern`, sorted.
+
+    A run folder is often assembled by linking result folders in, so symlinked folders
+    are followed. Each folder is entered once, by its resolved path: a link back into
+    the run would otherwise be walked forever, and a folder linked in twice would give
+    every result in it twice.
+    """
+    found, visited = [], set()
+    for folder, subfolders, files in os.walk(run_dir, followlinks=True):
+        real = os.path.realpath(folder)
+        if real in visited:
+            subfolders[:] = []
+            continue
+        visited.add(real)
+        found.extend(Path(folder) / f for f in fnmatch.filter(files, pattern))
+    return sorted(found)
+
+
 def find_series(run_dir):
     """{name: batch_results.json path}, named after the folder each series wrote to."""
     found = {}
-    for path in sorted(Path(run_dir).rglob('batch_results.json')):
+    for path in _files_under(run_dir, 'batch_results.json'):
         name = path.parent.name
         if name in found:   # two series folders of one name: tell them apart by place
             name = '_'.join(path.parent.relative_to(run_dir).parts)
@@ -52,7 +72,7 @@ def find_series(run_dir):
 def find_kd_fits(run_dir):
     """{name: fit JSON path}, named after the `--prefix` the fit was written with."""
     found = {}
-    for path in sorted(Path(run_dir).rglob(f'*{KD_FIT_SUFFIX}')):
+    for path in _files_under(run_dir, f'*{KD_FIT_SUFFIX}'):
         name = path.name[:-len(KD_FIT_SUFFIX)] or path.parent.name
         if name in found:
             name = '_'.join(path.parent.relative_to(run_dir).parts) + '_' + name
@@ -102,7 +122,7 @@ def find_dynamixs_records(run_dir):
     """Every `<prefix>_dynamixs.json` a dynamixs command left under the run, each with the
     file it was read from as `record_file`."""
     records = []
-    for path in sorted(Path(run_dir).rglob(f'*{DYNAMIXS_RECORD_SUFFIX}')):
+    for path in _files_under(run_dir, f'*{DYNAMIXS_RECORD_SUFFIX}'):
         record = json.loads(path.read_text())
         record['record_file'] = str(path)
         records.append(record)
