@@ -1786,17 +1786,9 @@ def _run_dynamixs_density(args):
             df.to_csv(results, index=False)
             outputs = [results]
             if not args.no_plot:
-                # The single-field plotter writes a hard-coded filename to the CWD, so run
-                # it from the output directory and record whatever PDF it produced.
-                cwd = os.getcwd()
-                try:
-                    os.chdir(args.out)
-                    before = set(f for f in os.listdir('.') if f.endswith('.pdf'))
-                    analyzer.plot_results(df, save_plots=True)
-                    new = [f for f in os.listdir('.') if f.endswith('.pdf') and f not in before]
-                finally:
-                    os.chdir(cwd)
-                outputs += [os.path.join(args.out, f) for f in new]
+                plots = f"{prefix}_plots.pdf"
+                analyzer.plot_results(df, save_plots=True, plot_filename=plots)
+                outputs.append(plots)
 
     _emit(args, _recorded(args,
           {'command': 'dynamixs density', 'n_residues': len(df),
