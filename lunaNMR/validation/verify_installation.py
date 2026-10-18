@@ -28,7 +28,6 @@ REQUIRED_DEPENDENCIES = {
     'matplotlib': 'Plotting and visualization',
     'scipy': 'Scientific computing',
     'lmfit': 'Relaxation curve fitting (DynamiXs)',
-    'networkx': 'Graph clustering for peak detection',
     'nmrglue': 'NMR data file reading',
     'PySide6': 'Qt GUI framework',
     'numba': '2D multi-peak fitting acceleration',

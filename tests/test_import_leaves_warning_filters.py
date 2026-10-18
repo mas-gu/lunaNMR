@@ -30,7 +30,7 @@ _MODULES = [
 # The third-party libraries those modules import, loaded before the snapshot: what they
 # do to the filters on import is theirs, not lunaNMR's.
 _THIRD_PARTY = ("numpy", "scipy.optimize", "scipy.signal", "scipy.special", "pandas",
-                "matplotlib.pyplot", "lmfit", "nmrglue", "numba", "networkx")
+                "matplotlib.pyplot", "lmfit", "nmrglue", "numba")
 
 
 @pytest.mark.parametrize("module", _MODULES)
