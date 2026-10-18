@@ -1073,29 +1073,13 @@ class ParallelVoigtProcessor:
 
     def _serialize_ps2d_config(self):
         """
-        Extract PS2D configuration for workers to ensure consistent behavior.
-
-        Workers need access to PS2D config for:
-        - Overlap detection thresholds
-        - Position margins (F1, F2)
-        - Max iterations for LM optimizer
-        - Nucleus type assumptions
+        The whole PS2D configuration, for the workers to fit with exactly what this
+        process would: the nucleus, its windows and linewidth limits, and any expert
+        override. A subset left a worker on whatever its own import defaulted to.
         """
         try:
             from lunaNMR.core.ps2d_config import get_ps2d_config
-            config = get_ps2d_config()
-
-            ps2d_dict = {
-                'nucleus_type': getattr(config, 'nucleus_type', '15N'),
-                'overlap_threshold_x': getattr(config, 'overlap_threshold_x', 0.08),
-                'overlap_threshold_y': getattr(config, 'overlap_threshold_y', 0.8),
-                'max_iterations': getattr(config, 'max_iterations', 100),
-                'pos_margin_f1': getattr(config, 'pos_margin_f1', 0.05),
-                'pos_margin_f2': getattr(config, 'pos_margin_f2', 0.02),
-                'radF1': getattr(config, 'radF1', 0.6),
-                'radF2': getattr(config, 'radF2', 0.06)
-            }
-            return ps2d_dict
+            return dict(vars(get_ps2d_config()))
         except ImportError:
             log_warning("Parallel: PS2D config not available, using defaults")
             return {}

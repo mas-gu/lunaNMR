@@ -15,7 +15,7 @@ from typing import List, Dict, Any, Optional
 
 # Independent imports - no GUI dependencies
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
-from lunaNMR.core.ps2d_config import restore_base_ps2d_config
+from lunaNMR.core.ps2d_config import get_ps2d_config, restore_base_ps2d_config, set_ps2d_config
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
 from lunaNMR.utils.parameter_manager import NMRParameterManager
@@ -634,6 +634,14 @@ class MultiSpectrumProcessor:
             log_error(f"NMR data verification failed for {spectrum_name}")
             raise IOError(f"NMR data not properly loaded after direct loading: {nmr_file}")
 
+        # The series is fitted with the PS2D config of the nucleus its first spectrum
+        # carries. The GUI applies it when a spectrum is loaded; a headless run has no GUI
+        # to do so, and a 13C-HSQC was fitted with the 15N windows.
+        detected = getattr(self.integrator, 'auto_detected_nucleus', None)
+        if spectrum_number == 1 and detected and detected != get_ps2d_config().nucleus_type:
+            set_ps2d_config(detected)
+            log_info(f"PS2D configuration set to {detected} for this series")
+
         # APPLY LOCKED THRESHOLD FROM GUI (if in from-GUI mode)
         if self.sn_from_gui_locked:
             self.integrator.sn_from_gui_mode = True
@@ -900,7 +908,6 @@ class MultiSpectrumProcessor:
         # width; falls back to the config value for spectrum 1 (no reference LW
         # yet) or if the learning produced none.
         if getattr(self, 'titration_tracking', False):
-            from lunaNMR.core.ps2d_config import get_ps2d_config
             cfg = get_ps2d_config()
             win_f1, win_f2 = self._titration_window(cfg.titration_pos_margin_f1,
                                                     cfg.titration_pos_margin_f2)
@@ -958,7 +965,6 @@ class MultiSpectrumProcessor:
             # Source 3: Fallback - recompute (should not happen anymore)
             if clusters_found is None:
                 log_warning("Fallback: No clusters found from fitting, recomputing (may differ!)")
-                from lunaNMR.core.ps2d_config import get_ps2d_config
                 config = get_ps2d_config()
                 if learned_statistics is not None:
                     overlap_x = learned_statistics.get('overlap_threshold_x')
