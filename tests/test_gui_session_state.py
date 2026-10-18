@@ -146,3 +146,45 @@ class TestLoadingNewDataStartsAFreshAnalysis:
         _wait_for(app, window.fitting_worker)
 
         assert at_start == [None]
+
+
+class TestThePs2dConfigFollowsTheWindow:
+
+    def test_reset_puts_the_15n_defaults_back(self, window, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+        from lunaNMR.core.ps2d_config import PS2DConfig, get_ps2d_config, restore_base_ps2d_config
+        window._on_nucleus_type_change('13C')
+        monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+
+        window.on_reset_results()
+        restore_base_ps2d_config()
+
+        config = get_ps2d_config()
+        assert (config.nucleus_type, config.radF1) == ('15N', PS2DConfig('15N').radF1)
+        assert window.ps2d_radF1 == PS2DConfig('15N').radF1
+
+    def test_loading_a_spectrum_applies_its_nucleus_when_the_config_holds_another(self, window, data,
+                                                                                  monkeypatch):
+        from lunaNMR.core.ps2d_config import PS2DConfig, get_ps2d_config, set_ps2d_config
+        set_ps2d_config('13C')
+
+        _load(window, monkeypatch, data["spectrum"], data["ten"])
+
+        config = get_ps2d_config()
+        assert (config.nucleus_type, config.radF1) == ('15N', PS2DConfig('15N').radF1)
+
+    def test_reset_puts_the_15n_defaults_in_an_open_expert_panel(self, window, monkeypatch):
+        from PySide6.QtWidgets import QDialog, QMessageBox
+        from lunaNMR.core.ps2d_config import PS2DConfig, get_ps2d_config, restore_base_ps2d_config
+        monkeypatch.setattr(QDialog, "exec", lambda self: 0)
+        window.on_expert_mode()
+        window._on_nucleus_type_change('13C')
+        monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+
+        window.on_reset_results()
+        window.sync_parameters_to_integrator()
+        restore_base_ps2d_config()
+
+        config = get_ps2d_config()
+        assert (config.nucleus_type, config.radF1) == ('15N', PS2DConfig('15N').radF1)
+        assert window.expert_nucleus_combo.currentText() == '15N'

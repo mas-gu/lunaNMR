@@ -59,7 +59,8 @@ from lunaNMR.gui.styles.design_system import (
 
 # Import core processing components
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
-from lunaNMR.core.ps2d_config import set_ps2d_config, get_ps2d_config, mark_ps2d_config_as_base
+from lunaNMR.core.ps2d_config import (set_ps2d_config, get_ps2d_config, mark_ps2d_config_as_base,
+                                      reset_ps2d_config)
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.utils.config_manager import ConfigurationManager, UserPreferences, ProcessingParameters
 from lunaNMR.utils.parameter_manager import NMRParameterManager
@@ -3254,28 +3255,11 @@ class LunaNMRMainWindow(BaseWindow):
         self.nucleus_type = nucleus
         set_ps2d_config(nucleus)
         config = get_ps2d_config()
-
-        # Update instance variables
-        self.ps2d_radF1 = config.radF1
-        self.ps2d_radF2 = config.radF2
-        self.ps2d_max_iterations = config.max_iterations
-        self.ps2d_max_cluster_size = config.max_cluster_size
-        self.ps2d_overlap_x = config.overlap_threshold_x
-        self.ps2d_overlap_y = config.overlap_threshold_y
+        self._show_ps2d_config()
 
         # Update nucleus-adaptive search windows
         self.search_window_y = config.search_window_f1  # F1 (15N/13C)
         self.search_window_x = config.search_window_f2  # F2 (1H)
-
-        # Update spinboxes if they exist
-        if hasattr(self, 'expert_radF1_spin'):
-            self.expert_radF1_spin.setValue(config.radF1)
-            self.expert_radF2_spin.setValue(config.radF2)
-            self.expert_max_iter_spin.setValue(config.max_iterations)
-            self.expert_overlap_x_spin.setValue(config.overlap_threshold_x)
-            self.expert_overlap_y_spin.setValue(config.overlap_threshold_y)
-        if hasattr(self, 'expert_max_cluster_spin'):
-            self.expert_max_cluster_spin.setValue(config.max_cluster_size)
 
         # Update search window spinboxes
         if hasattr(self, 'expert_search_x_spin'):
@@ -3295,6 +3279,28 @@ class LunaNMRMainWindow(BaseWindow):
         if self.show_ellipses:
             self.update_spectrum_plot()
 
+    def _show_ps2d_config(self):
+        """Show the global PS2D config in the instance variables and the Expert Mode panel."""
+        config = get_ps2d_config()
+
+        # Update instance variables
+        self.ps2d_radF1 = config.radF1
+        self.ps2d_radF2 = config.radF2
+        self.ps2d_max_iterations = config.max_iterations
+        self.ps2d_max_cluster_size = config.max_cluster_size
+        self.ps2d_overlap_x = config.overlap_threshold_x
+        self.ps2d_overlap_y = config.overlap_threshold_y
+
+        # Update spinboxes if they exist
+        if hasattr(self, 'expert_radF1_spin'):
+            self.expert_radF1_spin.setValue(config.radF1)
+            self.expert_radF2_spin.setValue(config.radF2)
+            self.expert_max_iter_spin.setValue(config.max_iterations)
+            self.expert_overlap_x_spin.setValue(config.overlap_threshold_x)
+            self.expert_overlap_y_spin.setValue(config.overlap_threshold_y)
+        if hasattr(self, 'expert_max_cluster_spin'):
+            self.expert_max_cluster_spin.setValue(config.max_cluster_size)
+
     def _apply_auto_detected_nucleus(self):
         """Apply auto-detected nucleus type from integrator to GUI.
 
@@ -3312,9 +3318,10 @@ class LunaNMRMainWindow(BaseWindow):
             logger.info("Could not auto-detect nucleus type from spectral dimensions")
             return
 
-        # Check if nucleus type changed
+        # Check if nucleus type changed. The config is process-wide and a series run
+        # switches it to the nucleus it detected, so it is compared as well as the window.
         current_setting = self.nucleus_type
-        if current_setting != detected_nucleus:
+        if detected_nucleus != current_setting or detected_nucleus != get_ps2d_config().nucleus_type:
             # Update internal state
             self.nucleus_type = detected_nucleus
 
@@ -3536,6 +3543,10 @@ class LunaNMRMainWindow(BaseWindow):
                 'shift_15n_spin': self.shift_15n_spin,
             }
 
+            # The PS2D config outlives the window state: put the startup 15N defaults
+            # back before init_variables reads them
+            reset_ps2d_config()
+
             # Reset ALL state variables to defaults (same as __init__)
             self.init_variables()
 
@@ -3545,6 +3556,11 @@ class LunaNMRMainWindow(BaseWindow):
 
             # Reset GUI widgets to default values
             self._reset_gui_widgets_to_defaults()
+            if hasattr(self, 'expert_nucleus_combo'):
+                self.expert_nucleus_combo.blockSignals(True)
+                self.expert_nucleus_combo.setCurrentText(self.nucleus_type)
+                self.expert_nucleus_combo.blockSignals(False)
+            self._show_ps2d_config()
 
             # Clear peak navigator
             if hasattr(self, 'peak_navigator') and self.peak_navigator:
