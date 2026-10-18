@@ -213,8 +213,7 @@ class NMRParameterManager:
         return {
             'detection_params': {
                 'search_window_x': self.current_params['search_window_x'],
-                'search_window_y': self.current_params['search_window_y'],
-                'noise_threshold': self.current_params['noise_threshold']
+                'search_window_y': self.current_params['search_window_y']
             },
             'fitting_params': {
                 'fitting_window_x': self.current_params['fitting_window_x'],
@@ -334,7 +333,6 @@ class NMRParameterManager:
             # Simplified mode only affects FITTING parameters, NOT detection parameters
             params['detection_params']['search_window_x'] = self.current_params['search_window_x']
             params['detection_params']['search_window_y'] = self.current_params['search_window_y']
-            params['detection_params']['noise_threshold'] = self.current_params['noise_threshold']
 
             # CRITICAL FIX: GUI control parameters must ALWAYS use GUI values
             # Simplified mode should NOT override fix_positions, fix_linewidths, use_parallel_processing

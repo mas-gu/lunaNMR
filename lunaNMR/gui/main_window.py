@@ -417,8 +417,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.fix_positions = False
 
         # ===== Peak Detection Parameters (Expert Mode) =====
-        # Detection parameters from parameter_manager defaults
-        self.noise_threshold = 3.0
         # Nucleus-adaptive search windows (from ps2d_config)
         self.search_window_x = SEARCH_WINDOW_PPM  # 1H dimension (ppm) - F2
         self.search_window_y = SEARCH_WINDOW_PPM  # 15N/13C dimension (ppm) - F1
@@ -2483,16 +2481,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.expert_search_y_spin.valueChanged.connect(self._on_expert_param_change)
         params_frame_layout.addWidget(self.expert_search_y_spin, 0, 2)
 
-        # Row 1: Noise Threshold
-        params_frame_layout.addWidget(QLabel("Noise Threshold:"), 1, 0)
-        self.expert_noise_spin = QDoubleSpinBox()
-        self.expert_noise_spin.setRange(0.1, 10.0)  # set_threshold_multiplier refuses below 0.1
-        self.expert_noise_spin.setSingleStep(0.1)
-        self.expert_noise_spin.setDecimals(2)
-        self.expert_noise_spin.setValue(self.noise_threshold)
-        self.expert_noise_spin.valueChanged.connect(self._on_expert_param_change)
-        params_frame_layout.addWidget(self.expert_noise_spin, 1, 1)
-
         # Row 2: Detection rectangle size (pixels)
         params_frame_layout.addWidget(QLabel("X×Y (pixels):"), 2, 0)
         self.expert_det_x_spin = QSpinBox()
@@ -3077,8 +3065,6 @@ class LunaNMRMainWindow(BaseWindow):
             self.expert_search_x_spin.setValue(self.search_window_x)
         if hasattr(self, 'expert_search_y_spin'):
             self.expert_search_y_spin.setValue(self.search_window_y)
-        if hasattr(self, 'expert_noise_spin'):
-            self.expert_noise_spin.setValue(self.noise_threshold)
 
         # PS2D config parameters
         if hasattr(self, 'expert_rad_x_spin'):
@@ -3179,16 +3165,14 @@ class LunaNMRMainWindow(BaseWindow):
         """Handle detection parameter changes from Expert Mode spinboxes."""
         self.search_window_x = self.expert_search_x_spin.value()
         self.search_window_y = self.expert_search_y_spin.value()
-        self.noise_threshold = self.expert_noise_spin.value()
         self.centroid_window_x_ppm = self.expert_centroid_x_spin.value()
         self.centroid_window_y_ppm = self.expert_centroid_y_spin.value()
 
         # Update integrator if available
         if hasattr(self, 'integrator') and self.integrator:
             self.integrator.set_search_window(self.search_window_x, self.search_window_y)
-            self.integrator.set_threshold_multiplier(self.noise_threshold)
 
-        logger.info(f"Expert params updated: search_x={self.search_window_x}, search_y={self.search_window_y}, noise={self.noise_threshold}")
+        logger.info(f"Expert params updated: search_x={self.search_window_x}, search_y={self.search_window_y}")
 
     def _on_auto_add_dummy_change(self, state):
         """Handle auto-add dummy peaks checkbox change."""
@@ -3662,8 +3646,6 @@ class LunaNMRMainWindow(BaseWindow):
             self.fix_positions_checkbox.setChecked(False)
 
         # Expert Mode parameters (if expanded)
-        if hasattr(self, 'expert_noise_spin') and self.expert_noise_spin:
-            self.expert_noise_spin.setValue(3.0)
         if hasattr(self, 'expert_search_x_spin') and self.expert_search_x_spin:
             self.expert_search_x_spin.setValue(SEARCH_WINDOW_PPM)
         if hasattr(self, 'expert_search_y_spin') and self.expert_search_y_spin:
@@ -6213,7 +6195,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 # Update detection parameters
                 self.param_manager.current_params['search_window_x'] = self.search_window_x
                 self.param_manager.current_params['search_window_y'] = self.search_window_y
-                self.param_manager.current_params['noise_threshold'] = self.noise_threshold
 
                 # Update centroid parameters if available
                 if hasattr(self, 'centroid_window_x_ppm'):
@@ -6278,7 +6259,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     detection_params['search_window_x'],
                     detection_params['search_window_y']
                 )
-                self.integrator.set_threshold_multiplier(detection_params['noise_threshold'])
 
                 # Update fitting parameters
                 if hasattr(self.integrator, 'fitting_parameters'):
@@ -6293,7 +6273,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             else:
                 # Direct sync without parameter manager (fallback)
                 self.integrator.set_search_window(self.search_window_x, self.search_window_y)
-                self.integrator.set_threshold_multiplier(self.noise_threshold)
 
             # Sync S/N threshold and workflow mode (v0.9 main_gui.py:739-760)
             # Read from spinbox widgets directly (not from plain attributes)
@@ -6442,9 +6421,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             return
 
         # CRITICAL: Sync GUI parameters BEFORE detection
-        # This ensures Expert Mode settings (search windows, noise threshold, etc.) are passed
+        # This ensures Expert Mode settings (search windows, etc.) are passed
         self.sync_parameters_to_integrator()
-        logger.info(f"Parameters synced for detection: search_window=({self.search_window_x}, {self.search_window_y}), noise_threshold={self.noise_threshold}")
+        logger.info(f"Parameters synced for detection: search_window=({self.search_window_x}, {self.search_window_y})")
 
         # Validate NMR data is loaded
         if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:

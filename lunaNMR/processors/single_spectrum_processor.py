@@ -168,7 +168,6 @@ class SingleSpectrumProcessor:
             detection_params['search_window_x'],
             detection_params['search_window_y']
         )
-        self.integrator.set_threshold_multiplier(detection_params['noise_threshold'])
 
         # Apply fitting parameters
         self.integrator.fitting_parameters.update(params['fitting_params'])

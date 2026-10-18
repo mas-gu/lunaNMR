@@ -954,7 +954,6 @@ class SeriesIntegrationDialog(BaseDialog):
         self._log(f"Starting series integration: {len(self.nmr_files)} spectra, {len(reference_peaks)} peaks{delay_msg}")
         self.tracking_statement = self._tracking_statement(peak_source_mode)
         self._log(self.tracking_statement)
-        self._log("Noise Threshold does not apply to a series: series detection runs at its own S/N threshold")
         self._log("Adaptive radius search: off for a series")
 
         # Create worker and thread
@@ -1411,7 +1410,6 @@ class SeriesIntegrationDialog(BaseDialog):
             'detection_params': {
                 'search_window_x': getattr(self.main_window, 'search_window_x', 0.08),
                 'search_window_y': getattr(self.main_window, 'search_window_y', 0.8),
-                'noise_threshold': getattr(self.main_window, 'noise_threshold', 3.0),
             },
             # GUI parameters for fitting control
             'gui_params': {
