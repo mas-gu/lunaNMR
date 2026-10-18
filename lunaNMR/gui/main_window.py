@@ -4721,12 +4721,6 @@ class LunaNMRMainWindow(BaseWindow):
         spectral_inspector_action.triggered.connect(self.launch_spectral_inspector)
         modules_menu.addAction(spectral_inspector_action)
 
-        modules_menu.addSeparator()
-
-        ml_learning_action = QAction("ML Learning Center...", self)
-        ml_learning_action.triggered.connect(self.show_ml_learning_center)
-        modules_menu.addAction(ml_learning_action)
-
         # === Help Menu (v0o9 lines 1043-1047) ===
         help_menu = menu_bar.addMenu("&Help")
 
@@ -5796,40 +5790,6 @@ class LunaNMRMainWindow(BaseWindow):
                 "No files loaded to validate.")
 
         return results
-
-    # =================== ML LEARNING CENTER ===================
-
-    def show_ml_learning_center(self):
-        """Show ML Learning Center dialog.
-
-        Opens the ML Learning Center panel for viewing and controlling
-        ML prediction settings, training status, and configuration.
-        """
-        from lunaNMR.ml.gui import MLLearningPanel
-        from lunaNMR.ml import ModelManager
-
-        # Get or create model manager
-        model_manager = getattr(self, '_ml_model_manager', None)
-        if model_manager is None:
-            try:
-                model_manager = ModelManager()
-                self._ml_model_manager = model_manager
-            except Exception as e:
-                logger.warning(f"Could not create ModelManager: {e}")
-                model_manager = None
-
-        dialog = MLLearningPanel(
-            parent=self,
-            model_manager=model_manager,
-            main_window=self
-        )
-        dialog.exec()
-
-        # Apply any config changes
-        if model_manager:
-            dialog.apply_config()
-
-        self.update_status("ML Learning Center closed")
 
     # =================== HELP MENU HANDLERS ===================
 
