@@ -441,15 +441,15 @@ Qt QSS supports powerful state-based styling:
 
 **Example:**
 ```css
-QPushButton:hover {
+QPushButton.primary:hover {
     background-color: #4A8DD4;
 }
 
-QPushButton:pressed {
+QPushButton.primary:pressed {
     background-color: #3A7DC4;
 }
 
-QPushButton:disabled {
+QPushButton.primary:disabled {
     background-color: #C7C7CC;
 }
 ```
@@ -511,8 +511,8 @@ CustomTkinter uses separate properties (`hover_color`, `fg_color`), while Qt use
 
 All these widgets are styled in `main.qss`:
 
-- ✓ QPushButton (with 5 classes)
-- ✓ QLabel (with 4 classes)
+- ✓ QPushButton (with 6 classes)
+- ✓ QLabel (with 5 classes)
 - ✓ QFrame (with 2 classes)
 - ✓ QGroupBox
 - ✓ QLineEdit
