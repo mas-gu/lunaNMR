@@ -844,6 +844,7 @@ def _merge_series_params(defaults, overrides, path):
     a JSON file is the easiest way to produce it.
     """
     import difflib
+    import json
     merged = {section: dict(values) for section, values in defaults.items()}
     if not isinstance(overrides, dict):
         raise ValueError(f"{path}: expected a JSON object of parameter sections, "
@@ -864,8 +865,24 @@ def _merge_series_params(defaults, overrides, path):
                     f"{path}: unknown key {key!r} in {section!r}"
                     + (f" — did you mean {close[0]!r}?" if close else "")
                     + f". Known keys: {', '.join(sorted(merged[section]))}")
+            if not _same_kind(value, merged[section][key]):
+                raise ValueError(
+                    f"{path}: {section}.{key} must be "
+                    + ("true or false" if isinstance(merged[section][key], bool) else "a number")
+                    + f", got {json.dumps(value)}")
             merged[section][key] = value
     return merged
+
+
+def _same_kind(value, default):
+    """Whether `value` can stand in for `default`: a JSON boolean for a switch, a JSON
+    number for a numeric knob. The engine reads a switch by truthiness, so the string
+    "false" would turn it ON."""
+    if isinstance(default, bool):
+        return isinstance(value, bool)
+    if isinstance(default, (int, float)):
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return True
 
 
 def _load_series_params(args):

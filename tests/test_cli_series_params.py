@@ -106,6 +106,40 @@ class TestAnUnknownKeyIsRefused:
                      "--out", str(tmp_path / "o"), "--params", str(cfg)]) == 1
 
 
+class TestAWrongTypeIsRefused:
+    """A knob is checked for its type as well as its name. "false" is a non-empty string,
+    so the engine read it as True: position fixing switched ON, every Stage 2 skipped,
+    while the summary echoed the value the caller believed they had set.
+    """
+
+    @pytest.mark.parametrize("payload", [
+        {"gui_params": {"fix_positions": "false"}},
+        {"gui_params": {"use_ps2d_multi_peak": 0}},
+        {"detection_params": {"search_window_x": "0.05"}},
+        {"fitting_params": {"max_iterations": None}},
+        {"fitting_params": {"max_iterations": True}},
+    ])
+    def test_a_value_of_the_wrong_type_is_an_error(self, tmp_path, capsys, payload):
+        assert TestAnUnknownKeyIsRefused()._err(tmp_path, payload) == 1
+        (section, values), = payload.items()
+        (key, _), = values.items()
+        assert key in capsys.readouterr().err
+
+    def test_the_dry_run_refuses_it_too(self, tmp_path):
+        cfg = tmp_path / "tune.json"
+        cfg.write_text(json.dumps({"gui_params": {"fix_positions": "false"}}))
+        peaks = _inputs(tmp_path)
+        from lunaNMR.cli import main
+        assert main(["series", "--spectra", str(tmp_path), "--peaks", str(peaks),
+                     "--out", str(tmp_path / "o"), "--params", str(cfg), "--dry-run"]) == 1
+
+    def test_an_integer_is_accepted_for_a_real_valued_knob(self):
+        from lunaNMR.cli import _default_series_params, _merge_series_params
+        merged = _merge_series_params(_default_series_params(),
+                                      {"fitting_params": {"min_r_squared": 1}}, "tune.json")
+        assert merged["fitting_params"]["min_r_squared"] == 1
+
+
 class TestCommandLineFlagsWin:
     """--params is a file; --parallel and --peak-source are what the caller just typed.
     The typed thing wins, or a stale file silently overrides the command line."""
