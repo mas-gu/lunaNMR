@@ -603,6 +603,17 @@ def _natural_key(text):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', text)]
 
 
+def _series_order(files, mode):
+    """Spectra in series order - by the titration point or delay the GUI parses from each
+    name (DelayExtractor, the sort the GUI's series list uses), then any spectrum with no
+    value, in name order. A cascade seeds each point from the one before it, so name order
+    (0o5 < 0o25 < 0o125) would track every peak from the wrong point."""
+    from lunaNMR.utils.delay_extractor import DelayExtractor
+    ordered = [f for f, _, _ in DelayExtractor(mode=mode).sort_files_with_sequence(list(files))]
+    placed = set(ordered)
+    return ordered + [f for f in files if f not in placed]
+
+
 def _discover_spectra(spectra, extensions=None):
     """Resolve --spectra (a folder or a glob) to a naturally-sorted list of spectrum files.
 
@@ -867,7 +878,8 @@ def _run_series(args):
     from lunaNMR.utils.file_manager import NMRFileManager
 
     file_manager = NMRFileManager()
-    nmr_files = _discover_spectra(args.spectra, file_manager.supported_nmr_formats)
+    nmr_files = _series_order(
+        _discover_spectra(args.spectra, file_manager.supported_nmr_formats), args.mode)
 
     # Validated before the dry-run returns: a plan that says "OK" for a run whose
     # tuning file will be rejected is the dry-run contract breaking again.
@@ -945,9 +957,12 @@ def _run_series(args):
     outputs = {name: os.path.join(output_folder, name)
                for name in SERIES_OUTPUTS
                if os.path.exists(os.path.join(output_folder, name))}
+    failed = sorted(name for name, data in results.items() if data.get('status') != 'success')
+    for name in failed:
+        print(f"  warning: {name} produced no fits; its matrix columns are empty", file=sys.stderr)
     _emit(args,
           {'command': 'series', 'spectra_fitted': n_success, 'spectra_total': len(results),
-           'output_folder': output_folder, 'outputs': outputs, 'parallel': args.parallel,
+           'failed_spectra': failed, 'output_folder': output_folder, 'outputs': outputs, 'parallel': args.parallel,
            'params_file': getattr(args, 'params', None), 'params': series_params},
           f"Series analysis complete: {n_success}/{len(results)} spectra fitted",
           f"  Output: {output_folder}",

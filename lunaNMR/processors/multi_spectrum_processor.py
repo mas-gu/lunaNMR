@@ -1706,19 +1706,22 @@ class MultiSpectrumProcessor:
                             break
 
                 if not found_peak:
+                    # Nothing was measured here - the spectrum failed, or this peak is not
+                    # in its results. Empty, never 0.0: a zero is read downstream as a
+                    # peak that decayed to nothing.
                     peak_row[f'{spectrum_key}_Detected'] = False
-                    peak_row[f'{spectrum_key}_Height'] = 0.0
-                    peak_row[f'{spectrum_key}_Volume'] = 0.0
-                    peak_row[f'{spectrum_key}_SNR'] = 0.0
+                    peak_row[f'{spectrum_key}_Height'] = np.nan
+                    peak_row[f'{spectrum_key}_Volume'] = np.nan
+                    peak_row[f'{spectrum_key}_SNR'] = np.nan
                     peak_row[f'{spectrum_key}_Quality'] = 'Not Detected'
-                    peak_row[f'{spectrum_key}_Position_X'] = 0.0
-                    peak_row[f'{spectrum_key}_Position_Y'] = 0.0
-                    peak_row[f'{spectrum_key}_R_Squared'] = 0.0
+                    peak_row[f'{spectrum_key}_Position_X'] = np.nan
+                    peak_row[f'{spectrum_key}_Position_Y'] = np.nan
+                    peak_row[f'{spectrum_key}_R_Squared'] = np.nan
                     peak_row[f'{spectrum_key}_Position_Pinned'] = False
                     peak_row[f'{spectrum_key}_Intensity_Pinned'] = False
-                    peak_row[f'{spectrum_key}_Detected_Intensity'] = 0.0
-                    peak_row[f'{spectrum_key}_LW_X'] = 0.0
-                    peak_row[f'{spectrum_key}_LW_Y'] = 0.0
+                    peak_row[f'{spectrum_key}_Detected_Intensity'] = np.nan
+                    peak_row[f'{spectrum_key}_LW_X'] = np.nan
+                    peak_row[f'{spectrum_key}_LW_Y'] = np.nan
 
             all_peaks_data.append(peak_row)
 
@@ -1772,7 +1775,9 @@ class MultiSpectrumProcessor:
         A point whose fit stopped on its intensity floor is left EMPTY. The relaxation
         analyses read only the matrices, which carry no flags, so a value taken from that
         floor - cluster-relative, a product of the neighbours' seeds - would be fitted as
-        a decay point. A decayed peak is not touched: its low value is the measurement.
+        a decay point. So is a FAILED fit, whose 0.0 is a placeholder, not a measurement.
+        A decayed peak is not touched: its low value is the measurement (and a fit inside
+        the noise is labelled Poor, never Failed).
         Nor is a position pinned on its margin: the intensity does not depend on it (see
         quality_categories.usable_points).
         """
@@ -1784,6 +1789,9 @@ class MultiSpectrumProcessor:
                 pinned_col = f'{spectrum_name}_Intensity_Pinned'
                 if pinned_col in tracking_df:
                     values = values.mask(tracking_df[pinned_col].astype(bool))
+                quality_col = f'{spectrum_name}_Quality'
+                if quality_col in tracking_df:
+                    values = values.mask(tracking_df[quality_col].astype(str).str.lower() == 'failed')
                 matrix[spectrum_name] = values
         return matrix
 
