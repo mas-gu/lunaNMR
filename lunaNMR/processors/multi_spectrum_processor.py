@@ -2298,6 +2298,9 @@ class BatchResults:
         self.statistics = {}
         self.errors = []
         self.series_mode = 'time'  # 'time' or 'titration' for filename value extraction
+        # The project folder this series' batch_results.json was opened from, which
+        # holds its CSVs; None for a series run in this session.
+        self.bundled_folder = None
 
     def add_result(self, spectrum_name, result_data):
         """Add a single spectrum result"""

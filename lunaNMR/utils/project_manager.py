@@ -134,6 +134,31 @@ def batch_results_from_dict(data: dict, deserialize_result=None):
     return batch_results
 
 
+# The CSVs a series' analyses read, bundled beside its batch_results.json.
+SERIES_CSVS = ('series_analysis_tidy.csv', 'peak_intensity_matrix.csv')
+
+
+def series_csv_path(batch_results, filename: str, bundled_first: bool) -> Optional[Path]:
+    """Where one of a series' SERIES_CSVS is on disk, or None.
+
+    Two places can hold it: the run's own output folder (for the tidy CSV, first the
+    csv_path it recorded), and - for a series opened from a project - the copy beside
+    the batch_results.json it was read from (`bundled_folder`). A series run in this
+    session has no bundled copy, so a project's copy under the same name never stands
+    in for it.
+    """
+    metadata = getattr(batch_results, 'metadata', None) or {}
+    own = []
+    if filename == 'series_analysis_tidy.csv' and metadata.get('csv_path'):
+        own.append(Path(metadata['csv_path']))
+    if metadata.get('output_folder'):
+        own.append(Path(metadata['output_folder']) / filename)
+    folder = getattr(batch_results, 'bundled_folder', None)
+    bundled = [Path(folder) / filename] if folder else []
+    return next((path for path in (bundled + own if bundled_first else own + bundled)
+                 if path.exists()), None)
+
+
 # A fit's surfaces are rebuilt from its parameters (`all_peaks`) and its region's ppm
 # axes; the region's intensity is re-sliced from the spectrum. Stored whole they are 99%
 # of a series: ~80 MB for a 7-point titration, against ~3 MB without them.
@@ -1033,10 +1058,9 @@ class ProjectManager:
             write_batch_results(batch_results, series_subdir / "batch_results.json",
                                 slim=not embed_region_data)
 
-            # Copy the tidy CSV into the bundle so the project is self-contained:
+            # Copy the CSVs into the bundle so the project is self-contained:
             # a moved/renamed source run folder still resolves for Kd/titration input.
-            self._copy_series_csv(batch_results, series_subdir)
-            self._copy_series_matrix(batch_results, series_subdir)
+            self._copy_series_csvs(batch_results, series_subdir)
 
             # Add to manifest
             spectrum_count = len(batch_results.results) if hasattr(batch_results, 'results') else 0
@@ -1065,30 +1089,21 @@ class ProjectManager:
         logger.info(f"Saved {len(saved_series)} series integrations")
         return True
 
-    def _copy_series_csv(self, batch_results, series_subdir: Path) -> None:
-        """Copy a series' series_analysis_tidy.csv into its bundle subdirectory.
+    def _copy_series_csvs(self, batch_results, series_subdir: Path) -> None:
+        """Copy a series' SERIES_CSVS - the tidy CSV Kd and DynamiXs read, the matrix
+        the hetNOE and methyl T2 pages read - into its bundle subdirectory.
 
-        Source is the recorded csv_path, else output_folder/series_analysis_tidy.csv.
-        Silently does nothing if no source CSV exists on disk.
+        From its run folder, else from the project it was opened from (a moved run, a
+        Save As, a renamed series). A CSV found in neither is left out.
         """
         import shutil
-        metadata = batch_results.metadata if hasattr(batch_results, 'metadata') else {}
-        src = metadata.get('csv_path')
-        if not (src and Path(src).exists()):
-            output_folder = metadata.get('output_folder')
-            src = str(Path(output_folder) / "series_analysis_tidy.csv") if output_folder else None
-        if src and Path(src).exists():
-            shutil.copy2(src, series_subdir / "series_analysis_tidy.csv")
-
-    def _copy_series_matrix(self, batch_results, series_subdir: Path) -> None:
-        """Copy a series' peak_intensity_matrix.csv - the file the hetNOE and methyl T2
-        pages read - from its output_folder into its bundle subdirectory, if it exists."""
-        import shutil
-        metadata = batch_results.metadata if hasattr(batch_results, 'metadata') else {}
-        output_folder = metadata.get('output_folder')
-        src = Path(output_folder) / "peak_intensity_matrix.csv" if output_folder else None
-        if src and src.exists():
-            shutil.copy2(src, series_subdir / "peak_intensity_matrix.csv")
+        for filename in SERIES_CSVS:
+            src = series_csv_path(batch_results, filename, bundled_first=False)
+            dest = series_subdir / filename
+            if src is not None and src.resolve() != dest.resolve():
+                shutil.copy2(src, dest)
+        if getattr(batch_results, 'bundled_folder', None):
+            batch_results.bundled_folder = str(series_subdir)
 
     def _load_series_results(self, bundle_path: Path) -> bool:
         """Load series integration results (multiple series) and reconstruct BatchResults.
@@ -1126,6 +1141,7 @@ class ProjectManager:
                 # Reconstruct BatchResults object
                 batch_results = batch_results_from_dict(data, self._deserialize_spectrum_result)
                 batch_results.metadata['series_name'] = series_name
+                batch_results.bundled_folder = str(series_subdir)
 
                 # Add to saved_series
                 self.main_window.saved_series[series_name] = batch_results
@@ -1146,6 +1162,7 @@ class ProjectManager:
                     data = json.load(f)
 
                 batch_results = batch_results_from_dict(data, self._deserialize_spectrum_result)
+                batch_results.bundled_folder = str(series_dir)
 
                 # Store in both places
                 self.main_window.batch_results = batch_results

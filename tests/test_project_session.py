@@ -247,3 +247,95 @@ def test_opening_a_project_closes_the_windows_showing_the_previous_one(app, bund
             window._spectral_inspector.deleteLater()
         window.close()
         window.deleteLater()
+
+
+# ---------- a series' CSVs: its bundled copy, or its own run's ----------
+
+SERIES_CSVS = ("series_analysis_tidy.csv", "peak_intensity_matrix.csv")
+
+
+def _point_series_at(bundle, folder):
+    """Rewrite the bundled series' record so its run folder is `folder`."""
+    batch = bundle / "series_results" / SERIES / "batch_results.json"
+    data = json.loads(batch.read_text())
+    data["metadata"]["output_folder"] = str(folder)
+    data["metadata"]["csv_path"] = str(folder / "series_analysis_tidy.csv")
+    batch.write_text(json.dumps(data))
+
+
+def _rerun_folder(bundle, folder):
+    """A re-run's output folder: the bundled CSVs, each marked so the two are told apart."""
+    folder.mkdir()
+    for name in SERIES_CSVS:
+        text = (bundle / "series_results" / SERIES / name).read_text()
+        (folder / name).write_text(text + "\n")
+    return folder
+
+
+def test_save_as_carries_the_bundled_csvs_once_the_run_has_moved(bundle_a, tmp_path):
+    bundle = _copy(bundle_a, tmp_path)
+    _point_series_at(bundle, tmp_path / "gone")
+    window, pm, _ = _loaded(bundle)
+    other = tmp_path / "P2.lunaNMR"
+    assert pm.save_project(other)[0]
+    for name in SERIES_CSVS:
+        assert ((other / "series_results" / SERIES / name).read_text()
+                == (bundle / "series_results" / SERIES / name).read_text()), name
+
+
+def test_a_renamed_series_keeps_its_bundled_csvs(bundle_a, tmp_path):
+    bundle = _copy(bundle_a, tmp_path)
+    _point_series_at(bundle, tmp_path / "gone")
+    original = {name: (bundle / "series_results" / SERIES / name).read_text()
+                for name in SERIES_CSVS}
+    window, pm, _ = _loaded(bundle)
+    window.saved_series = {"renamed": window.saved_series[SERIES]}
+    assert pm.save_project(bundle)[0]
+    for name in SERIES_CSVS:
+        assert (bundle / "series_results" / "renamed" / name).read_text() == original[name]
+
+
+def _dynamixs_dialog(window, bundle):
+    from lunaNMR.gui.dialogs.dynamixs_dialog import DynamiXsDialog
+    window.current_project_path = bundle
+    return DynamiXsDialog(parent=None, main_window=window)
+
+
+def test_a_series_rerun_under_its_name_reads_its_own_csvs(app, bundle_a, tmp_path):
+    """A re-run that overwrites a loaded series' name is a new series; the project's
+    copy of the old one must not stand in for it."""
+    from lunaNMR.utils.project_manager import batch_results_from_dict
+    bundle = _copy(bundle_a, tmp_path)
+    window, _, _ = _loaded(bundle)
+    rerun = _rerun_folder(bundle, tmp_path / "rerun")
+    data = json.loads((bundle / "series_results" / SERIES / "batch_results.json").read_text())
+    batch = batch_results_from_dict(data)
+    batch.metadata["output_folder"] = str(rerun)
+    batch.metadata["csv_path"] = str(rerun / "series_analysis_tidy.csv")
+    window.saved_series[SERIES] = batch
+    dialog = _dynamixs_dialog(window, bundle)
+    try:
+        page = dialog.hetnoe_page
+        [series] = page._get_available_series(include=lambda br: True)
+        assert series["csv_path"] == str(rerun / "series_analysis_tidy.csv")
+        assert page._series_intensity_matrix(SERIES) == str(rerun / "peak_intensity_matrix.csv")
+    finally:
+        dialog.deleteLater()
+
+
+def test_a_loaded_series_reads_its_bundled_csvs(app, bundle_a, tmp_path):
+    """The CSVs that belong to a loaded series are the ones beside the batch_results.json
+    it was read from, whatever its recorded run folder holds now."""
+    bundle = _copy(bundle_a, tmp_path)
+    rerun = _rerun_folder(bundle, tmp_path / "rerun")
+    _point_series_at(bundle, rerun)
+    window, _, _ = _loaded(bundle)
+    dialog = _dynamixs_dialog(window, bundle)
+    try:
+        page = dialog.hetnoe_page
+        held = bundle / "series_results" / SERIES
+        [series] = page._get_available_series(include=lambda br: True)
+        assert series["csv_path"] == str(held / "series_analysis_tidy.csv")
+        assert page._series_intensity_matrix(SERIES) == str(held / "peak_intensity_matrix.csv")
+    finally:
+        dialog.deleteLater()
