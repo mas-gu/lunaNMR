@@ -2661,12 +2661,7 @@ class VoigtIntegrator(BaseIntegrator):
                         detected_intensity = peak_dict.get('intensity')
                         break
 
-                # A near-noise peak's R-squared is ~0 by construction - a held shape
-                # against noise - so it cannot say the fit failed; the fit was solved.
-                # Labelled Failed, its measured near-zero intensity was dropped as one.
-                quality = self._assign_quality_from_r2(result_2d['r_squared'])
-                if quality == 'Failed' and target_peak.get('near_noise'):
-                    quality = 'Poor'
+                quality = self._assign_quality_to_fitted_peak(result_2d['r_squared'], target_peak)
 
                 # Extract 2D region data for proper 2D contour visualization
                 region_2d = self.extract_2d_region_for_overlap_group(overlap_group)
@@ -4396,6 +4391,18 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             return "Poor"
         else:
             return "Failed"
+
+    def _assign_quality_to_fitted_peak(self, r_squared, fitted_peak):
+        """Quality label of one peak of a 2D fit, from the fit's R-squared.
+
+        A near-noise peak's R-squared is ~0 by construction - a held shape against
+        noise - so it cannot say the fit failed; the fit was solved. Labelled Failed,
+        its measured near-zero intensity was dropped as one.
+        """
+        quality = self._assign_quality_from_r2(r_squared)
+        if quality == 'Failed' and fitted_peak.get('near_noise'):
+            quality = 'Poor'
+        return quality
 
     def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown", linewidth_constraints=None, all_peaks_context=None):
         """
