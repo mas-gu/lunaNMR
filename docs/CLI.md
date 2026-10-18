@@ -197,6 +197,16 @@ remedy was to re-pick every peak.
 then applies it; `--dx`/`--dy` give it explicitly. `--out` must differ from `--peaks`: the
 input is often the only copy of an assignment nobody wants to redo.
 
+**A measured offset is checked before it is written.** The search grid spans ±0.09 ppm in
+¹H, and it always has a maximum: a list further out than that gets a spurious one inside
+the grid, and applying it leaves the list off in both dimensions. So `--auto` re-reads the
+spectrum at the shifted positions and refuses (exit 1, `ok: false`, nothing written) when
+the median S/N there is below 10 or fewer than 85% of the peaks are captured — the
+thresholds `diagnose` uses. On the real reference spectrum with the list 0.15 ppm out in
+¹H, the "correction" left a median S/N of 3 and 6/68 peaks captured; a correct one gives
+~124 and 64/68. A written `--auto` summary carries `captured` and `median_snr`. Given
+`--dx`/`--dy` are applied unchecked.
+
 **`--quick` is a resolution limit, not just a speed knob.** It quantises the ¹⁵N offset to
 0.03 ppm instead of 0.015, so a smaller real offset is misreported — as zero, or as a full
 step, i.e. twice the truth — and either reads as a confident measurement. Measure on the

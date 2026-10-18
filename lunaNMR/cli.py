@@ -2030,11 +2030,12 @@ def _run_peaks_shift(args):
     if df is None or df.empty:
         raise ValueError(f"No peaks could be read from {args.peaks}")
 
-    dx, dy, source = args.dx, args.dy, 'given'
+    dx, dy, source, registration = args.dx, args.dy, 'given', {}
     if args.auto:
         if not os.path.isfile(args.spectrum):
             raise FileNotFoundError(f"--spectrum not found: {args.spectrum}")
-        from lunaNMR.validation.spectra_check import assess_registration
+        from lunaNMR.validation.spectra_check import (
+            _CAPTURE_FLOOR, _DETECT_SNR, _capture, assess_registration)
         peaks = list(zip(df['Assignment'].astype(str),
                          df['Position_X'].astype(float),
                          df['Position_Y'].astype(float)))
@@ -2043,7 +2044,21 @@ def _run_peaks_shift(args):
             # the list must ADD to register. Applying it with the wrong sign doubles
             # the error and looks identical to having worked.
             dx, dy = assess_registration(args.spectrum, peaks, quick=args.quick)
+            # The grid always has an arg-max, real or not: a list further out than the
+            # grid spans gets a spurious one inside it. Judge the shifted list on the
+            # spectrum it was measured against before writing it.
+            cap = _capture(args.spectrum, [(n, x + dx, y + dy) for n, x, y in peaks])
         source = 'measured'
+        rate = cap['captured'] / cap['n_peaks']
+        if cap['median_snr'] < _DETECT_SNR or rate < _CAPTURE_FLOOR:
+            raise ValueError(
+                f"measured offset dx={dx:+.4f} dy={dy:+.3f} ppm does not register the list: "
+                f"after it, median S/N at the peaks is {cap['median_snr']:.1f} "
+                f"(need {_DETECT_SNR:.0f}) and {cap['captured']}/{cap['n_peaks']} peaks are "
+                f"captured (need {_CAPTURE_FLOOR:.0%}). The real offset is probably outside "
+                f"the search grid (+/-0.09 ppm 1H); {args.out} was not written. Check the "
+                f"list against the spectrum, or give --dx/--dy")
+        registration = {'captured': cap['captured'], 'median_snr': cap['median_snr']}
 
     shifted = df.copy()
     shifted['Position_X'] = shifted['Position_X'].astype(float) + dx
@@ -2051,7 +2066,7 @@ def _run_peaks_shift(args):
 
     summary = {'command': 'peaks shift', 'peaks': args.peaks, 'out': args.out,
                'dx': float(dx), 'dy': float(dy), 'offset_source': source,
-               'n_peaks': len(shifted), 'dry_run': bool(args.dry_run)}
+               'n_peaks': len(shifted), 'dry_run': bool(args.dry_run), **registration}
     human = [f"{'[dry-run] ' if args.dry_run else ''}peaks shift "
              f"({source}): dx={dx:+.4f} dy={dy:+.3f} ppm over {len(shifted)} peaks",
              f"  in:  {args.peaks}",
