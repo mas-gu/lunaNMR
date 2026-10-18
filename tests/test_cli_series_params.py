@@ -40,7 +40,7 @@ def _captured_params(monkeypatch, tmp_path, extra):
 
 
 class TestTuningKnobsAreReachable:
-    """docs/CLI.md advises tuning search_window/min_r_squared, and the CLI froze them at
+    """docs/CLI.md advises tuning the detection and fitting knobs, and the CLI froze them at
     the GUI defaults. A series that fit badly had no headless remediation at all.
     """
 
@@ -62,12 +62,12 @@ class TestTuningKnobsAreReachable:
         cfg = tmp_path / "tune.json"
         cfg.write_text(json.dumps({
             "detection_params": {"search_window_x": 0.04, "search_window_y": 0.04},
-            "fitting_params": {"min_r_squared": 0.8},
-            "gui_params": {"max_peaks_fit": 120}}))
+            "fitting_params": {"fitting_window_x": 0.3},
+            "gui_params": {"fix_linewidths": True}}))
         params = _captured_params(monkeypatch, tmp_path, ["--params", str(cfg)])
         assert params["detection_params"]["search_window_y"] == 0.04
-        assert params["fitting_params"]["min_r_squared"] == 0.8
-        assert params["gui_params"]["max_peaks_fit"] == 120
+        assert params["fitting_params"]["fitting_window_x"] == 0.3
+        assert params["gui_params"]["fix_linewidths"] is True
 
 
 class TestAnUnknownKeyIsRefused:
@@ -114,7 +114,7 @@ class TestAWrongTypeIsRefused:
 
     @pytest.mark.parametrize("payload", [
         {"gui_params": {"fix_positions": "false"}},
-        {"gui_params": {"use_ps2d_multi_peak": 0}},
+        {"gui_params": {"use_ps2d_linewidth_reuse": 0}},
         {"detection_params": {"search_window_x": "0.05"}},
         {"fitting_params": {"max_iterations": None}},
         {"fitting_params": {"max_iterations": True}},
@@ -136,19 +136,18 @@ class TestAWrongTypeIsRefused:
     def test_an_integer_is_accepted_for_a_real_valued_knob(self):
         from lunaNMR.cli import _default_series_params, _merge_series_params
         merged = _merge_series_params(_default_series_params(),
-                                      {"fitting_params": {"min_r_squared": 1}}, "tune.json")
-        assert merged["fitting_params"]["min_r_squared"] == 1
+                                      {"fitting_params": {"fitting_window_y": 2}}, "tune.json")
+        assert merged["fitting_params"]["fitting_window_y"] == 2
 
 
 class TestCommandLineFlagsWin:
     """--params is a file; --parallel and --peak-source are what the caller just typed.
     The typed thing wins, or a stale file silently overrides the command line."""
 
-    def test_parallel_flag_beats_the_file(self, monkeypatch, tmp_path):
-        cfg = tmp_path / "tune.json"
-        cfg.write_text(json.dumps({"processing_options": {"use_parallel_processing": False}}))
-        params = _captured_params(monkeypatch, tmp_path, ["--params", str(cfg), "--parallel"])
+    def test_parallel_is_the_flags_alone(self, monkeypatch, tmp_path):
+        params = _captured_params(monkeypatch, tmp_path, ["--parallel"])
         assert params["processing_options"]["use_parallel_processing"] is True
+        assert params["gui_params"]["use_parallel_processing"] is True
 
     def test_independent_mode_beats_the_file(self, monkeypatch, tmp_path):
         cfg = tmp_path / "tune.json"
@@ -157,3 +156,82 @@ class TestCommandLineFlagsWin:
         params = _captured_params(monkeypatch, tmp_path,
                                   ["--params", str(cfg), "--peak-source", "independent"])
         assert params["processing_options"]["rerun_adaptive_per_spectrum"] is True
+
+
+class TestAKnobWithNoEffectIsRefused:
+    """A key the series engine never reads is accepted, echoed in the summary as the
+    setting the run used, and changes nothing. Each one below was traced to no reader on
+    the series path, and measured: a 2-point DNAJA1 run wrote a byte-identical tidy CSV
+    with it changed, in reference, cascade, independent and titration modes.
+    """
+
+    @pytest.mark.parametrize("section,key,value", [
+        ("gui_params", "use_centroid_refinement", False),
+        ("gui_params", "centroid_noise_multiplier", 4.5),
+        ("gui_params", "use_ps2d_multi_peak", False),
+        ("gui_params", "height_threshold", 0.5),
+        ("gui_params", "distance_factor", 50.0),
+        ("gui_params", "prominence_threshold", 0.3),
+        ("gui_params", "smoothing_sigma", 3.0),
+        ("gui_params", "max_peaks_fit", 2),
+        ("gui_params", "max_optimization_iterations", 2),
+        ("fitting_params", "min_r_squared", 0.95),
+        ("processing_options", "use_global_optimization", True),
+    ])
+    def test_it_is_refused_as_having_no_effect(self, tmp_path, capsys, section, key, value):
+        assert TestAnUnknownKeyIsRefused()._err(tmp_path, {section: {key: value}}) == 1
+        err = capsys.readouterr().err
+        assert key in err and "no effect" in err
+
+    @pytest.mark.parametrize("section", ["gui_params", "processing_options"])
+    def test_parallel_processing_is_refused_in_favour_of_the_flag(self, tmp_path, capsys,
+                                                                  section):
+        payload = {section: {"use_parallel_processing": True}}
+        assert TestAnUnknownKeyIsRefused()._err(tmp_path, payload) == 1
+        err = capsys.readouterr().err
+        assert "no effect" in err and "--parallel" in err
+
+    def test_the_dry_run_refuses_it_too(self, tmp_path):
+        cfg = tmp_path / "tune.json"
+        cfg.write_text(json.dumps({"fitting_params": {"min_r_squared": 0.9}}))
+        peaks = _inputs(tmp_path)
+        from lunaNMR.cli import main
+        assert main(["series", "--spectra", str(tmp_path), "--peaks", str(peaks),
+                     "--out", str(tmp_path / "o"), "--params", str(cfg), "--dry-run"]) == 1
+
+    def test_the_known_keys_it_lists_are_the_accepted_ones(self, tmp_path, capsys):
+        TestAnUnknownKeyIsRefused()._err(tmp_path, {"gui_params": {"no_such_knob": 1}})
+        listed = capsys.readouterr().err.split("Known keys:")[1]
+        assert "fix_positions" in listed
+        assert "use_centroid_refinement" not in listed
+
+    def test_noise_threshold_is_still_accepted(self, monkeypatch, tmp_path):
+        cfg = tmp_path / "tune.json"
+        cfg.write_text(json.dumps({"detection_params": {"noise_threshold": 5.0}}))
+        params = _captured_params(monkeypatch, tmp_path, ["--params", str(cfg)])
+        assert params["detection_params"]["noise_threshold"] == 5.0
+
+
+class TestTitrationRefusesTheFreeStateAnchor:
+    """use_original_reference_for_detection is what --peak-source independent sets; in a
+    titration it detects every point against the free-state list, the combination the
+    CLI already refuses as --peak-source independent."""
+
+    def test_it_is_refused_with_titration(self, tmp_path, capsys):
+        cfg = tmp_path / "tune.json"
+        cfg.write_text(json.dumps(
+            {"processing_options": {"use_original_reference_for_detection": True}}))
+        peaks = _inputs(tmp_path)
+        from lunaNMR.cli import main
+        assert main(["series", "--spectra", str(tmp_path), "--peaks", str(peaks),
+                     "--out", str(tmp_path / "o"), "--params", str(cfg),
+                     "--mode", "titration", "--dry-run"]) == 1
+        assert "cascade" in capsys.readouterr().err
+
+    def test_it_is_accepted_in_time_mode(self, monkeypatch, tmp_path):
+        cfg = tmp_path / "tune.json"
+        cfg.write_text(json.dumps(
+            {"processing_options": {"use_original_reference_for_detection": True}}))
+        params = _captured_params(monkeypatch, tmp_path,
+                                  ["--params", str(cfg), "--peak-source", "cascade"])
+        assert params["processing_options"]["use_original_reference_for_detection"] is True

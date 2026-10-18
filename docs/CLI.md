@@ -222,14 +222,19 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   deep-merged over the defaults so naming one key leaves the rest alone:
   ```json
   {"detection_params": {"search_window_x": 0.05},
-   "fitting_params":   {"min_r_squared": 0.8},
-   "gui_params":       {"max_peaks_fit": 120}}
+   "gui_params":       {"fix_linewidths": true}}
   ```
   **An unknown key is refused, with a suggestion** — a knob that is accepted, does nothing and
   still reports success is the failure mode this whole surface exists to prevent, and it is
   checked during `--dry-run` too. Command-line flags (`--parallel`, `--peak-source`) win over
   the file, so a stale tuning file cannot silently override what you just typed. The run
-  summary records the effective `params`.
+  summary records the effective `params`. A key the defaults carry but nothing on the series
+  path reads is refused as having no effect: `gui_params.use_centroid_refinement`,
+  `centroid_noise_multiplier`, `use_ps2d_multi_peak`, `height_threshold`, `distance_factor`,
+  `prominence_threshold`, `smoothing_sigma`, `max_peaks_fit`, `max_optimization_iterations`,
+  `fitting_params.min_r_squared`, `processing_options.use_global_optimization`, and
+  `use_parallel_processing` in either section (`--parallel` sets it). With `--mode titration`,
+  `processing_options.use_original_reference_for_detection: true` is refused too.
 - `"gui_params": {"use_adaptive_optimization": true}` turns on the fitting-window grid
   search (1.0 / 1.5 / 2.0 x the median linewidth). It is **off by default**: on the DNAJA1
   and ERDJ6 titrations it chose 1.0x both times, a window that cuts the peak at half height,

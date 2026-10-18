@@ -897,6 +897,25 @@ def _validate_series(parser, args):
                      "one before); --peak-source independent cannot be combined with it")
 
 
+# Keys the defaults carry for the parameter manager, which indexes them, but which
+# nothing on the series path reads - or whose value a flag always replaces.
+_SERIES_PARAMS_WITHOUT_EFFECT = {
+    ('gui_params', 'use_centroid_refinement'): 'nothing reads it',
+    ('gui_params', 'centroid_noise_multiplier'): 'only a detection the series never runs reads it',
+    ('gui_params', 'use_ps2d_multi_peak'): 'PS2D 2D fitting always runs',
+    ('gui_params', 'height_threshold'): 'only 1D cross-section peak picking, which nothing calls, reads it',
+    ('gui_params', 'distance_factor'): 'only 1D cross-section peak picking, which nothing calls, reads it',
+    ('gui_params', 'prominence_threshold'): 'only 1D cross-section peak picking, which nothing calls, reads it',
+    ('gui_params', 'smoothing_sigma'): 'only 1D cross-section peak picking, which nothing calls, reads it',
+    ('gui_params', 'max_peaks_fit'): 'only a 1D parameter search, which nothing calls, reads it',
+    ('gui_params', 'max_optimization_iterations'): 'only a 1D parameter search, which nothing calls, reads it',
+    ('fitting_params', 'min_r_squared'): 'it is stored and never read',
+    ('processing_options', 'use_global_optimization'): 'the series always runs without it',
+    ('gui_params', 'use_parallel_processing'): 'it is set by --parallel',
+    ('processing_options', 'use_parallel_processing'): 'it is set by --parallel',
+}
+
+
 def _merge_series_params(defaults, overrides, path):
     """Deep-merge a tuning file over the default series parameters.
 
@@ -920,13 +939,19 @@ def _merge_series_params(defaults, overrides, path):
         if not isinstance(values, dict):
             raise ValueError(f"{path}: section {section!r} must be an object of "
                              f"key/value pairs, got {type(values).__name__}")
+        accepted = [k for k in merged[section]
+                    if (section, k) not in _SERIES_PARAMS_WITHOUT_EFFECT]
         for key, value in values.items():
+            if (section, key) in _SERIES_PARAMS_WITHOUT_EFFECT:
+                raise ValueError(
+                    f"{path}: {section}.{key} has no effect on a series run "
+                    f"({_SERIES_PARAMS_WITHOUT_EFFECT[section, key]}); remove it")
             if key not in merged[section]:
-                close = difflib.get_close_matches(key, merged[section], n=1)
+                close = difflib.get_close_matches(key, accepted, n=1)
                 raise ValueError(
                     f"{path}: unknown key {key!r} in {section!r}"
                     + (f" — did you mean {close[0]!r}?" if close else "")
-                    + f". Known keys: {', '.join(sorted(merged[section]))}")
+                    + f". Known keys: {', '.join(sorted(accepted))}")
             if not _same_kind(value, merged[section][key]):
                 raise ValueError(
                     f"{path}: {section}.{key} must be "
@@ -964,8 +989,12 @@ def _load_series_params(args):
         except ValueError as exc:
             raise ValueError(f"{args.params}: not valid JSON — {exc}")
         params = _merge_series_params(params, overrides, args.params)
-        params['gui_params']['use_parallel_processing'] = args.parallel
-        params['processing_options']['use_parallel_processing'] = args.parallel
+        if (args.mode == 'titration'
+                and params['processing_options']['use_original_reference_for_detection']):
+            raise ValueError(
+                f"{args.params}: processing_options.use_original_reference_for_detection "
+                f"detects every point against the reference list, and --mode titration "
+                f"tracks peaks by cascade; it cannot be combined with it")
     if args.peak_source == 'independent':
         # Independent mode means a full detect+fit per spectrum, which is two options
         # rather than one. The GUI sets both (series_integration_dialog, the
