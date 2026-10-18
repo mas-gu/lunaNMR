@@ -60,3 +60,20 @@ class TestBatchLeavesTheProcessAsItFoundIt:
         worker.start()
         worker.join()
         assert outcome == {'rc': 0}
+
+
+class TestAUsageErrorReturnsFromMain:
+    """argparse ends a bad command line with SystemExit, a BaseException: a host that
+    calls main() and catches Exception was ended by its caller's typo."""
+
+    def test_a_bad_choice_returns_2(self, tmp_path, capsys):
+        assert cli.main(['kd', '--input', 'in.csv', '--out', str(tmp_path / 'o'),
+                         '--p0', '50', '--observable', 'cps']) == 2
+
+    def test_a_validator_rejection_returns_2(self, tmp_path, capsys):
+        assert cli.main(['series', '--spectra', str(tmp_path), '--peaks', 'p.txt',
+                         '--out', str(tmp_path / 'o'), '--deep']) == 2
+
+    def test_help_returns_0(self, capsys):
+        assert cli.main(['--help']) == 0
+        assert 'usage: lunaNMR' in capsys.readouterr().out

@@ -27,8 +27,12 @@ The CLI imports no Qt: `lunaNMR/__init__.py` is lazy, and matplotlib is forced t
 | code | meaning |
 |---|---|
 | `0` | ran to completion |
-| `1` | bad input (missing file, malformed CSV/JSON, no parseable delay) — reported as `error: …` on stderr, no traceback; **or** a dry-run whose inputs are missing |
-| `2` | no subcommand, or an unrecognised flag (argparse; help goes to stderr) |
+| `1` | bad input (missing or unwritable path, malformed CSV/JSON, no parseable delay) — reported as `error: …` on stderr, no traceback; **or** a dry-run whose inputs are missing |
+| `2` | no subcommand, or a command line the parser rejects: an unrecognised flag, a bad value, or a flag combination a subcommand refuses (argparse's usage report on stderr) |
+
+Under `--format json` both `1` and `2` also print an `{"ok": false, …}` object on stdout; a
+rejected command line reports `error.type` `UsageError`. Called in-process, `lunaNMR.cli.main()`
+returns these codes — including `0` for `--help`/`--version` — rather than raising `SystemExit`.
 
 Beyond that, some subcommands report *findings* through the exit code:
 

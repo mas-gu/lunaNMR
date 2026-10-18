@@ -46,6 +46,86 @@ class TestAFailureIsStillParseable:
         assert p.stderr.startswith("error:")
 
 
+_TIDY = ("spectrum_name,assignment,ppm_x,ppm_y,height,volume\n"
+         "0,K14,7.5,110.0,200.0,2000.0\n1,K14,7.51,110.05,150.0,1500.0\n"
+         "2,K14,7.53,110.2,90.0,900.0\n")
+
+
+class TestAUsageErrorIsStillParseable:
+    """argparse and the semantic validators report a bad command line on stderr and
+    exit 2, so under --format json stdout was empty and json.loads raised instead of
+    saying which flag was wrong."""
+
+    def test_a_bad_choice(self, tmp_path):
+        p = _run("kd", "--input", "in.csv", "--out", str(tmp_path / "o"), "--p0", "50",
+                 "--observable", "cps", "--format", "json")
+        assert p.returncode == 2
+        payload = json.loads(p.stdout)
+        assert payload["ok"] is False
+        assert payload["command"] == "kd"
+        assert payload["error"]["type"] == "UsageError"
+        assert "cps" in payload["error"]["message"]
+
+    def test_a_validator_rejection(self, tmp_path):
+        p = _run("series", "--spectra", str(tmp_path), "--peaks", "p.txt",
+                 "--out", str(tmp_path / "o"), "--deep", "--format=json")
+        assert p.returncode == 2
+        payload = json.loads(p.stdout)
+        assert payload["command"] == "series"
+        assert "--deep" in payload["error"]["message"]
+
+    def test_a_nested_subcommand_is_named(self, tmp_path):
+        p = _run("dynamixs", "t1t2", "--exp", "T9", "--input", "x.csv",
+                 "--out", str(tmp_path / "o"), "--format", "json")
+        assert p.returncode == 2
+        assert json.loads(p.stdout)["command"] == "dynamixs t1t2"
+
+    def test_text_mode_keeps_the_argparse_report(self, tmp_path):
+        p = _run("kd", "--input", "in.csv", "--out", str(tmp_path / "o"), "--p0", "50",
+                 "--observable", "cps")
+        assert p.returncode == 2
+        assert p.stdout == ""
+        assert p.stderr.startswith("usage: lunaNMR kd")
+        assert "lunaNMR kd: error: argument --observable" in p.stderr
+
+
+class TestAnUnwritableOutputIsReported:
+    """Only FileNotFoundError among the OSErrors was caught, so an --out under a file
+    or without permission left stdout empty and dumped a traceback."""
+
+    def test_json(self, tmp_path):
+        (tmp_path / "in.csv").write_text(_TIDY)
+        (tmp_path / "a_file").write_text("")
+        p = _run("kd", "--input", str(tmp_path / "in.csv"), "--p0", "50",
+                 "--out", str(tmp_path / "a_file" / "o"), "--conc", "0,25,50",
+                 "--format", "json")
+        assert p.returncode == 1
+        payload = json.loads(p.stdout)
+        assert payload["ok"] is False
+        assert payload["error"]["type"] == "NotADirectoryError"
+
+    def test_text(self, tmp_path):
+        (tmp_path / "in.csv").write_text(_TIDY)
+        (tmp_path / "a_file").write_text("")
+        p = _run("kd", "--input", str(tmp_path / "in.csv"), "--p0", "50",
+                 "--out", str(tmp_path / "a_file" / "o"), "--conc", "0,25,50")
+        assert p.returncode == 1
+        assert p.stderr.startswith("error:")
+        assert "Traceback" not in p.stderr
+
+
+class TestAnUnknownExportKindIsReported:
+    def test_json(self, tmp_path):
+        (tmp_path / "fit.json").write_text("{}")
+        p = _run("export", "kd", "--json", str(tmp_path / "fit.json"),
+                 "--out", str(tmp_path / "o"), "--kind", "curves,kdbars", "--format", "json")
+        assert p.returncode == 1
+        payload = json.loads(p.stdout)
+        assert payload["ok"] is False
+        assert payload["command"] == "export kd"
+        assert "kdbars" in payload["error"]["message"]
+
+
 class TestASuccessIsLabelled:
     def test_ok_and_schema_version_are_present(self, tmp_path):
         csv = tmp_path / "series_analysis_tidy.csv"

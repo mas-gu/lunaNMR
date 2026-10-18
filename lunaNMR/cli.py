@@ -49,6 +49,46 @@ def _choice_list(*allowed):
     return parse
 
 
+class UsageError(Exception):
+    """A command line the parser or a validator rejected; `parser` is the one that
+    rejected it, whose prog names the subcommand."""
+
+    def __init__(self, parser, message):
+        super().__init__(message)
+        self.parser = parser
+
+
+class _ArgumentParser(argparse.ArgumentParser):
+    """Raises UsageError where argparse would print and exit, so main() can report the
+    error in the caller's format and return rather than end the caller's process."""
+
+    def error(self, message):
+        raise UsageError(self, message)
+
+
+def _requested_format(argv):
+    """The --format named on a command line argparse could not parse."""
+    for i, arg in enumerate(argv):
+        if arg == '--format' and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith('--format='):
+            return arg.split('=', 1)[1]
+    return 'text'
+
+
+def _report_usage_error(argv, args, exc):
+    """Print argparse's own usage report on stderr and, under --format json, the error
+    envelope on stdout. Returns the usage exit status, 2."""
+    exc.parser.print_usage(sys.stderr)
+    print(f"{exc.parser.prog}: error: {exc}", file=sys.stderr)
+    if args is None:
+        args = argparse.Namespace(command=exc.parser.prog.partition(' ')[2],
+                                  format=_requested_format(argv))
+    if getattr(args, 'format', 'text') == 'json':
+        _emit_error(args, exc)
+    return 2
+
+
 # Bumped only when a key changes meaning or disappears. Additions do not bump it: a
 # consumer that reads the keys it knows keeps working across them.
 SCHEMA_VERSION = 1
@@ -1333,8 +1373,9 @@ def _run_export_kd(args):
     unknown_kind = [k for k in args.kind if k not in ('curves', 'ref-bars', 'kd-bars',
                                                       'global-fit')]
     if unknown_kind:
-        print(f"Unknown --kind value(s): {','.join(unknown_kind)} "
-              "(use curves, ref-bars, kd-bars and/or global-fit)", file=sys.stderr)
+        _emit_error(args, ValueError(
+            f"Unknown --kind value(s): {','.join(unknown_kind)} "
+            "(use curves, ref-bars, kd-bars and/or global-fit)"))
         return 1
 
     with open(args.json) as fh:
@@ -2067,7 +2108,7 @@ def _run_batch(batch_argv):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(
+    parser = _ArgumentParser(
         prog='lunaNMR',
         description='LunaNMR command-line interface for headless NMR analysis.',
         # `--help` is the one entry point every caller already runs, so it is where the
@@ -2449,13 +2490,20 @@ def main(argv=None):
         return _run_batch(argv[1:])
 
     parser = build_parser()
-    args = parser.parse_args(argv)
-    if not getattr(args, 'command', None):
-        parser.print_help(sys.stderr)
-        return 2
-    validate = getattr(args, '_validate', None)
-    if validate:
-        validate(parser, args)
+    args = None
+    try:
+        args = parser.parse_args(argv)
+        if not getattr(args, 'command', None):
+            parser.print_help(sys.stderr)
+            return 2
+        validate = getattr(args, '_validate', None)
+        if validate:
+            validate(parser, args)
+    except UsageError as exc:
+        return _report_usage_error(argv, args, exc)
+    except SystemExit as exc:
+        # --help and --version: argparse has printed them and asks to exit.
+        return exc.code or 0
     # Every subcommand is headless. The fitters show their figures on an interactive
     # backend, and in a process that already uses Qt (a GUI test session, an in-process
     # caller) plt.show() starts an event loop that never returns.
@@ -2463,9 +2511,9 @@ def main(argv=None):
     matplotlib.use('Agg')
     try:
         return args.func(args)
-    except (FileNotFoundError, ValueError, RuntimeError, KeyError, TypeError) as exc:
-        # Expected bad-input failures from the wrapped engines (missing file, bad
-        # concentrations, malformed CSV/JSON missing an expected column/key, an
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
+        # Expected bad-input failures from the wrapped engines (missing or unwritable
+        # path, bad concentrations, malformed CSV/JSON missing an expected column/key, an
         # unparseable delay label): report cleanly instead of dumping a traceback.
         _emit_error(args, exc)
         return 1

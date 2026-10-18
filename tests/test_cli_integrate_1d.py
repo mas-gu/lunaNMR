@@ -117,9 +117,7 @@ class TestInputHandling:
 
     def test_it_needs_peaks_from_somewhere(self, tmp_path):
         _write_series(tmp_path)
-        with pytest.raises(SystemExit) as exc:
-            _run(["integrate-1d", "--spectra", str(tmp_path), "--out", str(tmp_path / "o")])
-        assert exc.value.code == 2
+        assert _run(["integrate-1d", "--spectra", str(tmp_path), "--out", str(tmp_path / "o")]) == 2
 
     def test_no_spectra_is_an_error(self, tmp_path):
         assert _run(["integrate-1d", "--spectra", str(tmp_path / "empty"),

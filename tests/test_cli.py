@@ -88,9 +88,7 @@ class TestKdSubcommand:
     def test_kd_missing_required_flag_errors(self, tmp_path):
         from lunaNMR.cli import main
         # --out and --p0 are required; argparse should exit non-zero.
-        with pytest.raises(SystemExit) as exc:
-            main(["kd", "--input", "nope.csv"])
-        assert exc.value.code == 2
+        assert main(["kd", "--input", "nope.csv"]) == 2
 
 
 class TestBatchDelegation:
@@ -264,9 +262,7 @@ class TestRelaxationFlags:
 class TestSeriesSubcommand:
     def test_series_requires_peaks(self, tmp_path):
         from lunaNMR.cli import main
-        with pytest.raises(SystemExit) as exc:
-            main(["series", "--spectra", str(tmp_path), "--out", str(tmp_path / "o")])
-        assert exc.value.code == 2
+        assert main(["series", "--spectra", str(tmp_path), "--out", str(tmp_path / "o")]) == 2
 
     @pytest.mark.filterwarnings("ignore::RuntimeWarning")
     def test_series_returns_nonzero_when_no_spectra_processed(self, tmp_path):
@@ -991,9 +987,7 @@ class TestDynamixsModelfree:
                       for f, n in (("t1", "t1"), ("t2", "t2"),
                                    ("noe-sat", "sat"), ("noe-unsat", "unsat"))], []),
                 "--field1-freq", "600", "--out", str(tmp_path / "o"), "--dry-run"]
-        with pytest.raises(SystemExit) as exc:
-            main(argv)
-        assert exc.value.code == 2
+        assert main(argv) == 2
 
     def test_single_field_does_not_require_it(self, tmp_path):
         """Only --dual reads a second frequency, so it must not become mandatory."""
@@ -1070,9 +1064,7 @@ class TestDynamixsModelfree:
 class TestDispatch:
     def test_help_exits_zero(self):
         from lunaNMR.cli import main
-        with pytest.raises(SystemExit) as exc:
-            main(["--help"])
-        assert exc.value.code == 0
+        assert main(["--help"]) == 0
 
     def test_no_subcommand_returns_nonzero(self):
         from lunaNMR.cli import main
@@ -1080,6 +1072,4 @@ class TestDispatch:
 
     def test_unknown_subcommand_errors(self):
         from lunaNMR.cli import main
-        with pytest.raises(SystemExit) as exc:
-            main(["bogus"])
-        assert exc.value.code == 2
+        assert main(["bogus"]) == 2
