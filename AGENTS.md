@@ -48,5 +48,6 @@ later step depends on.
 ## Tests
 
 ```bash
-make test        # all three test roots, headless
+QT_QPA_PLATFORM=offscreen python -m pytest \
+    tests/ modules/dynamiXs_v2o0/tests/ modules/integration_1d_v1o0/tests/ -q   # all three test roots, headless
 ```
