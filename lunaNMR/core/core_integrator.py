@@ -3707,6 +3707,10 @@ class VoigtIntegrator(BaseIntegrator):
             if not p.get('is_dummy', False)
         ]
 
+        # A dummy is never named after a peak already in the list, a listed dummy included
+        taken_names = {str(p.get('assignment')) for p in matched_peaks}
+        dummy_number = 0
+
         # Find unmatched peaks that pass all filters
         dummy_count = 0
         for i, detected_peak in enumerate(all_detected_peaks):
@@ -3740,8 +3744,11 @@ class VoigtIntegrator(BaseIntegrator):
 
             # All filters passed - add as dummy peak
             dummy_count += 1
+            dummy_number += 1
+            while f'dummy_{dummy_number:03d}' in taken_names:
+                dummy_number += 1
             dummy_peak = {
-                'assignment': f'dummy_{dummy_count:03d}',
+                'assignment': f'dummy_{dummy_number:03d}',
                 'ppm_x': peak_x,
                 'ppm_y': peak_y,
                 'x_point': detected_peak['indices'][0],

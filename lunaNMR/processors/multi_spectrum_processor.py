@@ -819,14 +819,16 @@ class MultiSpectrumProcessor:
                     })
 
                 detected_df = pd.DataFrame(detected_peak_data)
+                # Only the dummies this detection added: one already in the peak list
+                # under a dummy's name is a listed peak and is fitted as one
+                added_by_detection = [bool(peak.get('is_dummy', False)) for peak in detected_peaks]
 
                 # CRITICAL: Replace peak_list with detected positions (not reference positions)
                 # This ensures fitting uses DETECTED/RECENTERED positions, just like GUI
                 self.integrator.peak_list = detected_df
 
                 if spectrum_number == 1:
-                    is_dummy = detected_df['Assignment'].astype(str).str.startswith('dummy_')
-                    self.dummy_peaks = detected_df[is_dummy].reset_index(drop=True)
+                    self.dummy_peaks = detected_df[added_by_detection].reset_index(drop=True)
 
             else:
                 log_warning("No peaks detected - using reference positions as fallback")

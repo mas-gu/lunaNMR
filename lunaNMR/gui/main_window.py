@@ -2455,7 +2455,7 @@ class LunaNMRMainWindow(BaseWindow):
         # Row 1: Noise Threshold
         params_frame_layout.addWidget(QLabel("Noise Threshold:"), 1, 0)
         self.expert_noise_spin = QDoubleSpinBox()
-        self.expert_noise_spin.setRange(0.01, 10.0)
+        self.expert_noise_spin.setRange(0.1, 10.0)  # set_threshold_multiplier refuses below 0.1
         self.expert_noise_spin.setSingleStep(0.1)
         self.expert_noise_spin.setDecimals(2)
         self.expert_noise_spin.setValue(self.noise_threshold)
