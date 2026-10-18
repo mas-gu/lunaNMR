@@ -27,7 +27,6 @@ REQUIRED_DEPENDENCIES = {
     'pandas': 'Data manipulation',
     'matplotlib': 'Plotting and visualization',
     'scipy': 'Scientific computing',
-    'sklearn': 'Machine learning (peak clustering)',
     'networkx': 'Graph clustering for peak detection',
     'nmrglue': 'NMR data file reading',
     'PySide6': 'Qt GUI framework',
@@ -36,8 +35,6 @@ REQUIRED_DEPENDENCIES = {
 
 # Absent installs degrade a feature rather than breaking the application.
 OPTIONAL_DEPENDENCIES = {
-    'torch': 'CNN peak classifier',
-    'torchvision': 'CNN peak classifier',
     'psutil': 'Memory and performance monitoring',
 }
 
