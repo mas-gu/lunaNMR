@@ -77,3 +77,35 @@ class TestAUsageErrorReturnsFromMain:
     def test_help_returns_0(self, capsys):
         assert cli.main(['--help']) == 0
         assert 'usage: lunaNMR' in capsys.readouterr().out
+
+
+_TIDY = ("spectrum_name,assignment,ppm_x,ppm_y,height,volume\n"
+         "0,K14,7.5,110.0,200.0,2000.0\n1,K14,7.51,110.05,150.0,1500.0\n"
+         "2,K14,7.53,110.2,90.0,900.0\n0,A17,8.0,120.0,100.0,1000.0\n"
+         "1,A17,8.02,120.1,80.0,800.0\n2,A17,8.05,120.3,50.0,500.0\n")
+
+
+class TestMatplotlibSettingsAreRestored:
+    """`kd --survey` and `export kd` set pdf.fonttype for the whole process, so every
+    later PDF the host wrote depended on which command had run before it."""
+
+    def _kd_inputs(self, tmp_path):
+        csv = tmp_path / 'series_analysis_tidy.csv'
+        csv.write_text(_TIDY)
+        return ['--input', str(csv), '--p0', '50', '--conc', '0,25,50']
+
+    def test_export_kd(self, tmp_path, capsys):
+        import matplotlib
+        assert cli.main(['kd', *self._kd_inputs(tmp_path), '--out', str(tmp_path / 'kd')]) == 0
+        with matplotlib.rc_context({'pdf.fonttype': 3}):
+            assert cli.main(['export', 'kd', '--json',
+                             str(tmp_path / 'kd' / 'data' / 'kd_kd_fit_data.json'),
+                             '--out', str(tmp_path / 'figs')]) == 0
+            assert matplotlib.rcParams['pdf.fonttype'] == 3
+
+    def test_kd_survey(self, tmp_path, capsys):
+        import matplotlib
+        with matplotlib.rc_context({'pdf.fonttype': 3}):
+            assert cli.main(['kd', *self._kd_inputs(tmp_path), '--out', str(tmp_path / 'kd'),
+                             '--survey']) == 0
+            assert matplotlib.rcParams['pdf.fonttype'] == 3

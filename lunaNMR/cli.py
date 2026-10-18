@@ -2518,7 +2518,11 @@ def main(argv=None):
     import matplotlib
     matplotlib.use('Agg')
     try:
-        return args.func(args)
+        # Handlers set rcParams (pdf.fonttype) for their own figures; the context gives
+        # the process its own settings back, so a later call's PDFs do not depend on
+        # which command ran before it.
+        with matplotlib.rc_context():
+            return args.func(args)
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         # Expected bad-input failures from the wrapped engines (missing or unwritable
         # path, bad concentrations, malformed CSV/JSON missing an expected column/key, an
