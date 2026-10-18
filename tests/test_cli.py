@@ -301,37 +301,28 @@ class TestIndependentModeMatchesTheGui:
     algorithm, and neither side said so.
     """
 
-    def _options_for(self, monkeypatch, tmp_path, peak_source):
-        """Capture the processing_options the CLI hands the processor."""
-        import lunaNMR.processors.multi_spectrum_processor as msp
-        captured = {}
-
-        class _Spy:
-            def __init__(self, params):
-                captured.update(params['processing_options'])
-
-            def process_nmr_series(self, *a, **kw):
-                raise SystemExit(0)      # stop before any fitting happens
-
-        monkeypatch.setattr(msp, 'MultiSpectrumProcessor', _Spy)
+    def _options_for(self, tmp_path, capsys, peak_source):
+        """The processing_options the run would hand the processor, as the dry run's
+        summary reports them."""
         (tmp_path / "s_8ms.ft").write_bytes(b"")
         peaks = tmp_path / "p.txt"
         peaks.write_text("Assignment\tPosition_X\tPosition_Y\nK3\t8.0\t120.0\n")
         from lunaNMR.cli import main
-        with pytest.raises(SystemExit):
-            main(["series", "--spectra", str(tmp_path), "--peaks", str(peaks),
-                  "--out", str(tmp_path / "o"), "--peak-source", peak_source])
-        return captured
+        capsys.readouterr()
+        assert main(["series", "--spectra", str(tmp_path), "--peaks", str(peaks),
+                     "--out", str(tmp_path / "o"), "--peak-source", peak_source,
+                     "--dry-run", "--format", "json"]) == 0
+        return json.loads(capsys.readouterr().out)["params"]["processing_options"]
 
     def test_independent_reruns_adaptive_and_uses_the_original_reference(
-            self, monkeypatch, tmp_path):
-        opts = self._options_for(monkeypatch, tmp_path, "independent")
+            self, tmp_path, capsys):
+        opts = self._options_for(tmp_path, capsys, "independent")
         assert opts['rerun_adaptive_per_spectrum'] is True
         assert opts['use_original_reference_for_detection'] is True
 
     @pytest.mark.parametrize("source", ["reference", "cascade", "detected"])
-    def test_the_other_sources_are_unchanged(self, monkeypatch, tmp_path, source):
-        opts = self._options_for(monkeypatch, tmp_path, source)
+    def test_the_other_sources_are_unchanged(self, tmp_path, capsys, source):
+        opts = self._options_for(tmp_path, capsys, source)
         assert opts['rerun_adaptive_per_spectrum'] is False
         assert opts['use_original_reference_for_detection'] is False
 

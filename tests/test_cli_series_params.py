@@ -18,25 +18,15 @@ def _inputs(tmp_path):
     return peaks
 
 
-def _captured_params(monkeypatch, tmp_path, extra):
-    """The params dict the CLI hands MultiSpectrumProcessor."""
-    import lunaNMR.processors.multi_spectrum_processor as msp
-    captured = {}
-
-    class _Spy:
-        def __init__(self, params):
-            captured.update(params)
-
-        def process_nmr_series(self, *a, **kw):
-            raise SystemExit(0)
-
-    monkeypatch.setattr(msp, 'MultiSpectrumProcessor', _Spy)
+def _effective_params(tmp_path, extra, capsys):
+    """The parameters the run would hand the series engine, as the dry run's summary
+    reports them - the same object a real run passes to MultiSpectrumProcessor."""
     peaks = _inputs(tmp_path)
     from lunaNMR.cli import main
-    with pytest.raises(SystemExit):
-        main(["series", "--spectra", str(tmp_path), "--peaks", str(peaks),
-              "--out", str(tmp_path / "o"), *extra])
-    return captured
+    capsys.readouterr()
+    assert main(["series", "--spectra", str(tmp_path), "--peaks", str(peaks),
+                 "--out", str(tmp_path / "o"), "--dry-run", "--format", "json", *extra]) == 0
+    return json.loads(capsys.readouterr().out)["params"]
 
 
 class TestTuningKnobsAreReachable:
@@ -44,27 +34,27 @@ class TestTuningKnobsAreReachable:
     the GUI defaults. A series that fit badly had no headless remediation at all.
     """
 
-    def test_a_nested_value_is_applied(self, monkeypatch, tmp_path):
+    def test_a_nested_value_is_applied(self, tmp_path, capsys):
         cfg = tmp_path / "tune.json"
         cfg.write_text(json.dumps({"detection_params": {"search_window_x": 0.05}}))
-        params = _captured_params(monkeypatch, tmp_path, ["--params", str(cfg)])
+        params = _effective_params(tmp_path, ["--params", str(cfg)], capsys)
         assert params["detection_params"]["search_window_x"] == 0.05
 
-    def test_untouched_keys_keep_their_defaults(self, monkeypatch, tmp_path):
+    def test_untouched_keys_keep_their_defaults(self, tmp_path, capsys):
         """A merge, not a replacement: naming one knob must not blank the section."""
         cfg = tmp_path / "tune.json"
         cfg.write_text(json.dumps({"detection_params": {"search_window_x": 0.05}}))
-        params = _captured_params(monkeypatch, tmp_path, ["--params", str(cfg)])
+        params = _effective_params(tmp_path, ["--params", str(cfg)], capsys)
         assert params["detection_params"]["search_window_y"] == 0.070
         assert params["fitting_params"]["min_r_squared"] == 0.5
 
-    def test_several_sections_at_once(self, monkeypatch, tmp_path):
+    def test_several_sections_at_once(self, tmp_path, capsys):
         cfg = tmp_path / "tune.json"
         cfg.write_text(json.dumps({
             "detection_params": {"search_window_x": 0.04, "search_window_y": 0.04},
             "fitting_params": {"fitting_window_x": 0.3},
             "gui_params": {"fix_linewidths": True}}))
-        params = _captured_params(monkeypatch, tmp_path, ["--params", str(cfg)])
+        params = _effective_params(tmp_path, ["--params", str(cfg)], capsys)
         assert params["detection_params"]["search_window_y"] == 0.04
         assert params["fitting_params"]["fitting_window_x"] == 0.3
         assert params["gui_params"]["fix_linewidths"] is True
@@ -144,17 +134,17 @@ class TestCommandLineFlagsWin:
     """--params is a file; --parallel and --peak-source are what the caller just typed.
     The typed thing wins, or a stale file silently overrides the command line."""
 
-    def test_parallel_is_the_flags_alone(self, monkeypatch, tmp_path):
-        params = _captured_params(monkeypatch, tmp_path, ["--parallel"])
+    def test_parallel_is_the_flags_alone(self, tmp_path, capsys):
+        params = _effective_params(tmp_path, ["--parallel"], capsys)
         assert params["processing_options"]["use_parallel_processing"] is True
         assert params["gui_params"]["use_parallel_processing"] is True
 
-    def test_independent_mode_beats_the_file(self, monkeypatch, tmp_path):
+    def test_independent_mode_beats_the_file(self, tmp_path, capsys):
         cfg = tmp_path / "tune.json"
         cfg.write_text(json.dumps(
             {"processing_options": {"rerun_adaptive_per_spectrum": False}}))
-        params = _captured_params(monkeypatch, tmp_path,
-                                  ["--params", str(cfg), "--peak-source", "independent"])
+        params = _effective_params(tmp_path,
+                                   ["--params", str(cfg), "--peak-source", "independent"], capsys)
         assert params["processing_options"]["rerun_adaptive_per_spectrum"] is True
 
 
@@ -233,10 +223,10 @@ class TestTitrationRefusesTheFreeStateAnchor:
                      "--mode", "titration", "--dry-run"]) == 1
         assert "cascade" in capsys.readouterr().err
 
-    def test_it_is_accepted_in_time_mode(self, monkeypatch, tmp_path):
+    def test_it_is_accepted_in_time_mode(self, tmp_path, capsys):
         cfg = tmp_path / "tune.json"
         cfg.write_text(json.dumps(
             {"processing_options": {"use_original_reference_for_detection": True}}))
-        params = _captured_params(monkeypatch, tmp_path,
-                                  ["--params", str(cfg), "--peak-source", "cascade"])
+        params = _effective_params(tmp_path,
+                                   ["--params", str(cfg), "--peak-source", "cascade"], capsys)
         assert params["processing_options"]["use_original_reference_for_detection"] is True

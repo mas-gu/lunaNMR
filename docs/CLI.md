@@ -265,7 +265,7 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   still reports success is the failure mode this whole surface exists to prevent, and it is
   checked during `--dry-run` too. Command-line flags (`--parallel`, `--peak-source`) win over
   the file, so a stale tuning file cannot silently override what you just typed. The run
-  summary records the effective `params`. A key the defaults carry but nothing on the series
+  summary - and the `--dry-run` summary - records the effective `params`. A key the defaults carry but nothing on the series
   path reads is refused as having no effect: `gui_params.use_centroid_refinement`,
   `centroid_noise_multiplier`, `use_ps2d_multi_peak`, `height_threshold`, `distance_factor`,
   `prominence_threshold`, `smoothing_sigma`, `max_peaks_fit`, `max_optimization_iterations`,

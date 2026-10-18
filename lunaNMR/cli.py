@@ -1116,7 +1116,9 @@ def _run_series(args):
         summary = {'command': 'series', 'dry_run': True, 'spectra_found': len(nmr_files),
                    'peaks': args.peaks, 'peaks_exists': peaks_ok, 'mode': args.mode,
                    **tracking, 'parallel': args.parallel,
-                   'output_dir': args.out, 'missing_inputs': missing}
+                   'output_dir': args.out, 'missing_inputs': missing,
+                   # The parameters the run would hand the engine, as its summary reports
+                   'params_file': getattr(args, 'params', None), 'params': series_params}
         deep_lines, deep_code, deep_error = [], 0, None
         if getattr(args, 'deep', False) and nmr_files and peaks_ok:
             from lunaNMR.validation.spectra_check import check_experiment
