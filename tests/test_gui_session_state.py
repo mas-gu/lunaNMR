@@ -247,8 +247,9 @@ class TestTheExpertPanelIsWhatTheFitUses:
 
 
 class TestCancelStopsTheRunFromCounting:
-    """Cancel closes the progress dialog; the worker cannot be interrupted mid-fit, so it
-    runs on. Its results must not land, and no second run may start beside it."""
+    """Cancel closes the progress dialog. A fit stops before its next cluster; a detection
+    cannot be interrupted and runs on. Neither one's results may land, and no second run
+    may start beside them."""
 
     @pytest.fixture
     def cancel_at_once(self, monkeypatch):
@@ -275,6 +276,21 @@ class TestCancelStopsTheRunFromCounting:
         assert window.integrator.fitted_peaks is detected
         assert window.last_fitting_results is None
         assert not list(data["folder"].glob("*_fitting_results.csv"))
+
+    @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
+    def test_cancel_stops_the_fit_before_its_first_pass_ends(self, app, window, data, monkeypatch,
+                                                             cancel_at_once, parallel):
+        _load(window, monkeypatch, data["spectrum"], data["ten"])
+        window.use_parallel_processing = parallel
+        previous_clusters = window.integrator.enhanced_fitter.series_params
+
+        window.on_fit_spectrum()
+        _wait_for(app, window.fitting_worker)
+
+        assert window.integrator.enhanced_fitter.parallel_processor.pass1_results is None
+        assert window.integrator.enhanced_fitter.series_params is previous_clusters
+        assert "cancelled" in window.statusBar().currentMessage().lower()
+        assert self._buttons(window) == (True, True, True)
 
     def test_nothing_else_starts_while_a_cancelled_fit_runs(self, app, window, data, monkeypatch,
                                                             cancel_at_once):

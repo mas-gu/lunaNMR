@@ -11,6 +11,7 @@ import pandas as pd
 
 from lunaNMR.core.ps2d_config import restore_base_ps2d_config
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
+from lunaNMR.utils.cancellation import Cancelled
 
 # Below this many peaks, distributing the work costs more than it saves.
 MIN_PEAKS_FOR_PARALLEL = 3
@@ -64,7 +65,8 @@ class SingleSpectrumProcessor:
                          processing_options: Optional[Dict] = None,
                          progress_callback: Optional[callable] = None,
                          locked_clusters_by_assignment: Optional[List[List[str]]] = None,
-                         pre_learned_statistics: Optional[Dict] = None) -> Tuple[List[Dict], Optional[Dict]]:
+                         pre_learned_statistics: Optional[Dict] = None,
+                         stop=None) -> Tuple[List[Dict], Optional[Dict]]:
         """
         Process all peaks in a peak list using specified options
 
@@ -81,6 +83,8 @@ class SingleSpectrumProcessor:
                 guesses (not fixed constraints). Format:
                 {'lw_f1_median': float, 'lw_f2_median': float, 'lw_f1_mad': float,
                  'lw_f2_mad': float, 'n_samples': int, 'alpha': float}
+            stop: Optional threading.Event; once set, the fit ends before its next cluster
+                and raises Cancelled.
 
         Returns:
             Tuple of (fitted_results: List[Dict], learned_statistics: Optional[Dict])
@@ -104,6 +108,7 @@ class SingleSpectrumProcessor:
         self._force_reference_linewidths = processing_options.get('force_reference_linewidths', False) if processing_options else False
         # Skip series_params to force fresh adaptive optimization (Independent mode)
         self._skip_series_params = processing_options.get('skip_series_params', False) if processing_options else False
+        self._stop = stop
 
         try:
             # A fresh fit - nothing inherited from a reference spectrum - starts from the
@@ -142,6 +147,8 @@ class SingleSpectrumProcessor:
                 # Sequential is the same pipeline, run in this process
                 return self._process_with_parallel_fitting(peak_list, in_process=True)
 
+        except Cancelled:
+            raise
         except Exception as e:
             log_error(f"Error in process_peak_list: {e}")
             if self.progress_callback:
@@ -321,7 +328,8 @@ class SingleSpectrumProcessor:
                     reference_linewidths=reference_linewidths if force_reference_linewidths else None,
                     skip_series_params=skip_series_params,
                     reference_positions=getattr(self, '_original_reference_positions', None),
-                    in_process=in_process
+                    in_process=in_process,
+                    stop=getattr(self, '_stop', None)
                 )
 
                 # Handle both old (list) and new (tuple) return formats
@@ -360,6 +368,8 @@ class SingleSpectrumProcessor:
 
                 return (fitted_results, learned_statistics)
 
+            except Cancelled:
+                raise
             except Exception as e:
                 if in_process:
                     raise
