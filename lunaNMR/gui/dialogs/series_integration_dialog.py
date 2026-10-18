@@ -1469,8 +1469,6 @@ class SeriesIntegrationDialog(BaseDialog):
                 # titrations it chose a window that cuts the peak at half height
                 'use_adaptive_optimization': False,
                 'auto_add_dummy_peaks': getattr(self.main_window, 'auto_add_dummy_peaks', True),
-                # ML training data collection
-                'collect_training_data': self._get_ml_collect_enabled(),
                 # Custom linewidth parameters (only if enabled)
                 'lw_lorentz_1h': getattr(self.main_window, 'lw_lorentz_1h', None) if getattr(self.main_window, 'use_custom_linewidths', False) else None,
                 'lw_gauss_1h': getattr(self.main_window, 'lw_gauss_1h', None) if getattr(self.main_window, 'use_custom_linewidths', False) else None,
@@ -1527,18 +1525,3 @@ class SeriesIntegrationDialog(BaseDialog):
             params['processing_options']['use_original_reference_for_detection'] = True
 
         return params
-
-    def _get_ml_collect_enabled(self) -> bool:
-        """Check if ML training data collection is enabled via ML Learning Center config."""
-        if not self.main_window:
-            return False
-
-        try:
-            if hasattr(self.main_window, 'config_manager'):
-                config = self.main_window.config_manager.config
-                ml_config = config.get('ml_learning', {})
-                return ml_config.get('collect_training_data', False)
-        except Exception:
-            pass
-
-        return False

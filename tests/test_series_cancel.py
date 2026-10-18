@@ -149,35 +149,8 @@ def test_a_cancelled_series_in_the_dialog_writes_and_saves_nothing(app, dialog, 
     assert "cancelled - nothing written" in dialog.log_text.toPlainText().lower()
 
 
-def test_a_series_stopped_after_its_first_spectrum_removes_what_it_wrote(series):
-    """With training data collection on, the series writes into its folder while it runs;
-    a stop before the second spectrum leaves no folder behind."""
-    from lunaNMR.cli import _default_series_params
-    from lunaNMR.processors.multi_spectrum_processor import MultiSpectrumProcessor
-    from lunaNMR.utils.cancellation import Cancelled
-    params = _default_series_params()
-    params['gui_params']['collect_training_data'] = True
-    stop = threading.Event()
-    wrote_during_the_run = []
-
-    def progress(pct, task, log_msg=None, failed=False):
-        if POINTS[1] in (log_msg or ""):
-            wrote_during_the_run.append(series["out"].exists())
-            stop.set()
-        return True
-
-    with pytest.raises(Cancelled):
-        MultiSpectrumProcessor(params).process_nmr_series(
-            series["files"], series["peaks"], str(series["out"]),
-            peak_source_mode='cascade', progress_callback=progress,
-            series_mode='titration', stop=stop)
-
-    assert wrote_during_the_run == [True]
-    assert not series["out"].exists()
-
-
 def test_a_folder_that_was_there_before_the_series_is_kept(series):
-    """The CLI writes into a folder it made itself: a stopped series removes only its own."""
+    """The CLI writes into a folder it made itself: a stopped series adds nothing to it."""
     from lunaNMR.cli import _default_series_params
     from lunaNMR.processors.multi_spectrum_processor import MultiSpectrumProcessor
     from lunaNMR.utils.cancellation import Cancelled

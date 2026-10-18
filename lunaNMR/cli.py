@@ -807,7 +807,6 @@ def _default_series_params(parallel=False):
             # Unmatched peaks near listed ones, added as dummy_ peaks on the first
             # spectrum and fitted at every point
             'auto_add_dummy_peaks': True,
-            'collect_training_data': False,
             'height_threshold': 0.1,
             'distance_factor': 2.0,
             'prominence_threshold': 0.05,
