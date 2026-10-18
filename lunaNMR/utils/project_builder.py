@@ -208,18 +208,18 @@ def t1t2_analysis(records, name, staging, t1rho_records=()):
             'file_refs': {'t1t2': refs}}
 
 
-def modelfree_analysis(record, name):
+def modelfree_analysis(record, name, out):
     """An integrated (model-free) page analysis from one `dynamixs modelfree` record.
 
-    Its output folder is used as the page's own: the results viewer opens
-    `<prefix>_spectral_density_detailed.csv` there, which the CLI writes under that name.
-    An R2 table given for a field (--f*-r2-table) has no field on the page; it is kept
-    with the run in the analysis metadata.
+    `out` - the run's own outputs (stage_own_outputs) - is used as the page's folder: the
+    results viewer opens `<prefix>_spectral_density_detailed.csv` there, which the CLI
+    writes under that name. An R2 table given for a field (--f*-r2-table) has no field
+    on the page; it is kept with the run in the analysis metadata.
     """
-    args = record['args']
+    args, out = record['args'], str(out)
     variant = 'jwh' if (args.get('method') or '').endswith('jwh') else '087'
     page = {
-        'session_results': {'analysis_complete': True, 'output_dir': args['out'],
+        'session_results': {'analysis_complete': True, 'output_dir': out,
                             'json_folder': None},
         'field1_t1_file': args.get('f1_t1'), 'field1_t2_file': args.get('f1_t2'),
         'field1_noe_sat_file': args.get('f1_noe_sat'),
@@ -235,7 +235,7 @@ def modelfree_analysis(record, name):
         't1_initial_time': args.get('init_t1'), 't2_initial_time': args.get('init_t2'),
         'bootstrap_iterations': args.get('n_bootstrap'),
         'monte_carlo_iterations': args.get('n_monte_carlo'),
-        'output_dir': args['out'], 'prefix': args['prefix'], 'json_folder_name': 'json',
+        'output_dir': out, 'prefix': args['prefix'], 'json_folder_name': 'json',
     }
     page = {k: v for k, v in page.items() if v is not None}
     refs = {key: page[key] for key in page if key.endswith('_file')}
@@ -244,17 +244,18 @@ def modelfree_analysis(record, name):
             'file_refs': {'integrated': refs}}
 
 
-def methyl_t2_analysis(record, name):
+def methyl_t2_analysis(record, name, out):
     """A methyl T2 page analysis from one `dynamixs methyl-t2` record.
 
-    Its output folder is used as the page's own: the CLI writes the fit JSON
-    (`*_methylT2_fit_data.json`, which the page's viewers look for) and the results file
-    there, so both are the page's `last_json_folder` / `last_results_file`.
+    `out` - the run's own outputs (stage_own_outputs) - is used as the page's folder: the
+    CLI writes the fit JSON (`*_methylT2_fit_data.json`, which the page's viewers look
+    for) and the results file there, so both are the page's `last_json_folder` /
+    `last_results_file`.
     """
-    args, summary = record['args'], record['summary']
-    page = {'input_file': args['input'], 'output_dir': args['out'],
-            'last_json_folder': str(Path(summary['json_file']).parent),
-            'last_results_file': summary['results_file'],
+    args, summary, out = record['args'], record['summary'], Path(out)
+    page = {'input_file': args['input'], 'output_dir': str(out),
+            'last_json_folder': str(out),
+            'last_results_file': str(out / Path(summary['results_file']).name),
             'field_freq': args.get('field_freq'), 'bootstrap_iter': args.get('bootstrap')}
     page = {k: v for k, v in page.items() if v is not None}
     return {'state': _analysis_state(name, METHYL_T2_PAGE, 'methyl_t2', 'methyl_t2',
@@ -262,32 +263,33 @@ def methyl_t2_analysis(record, name):
             'file_refs': {'methyl_t2': {'input_file': args['input']}}}
 
 
-def hetnoe_analysis(record, name):
+def hetnoe_analysis(record, name, out):
     """A hetNOE page analysis from one `dynamixs hetnoe` record: its two intensity files,
-    and the results file it wrote in its own output folder."""
-    args, summary = record['args'], record['summary']
+    and the results file it wrote, from `out` - the run's own outputs."""
+    args, summary, out = record['args'], record['summary'], Path(out)
     page = {'mode': 1, 'sat_file': args['sat'], 'unsat_file': args['unsat'],
-            'output_dir': args['out'], 'prefix': args['prefix'],
-            'last_results_file': summary['output']}
+            'output_dir': str(out), 'prefix': args['prefix'],
+            'last_results_file': str(out / Path(summary['output']).name)}
     return {'state': _analysis_state(name, HETNOE_PAGE, 'hetnoe', 'hetnoe', page, [record]),
             'file_refs': {'hetnoe': {'sat_file': args['sat'], 'unsat_file': args['unsat']}}}
 
 
-def density_analysis(record, name):
+def density_analysis(record, name, out):
     """A spectral-density page analysis from one `dynamixs density` record.
 
     The page has no viewer of its own: it holds the inputs, the parameters and the
-    detailed results file the run wrote.
+    detailed results file the run wrote, from `out` - the run's own outputs.
     """
-    args, summary = record['args'], record['summary']
+    args, summary, out = record['args'], record['summary'], Path(out)
     # A dual-field run writes _basic and _detailed tables, a single-field one _results.
-    tables = [o for o in summary.get('outputs', []) if o.endswith('.csv')]
+    tables = [str(out / Path(o).name) for o in summary.get('outputs', [])
+              if o.endswith('.csv')]
     detailed = next((o for o in tables if '_detailed' in Path(o).name),
                     tables[0] if tables else None)
     page = {'session_results': {'analysis_complete': True, 'results_prefix': args['prefix'],
-                                'output_dir': args['out'], 'results_file': detailed},
+                                'output_dir': str(out), 'results_file': detailed},
             'input_file1': args['input'], 'input_file2': args.get('input2'),
-            'output_dir': args['out'],
+            'output_dir': str(out),
             'mode': 'dual_field' if args.get('dual') else 'single_field',
             'use_087': bool(args.get('use_087')),
             'field1_freq': args.get('field1_freq'), 'field2_freq': args.get('field2_freq'),
@@ -299,6 +301,28 @@ def density_analysis(record, name):
     return {'state': _analysis_state(name, SPECTRAL_PAGE, 'spectral_density', 'spectral',
                                      page, [record]),
             'file_refs': {'spectral': refs}}
+
+
+def stage_own_outputs(record, records, stage):
+    """Copy into `stage` the files of the record's --out folder that its run wrote.
+
+    The project save copies a page's results from its folder by name pattern, so runs
+    sharing an --out folder would each be bundled with all of them. Every output a
+    dynamixs command writes starts with `<prefix>_`; a file belongs to the longest prefix
+    among the folder's records that it starts with, so `a` does not claim `a_b`'s files.
+    """
+    out = Path(record['args']['out']).resolve()
+    prefix = record['args']['prefix']
+    longer = [r['args']['prefix'] for r in records
+              if Path(r['args']['out']).resolve() == out
+              and r['args']['prefix'].startswith(f'{prefix}_')]
+    stage = Path(stage)
+    stage.mkdir(parents=True)
+    for path in sorted(out.iterdir()):
+        if (path.is_file() and path.name.startswith(f'{prefix}_')
+                and not any(path.name.startswith(f'{p}_') for p in longer)):
+            shutil.copy2(path, stage / path.name)
+    return stage
 
 
 def dynamixs_analyses(run_dir, staging):
@@ -327,7 +351,8 @@ def dynamixs_analyses(run_dir, staging):
             if name in analyses:
                 place = Path(record['record_file']).parent.relative_to(run_dir)
                 name = '_'.join(place.parts) + f'_{suffix}'
-            analyses[name] = build(record, name)
+            analyses[name] = build(record, name, stage_own_outputs(
+                record, records, Path(staging) / 'runs' / name))
         elif record['command'] not in ('dynamixs t1t2', 'dynamixs t1rho'):
             skipped.append(f"{record['command']} ({record['args'].get('prefix')})")
     return analyses, skipped
@@ -367,7 +392,8 @@ def build_project(run_dir, bundle, spectrum=None, peaks=None):
     :param peaks: the peak list it shows; defaults to the one that series was fitted with
     :return: {'series', 'kd', 'dynamixs': [...names], 'dynamixs_skipped': [...records
         no GUI page holds], 'spectrum', 'peaks'}
-    :raises ValueError: when the run holds no series, Kd fit or DynamiXs record
+    :raises ValueError: when the run holds no series, Kd fit or DynamiXs record, or when
+        no `spectrum` is given and the series' reference spectrum does not exist
     """
     series_files = find_series(run_dir)
     kd_files = find_kd_fits(run_dir)
@@ -384,6 +410,11 @@ def _build(run_dir, bundle, spectrum, peaks, series_files, kd_files, staging):
     first = next(iter(saved_series.values()), None)
     if spectrum is None and first is not None:
         spectrum = _reference_spectrum(first)
+        # The bundle reopens it by path, and rebuilds the slim series' fits from it.
+        if spectrum and not Path(spectrum).exists():
+            raise ValueError(f"The series' reference spectrum {spectrum} does not exist - "
+                             f"its spectra have moved since the series ran. Pass "
+                             f"--spectrum <file> to name the spectrum the bundle reopens")
     if peaks is None and first is not None:
         peaks = first.metadata.get('peak_list_file')
 

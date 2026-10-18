@@ -200,3 +200,45 @@ def test_a_spectrum_that_does_not_exist_is_refused(run_dir, tmp_path, dry_run):
                  "--spectrum", str(tmp_path / "nonexistent.ft"),
                  *(["--dry-run"] if dry_run else [])]) == 1
     assert not out.exists()
+
+
+def _run_with_data_folder(run_dir, dest, data_folder):
+    """A copy of the run whose series records `data_folder` as where its spectra are."""
+    import shutil
+    shutil.copytree(run_dir, dest)
+    batch = dest / "series" / "DNAJA1" / "batch_results.json"
+    data = json.loads(batch.read_text())
+    data["metadata"]["data_folder"] = str(data_folder)
+    batch.write_text(json.dumps(data))
+    return dest
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_a_default_spectrum_that_does_not_exist_is_refused(run_dir, tmp_path, dry_run):
+    """With no --spectrum the bundle records the series' reference spectrum; when the
+    spectra are no longer where the series read them, that is a path to nothing."""
+    import subprocess
+    moved = _run_with_data_folder(run_dir, tmp_path / "moved", tmp_path / "gone")
+    out = tmp_path / "D.lunaNMR"
+    p = subprocess.run([sys.executable, "-m", "lunaNMR", "project", "build", str(moved),
+                        "--out", str(out), "--format", "json",
+                        *(["--dry-run"] if dry_run else [])],
+                       cwd=str(Path(__file__).resolve().parents[1]),
+                       capture_output=True, text=True)
+    assert p.returncode == 1, p.stdout
+    payload = json.loads(p.stdout)
+    assert payload["ok"] is False
+    assert "--spectrum" in payload["error"]["message"]
+    assert str(tmp_path / "gone") in payload["error"]["message"]
+    assert not out.exists()
+
+
+def test_the_same_run_builds_when_given_the_spectrum(run_dir, tmp_path):
+    from lunaNMR.cli import main
+    moved = _run_with_data_folder(run_dir, tmp_path / "moved", tmp_path / "gone")
+    out = tmp_path / "D.lunaNMR"
+    spectrum = DNAJA1 / "2D_DNAJA1_0o0.ft"
+    assert main(["project", "build", str(moved), "--out", str(out),
+                 "--spectrum", str(spectrum)]) == 0
+    manifest = json.loads((out / "project.json").read_text())
+    assert manifest["file_references"]["nmr_spectrum"] == str(spectrum.resolve())

@@ -273,14 +273,19 @@ def find_spectra(folder) -> List[str]:
 
 
 def check_experiment(spectra_dir, peaks_path, *, quick: bool = False,
-                     sample: bool = False, series_mode: str = 'time') -> Dict:
+                     sample: bool = False, series_mode: str = 'time',
+                     spectra: Optional[Sequence[str]] = None) -> Dict:
     """Inspect one experiment folder against its own peak list.
 
     `sample` assesses only the first and last spectrum; the default assesses all of
     them, because the middle of a series is where decay-driven capture loss lives.
+    `spectra` restricts the check to those files of the folder.
     """
     spectra_dir = str(spectra_dir)
     paths = find_spectra(spectra_dir)
+    if spectra is not None:
+        keep = {os.path.abspath(p) for p in spectra}
+        paths = [p for p in paths if os.path.abspath(p) in keep]
     names = [os.path.basename(p) for p in paths]
     result: Dict = dict(experiment=os.path.basename(os.path.normpath(spectra_dir)),
                         folder=spectra_dir, n_spectra=len(paths), spectra=[],
@@ -360,10 +365,28 @@ def check_experiment(spectra_dir, peaks_path, *, quick: bool = False,
     return result
 
 
-def find_peak_list(folder) -> Optional[str]:
-    """The peak list belonging to an experiment lives beside its spectra."""
+def pair_peak_lists(folder) -> Tuple[Dict[str, List[str]], List[str], List[str]]:
+    """Which peak list each spectrum of a folder is checked against.
+
+    The list belonging to an experiment lives beside its spectra. A folder with one
+    list uses it for every spectrum; a folder with several pairs each spectrum with the
+    list of the same stem, since one folder often holds several states each with its
+    own list. Returns ({list: [spectra]}, unpaired spectra, every list in the folder).
+    """
     lists = sorted(glob.glob(os.path.join(str(folder), '*.txt')))
-    return lists[0] if lists else None
+    spectra = find_spectra(folder)
+    if len(lists) <= 1:
+        return ({lists[0]: spectra} if lists else {}), [], lists
+    by_stem = {os.path.splitext(os.path.basename(p))[0]: p for p in lists}
+    pairs: Dict[str, List[str]] = {}
+    unpaired = []
+    for path in spectra:
+        own = by_stem.get(os.path.splitext(os.path.basename(path))[0])
+        if own:
+            pairs.setdefault(own, []).append(path)
+        else:
+            unpaired.append(path)
+    return pairs, unpaired, lists
 
 
 def check_dataset(root, *, quick: bool = False, sample: bool = False,
@@ -387,25 +410,34 @@ def check_dataset(root, *, quick: bool = False, sample: bool = False,
 
     sets = {}
     for folder in folders:
-        peaks_path = find_peak_list(folder)
+        pairs, unpaired, lists = pair_peak_lists(folder)
         rel = os.path.relpath(folder, root)
-        if not peaks_path:
+        if not lists:
             result['findings'].append(Finding('WARN', 'peak_list', f'{rel}: no peak list in this folder'))
             continue
-        try:
-            experiment = check_experiment(folder, peaks_path, quick=quick, sample=sample,
-                                          series_mode=series_mode)
-        except Exception as exc:
-            # One folder this check cannot read must not cost every other its result.
+        if unpaired:
             result['findings'].append(Finding(
-                'FAIL', 'spectra', f'{rel}: could not be checked '
-                                   f'({type(exc).__name__}: {exc})'))
-            continue
-        experiment['experiment'] = rel
-        result['experiments'].append(experiment)
-        result['findings'].extend(experiment['findings'])
-        if experiment.get('peak_list', {}).get('assignments'):
-            sets[rel] = set(experiment['peak_list']['assignments'])
+                'WARN', 'peak_list',
+                f'{rel}: {", ".join(os.path.basename(p) for p in unpaired)} not checked — '
+                f'no peak list of the same name among '
+                f'{", ".join(os.path.basename(p) for p in lists)}'))
+        for peaks_path, spectra in pairs.items():
+            stem = os.path.splitext(os.path.basename(peaks_path))[0]
+            name = rel if len(lists) == 1 else stem if rel == '.' else f'{rel}:{stem}'
+            try:
+                experiment = check_experiment(folder, peaks_path, quick=quick, sample=sample,
+                                              series_mode=series_mode, spectra=spectra)
+            except Exception as exc:
+                # One folder this check cannot read must not cost every other its result.
+                result['findings'].append(Finding(
+                    'FAIL', 'spectra', f'{name}: could not be checked '
+                                       f'({type(exc).__name__}: {exc})'))
+                continue
+            experiment['experiment'] = name
+            result['experiments'].append(experiment)
+            result['findings'].extend(experiment['findings'])
+            if experiment.get('peak_list', {}).get('assignments'):
+                sets[name] = set(experiment['peak_list']['assignments'])
 
     if len(sets) > 1:
         common = set.intersection(*sets.values())

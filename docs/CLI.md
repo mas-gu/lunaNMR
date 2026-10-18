@@ -90,6 +90,13 @@ Intensities are deliberate approximations (the maximum in a small box, not a fit
 sub-series ratio from here is an estimate to be re-measured on fitted intensities before it
 is applied.
 
+**Which peak list a spectrum is checked against.** A folder with one `*.txt` uses it for
+every spectrum. A folder with several pairs each spectrum with the list of the same stem
+(`state.ft` ↔ `state.txt`), each pair reported as its own experiment named `folder:stem`,
+since one folder often holds several states each with its own list. A spectrum with no list
+of its name in such a folder is not checked, and a `WARN` names it and the lists that were
+there — judging it against some other list reads a wrong list as decay.
+
 `--quick` uses a coarser registration grid. `--sample` assesses only the first and last
 spectrum of each experiment instead of all of them.
 
@@ -142,7 +149,9 @@ It saves through `ProjectManager.save_project` itself, handed a stand-in main wi
 the bundle is exactly what the GUI would have saved. The GUI reopens the first series'
 reference spectrum and the peak list it was fitted against unless `--spectrum`/`--peaks`
 say otherwise. Both are **referenced by absolute path, not copied**: the bundle needs the
-data where it was. DynamiXs results are copied into the bundle, so they reopen after the
+data where it was. With no `--spectrum`, a reference spectrum that no longer exists where
+the series read it is refused (exit 1) with a message to pass `--spectrum`; so is a given
+`--spectrum` that does not exist. DynamiXs results are copied into the bundle, so they reopen after the
 run folder is gone. Refuses an existing `--out`, and leaves nothing behind when a build
 fails. `--dry-run` performs the whole build into a scratch folder and reports what the
 bundle would hold.
@@ -152,6 +161,12 @@ the other: the page holds one. Two model-free runs of one `--prefix` are both bu
 the second named after where its record sits. Every DynamiXs analysis keeps the CLI runs
 it came from (`analysis_metadata.cli_runs`), so inputs the page has no field for - an
 `--f*-r2-table` - stay on record.
+
+Runs that share an `--out` folder are bundled apart: each analysis gets only the files its
+own run wrote - every `dynamixs` output starts with `<prefix>_`, and a file belongs to the
+longest prefix of that folder's runs it starts with, so `a` does not claim `a_b_*`. A
+folder shared by two methyl-t2 runs otherwise gave each analysis both fit JSONs, and its
+viewer, which opens every fit in its folder, showed the other run's fits as its own.
 
 A series is stored slim, by `series` and by the GUI alike: each fit keeps its parameters
 (`all_peaks`) and its region's ppm axes, and the viewers rebuild the region and surfaces
@@ -196,6 +211,16 @@ remedy was to re-pick every peak.
 `--auto` measures the offset against `--spectrum` with the same routine `diagnose` uses,
 then applies it; `--dx`/`--dy` give it explicitly. `--out` must differ from `--peaks`: the
 input is often the only copy of an assignment nobody wants to redo.
+
+**A measured offset is checked before it is written.** The search grid spans ±0.09 ppm in
+¹H, and it always has a maximum: a list further out than that gets a spurious one inside
+the grid, and applying it leaves the list off in both dimensions. So `--auto` re-reads the
+spectrum at the shifted positions and refuses (exit 1, `ok: false`, nothing written) when
+the median S/N there is below 10 or fewer than 85% of the peaks are captured — the
+thresholds `diagnose` uses. On the real reference spectrum with the list 0.15 ppm out in
+¹H, the "correction" left a median S/N of 3 and 6/68 peaks captured; a correct one gives
+~124 and 64/68. A written `--auto` summary carries `captured` and `median_snr`. Given
+`--dx`/`--dy` are applied unchecked.
 
 **`--quick` is a resolution limit, not just a speed knob.** It quantises the ¹⁵N offset to
 0.03 ppm instead of 0.015, so a smaller real offset is misreported — as zero, or as a full

@@ -127,3 +127,60 @@ class TestTheMeasurementGridIsTheResolutionLimit:
         p = _run("peaks", "shift", "--peaks", str(peaks), "--out", str(tmp_path / "f.txt"),
                  "--auto", "--spectrum", str(spec), "--format", "json")
         assert json.loads(p.stdout)["dy"] == pytest.approx(0.015, abs=0.008)
+
+
+DNAJA1 = ROOT.parent / "data_test" / "data_binding" / "DNAJA1_HSPA8"
+
+
+def _real_offset_list(tmp_path, dx, dy):
+    """The real reference list moved by (dx, dy), and the spectrum it belongs to."""
+    if not (DNAJA1 / "DNAJA1.txt").exists():
+        pytest.skip("data_test not present")
+    off = tmp_path / "off.txt"
+    assert _run("peaks", "shift", "--peaks", str(DNAJA1 / "DNAJA1.txt"), "--out", str(off),
+                "--dx", str(dx), "--dy", str(dy)).returncode == 0
+    return off, DNAJA1 / "2D_DNAJA1_0o0.ft"
+
+
+class TestAMeasuredShiftThatDoesNotRegisterIsRefused:
+    """The search grid spans +/-0.09 ppm in 1H. A list further out than that still has an
+    arg-max somewhere -- a spurious one, inside the grid -- and applying it leaves the list
+    off in both dimensions. Measured on the real reference spectrum with the list 0.15 ppm
+    out in 1H: median S/N ~3 and 6/68 peaks captured after the 'correction', against ~124
+    and 64/68 for a correct one. So the shifted list is judged on the spectrum it was
+    measured against, not on the optimiser having returned a number.
+    """
+
+    def test_an_offset_outside_the_grid_is_not_written(self, tmp_path):
+        off, spec = _real_offset_list(tmp_path, 0.15, 0.0)
+        out = tmp_path / "fixed.txt"
+        p = _run("peaks", "shift", "--peaks", str(off), "--out", str(out),
+                 "--auto", "--spectrum", str(spec), "--format", "json")
+        assert p.returncode == 1, p.stdout
+        payload = json.loads(p.stdout)
+        assert payload["ok"] is False
+        assert "S/N" in payload["error"]["message"]
+        assert "captured" in payload["error"]["message"]
+        assert not out.exists()
+
+    def test_the_refusal_is_stated_in_text_mode_too(self, tmp_path):
+        off, spec = _real_offset_list(tmp_path, 0.15, 0.0)
+        out = tmp_path / "fixed.txt"
+        p = _run("peaks", "shift", "--peaks", str(off), "--out", str(out),
+                 "--auto", "--spectrum", str(spec))
+        assert p.returncode == 1
+        assert "not written" in p.stderr
+        assert not out.exists()
+
+    def test_an_offset_inside_the_grid_is_corrected_and_written(self, tmp_path):
+        off, spec = _real_offset_list(tmp_path, 0.05, 0.3)
+        out = tmp_path / "fixed.txt"
+        p = _run("peaks", "shift", "--peaks", str(off), "--out", str(out),
+                 "--auto", "--spectrum", str(spec), "--format", "json")
+        assert p.returncode == 0, p.stdout + p.stderr
+        payload = json.loads(p.stdout)
+        assert payload["dx"] == pytest.approx(-0.05, abs=0.005)
+        assert payload["dy"] == pytest.approx(-0.3, abs=0.02)
+        assert payload["captured"] >= 60
+        assert payload["median_snr"] > 100
+        assert out.exists()
