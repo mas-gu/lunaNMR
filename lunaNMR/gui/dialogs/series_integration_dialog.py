@@ -65,6 +65,7 @@ class ProcessingWorker(QObject):
     notice = Signal(str, bool)  # a warning or error from the run, is_error
     finished = Signal(object)  # batch_results
     error = Signal(str)
+    cancelled = Signal()  # the run stopped after a cancel
 
     def __init__(self, processor, nmr_files, reference_peaks, peak_source_mode, voigt_params,
                  extract_delays: bool = False, series_mode: str = "time",
@@ -102,6 +103,10 @@ class ProcessingWorker(QObject):
         """OutputManager callback for the series thread: every message drives the
         progress display, and a warning or error is also forwarded for the log."""
         if self._cancelled:
+            # The series sets processing_active when it starts, over a cancel
+            # that came first; its loop stops at the next spectrum on this
+            if self.processor:
+                self.processor.processing_active = False
             return False  # Signal to stop
         if failed or (log_msg or '').startswith('Warning:'):
             self.notice.emit(log_msg, bool(failed))
@@ -156,6 +161,8 @@ class ProcessingWorker(QObject):
 
             if not self._cancelled:
                 self.finished.emit(batch_results)
+            else:
+                self.cancelled.emit()
 
         except Exception as e:
             import traceback
@@ -945,6 +952,7 @@ class SeriesIntegrationDialog(BaseDialog):
 
         # Update UI
         self.start_btn.setEnabled(False)
+        self.close_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.pause_btn.setEnabled(True)
         self.pause_btn.setText("⏸ Pause")
@@ -993,8 +1001,11 @@ class SeriesIntegrationDialog(BaseDialog):
         self.worker.notice.connect(self._on_notice)
         self.worker.finished.connect(self._on_finished)
         self.worker.error.connect(self._on_error)
+        self.worker.cancelled.connect(self._on_cancelled)
         self.worker.finished.connect(self.thread.quit)
         self.worker.error.connect(self.thread.quit)
+        self.worker.cancelled.connect(self.thread.quit)
+        self.thread.finished.connect(lambda: self.close_btn.setEnabled(True))
 
         # Start
         self.thread.start()
@@ -1015,8 +1026,36 @@ class SeriesIntegrationDialog(BaseDialog):
         """Cancel the current processing."""
         if self.worker:
             self.worker.cancel()
-        self._log("Cancelling...")
+        self.cancel_btn.setEnabled(False)
+        self.pause_btn.setEnabled(False)
+        self._log("Cancelling... the spectrum being fitted is finished first")
         self.status_label.setText("Cancelling...")
+
+    def _on_cancelled(self):
+        """The run stopped after a cancel."""
+        self.start_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.pause_btn.setEnabled(False)
+        self.status_label.setText("Cancelled")
+        self._log("Series integration cancelled")
+
+    def _is_running(self) -> bool:
+        return self.thread is not None and self.thread.isRunning()
+
+    def reject(self):
+        """Esc and Close: refused while a run goes on, which would outlive the dialog."""
+        if self._is_running():
+            self.status_label.setText("Running - cancel the run before closing")
+            return
+        super().reject()
+
+    def closeEvent(self, event):
+        """The window's close button: refused while a run goes on."""
+        if self._is_running():
+            self.status_label.setText("Running - cancel the run before closing")
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def _on_pause_clicked(self):
         """Toggle pause state."""

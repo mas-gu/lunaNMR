@@ -59,7 +59,8 @@ from lunaNMR.gui.styles.design_system import (
 
 # Import core processing components
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
-from lunaNMR.core.ps2d_config import set_ps2d_config, get_ps2d_config, mark_ps2d_config_as_base
+from lunaNMR.core.ps2d_config import (set_ps2d_config, get_ps2d_config, mark_ps2d_config_as_base,
+                                      reset_ps2d_config)
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.utils.config_manager import ConfigurationManager, UserPreferences, ProcessingParameters
 from lunaNMR.utils.parameter_manager import NMRParameterManager
@@ -1335,6 +1336,24 @@ class LunaNMRMainWindow(BaseWindow):
         self.detect_peaks_button.setStyleSheet(self._get_green_button_style())
         self.fit_all_peaks_button.setStyleSheet(self._get_blue_button_style())
         self.series_button.setStyleSheet(self._get_blue_button_style())
+
+    def _refuse_while_running(self) -> bool:
+        """True, with the reason in the status bar, while a detection or fit is running.
+
+        A cancelled run cannot be interrupted mid-fit and runs on in its thread, on this
+        window's integrator and the process-wide PS2D config; nothing else may start
+        beside it or change the data under it.
+        """
+        for worker in (getattr(self, 'detection_worker', None), getattr(self, 'fitting_worker', None)):
+            if worker is not None and worker.isRunning():
+                self.update_status("A peak detection or fit is still running - wait for it to finish")
+                return True
+        return False
+
+    def _set_run_controls_enabled(self, enabled: bool):
+        """Enable or disable the buttons that start a detection, a fit or a series."""
+        for button in (self.detect_peaks_button, self.fit_all_peaks_button, self.series_button):
+            button.setEnabled(enabled)
 
     def create_control_center_section(self) -> QGroupBox:
         """Create the Control Center section with main action buttons.
@@ -3255,28 +3274,11 @@ class LunaNMRMainWindow(BaseWindow):
         self.nucleus_type = nucleus
         set_ps2d_config(nucleus)
         config = get_ps2d_config()
-
-        # Update instance variables
-        self.ps2d_radF1 = config.radF1
-        self.ps2d_radF2 = config.radF2
-        self.ps2d_max_iterations = config.max_iterations
-        self.ps2d_max_cluster_size = config.max_cluster_size
-        self.ps2d_overlap_x = config.overlap_threshold_x
-        self.ps2d_overlap_y = config.overlap_threshold_y
+        self._show_ps2d_config()
 
         # Update nucleus-adaptive search windows
         self.search_window_y = config.search_window_f1  # F1 (15N/13C)
         self.search_window_x = config.search_window_f2  # F2 (1H)
-
-        # Update spinboxes if they exist
-        if hasattr(self, 'expert_radF1_spin'):
-            self.expert_radF1_spin.setValue(config.radF1)
-            self.expert_radF2_spin.setValue(config.radF2)
-            self.expert_max_iter_spin.setValue(config.max_iterations)
-            self.expert_overlap_x_spin.setValue(config.overlap_threshold_x)
-            self.expert_overlap_y_spin.setValue(config.overlap_threshold_y)
-        if hasattr(self, 'expert_max_cluster_spin'):
-            self.expert_max_cluster_spin.setValue(config.max_cluster_size)
 
         # Update search window spinboxes
         if hasattr(self, 'expert_search_x_spin'):
@@ -3296,6 +3298,28 @@ class LunaNMRMainWindow(BaseWindow):
         if self.show_ellipses:
             self.update_spectrum_plot()
 
+    def _show_ps2d_config(self):
+        """Show the global PS2D config in the instance variables and the Expert Mode panel."""
+        config = get_ps2d_config()
+
+        # Update instance variables
+        self.ps2d_radF1 = config.radF1
+        self.ps2d_radF2 = config.radF2
+        self.ps2d_max_iterations = config.max_iterations
+        self.ps2d_max_cluster_size = config.max_cluster_size
+        self.ps2d_overlap_x = config.overlap_threshold_x
+        self.ps2d_overlap_y = config.overlap_threshold_y
+
+        # Update spinboxes if they exist
+        if hasattr(self, 'expert_radF1_spin'):
+            self.expert_radF1_spin.setValue(config.radF1)
+            self.expert_radF2_spin.setValue(config.radF2)
+            self.expert_max_iter_spin.setValue(config.max_iterations)
+            self.expert_overlap_x_spin.setValue(config.overlap_threshold_x)
+            self.expert_overlap_y_spin.setValue(config.overlap_threshold_y)
+        if hasattr(self, 'expert_max_cluster_spin'):
+            self.expert_max_cluster_spin.setValue(config.max_cluster_size)
+
     def _apply_auto_detected_nucleus(self):
         """Apply auto-detected nucleus type from integrator to GUI.
 
@@ -3313,9 +3337,10 @@ class LunaNMRMainWindow(BaseWindow):
             logger.info("Could not auto-detect nucleus type from spectral dimensions")
             return
 
-        # Check if nucleus type changed
+        # Check if nucleus type changed. The config is process-wide and a series run
+        # switches it to the nucleus it detected, so it is compared as well as the window.
         current_setting = self.nucleus_type
-        if current_setting != detected_nucleus:
+        if detected_nucleus != current_setting or detected_nucleus != get_ps2d_config().nucleus_type:
             # Update internal state
             self.nucleus_type = detected_nucleus
 
@@ -3488,6 +3513,8 @@ class LunaNMRMainWindow(BaseWindow):
         Resets ALL state: parameters, results, loaded files, GUI widgets.
         """
         logger.info("Reset Results button clicked")
+        if self._refuse_while_running():
+            return
 
         # Confirm destructive action
         reply = QMessageBox.question(
@@ -3537,6 +3564,10 @@ class LunaNMRMainWindow(BaseWindow):
                 'shift_15n_spin': self.shift_15n_spin,
             }
 
+            # The PS2D config outlives the window state: put the startup 15N defaults
+            # back before init_variables reads them
+            reset_ps2d_config()
+
             # Reset ALL state variables to defaults (same as __init__)
             self.init_variables()
 
@@ -3546,6 +3577,11 @@ class LunaNMRMainWindow(BaseWindow):
 
             # Reset GUI widgets to default values
             self._reset_gui_widgets_to_defaults()
+            if hasattr(self, 'expert_nucleus_combo'):
+                self.expert_nucleus_combo.blockSignals(True)
+                self.expert_nucleus_combo.setCurrentText(self.nucleus_type)
+                self.expert_nucleus_combo.blockSignals(False)
+            self._show_ps2d_config()
 
             # Clear peak navigator
             if hasattr(self, 'peak_navigator') and self.peak_navigator:
@@ -4439,6 +4475,8 @@ class LunaNMRMainWindow(BaseWindow):
         6. Show success/error messages
         """
         logger.info("Load Data button clicked")
+        if self._refuse_while_running():
+            return
 
         # Import dialog
         from lunaNMR.gui.dialogs import DataLoadingDialog
@@ -4468,6 +4506,16 @@ class LunaNMRMainWindow(BaseWindow):
         self.current_peak_folder = result['peak_folder']
 
         logger.info(f"Files selected - NMR: {nmr_file}, Peak: {peak_file}")
+        self.load_data(nmr_file, peak_file)
+
+    def load_data(self, nmr_file: str, peak_file: str = None):
+        """Load a spectrum, and optionally a peak list, as the data of a fresh analysis.
+
+        The previous data's detection, fit results and fitted clusters are forgotten:
+        Fit Spectrum fits detected peaks in preference to the list, and a series locks
+        the clusters of the last fit, so either would otherwise belong to other data.
+        """
+        self._forget_previous_results()
 
         # Load files into integrator
         try:
@@ -4486,6 +4534,15 @@ class LunaNMRMainWindow(BaseWindow):
             from lunaNMR.gui.components import show_error
             show_error(self, "Load Error", f"Failed to load data files: {e}")
             logger.error(f"Failed to load data: {e}")
+
+    def _forget_previous_results(self):
+        """Drop the detected peaks, fit results and fitted clusters of the data loaded before."""
+        self.integrator.fitted_peaks = []
+        if self.integrator.enhanced_fitter is not None:
+            self.integrator.enhanced_fitter.series_params = None
+        self.last_fitting_results = None
+        if self.peak_navigator is not None:
+            self.peak_navigator.load_detected_peaks([])
 
     def load_nmr_file(self, file_path: str):
         """Load NMR spectrum file into the integrator.
@@ -5123,6 +5180,9 @@ class LunaNMRMainWindow(BaseWindow):
         Processes multiple spectra using MultiSpectrumProcessor.
         Opens SeriesIntegrationDialog for configuration and progress tracking.
         """
+        if self._refuse_while_running():
+            return
+
         # CRITICAL: Sync GUI parameters BEFORE series integration
         self.sync_parameters_to_integrator()
         logger.info(f"Parameters synced for series: fix_positions={self.fix_positions}, fix_linewidths={self.fix_linewidths}")
@@ -5136,6 +5196,8 @@ class LunaNMRMainWindow(BaseWindow):
         dialog.processing_complete.connect(self._on_series_complete)
 
         dialog.exec()
+        # The series switched the PS2D config to the nucleus it detected
+        self.sync_parameters_to_integrator()
 
         self.update_status("Series integration dialog closed")
 
@@ -6248,8 +6310,14 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     logger.info(f"S/N from-GUI mode: threshold={self.integrator.sn_absolute_threshold:.2e}, "
                                 f"contour_min={self.contour_min_spin.value():.3f} (with 5% safety margin)")
 
-            # Sync PS2D expert parameters from spinboxes to global config
+            # Sync PS2D expert parameters from spinboxes to global config. The config is
+            # process-wide and a series switches it to the nucleus it detected; this
+            # window fits with the nucleus it shows.
             ps2d_config = get_ps2d_config()
+            if ps2d_config.nucleus_type != self.nucleus_type:
+                logger.info(f"PS2D config is {ps2d_config.nucleus_type}, set by another run; "
+                            f"returning it to this window's {self.nucleus_type}")
+                ps2d_config = set_ps2d_config(self.nucleus_type)
             if hasattr(self, 'expert_radF1_spin') and self.expert_radF1_spin is not None:
                 try:
                     ps2d_config.radF1 = float(self.expert_radF1_spin.value())
@@ -6275,6 +6343,14 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     ps2d_config.max_iterations = int(self.expert_max_iter_spin.value())
                 except (ValueError, AttributeError):
                     pass
+            if hasattr(self, 'expert_max_cluster_spin') and self.expert_max_cluster_spin is not None:
+                try:
+                    ps2d_config.max_cluster_size = int(self.expert_max_cluster_spin.value())
+                except (ValueError, AttributeError):
+                    pass
+            if hasattr(self, 'expert_radF1_spin') and self.expert_radF1_spin is not None:
+                # What the panel shows is what every fresh fit starts from, Applied or not
+                mark_ps2d_config_as_base()
 
             # Sync auto-add dummy peaks setting
             if hasattr(self, 'auto_add_dummy_peaks'):
@@ -6346,6 +6422,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         5. Update GUI with results (peaks, plots, statistics)
         """
         logger.info("Detect Peaks button clicked")
+        if self._refuse_while_running():
+            return
 
         # CRITICAL: Sync GUI parameters BEFORE detection
         # This ensures Expert Mode settings (search windows, noise threshold, etc.) are passed
@@ -6376,11 +6454,14 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         # Create and configure worker
         self.detection_worker = PeakDetectionWorker(self.integrator, self.workflow_mode)
+        # The detection replaces fitted_peaks itself; a cancelled one puts these back
+        previous_peaks = self.integrator.fitted_peaks
 
         # Connect worker signals to dialog and handlers
         self.detection_worker.progress_updated.connect(progress_dialog.update_progress)
         self.detection_worker.detection_complete.connect(
-            lambda peaks: self.on_detection_complete(peaks, progress_dialog)
+            lambda peaks: self._discard_cancelled_detection(previous_peaks)
+            if progress_dialog.is_cancelled else self.on_detection_complete(peaks, progress_dialog)
         )
         self.detection_worker.detection_failed.connect(
             lambda error: self.on_detection_failed(error, progress_dialog)
@@ -6389,12 +6470,20 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         self.detection_worker.finished.connect(
             lambda: progress_dialog.complete("Detection complete - click Close to continue")
         )
+        self.detection_worker.finished.connect(lambda: self._set_run_controls_enabled(True))
 
         # Start worker and show progress
         logger.info(f"Starting peak detection (mode={self.workflow_mode})")
         self.update_status("Detecting peaks...")
+        self._set_run_controls_enabled(False)
         self.detection_worker.start()
         progress_dialog.exec()
+
+    def _discard_cancelled_detection(self, previous_peaks):
+        """A detection the user cancelled finished: keep the peaks it was started over."""
+        self.integrator.fitted_peaks = previous_peaks
+        logger.info("Cancelled peak detection finished; its peaks were discarded")
+        self.update_status("Detection cancelled - its results were discarded")
 
     @Slot(list)
     def on_detection_complete(self, detected_peaks, progress_dialog):
@@ -6501,6 +6590,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         5. Update GUI with results (peaks, plots, statistics)
         """
         logger.info("Fit Spectrum button clicked")
+        if self._refuse_while_running():
+            return
 
         # Clear undo stack before major fitting operation
         # (fitted_peaks will be completely replaced, making undo impossible)
@@ -6515,8 +6606,10 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         # Clear cached series_params to ensure fresh clustering with current settings.
         # This prevents stale cluster assignments from being reused when the user
         # changes parameters like max_cluster_size between fits.
-        if hasattr(self.integrator, 'fitter') and hasattr(self.integrator.fitter, 'series_params'):
-            self.integrator.fitter.series_params = None
+        # A cancelled fit puts the clusters of the fit before it back
+        previous_series_params = getattr(self.integrator.enhanced_fitter, 'series_params', None)
+        if self.integrator.enhanced_fitter is not None:
+            self.integrator.enhanced_fitter.series_params = None
 
         # Validate peak_list is loaded (required for fitting)
         if not hasattr(self.integrator, 'peak_list') or self.integrator.peak_list is None:
@@ -6612,7 +6705,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         self.fitting_worker.progress_updated.connect(on_fitting_progress)
         self.fitting_worker.fitting_complete.connect(
-            lambda summary: self.on_fitting_complete(summary, progress_dialog)
+            lambda summary: self._discard_cancelled_fit(previous_series_params)
+            if progress_dialog.is_cancelled else self.on_fitting_complete(summary, progress_dialog)
         )
         self.fitting_worker.fitting_failed.connect(
             lambda error: self.on_fitting_failed(error, progress_dialog)
@@ -6621,12 +6715,21 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         self.fitting_worker.finished.connect(
             lambda: progress_dialog.complete("Fitting complete - click Close to continue")
         )
+        self.fitting_worker.finished.connect(lambda: self._set_run_controls_enabled(True))
 
         # Start worker and show progress
         logger.info(f"Starting Voigt fitting for {len(self.integrator.peak_list)} peaks")
         self.update_status(f"Fitting {len(self.integrator.peak_list)} peaks...")
+        self._set_run_controls_enabled(False)
         self.fitting_worker.start()
         progress_dialog.exec()
+
+    def _discard_cancelled_fit(self, previous_series_params):
+        """A fit the user cancelled finished: its results are neither shown nor saved."""
+        if self.integrator.enhanced_fitter is not None:
+            self.integrator.enhanced_fitter.series_params = previous_series_params
+        logger.info("Cancelled fit finished; its results were discarded")
+        self.update_status("Fitting cancelled - its results were discarded")
 
     @Slot(dict)
     def on_fitting_complete(self, summary, progress_dialog):
@@ -6957,6 +7060,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         Based on v0.9 main_gui.py lines 4452-4510.
         """
         logger.info("Fit Series button clicked")
+        if self._refuse_while_running():
+            return
 
         # CRITICAL: Sync GUI parameters BEFORE series integration
         # This ensures Expert Mode settings are up-to-date for the dialog to read
@@ -6984,6 +7089,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         # Show dialog (non-blocking)
         dialog.exec()
+        # The series switched the PS2D config to the nucleus it detected
+        self.sync_parameters_to_integrator()
 
     def _on_series_processing_complete(self, batch_results):
         """Handle series processing completion.
