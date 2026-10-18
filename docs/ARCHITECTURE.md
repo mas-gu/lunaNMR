@@ -1,6 +1,6 @@
 # Architecture Guide
 
-**TL;DR**: GUI (PySide6/Qt6) → processors (workflow orchestration) → core engines (detection, PS2D 2D fitting, overlap clustering). A headless CLI (`python -m lunaNMR`) shares the same engines. Parallel mode distributes whole overlap clusters across worker processes. GUI and CLI produce an identical result schema.
+**TL;DR**: GUI (PySide6/Qt6) → processors (workflow orchestration) → core engines (detection, PS2D 2D fitting, overlap clustering). A headless CLI (`python -m lunaNMR`) shares the same engines. Sequential and parallel are one pipeline: parallel distributes whole overlap clusters across worker processes, sequential runs the same cluster tasks in process. GUI and CLI produce an identical result schema.
 
 ---
 
@@ -8,7 +8,7 @@
 
 ```
 lunaNMR_v1o0/
-├── launch_lunaNMR.py       # Launcher (tkinter selector → Qt app)
+├── launch_lunaNMR.py       # Launcher: opens the Qt main window
 ├── docs/
 ├── lunaNMR/                # Main package
 │   ├── cli.py              # Headless CLI dispatcher (python -m lunaNMR)
@@ -19,12 +19,13 @@ lunaNMR_v1o0/
 │   ├── batch_processing/   # CLI folder batch automation
 │   ├── integrators/        # In-place advanced/series integrators
 │   ├── utils/              # Config, params, file I/O, project bundles, output routing
-│   └── validation/         # Installation + memory checks
+│   └── validation/         # Installation + memory checks, `diagnose` pre-flight (spectra_check.py)
 └── modules/
-    └── dynamiXs_v2o0/      # DynamiXs (relaxation/dynamics) + dynamiXs_Kd/ (Kd/titration)
+    ├── dynamiXs_v2o0/      # DynamiXs (relaxation/dynamics) + dynamiXs_Kd/ (Kd/titration)
+    └── integration_1d_v1o0/ # 1D peak integration across a series
 ```
 
-tkinter is used **only** for the launcher's application-selector dialog; the app is entirely Qt.
+tkinter is used **only** for the launcher's startup error dialogs; the app is entirely Qt.
 
 ---
 
@@ -42,7 +43,7 @@ tkinter is used **only** for the launcher's application-selector dialog; the app
 ## 3. Core Engines
 
 ### 3.1 Peak Detection (`core/enhanced_peak_picker.py`, `core_integrator.py`)
-- Prominence/S-N detection via `scipy.ndimage.maximum_filter`
+- Prominence/S-N detection via `scipy.ndimage.maximum_filter`, per sign: maxima above +threshold and minima below −threshold (negative peaks are kept)
 - Top-contour centroid refinement: `core_integrator._calculate_top_contour_center()`
 
 ### 3.2 PS2D Stack
@@ -59,25 +60,32 @@ tkinter is used **only** for the launcher's application-selector dialog; the app
 
 ## 4. Data Flow
 
-### 4.1 Sequential (default)
+### 4.1 Detection
 ```
-GUI → processors.SingleSpectrumProcessor
-  → core_integrator.detect_peaks_sn_native()  → _detect_peaks_by_threshold() → _calculate_top_contour_center()
-  → core_integrator.identify_overlap_clusters()          # agglomerative closest-pair clustering
-  → per cluster:  single peak → enhanced_peak_fitting() (1D)
-                  multi-peak  → ps2d_2d_fitter.fit_multi_peak_2d() (2D)
+GUI → core_integrator.detect_peaks_sn_native()  → _detect_peaks_by_threshold() → _calculate_top_contour_center()
+```
+
+### 4.2 Fitting: one pipeline, sequential or parallel
+```
+GUI → processors.SingleSpectrumProcessor.process_peak_list(stop=)
+  → restore_base_ps2d_config()        # fresh run: no locked clusters / learned statistics
+  → enhanced_voigt_fitter.enhanced_peak_fitting_parallel(in_process=, stop=)
+  → parallel_voigt_processor.ParallelVoigtProcessor.fit_all_peaks_parallel()
+      → core_integrator.identify_overlap_clusters()   (ONCE, disjoint clusters)
+      → PASS 1: isolated peaks → linewidth statistics
+      → adaptive radius search (only when use_adaptive_optimization; off by default)
+      → PASS 2: multi-peak clusters with the learned statistics
+      each pass: _create_cluster_tasks() → _execute_parallel_cluster_fitting()
+                 → _parallel_cluster_worker(task) per cluster:
+                     single peak → enhanced_peak_fitting() (1D)
+                     multi-peak  → fit_overlap_group_2d() → ps2d_2d_fitter.fit_multi_peak_2d() (2D)
+      → _consolidate_cluster_results()  (integer peak_number matching)
   → GUI tables/plots
 ```
 
-### 4.2 Parallel (`core/parallel_voigt_processor.py::ParallelVoigtProcessor`)
-```
-identify_overlap_clusters()  (ONCE, disjoint clusters)
-  → fit_all_peaks_parallel()
-      → _create_cluster_tasks()  → _execute_parallel_cluster_fitting()  (multiprocessing.Pool, whole clusters per worker)
-      → _consolidate_cluster_results()  (integer peak_number matching)
-```
+**Sequential vs parallel**: with `in_process=True` (sequential, or fewer than 3 peaks) each cluster task is a direct call to `_parallel_cluster_worker`; otherwise the tasks go to a `multiprocessing` pool from a `spawn` context. Same clustering, passes and locking, so the two give identical results; parallel pays off only on large peak lists (~2.7× on 6 cores). Workers rebuild the integrator from a serialised copy (`_serialize_integrator_params`, `_prepare_shared_context`).
 
-**Key differences**: identical clustering; workers receive whole clusters (not peaks); consolidation keys on integer `peak_number` (not float coords); ~2.7× speedup on 6 cores.
+**Cancel** is a `threading.Event` passed down as `stop=` (`utils/cancellation.py`: `Cancelled`, `raise_if_stopped`). It is checked before each cluster, each detection peak and each adaptive-search fit, and polled while waiting on pool tasks; a stopped run raises `Cancelled` and returns nothing — no fallback, no partial results.
 
 ---
 
@@ -87,7 +95,7 @@ identify_overlap_clusters()  (ONCE, disjoint clusters)
 - **View**: `gui/main_window.py` (`LunaNMRMainWindow(BaseWindow)`), `gui/components/peak_navigator.py`, `spectrum_plotter.py`, `voigt_analysis_plotter.py`, `gui/dialogs/`
 - **Controller**: GUI callbacks → processors → update model → refresh view
 
-Dialogs subclass `BaseDialog(QDialog)`; stylesheets from `gui/styles/main.qss`. Layout: left controls | center spectrum+contours+markers | right Peak Navigator (quality-colored); status bar shows project/nucleus/quality/progress.
+Dialogs subclass `BaseDialog(QDialog)`; stylesheets from `gui/styles/main.qss`. Layout: left controls | center spectrum+contours+markers | right Peak Navigator (rows colored by R²); the status bar shows status messages (workflow mode, zoom, errors).
 
 ---
 
@@ -103,9 +111,9 @@ All share the same core engines, parameter manager, and result schema — GUI/CL
 
 ## 6.1 CLI, Modules & Project Bundles
 
-- **CLI** (`lunaNMR/cli.py`, `python -m lunaNMR`): wraps the same processors/backends, no Qt (lazy `__init__`, matplotlib forced to `Agg`). Subcommands: `series`, `dynamixs {t1t2,methyl-t2,hetnoe,density,modelfree}`, `kd`, `export kd`, `project {inventory,remove}`, `batch`. See [CLI.md](CLI.md).
-- **Modules** (`modules/dynamiXs_v2o0/`): DynamiXs relaxation/dynamics + `dynamiXs_Kd/` Kd/titration; launched from the GUI Modules menu, mirrored by the CLI.
-- **Project bundles** (`utils/project_manager.py`, `.lunaNMR`): state-based save/load. Fit surfaces stored slim, reconstructed on load (after the spectrum is loaded); DynamiXs and Kd persist as multiple named analyses.
+- **CLI** (`lunaNMR/cli.py`, `python -m lunaNMR`): wraps the same processors/backends, no Qt (lazy `__init__`, matplotlib forced to `Agg`). Subcommands: `diagnose`, `series`, `dynamixs {t1t2,methyl-t2,hetnoe,t1rho,density,modelfree}`, `kd`, `export kd`, `integrate-1d`, `peaks shift`, `project {inventory,export,remove,build}`, `batch`. The CLI passes no stop event. See [CLI.md](CLI.md).
+- **Modules** (`modules/dynamiXs_v2o0/`, `modules/integration_1d_v1o0/`): DynamiXs relaxation/dynamics, `dynamiXs_Kd/` Kd/titration and 1D integration, each its own entry of the GUI Modules menu, mirrored by the CLI.
+- **Project bundles** (`utils/project_manager.py`, `.lunaNMR`): state-based save/load. Fit surfaces stored slim, reconstructed on load (after the spectrum is loaded); each series carries its `batch_results.json`, tidy CSV, intensity and volume matrices, tracking CSV and `series_metadata.json`, and a series opened from a project reads and saves only those; DynamiXs and Kd persist as multiple named analyses. Opening a project starts a clean session.
 
 ---
 
@@ -148,7 +156,7 @@ Bruker TopSpin (`.2ii`/`.2rr`), NMRPipe (`.ft`/`.pipe`), Varian/Agilent (`.fid`/
 ## 10. Threads & Performance
 
 - **GUI**: Qt event loop; `QThread` workers for non-blocking detection/fitting.
-- **Parallel fitting**: `multiprocessing.Pool` (process-level; each worker gets a copy of integrator state, no shared mutable memory).
+- **Parallel fitting**: `multiprocessing` pool from a `spawn` context (process-level; each worker rebuilds the integrator from a serialised copy, no shared mutable memory).
 - **Numba**: 3-5× on PS2D Voigt primitives.
 - Hot spots: detection O(N) (`maximum_filter`), centroid O(W×H)/peak, clustering O(P²) worst-case, PS2D O(I·n·M).
 
