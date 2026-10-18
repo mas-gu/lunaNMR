@@ -23,10 +23,10 @@ T2_LOWER_BOUND_MS = 0.1
 
 try:
     from delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
-    from fit_Tx_NMRRE import measured_points
+    from fit_Tx_NMRRE import measured_points, results_file_from_json
 except ImportError:  # imported as dynamiXs_T1_T2.fit_methyl_T2 (parent dir on path)
     from dynamiXs_T1_T2.delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
-    from dynamiXs_T1_T2.fit_Tx_NMRRE import measured_points
+    from dynamiXs_T1_T2.fit_Tx_NMRRE import measured_points, results_file_from_json
 
 
 def biexp_decay(x, A, t2_a, t2_b):
@@ -395,11 +395,12 @@ def save_results_methyl(results_list, output_file):
 
 
 def save_fit_data_json_methyl(results_list, output_file, time_units, signal_units,
-                              n_bootstrap, field_freq):
+                              n_bootstrap, field_freq, results_file=None):
     """Save methyl shared-amplitude bi-exp fit data as JSON for the methyl viewer.
 
     Each `fits[i]` entry carries A, T2_avg, dT2, t2_a, t2_b, eta, their errors,
-    and the `bi_exp_unidentifiable` flag.
+    and the `bi_exp_unidentifiable` flag. `results_file`, the run's results file, is
+    recorded in the metadata relative to the JSON, for a refit to update.
     """
     if not results_list:
         raise ValueError("No results to save")
@@ -449,6 +450,8 @@ def save_fit_data_json_methyl(results_list, output_file, time_units, signal_unit
             "n_bootstrap": n_bootstrap,
             "n_residues": len(results_list),
             "time_points": [float(t) for t in time_points],
+            "results_file": (results_file_from_json(output_file, results_file)
+                             if results_file else None),
         },
         "fits": fits_data,
     }
@@ -569,6 +572,7 @@ def run_methyl_t2_analysis_with_params(params, progress_callback=None):
             successful, json_path,
             time_units=time_units, signal_units=signal_units,
             n_bootstrap=n_bootstrap, field_freq=field_freq,
+            results_file=results_txt_file,
         )
 
     return {
