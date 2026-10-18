@@ -131,22 +131,22 @@ class TestGlobalKd:
         result = _bootstrap_global_intensity(L, series, masks, names, popt, lo, hi, 20)
         assert np.isfinite(result)
 
-    def test_global_intensity_bootstrap_falls_back_to_analytic_on_failure(self, monkeypatch):
-        # If every bootstrap refit fails, Kd_err must fall back to the analytic
-        # covariance error rather than surface a non-finite value.
+    def test_a_bootstrap_with_no_answer_falls_back_to_the_analytic_error(self):
+        # A bootstrap whose every refit failed returns nan; the error reported is then
+        # the analytic covariance one, never a non-finite value.
+        from kd_fit import _preferred_error
+        assert _preferred_error(0.5, float('nan')) == 0.5
+        assert _preferred_error(0.5, 0.3) == 0.3
+
+    def test_the_global_intensity_fit_reports_a_bootstrapped_error(self):
         from kd_models import intensity_decay
-        import kd_fit
-        kd_true = 22.0
-        residues = {
-            'A': intensity_decay(L, 1.00, 0.05, kd_true),
-            'B': intensity_decay(L, 0.80, 0.20, kd_true),
-            'C': intensity_decay(L, 1.20, 0.00, kd_true),
-        }
-        monkeypatch.setattr(kd_fit, '_bootstrap_global_intensity',
-                            lambda *a, **k: float('nan'))
-        g = kd_fit.fit_global_kd_intensity(residues, L, n_bootstrap=10)
+        from kd_fit import fit_global_kd_intensity
+        rng = np.random.default_rng(0)
+        residues = {name: intensity_decay(L, i0, inf, 22.0) + rng.normal(0, 0.01, len(L))
+                    for name, i0, inf in (('A', 1.00, 0.05), ('B', 0.80, 0.20), ('C', 1.20, 0.0))}
+        g = fit_global_kd_intensity(residues, L, n_bootstrap=10)
         assert g['success']
-        assert np.isfinite(g['Kd_err'])
+        assert np.isfinite(g['Kd_err']) and g['Kd_err'] > 0
 
     def test_global_csp_reports_kd_err(self):
         from kd_models import csp_model

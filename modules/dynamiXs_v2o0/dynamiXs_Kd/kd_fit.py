@@ -203,6 +203,12 @@ def _clean(L, y):
     return L[mask], y[mask]
 
 
+def _preferred_error(analytic, bootstrapped):
+    """The bootstrap error when it produced one, else the analytic covariance error: a
+    bootstrap whose every refit failed returns nan, which must not reach the result."""
+    return bootstrapped if np.isfinite(bootstrapped) else analytic
+
+
 def fit_residue_csp(L, csp, P0, kd_init=None, n_bootstrap=0):
     """Fit one residue's CSP isotherm: Δδ_obs = Δδ_max · fraction_bound(L,P0,Kd)."""
     L, y = _clean(L, csp)
@@ -226,8 +232,8 @@ def fit_residue_csp(L, csp, P0, kd_init=None, n_bootstrap=0):
     perr = np.sqrt(np.diag(pcov))
     if n_bootstrap:
         bdd, bkd = _bootstrap_csp(L, y, P0, dd, kd, n_bootstrap)
-        dd_e = bdd if np.isfinite(bdd) else float(perr[0])   # fall back to covariance
-        kd_e = bkd if np.isfinite(bkd) else float(perr[1])
+        dd_e = _preferred_error(float(perr[0]), bdd)
+        kd_e = _preferred_error(float(perr[1]), bkd)
     else:
         dd_e, kd_e = float(perr[0]), float(perr[1])
     return {'success': True, 'Kd': float(kd), 'Kd_err': kd_e,
@@ -267,9 +273,9 @@ def fit_residue_intensity(L, obs, P0=None, kd_init=None, n_bootstrap=0):
     perr = np.sqrt(np.diag(pcov))
     if n_bootstrap:
         bi0, binf, bkd = _bootstrap_intensity(L, y, I0, I_inf, kd, hi, n_bootstrap)
-        i0_e = bi0 if np.isfinite(bi0) else float(perr[0])    # fall back to covariance
-        inf_e = binf if np.isfinite(binf) else float(perr[1])
-        kd_e = bkd if np.isfinite(bkd) else float(perr[2])
+        i0_e = _preferred_error(float(perr[0]), bi0)
+        inf_e = _preferred_error(float(perr[1]), binf)
+        kd_e = _preferred_error(float(perr[2]), bkd)
     else:
         i0_e, inf_e, kd_e = float(perr[0]), float(perr[1]), float(perr[2])
     return {'success': True, 'Kd': float(kd), 'Kd_err': kd_e,
@@ -484,10 +490,8 @@ def fit_global_kd_intensity(residues, L, n_bootstrap=0):
 
     kd_err = _shared_kd_err(res, 1 + 2 * len(names))
     if n_bootstrap:
-        boot_kd_err = _bootstrap_global_intensity(L, series, masks, names, res.x,
-                                                   lo, hi, n_bootstrap)
-        if np.isfinite(boot_kd_err):
-            kd_err = boot_kd_err          # fall back to the analytic value otherwise
+        kd_err = _preferred_error(kd_err, _bootstrap_global_intensity(
+            L, series, masks, names, res.x, lo, hi, n_bootstrap))
     kd = float(res.x[0])
     # Reported as a verdict, not imposed as a bound. The CSP isotherm is a physical
     # model, so clamping its shared Kd to the resolvable decade keeps the optimizer in
