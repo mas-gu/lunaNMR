@@ -352,6 +352,11 @@ class PS2DConfig:
 
 _ps2d_config = PS2DConfig('15N')  # Default to 15N
 
+# What every fresh fit starts from: the nucleus defaults plus whatever the user set
+# (the expert panel). The adaptive search writes the radii it chose into the global, and
+# a run that inherited them would start from another spectrum's tuning.
+_base_values = dict(vars(_ps2d_config))
+
 
 def get_ps2d_config() -> PS2DConfig:
     """
@@ -406,6 +411,7 @@ def set_ps2d_config(nucleus_type: str) -> PS2DConfig:
     """
     global _ps2d_config
     _ps2d_config = PS2DConfig(nucleus_type)
+    mark_ps2d_config_as_base()
     return _ps2d_config
 
 
@@ -417,6 +423,21 @@ def reset_ps2d_config():
     """
     global _ps2d_config
     _ps2d_config = PS2DConfig('15N')
+    mark_ps2d_config_as_base()
+
+
+def mark_ps2d_config_as_base():
+    """Make the current configuration the one every fresh fit starts from. Called when
+    the nucleus is chosen and when the user applies their own settings."""
+    global _base_values
+    _base_values = dict(vars(_ps2d_config))
+
+
+def restore_base_ps2d_config():
+    """Put the base configuration back, undoing what a previous run's adaptive search
+    tuned. In place, so every holder of the config object sees it."""
+    vars(_ps2d_config).clear()
+    vars(_ps2d_config).update(_base_values)
 
 
 # ============================================================================
@@ -456,6 +477,8 @@ __all__ = [
     'get_ps2d_config',
     'set_ps2d_config',
     'reset_ps2d_config',
+    'mark_ps2d_config_as_base',
+    'restore_base_ps2d_config',
     'get_ellipse_radii',
     'get_overlap_thresholds',
     'get_gap_thresholds',

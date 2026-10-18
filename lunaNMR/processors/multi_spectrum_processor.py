@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Optional
 
 # Independent imports - no GUI dependencies
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
+from lunaNMR.core.ps2d_config import restore_base_ps2d_config
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
 from lunaNMR.utils.parameter_manager import NMRParameterManager
@@ -392,6 +393,10 @@ class MultiSpectrumProcessor:
                                Each spectrum computes: threshold = max_intensity * contour_min * 1.05
             lock_detection_threshold: If True, use spectrum 1 threshold for all spectra (default True)
         """
+        # A series is a fresh run: it starts from the base PS2D config, not from the
+        # radii a previous run's adaptive search left (they size detection's dummies too)
+        restore_base_ps2d_config()
+
         self.reference_peaks = reference_peaks.copy()
         self.pre_detected_peaks = pre_detected_peaks  # Store for cascade mode spectrum 1
         self.output_folder = output_folder

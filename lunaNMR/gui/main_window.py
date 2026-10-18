@@ -59,7 +59,7 @@ from lunaNMR.gui.styles.design_system import (
 
 # Import core processing components
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
-from lunaNMR.core.ps2d_config import set_ps2d_config, get_ps2d_config
+from lunaNMR.core.ps2d_config import set_ps2d_config, get_ps2d_config, mark_ps2d_config_as_base
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.utils.config_manager import ConfigurationManager, UserPreferences, ProcessingParameters
 from lunaNMR.utils.parameter_manager import NMRParameterManager
@@ -3372,6 +3372,8 @@ class LunaNMRMainWindow(BaseWindow):
             config.overlap_threshold_y = overlap_y
             config.radF1_selector = radF1 * 1.5
             config.radF2_selector = radF2 * 1.5
+            # The user's own settings are what every fresh fit starts from
+            mark_ps2d_config_as_base()
 
             logger.info(f"PS2D params applied: radF1={radF1:.4f}, radF2={radF2:.4f}, max_iter={max_iterations}, max_cluster={max_cluster_size}")
             self.update_status(f"PS2D params: radF1={radF1:.3f}, radF2={radF2:.4f}, cluster_size={max_cluster_size}")

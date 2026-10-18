@@ -21,6 +21,7 @@ Author: Guillaume Mas
 Date: 2025
 """
 
+import contextlib
 import multiprocessing as mp
 from multiprocessing import Pool, cpu_count, shared_memory
 import numpy as np
@@ -64,7 +65,8 @@ class ParallelVoigtProcessor:
     - Result compilation
     """
     
-    def __init__(self, enhanced_voigt_fitter, max_workers=None, enable_adaptive=True):
+    def __init__(self, enhanced_voigt_fitter, max_workers=None, enable_adaptive=True,
+                 in_process=False):
         """
         Initialize parallel Voigt processor
 
@@ -72,10 +74,13 @@ class ParallelVoigtProcessor:
             enhanced_voigt_fitter: Original EnhancedVoigtFitter instance
             max_workers: Maximum number of worker processes (default: 75% of cores)
             enable_adaptive: Enable adaptive parameter optimization (default: True)
+            in_process: Run every cluster task, and the adaptive search, in this process
+                rather than over a pool. The same pipeline: this is sequential mode.
         """
         self.original_fitter = enhanced_voigt_fitter
         self.shared_memory_blocks = []  # Track for cleanup
         self.enable_adaptive = enable_adaptive
+        self.in_process = in_process
 
         # Adaptive optimization state
         self.optimal_params = None  # Stores grid search optimization results
@@ -114,7 +119,8 @@ class ParallelVoigtProcessor:
             log_info(f"Series parameters loaded from reference: radF1={radF1_str}, radF2={radF2_str}")
 
     def fit_all_peaks_parallel(self, peak_list, progress_callback=None, locked_clusters_by_assignment=None,
-                                pre_learned_statistics=None, reference_linewidths=None):
+                                pre_learned_statistics=None, reference_linewidths=None,
+                                reference_positions=None):
         """
         Complete parallel workflow using IDENTICAL clustering algorithm as sequential mode.
 
@@ -134,6 +140,9 @@ class ParallelVoigtProcessor:
                          'lw_f2_mad': float, 'n_samples': int, 'alpha': float}
             reference_linewidths: Optional dict mapping assignment -> {lw_lor_f1, lw_gau_f1, etc.}
                 for per-peak linewidth reuse. If provided, linewidths are fixed to these values.
+            reference_positions: Optional dict mapping assignment -> (x_ppm, y_ppm), the
+                original reference positions a cascade's absolute drift limit holds
+                clustered peaks to.
 
         Returns:
             Tuple of (fitted_results, learned_statistics) where:
@@ -144,8 +153,9 @@ class ParallelVoigtProcessor:
         if len(peak_list) == 0:
             return ([], None)
 
-        # Store reference linewidths for use in shared context
+        # Store reference linewidths and positions for use in shared context
         self._reference_linewidths = reference_linewidths
+        self._reference_positions = reference_positions
 
         log_progress(f"Starting cluster-based parallel fitting of {len(peak_list)} peaks")
         if reference_linewidths:
@@ -281,7 +291,8 @@ class ParallelVoigtProcessor:
 
                     # Prepare shared context WITHOUT spectrum_statistics (Pass 1)
                     shared_context_pass1 = self._prepare_shared_context(all_peaks_context, spectrum_statistics=None,
-                                                                        reference_linewidths=self._reference_linewidths)
+                                                                        reference_linewidths=self._reference_linewidths,
+                                                                        reference_positions=self._reference_positions)
 
                     # Create tasks for isolated peaks only
                     isolated_tasks = self._create_cluster_tasks(isolated_clusters, peak_metadata, peak_list, shared_context_pass1)
@@ -348,7 +359,8 @@ class ParallelVoigtProcessor:
                     shared_context_adaptive = self._prepare_shared_context(
                         all_peaks_context=all_peaks_context,
                         spectrum_statistics=spectrum_statistics,
-                        reference_linewidths=self._reference_linewidths
+                        reference_linewidths=self._reference_linewidths,
+                        reference_positions=self._reference_positions
                     )
                     # Define fit function for grid search evaluation
                     _debug_shown = [False]  # Use list to allow modification in nested function
@@ -387,7 +399,7 @@ class ParallelVoigtProcessor:
                         median_lw_f2=spectrum_statistics['lw_f2_median'],
                         fit_function=fit_single_peak,  # Fallback for sequential mode
                         progress_callback=progress_callback,
-                        use_parallel=True,  # ENABLED: Parallel adaptive optimization
+                        use_parallel=not self.in_process,
                         shared_context=shared_context_adaptive,  # Spectrum in shared memory
                         all_peaks_context=all_peaks_context
                     )
@@ -468,7 +480,8 @@ class ParallelVoigtProcessor:
 
                 # Prepare shared context with optimal parameters
                 shared_context_pass1bis = self._prepare_shared_context(all_peaks_context, spectrum_statistics=None,
-                                                                      reference_linewidths=self._reference_linewidths)
+                                                                      reference_linewidths=self._reference_linewidths,
+                                                                        reference_positions=self._reference_positions)
 
                 # Create tasks for all isolated peaks (including newly isolated from re-clustering)
                 isolated_tasks_bis = self._create_cluster_tasks(isolated_clusters, peak_metadata, peak_list, shared_context_pass1bis)
@@ -504,7 +517,8 @@ class ParallelVoigtProcessor:
 
                 # Prepare shared context WITH spectrum_statistics (Pass 2)
                 shared_context_pass2 = self._prepare_shared_context(all_peaks_context, spectrum_statistics=spectrum_statistics,
-                                                                    reference_linewidths=self._reference_linewidths)
+                                                                    reference_linewidths=self._reference_linewidths,
+                                                                        reference_positions=self._reference_positions)
 
                 # Create tasks for clusters
                 pass2_tasks = self._create_cluster_tasks(all_pass2_clusters, peak_metadata, peak_list, shared_context_pass2)
@@ -874,7 +888,7 @@ class ParallelVoigtProcessor:
         return good_peaks
 
     def _prepare_shared_context(self, all_peaks_context=None, spectrum_statistics=None,
-                                 reference_linewidths=None):
+                                 reference_linewidths=None, reference_positions=None):
         """
         Create shared memory context containing all data needed
         by worker processes without breaking current logic.
@@ -883,6 +897,8 @@ class ParallelVoigtProcessor:
             all_peaks_context: List of all peaks for overlap detection
             spectrum_statistics: Optional dict with spectrum-wide linewidth stats from Pass 1
             reference_linewidths: Optional dict mapping assignment -> linewidth params for reuse
+            reference_positions: Optional dict mapping assignment -> (x_ppm, y_ppm) for the
+                cascade drift limit
         """
         
         # 1. Create shared memory for spectral data
@@ -939,6 +955,9 @@ class ParallelVoigtProcessor:
 
             # NEW: Per-peak reference linewidths for reuse
             'reference_linewidths': reference_linewidths,
+
+            # Original reference positions: the cascade's absolute drift limit
+            'reference_positions': reference_positions,
 
             # Path information for worker imports
             'lunaNMR_path': os.path.dirname(os.path.dirname(__file__)),
@@ -1016,7 +1035,8 @@ class ParallelVoigtProcessor:
         if parent:
             # Copy important integrator parameters
             for param_name in ['fitting_parameters', 'gui_params', 'processing_mode', 'noise_threshold',
-                               'titration_pos_margin_f1', 'titration_pos_margin_f2']:
+                               'titration_pos_margin_f1', 'titration_pos_margin_f2',
+                               'titration_pos_margins', 'titration_lw_margins']:
                 if hasattr(parent, param_name):
                     params[param_name] = getattr(parent, param_name)
         
@@ -1168,7 +1188,8 @@ class ParallelVoigtProcessor:
         
     def _execute_parallel_cluster_fitting(self, cluster_tasks, progress_callback, pass_name=None):
         """
-        Execute cluster-based fitting in parallel (IDENTICAL logic to sequential mode).
+        Execute cluster-based fitting over the pool, or one task after another in this
+        process when in_process is set.
 
         Each worker fits ONE cluster and returns results for ALL peaks in that cluster.
 
@@ -1186,19 +1207,25 @@ class ParallelVoigtProcessor:
         pass_prefix = f"{pass_name}: " if pass_name else ""
 
         try:
-            # Test multiprocessing capability first
-            with Pool(processes=1) as test_pool:
-                test_result = test_pool.apply(_test_parallel_worker, ("test",))
-                if test_result != "test_success":
-                    raise Exception(f"Multiprocessing test failed: {test_result}")
+            with contextlib.ExitStack() as stack:
+                if self.in_process:
+                    # The worker called directly, in task order: one pipeline, no pool
+                    async_results = [(task['task_id'], task['cluster_size'],
+                                      _InProcessResult(task)) for task in cluster_tasks]
+                else:
+                    # Test multiprocessing capability first
+                    with Pool(processes=1) as test_pool:
+                        test_result = test_pool.apply(_test_parallel_worker, ("test",))
+                        if test_result != "test_success":
+                            raise Exception(f"Multiprocessing test failed: {test_result}")
 
-            # Execute parallel cluster fitting
-            with Pool(processes=self.max_workers) as pool:
-                # Submit all cluster tasks
-                async_results = []
-                for task in cluster_tasks:
-                    async_result = pool.apply_async(_parallel_cluster_worker, (task,))
-                    async_results.append((task['task_id'], task['cluster_size'], async_result))
+                    # Execute parallel cluster fitting
+                    pool = stack.enter_context(Pool(processes=self.max_workers))
+                    # Submit all cluster tasks
+                    async_results = []
+                    for task in cluster_tasks:
+                        async_result = pool.apply_async(_parallel_cluster_worker, (task,))
+                        async_results.append((task['task_id'], task['cluster_size'], async_result))
 
                 # Collect results with progress tracking
                 for task_id, cluster_size, async_result in async_results:
@@ -1400,6 +1427,16 @@ class ParallelVoigtProcessor:
         return results
 
 
+class _InProcessResult:
+    """A cluster task run in this process, read the way a pool's AsyncResult is."""
+
+    def __init__(self, task):
+        self.task = task
+
+    def get(self, timeout=None):
+        return _parallel_cluster_worker(self.task)
+
+
 def _test_parallel_worker(_test_data):
     """Simple test function for multiprocessing validation"""
     return "test_success"
@@ -1492,6 +1529,7 @@ def _parallel_cluster_worker(cluster_task):
                 peak_assignments=cluster_assignments,
                 fix_positions=fix_positions,  # Pass GUI checkbox state
                 fix_linewidths=fix_linewidths,  # Pass GUI checkbox state
+                reference_positions=cluster_task['shared_context'].get('reference_positions'),
                 reference_linewidths=cluster_reference_linewidths  # Pass reference linewidths for reuse
             )
 

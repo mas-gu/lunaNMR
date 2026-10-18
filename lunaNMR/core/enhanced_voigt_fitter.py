@@ -3129,7 +3129,8 @@ class EnhancedVoigtFitter:
     def enhanced_peak_fitting_parallel(self, peak_list, progress_callback=None,
                                         parent_integrator=None, locked_clusters_by_assignment=None,
                                         pre_learned_statistics=None, reference_linewidths=None,
-                                        skip_series_params=False):
+                                        skip_series_params=False, reference_positions=None,
+                                        in_process=False):
         """
         Fit a peak list with the cluster-based parallel workflow.
 
@@ -3147,6 +3148,10 @@ class EnhancedVoigtFitter:
                 for per-peak linewidth reuse. If provided, linewidths are fixed to these values.
             skip_series_params: If True, don't apply series_params from previous spectra.
                 This forces fresh adaptive optimization (used for Independent mode).
+            reference_positions: Optional dict mapping assignment -> (x_ppm, y_ppm), the
+                original reference positions a cascade's absolute drift limit holds to.
+            in_process: Run the same pipeline in this process rather than over a pool -
+                sequential mode.
 
         Returns:
             Tuple of (fitted_results, learned_statistics) where learned_statistics is the
@@ -3213,7 +3218,8 @@ class EnhancedVoigtFitter:
         if parent_integrator and hasattr(parent_integrator, 'gui_params'):
             enable_adaptive = parent_integrator.gui_params.get('use_adaptive_optimization', True)
         log_progress(f"Using parallel Voigt fitting for {len(peak_list)} peaks")
-        parallel_processor = ParallelVoigtProcessor(self, enable_adaptive=enable_adaptive)
+        parallel_processor = ParallelVoigtProcessor(self, enable_adaptive=enable_adaptive,
+                                                    in_process=in_process)
         self.parallel_processor = parallel_processor  # Store for ML training data collection
 
         # Pass series_params if available (for subsequent spectra in series)
@@ -3227,7 +3233,8 @@ class EnhancedVoigtFitter:
             progress_callback,
             locked_clusters_by_assignment=locked_clusters_by_assignment,
             pre_learned_statistics=pre_learned_statistics,
-            reference_linewidths=reference_linewidths
+            reference_linewidths=reference_linewidths,
+            reference_positions=reference_positions
         )
 
         # Store series_params after first spectrum optimization
