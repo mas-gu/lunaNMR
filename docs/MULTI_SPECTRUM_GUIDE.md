@@ -78,7 +78,7 @@ Written to `series_results_<timestamp>/` alongside the first spectrum's folder.
 Fitted **positions are formatted to 4 decimals** (`ppm_x/ppm_y` in tidy;
 `_format_dataframe_for_csv` for tracking) — CSP/titration analysis needs the precision.
 
-**Downstream consumers:** DynamiXs (tidy), Kd module (tidy + comprehensive), Series QC,
+**Downstream consumers:** DynamiXs (tidy), Kd module (tidy + comprehensive),
 overlay viewer.
 
 ---
