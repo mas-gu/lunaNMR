@@ -51,7 +51,9 @@ python -m lunaNMR kd --survey --input <tidy.csv> --out <RESULTS> --p0 <conc> \
 
 The survey needs concentrations like the fit does: `--conc` (in `--conc-units`), or
 `--conc-units` alone when the spectrum names carry them. With neither, and no params file
-stored for this input, it is refused.
+stored for this input, it is refused. A name `series` could not read a point from
+(`sample_2`; `value: null` in `series_metadata.json`) does not carry one: `--conc-units`
+alone is then refused, naming those labels, and `--conc` must give the concentrations.
 
 Produces `<out>/<prefix>_<obs>_vs_sequence.pdf` (prefix first, one per observable),
 `<out>/data/<prefix>_survey.csv`, and an editable `<prefix>_residues.txt` **beside the
