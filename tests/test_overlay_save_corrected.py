@@ -152,25 +152,30 @@ class TestRefitQualityRule:
 
 class TestRefitFlags:
     def test_a_point_refitted_off_its_intensity_floor_is_no_longer_pinned(self, titration):
+        """48IleH on the reference point: the series leaves it on its intensity floor at
+        1.1 sigma; refitted in place it comes back off the floor at ~3.9 sigma with a
+        positive height. The reference point is fitted before any linewidth cap exists,
+        so this case does not move with the cap."""
         from dynamiXs_Kd.kd_input import load_titration_tidy, load_titration_tracking
         folder, viewer = titration
-        idx = _spectrum_index(viewer, '2D_DNAJA1_HSPA8_3o0.ft')
-        assert viewer._find_peak_obj(idx, '42GlyH')['intensity_pinned'] is True
-        _refit_in_place(viewer, idx, '42GlyH')
-        peak = viewer._find_peak_obj(idx, '42GlyH')
+        idx = _spectrum_index(viewer, '2D_DNAJA1_0o0.ft')
+        assert viewer._find_peak_obj(idx, '48IleH')['intensity_pinned'] is True
+        _refit_in_place(viewer, idx, '48IleH')
+        peak = viewer._find_peak_obj(idx, '48IleH')
         assert peak['intensity_pinned'] is False
+        assert peak['height'] > 0
         viewer._on_save_corrected()
 
         tracking = pd.read_csv(folder / "comprehensive_peak_tracking.csv")
-        assert tracking.loc[tracking['Assignment'] == '42GlyH', '3_Intensity_Pinned'].item() == 0.0
+        assert tracking.loc[tracking['Assignment'] == '48IleH', '0_Intensity_Pinned'].item() == 0.0
         tidy = pd.read_csv(folder / "series_analysis_tidy.csv", dtype={'spectrum_name': str})
-        row = tidy[(tidy['spectrum_name'] == '3') & (tidy['assignment'] == '42GlyH')].iloc[0]
+        row = tidy[(tidy['spectrum_name'] == '0') & (tidy['assignment'] == '48IleH')].iloc[0]
         assert not row['intensity_pinned']
         assert math.isclose(row['detection_sigma'], peak['detection_sigma'], rel_tol=1e-9)
         for loader, name in ((load_titration_tracking, "comprehensive_peak_tracking.csv"),
                              (load_titration_tidy, "series_analysis_tidy.csv")):
             points, residues = loader(str(folder / name))
-            assert math.isclose(residues['42GlyH']['height'][points.index(3.0)], peak['height'],
+            assert math.isclose(residues['48IleH']['height'][points.index(0.0)], peak['height'],
                                 rel_tol=1e-6)
 
     def test_the_detection_of_a_refit_is_its_own(self, titration):
