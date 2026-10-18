@@ -76,6 +76,14 @@ FIT_BASELINE_BY_DEFAULT = False
 MARGINAL_TMAX_OVER_T = 2.0
 
 
+def delay_window(x, t2):
+    """(window_ratio, window_marginal) of a fitted time constant `t2` over the delays `x`
+    it was fitted on: t_max/T, and whether that is below MARGINAL_TMAX_OVER_T."""
+    x_max = float(np.max(x)) if np.size(x) else 0.0
+    window_ratio = (x_max / t2) if (np.isfinite(t2) and t2 > 0) else np.nan
+    return window_ratio, bool(np.isfinite(window_ratio) and window_ratio < MARGINAL_TMAX_OVER_T)
+
+
 def measured_points(x, y):
     """The (x, y) points that carry a measurement.
 
@@ -442,9 +450,7 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
         # covariance, which downstream code treats as a failed error estimate.
         c_err = 0.0
 
-    x_max = float(np.max(x)) if np.size(x) else 0.0
-    window_ratio = (x_max / t2) if (np.isfinite(t2) and t2 > 0) else np.nan
-    window_marginal = bool(np.isfinite(window_ratio) and window_ratio < MARGINAL_TMAX_OVER_T)
+    window_ratio, window_marginal = delay_window(x, t2)
 
     success = _is_reliable_t2(t2, t2_err, x, amplitude=a, y=y)
     if success:
@@ -563,20 +569,26 @@ def save_results(results_list, output_file, experiment_type="T1"):
         Type of experiment for headers
     """
     with open(output_file, "w") as f:
-        f.write(
-            f"Residue\tA\t{experiment_type}\tC\tA_err\t{experiment_type}_err"
-            f"\tC_err\tSuccess\tWindowRatio\n"
-        )
+        f.write("\t".join(results_columns(experiment_type)) + "\n")
         for result in results_list:
-            # fitting_wrapper.py reads row['Success']; the multicore writer has always
-            # emitted it and this one did not, so the single-core path raised KeyError.
-            ok = 'Yes' if result.get('reliable', result.get('success', True)) else 'No'
-            wr = result.get('window_ratio', float('nan'))
-            f.write(
-                f"{result['residue']}\t{result['A']:.6e}\t{result['t2']:.6e}\t"
-                f"{result['C']:.6e}\t{result['A_err']:.6e}\t"
-                f"{result['t2_err']:.6e}\t{result['C_err']:.6e}\t{ok}\t{wr:.3f}\n"
-            )
+            f.write("\t".join(results_row(result, experiment_type).values()) + "\n")
+
+
+def results_columns(experiment_type):
+    """The header of a results file for `experiment_type`."""
+    return ['Residue', 'A', experiment_type, 'C', 'A_err', f'{experiment_type}_err',
+            'C_err', 'Success', 'WindowRatio']
+
+
+def results_row(result, experiment_type):
+    """One residue's row of a results file, as {column: cell} in results_columns order."""
+    # fitting_wrapper.py and the results viewer read row['Success'].
+    ok = 'Yes' if result.get('reliable', result.get('success', True)) else 'No'
+    # WindowRatio is t_max/T: below ~2 the window is too short to pin the time constant down.
+    cells = [str(result['residue']), f"{result['A']:.6e}", f"{result['t2']:.6e}",
+             f"{result['C']:.6e}", f"{result['A_err']:.6e}", f"{result['t2_err']:.6e}",
+             f"{result['C_err']:.6e}", ok, f"{result.get('window_ratio', float('nan')):.3f}"]
+    return dict(zip(results_columns(experiment_type), cells))
 
 
 def results_file_from_json(json_file, results_file):
@@ -593,6 +605,36 @@ def recorded_results_file(json_file, metadata):
     """The results file the fit JSON `json_file` records in its `metadata`, or None."""
     recorded = (metadata or {}).get('results_file')
     return Path(json_file).parent / recorded if recorded else None
+
+
+def fit_data_entry(result, fit_time_dense):
+    """One residue's entry of a fit JSON, its fitted curve sampled at `fit_time_dense`."""
+    c = result.get('C', 0.0)
+    c_err = result.get('C_err', np.nan)
+    fit_intensity = result['A'] * np.exp(-fit_time_dense / result['t2']) + c
+    return {
+        'residue': str(result['residue']),
+        'A': float(result['A']),
+        't2': float(result['t2']),
+        'C': float(c),
+        'A_err': float(result['A_err']),
+        't2_err': float(result['t2_err']),
+        'C_err': float(c_err),
+        # Fit provenance: whether the baseline was fixed, and whether the delay window
+        # was long enough to pin the time constant down.
+        'baseline_fixed': bool(result.get('baseline_fixed', True)),
+        'window_ratio': float(result.get('window_ratio', float('nan'))),
+        'window_marginal': bool(result.get('window_marginal', False)),
+        # The fitter's own reliability verdict, the one the summary counts as
+        # n_fitted/n_excluded: without it a consumer of the JSON cannot tell a measured
+        # T from one the fitter had already rejected.
+        'success': bool(result.get('success', True)),
+        'intensities': [float(val) for val in result['y']],
+        'fit_curve': {
+            'time': [float(t) for t in fit_time_dense],
+            'intensity': [float(i) for i in fit_intensity]
+        }
+    }
 
 
 def save_fit_data_json(results_list, output_file, experiment_type, time_units,
@@ -629,37 +671,7 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
     max_time = max(time_points)
     fit_time_dense = np.linspace(0, max_time * 1.2, 100)
 
-    fits_data = []
-    for result in results_list:
-        c = result.get('C', 0.0)
-        c_err = result.get('C_err', np.nan)
-        # Calculate fit curve using fitted parameters
-        fit_intensity = result['A'] * np.exp(-fit_time_dense / result['t2']) + c
-
-        fits_data.append({
-            'residue': str(result['residue']),
-            'A': float(result['A']),
-            't2': float(result['t2']),
-            'C': float(c),
-            'A_err': float(result['A_err']),
-            't2_err': float(result['t2_err']),
-            'C_err': float(c_err),
-            # Fit provenance: whether the baseline was fixed, and whether the delay window
-            # was long enough to pin the time constant down. Computed by the fitter and
-            # previously dropped here, which made them unreachable from the CLI.
-            'baseline_fixed': bool(result.get('baseline_fixed', True)),
-            'window_ratio': float(result.get('window_ratio', float('nan'))),
-            'window_marginal': bool(result.get('window_marginal', False)),
-            # The fitter's own reliability verdict, the one the summary counts as
-            # n_fitted/n_excluded. Dropped here, it left consumers of the JSON with no
-            # way to tell a measured T from one the fitter had already rejected.
-            'success': bool(result.get('success', True)),
-            'intensities': [float(val) for val in result['y']],
-            'fit_curve': {
-                'time': [float(t) for t in fit_time_dense],
-                'intensity': [float(i) for i in fit_intensity]
-            }
-        })
+    fits_data = [fit_data_entry(result, fit_time_dense) for result in results_list]
 
     output_data = {
         'metadata': {
