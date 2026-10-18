@@ -338,6 +338,10 @@ class KdTitrationPage(BasePage):
         """'equivalents' or 'absolute', as the Concentration units selector says."""
         return 'equivalents' if self.conc_units_combo.currentIndex() == 1 else 'absolute'
 
+    def _set_conc_units(self, units):
+        """Point the Concentration units selector at `units` ('equivalents'/'absolute')."""
+        self.conc_units_combo.setCurrentIndex(1 if str(units).lower().startswith('eq') else 0)
+
     def _parse_concentrations(self):
         if not self.conc_spins:
             return None
@@ -369,8 +373,7 @@ class KdTitrationPage(BasePage):
         self.alpha_spin.setValue(float(params.get('alpha', 0.14)))
         self.obs_combo.setCurrentIndex(observables_to_combo_index(params.get('observables')))
         self.intvalue_combo.setCurrentText(str(params.get('intensity_value', 'height')))
-        self.conc_units_combo.setCurrentIndex(
-            1 if str(params.get('conc_units', 'absolute')).lower().startswith('eq') else 0)
+        self._set_conc_units(params.get('conc_units', 'absolute'))
         self.boot_spin.setValue(int(params.get('n_bootstrap', 0)))
 
     def _maybe_apply_params_json(self, csv_path, points):
@@ -862,6 +865,7 @@ class KdTitrationPage(BasePage):
             'output_dir': self.output_dir,
             'detected_points': list(self.detected_points),
             'concentrations': [s.value() for s in self.conc_spins],
+            'conc_units': self._conc_units(),
             'intensity_scales': [s.value() for s in self.scale_spins],
             'p0': self.p0_spin.value(),
             'alpha': self.alpha_spin.value(),
@@ -886,6 +890,7 @@ class KdTitrationPage(BasePage):
         self._build_conc_rows(self.detected_points)
         for spin, val in zip(self.conc_spins, state.get('concentrations', [])):
             spin.setValue(val)
+        self._set_conc_units(state.get('conc_units', 'absolute'))
         for spin, val in zip(self.scale_spins, state.get('intensity_scales', [])):
             spin.setValue(val)
 
