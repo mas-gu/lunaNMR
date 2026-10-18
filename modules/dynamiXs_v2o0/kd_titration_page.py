@@ -43,6 +43,10 @@ class KdTitrationPage(BasePage):
         self.last_json_folder = None
         self.last_json_file = None
         self.worker = None
+        # The survey thresholds the dataset was judged with (kd_params.THRESHOLD_KEYS).
+        # No widget shows them: they come from a params source and go to the fit as is.
+        from kd_params import thresholds
+        self.thresholds = thresholds()
         # Series identity — every series writes the SAME generic filename
         # (series_analysis_tidy.csv), so the saved-fit name must come from the series
         # name (drag) or the series folder, not the file stem.
@@ -272,6 +276,8 @@ class KdTitrationPage(BasePage):
                 self.points_label.setText(
                     f"Detected 0 points — is this a titration series CSV? ({len(residues)} residues)")
             self._build_conc_rows(points)
+            from kd_params import thresholds
+            self.thresholds = thresholds()
             self._maybe_apply_params_json(path, points)
             if not has_positions:
                 self.obs_combo.setCurrentIndex(2)  # no positions -> intensity only wins
@@ -366,7 +372,7 @@ class KdTitrationPage(BasePage):
         (`stated`: the keys it actually records; None for a dict that states them all)
         names the units of the point labels. Returns why the concentrations were not
         applied, or None."""
-        from kd_params import observables_to_combo_index, points_mismatch
+        from kd_params import observables_to_combo_index, points_mismatch, thresholds
         stated = set(params) if stated is None else stated
         concs = params.get('concentrations')
         not_applied = None
@@ -390,6 +396,7 @@ class KdTitrationPage(BasePage):
         self.obs_combo.setCurrentIndex(observables_to_combo_index(params.get('observables')))
         self.intvalue_combo.setCurrentText(str(params.get('intensity_value', 'height')))
         self.boot_spin.setValue(int(params.get('n_bootstrap', 0)))
+        self.thresholds = thresholds(params)
         return not_applied
 
     def _maybe_apply_params_json(self, csv_path, points):
@@ -409,13 +416,17 @@ class KdTitrationPage(BasePage):
 
     def _load_params_file(self, path):
         """Apply a params source to the panel and say on the page what it supplied."""
-        from kd_params import load_params, recorded_keys
+        from kd_params import load_params, recorded_keys, thresholds
         not_applied = self._apply_params(load_params(path), n_points=len(self.conc_spins),
                                          stated=recorded_keys(path))
         msg = f"Loaded binding parameters from {os.path.basename(path)}"
         if not_applied:
             msg += f" - not using its concentrations and units: {not_applied}"
         self._log(msg)
+        defaults = thresholds()
+        stored = [f"{k}={v:g}" for k, v in self.thresholds.items() if v != defaults[k]]
+        if stored:
+            self._log("Thresholds from that file: " + ", ".join(stored))
 
     def _gather_params_dict(self):
         """The current panel values as a params dict (for saving a params JSON)."""
@@ -430,6 +441,7 @@ class KdTitrationPage(BasePage):
             'intensity_value': self.intvalue_combo.currentText(),
             'conc_units': self._conc_units(),
             'n_bootstrap': int(self.boot_spin.value()),
+            **self.thresholds,
         }
 
     def _load_params_dialog(self):
@@ -494,6 +506,7 @@ class KdTitrationPage(BasePage):
             observables=observables,
             intensity_value=self.intvalue_combo.currentText(),
             n_bootstrap=int(self.boot_spin.value()),
+            thresholds=dict(self.thresholds),
         )
 
         self.progress_bar.setValue(0)
@@ -895,6 +908,7 @@ class KdTitrationPage(BasePage):
             'observable': self.obs_combo.currentIndex(),
             'intensity_value': self.intvalue_combo.currentText(),
             'bootstrap_iter': self.boot_spin.value(),
+            'thresholds': dict(self.thresholds),
             'last_json_file': self.last_json_file,
             'last_json_folder': self.last_json_folder,
         }
@@ -922,6 +936,8 @@ class KdTitrationPage(BasePage):
         self.obs_combo.setCurrentIndex(state.get('observable', 0))
         self.intvalue_combo.setCurrentText(state.get('intensity_value', 'height'))
         self.boot_spin.setValue(state.get('bootstrap_iter', 0))
+        from kd_params import thresholds
+        self.thresholds = thresholds(state.get('thresholds'))
 
         if self.input_file:
             self.file_drop.setText(os.path.basename(self.input_file))

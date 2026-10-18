@@ -98,6 +98,15 @@ class TestTheUnitsTravelWithTheConcentrations:
         assert again == pytest.approx(first)
 
 
+def _params_file(folder, csv, **settings):
+    """A settings file written for this input, as `kd` writes one."""
+    data = folder / "kd_analysis" / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    path = data / "other_kd_params.json"
+    path.write_text(json.dumps({"input": csv.name, "points": EQUIVALENTS, **settings}))
+    return path
+
+
 class TestALoadedFileKeepsItsPair:
     """Concentrations and their units are one statement. A file whose concentrations do
     not fit this input must not switch the units under the [L] values on screen."""
@@ -154,3 +163,67 @@ class TestALoadedFileKeepsItsPair:
         page._load_params_file(str(other))
 
         assert page._conc_units() == "equivalents"
+
+
+class TestStoredThresholdsReachTheFit:
+    """`kd` restores the survey thresholds a dataset was judged with. The page loaded
+    the same file and fitted at the defaults - a different global Kd from the same
+    settings - then wrote those defaults back for the next CLI run to restore."""
+
+    _FLAGS = ("--conc-units", "equivalents", "--csp-sigma-multiple", "2",
+              "--kd-outlier-z", "2", "--ref-max-ratio", "3")
+
+    def test_the_page_fits_the_kd_the_cli_fits(self, app, csv):
+        cli = _cli_kd(csv, *self._FLAGS)
+
+        page = _page()
+        page._set_input_file(str(csv))
+        gui = _run(app, page)
+
+        assert gui["global"]["csp"]["n_residues"] == cli["global"]["csp"]["n_residues"]
+        assert gui["global"]["csp"]["Kd"] == pytest.approx(cli["global"]["csp"]["Kd"])
+        assert gui["metadata"]["ref_max_ratio"] == 3.0
+
+    def test_the_page_writes_back_what_it_loaded(self, app, csv):
+        _cli_kd(csv, *self._FLAGS)
+
+        page = _page()
+        page._set_input_file(str(csv))
+        _run(app, page)
+
+        written = json.loads(
+            next((csv.parent / "kd_analysis" / "data").glob(
+                "DNAJA1_HSPA8_tidy_kd_params.json")).read_text())
+        assert written["csp_sigma_multiple"] == 2.0
+        assert written["kd_outlier_z"] == 2.0
+        assert written["ref_max_ratio"] == 3.0
+
+    def test_the_page_says_which_thresholds_it_applies(self, app, csv):
+        _cli_kd(csv, *self._FLAGS)
+
+        page = _page()
+        page._set_input_file(str(csv))
+
+        log = page.log_text.toPlainText()
+        assert "ref_max_ratio=3" in log and "kd_outlier_z=2" in log
+
+    def test_another_input_does_not_inherit_them(self, app, csv, tmp_path):
+        _params_file(csv.parent, csv, ref_max_ratio=3.0)
+        page = _page()
+        page._set_input_file(str(csv))
+        assert page.get_session_state()["thresholds"]["ref_max_ratio"] == 3.0
+
+        clean = tmp_path / "clean"
+        clean.mkdir()
+        shutil.copy(DNAJA1, clean / DNAJA1.name)
+        page._set_input_file(str(clean / DNAJA1.name))
+        assert page.get_session_state()["thresholds"]["ref_max_ratio"] == 10.0
+
+    def test_they_survive_a_reopen(self, app, csv):
+        _params_file(csv.parent, csv, kd_outlier_z=2.0)
+        page = _page()
+        page._set_input_file(str(csv))
+
+        reopened = _page()
+        reopened.restore_session_state(page.get_session_state())
+        assert reopened.get_session_state()["thresholds"]["kd_outlier_z"] == 2.0

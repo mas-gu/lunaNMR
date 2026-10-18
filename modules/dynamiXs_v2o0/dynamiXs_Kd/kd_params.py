@@ -38,6 +38,10 @@ _DEFAULTS = {
     'ref_max_ratio': 10.0,
 }
 
+# The survey thresholds above: how a dataset was judged, restored with it by every front end.
+THRESHOLD_KEYS = ('csp_sigma_multiple', 'kd_outlier_z', 'noise_quantile',
+                  'dd_runaway_ratio', 'ref_max_ratio')
+
 _OBS_BY_INDEX = {0: ['csp', 'intensity'], 1: ['csp'], 2: ['intensity']}
 
 
@@ -88,6 +92,12 @@ def normalize_params(d):
                                         _DEFAULTS['dd_runaway_ratio'])),
         'ref_max_ratio': float(d.get('ref_max_ratio', _DEFAULTS['ref_max_ratio'])),
     }
+
+
+def thresholds(params=None):
+    """The survey thresholds a params dict records, schema defaults filling the rest."""
+    p = normalize_params(params)
+    return {k: p[k] for k in THRESHOLD_KEYS}
 
 
 def load_params(path):

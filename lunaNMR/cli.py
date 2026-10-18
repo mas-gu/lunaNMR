@@ -425,14 +425,10 @@ def _sidecar_summary(sidecar):
             'n_value_unparsed': int(sidecar.get('n_value_unparsed') or 0)}
 
 
-_PERSISTED_SETTINGS = ('csp_sigma_multiple', 'kd_outlier_z',
-                       'noise_quantile',
-                       'dd_runaway_ratio', 'ref_max_ratio')
-
 # The list-valued inputs, mapped schema key -> argparse dest. They round-trip too, so a
 # survey's intensity scales do not have to be retyped on the fit, but they differ from the
-# settings above: an unrecorded one is stored as null rather than being absent, so the
-# restore tests the value and not just the key. Concentrations are resolved apart from
+# thresholds (kd_params.THRESHOLD_KEYS): an unrecorded one is stored as null rather than
+# being absent, so the restore tests the value and not just the key. Concentrations are resolved apart from
 # both (_apply_concentrations): they only mean anything together with their units.
 _PERSISTED_INPUTS = {'intensity_scales': 'intensity_scale'}
 
@@ -478,7 +474,7 @@ def _apply_thresholds(args, params):
     Returns (source path or None, [{'path', 'reason'}, ...] of files passed over).
     """
     from kd_input import load_titration
-    from kd_params import find_params_source, load_params, recorded_keys
+    from kd_params import THRESHOLD_KEYS, find_params_source, load_params, recorded_keys
     points = load_titration(args.input)[0]
     skipped = []
     src = find_params_source(args.input, points=points, rejected=skipped)
@@ -486,7 +482,7 @@ def _apply_thresholds(args, params):
     for s in skipped:
         print(f"  warning: not using {s['path']}: {s['reason']}", file=sys.stderr)
     _apply_concentrations(args, params, stored, recorded_keys(src) if src else set())
-    for key in _PERSISTED_SETTINGS:
+    for key in THRESHOLD_KEYS:
         flag = getattr(args, key, None)
         if flag is not None:
             params[key] = flag
