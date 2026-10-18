@@ -21,6 +21,7 @@ import math
 import os
 import re
 import sys
+import threading
 
 
 def _float_list(text):
@@ -2544,7 +2545,20 @@ def _version():
     return __version__
 
 
+# One call at a time per process. A call redirects fd 1 and sys.stdout for the whole
+# process while its engine runs, so two overlapping calls each saved the other's
+# redirection and one summary - and, depending on the order they finished, every later
+# write to stdout - landed on stderr. A host that needs calls to overlap runs each one in
+# its own process.
+_CALL_LOCK = threading.Lock()
+
+
 def main(argv=None):
+    with _CALL_LOCK:
+        return _main(argv)
+
+
+def _main(argv):
     if argv is None:
         argv = sys.argv[1:]
     # Delegate `batch` before argparse so the batch CLI parses its own flags cleanly.

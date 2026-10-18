@@ -36,6 +36,14 @@ Under `--format json` both `1` and `2` also print an `{"ok": false, …}` object
 rejected command line reports `error.type` `UsageError`. Called in-process, `lunaNMR.cli.main()`
 returns these codes — including `0` for `--help`/`--version` — rather than raising `SystemExit`.
 
+### One call at a time per process
+
+A run under `--format json` points fd 1 and `sys.stdout` at stderr for the whole process
+while its engine runs, so two runs in one process cannot overlap safely. `cli.main()` therefore
+holds a process-wide lock: a second thread that calls it waits until the first call returns.
+A host that needs calls to run concurrently — an MCP server, for one — should run each call in
+its own process (`python -m lunaNMR …` as a subprocess), not on threads of its own process.
+
 Beyond that, some subcommands report *findings* through the exit code:
 
 - **`diagnose`** returns `1` when any finding is `FAIL`, so `diagnose && series` stops there.
