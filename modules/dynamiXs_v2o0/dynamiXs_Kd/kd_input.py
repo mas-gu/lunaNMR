@@ -118,7 +118,8 @@ def load_titration_tracking(csv_path):
     per-residue format as load_titration_tidy.
 
     Columns look like: Assignment, {label}_Position_X, {label}_Position_Y,
-    {label}_Height, {label}_Volume, ... for each titration point label.
+    {label}_Height, {label}_Volume, ... for each titration point label. A point whose
+    {label}_Quality is 'Failed' is blanked in every column, as the tidy loader does.
     """
     df = pd.read_csv(csv_path)
     labels = [c[:-len('_Position_X')] for c in df.columns if c.endswith('_Position_X')]
@@ -133,7 +134,9 @@ def load_titration_tracking(csv_path):
         a = str(row.get('Assignment', '')).strip()
         if not a or a.lower() in ('nan', 'dummy', ''):
             continue
-        rec = {'points': list(points)}
+        failed = {lbl for lbl in labels
+                  if str(row.get(f'{lbl}_Quality', '')).strip().lower() == 'failed'}
+        rec = {'points': list(points), 'n_failed_points': len(failed)}
         # As load_titration_tidy: a point on its intensity floor is blanked in every
         # column, a position on its margin only in the position columns. The flags are
         # written as '1.0'/'0.0'; a file from before they existed has no such columns.
@@ -145,7 +148,7 @@ def load_titration_tracking(csv_path):
             vals = []
             for lbl in labels:
                 col = f'{lbl}_{suffix}'
-                is_pinned = (_pinned(lbl, 'Intensity')
+                is_pinned = (lbl in failed or _pinned(lbl, 'Intensity')
                              or (suffix.startswith('Position') and _pinned(lbl, 'Position')))
                 usable = col in df.columns and pd.notna(row[col]) and not is_pinned
                 vals.append(float(row[col]) if usable else np.nan)

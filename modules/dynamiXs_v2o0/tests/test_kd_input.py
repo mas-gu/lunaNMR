@@ -169,3 +169,41 @@ class TestDescriptiveLabels:
         points, residues = load_titration(str(csv))
         assert points == [1.0, 2.0, 3.0]
         assert set(residues) == {"R1", "R2"}
+
+
+_DATA_TEST = Path(__file__).resolve().parents[4] / "data_test"
+
+
+def _runs_with_failed_points():
+    """Real point-labelled series runs that wrote both CSVs and have a Failed point."""
+    from kd_input import _to_point
+    runs = []
+    for tracking in sorted(_DATA_TEST.glob("**/series_results_*/comprehensive_peak_tracking.csv")):
+        tidy = tracking.with_name("series_analysis_tidy.csv")
+        if not tidy.exists():
+            continue
+        rows = pd.read_csv(tidy)
+        if ((rows["quality"] == "Failed").any()
+                and all(_to_point(n) is not None for n in rows["spectrum_name"].unique())):
+            runs.append((tidy, tracking))
+    return runs
+
+
+@pytest.mark.skipif(not _runs_with_failed_points(), reason="data_test not present")
+@pytest.mark.parametrize("tidy,tracking", _runs_with_failed_points())
+def test_tracking_blanks_the_points_the_tidy_file_of_the_same_run_marks_failed(tidy, tracking):
+    # The same series must give the same Kd input whichever of its two CSVs is loaded.
+    from kd_input import _to_point, load_titration_tidy, load_titration_tracking
+    points, by_tidy = load_titration_tidy(str(tidy))
+    _, by_tracking = load_titration_tracking(str(tracking))
+    rows = pd.read_csv(tidy)
+    failed = rows[rows["quality"] == "Failed"]
+    assert len(failed)
+    for _, row in failed.iterrows():
+        rec = by_tracking[str(row["assignment"])]
+        k = points.index(_to_point(row["spectrum_name"]))
+        assert all(np.isnan(rec[key][k]) for key in ("ppm_x", "ppm_y", "height", "volume")), (
+            row["assignment"], row["spectrum_name"])
+    for name, rec in by_tidy.items():
+        if name in by_tracking:
+            assert by_tracking[name]["n_failed_points"] == rec["n_failed_points"], name
