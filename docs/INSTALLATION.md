@@ -33,7 +33,7 @@ All runtime deps are in `requirements.txt`:
 | matplotlib ≥3.5 | backend forced to `QtAgg` |
 | PySide6 ≥6.6 | Qt6 GUI — **required** |
 | numba ≥0.57 | **required** — 3–5× faster 2D multi-peak fitting |
-| networkx ≥2.5 | peak-detection clustering |
+| networkx ≥2.5 | listed requirement; no module imports it |
 | nmrglue ≥0.9 | NMR file reading |
 | psutil ≥5.8 | optional — performance tracking |
 
