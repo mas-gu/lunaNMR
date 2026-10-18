@@ -138,6 +138,7 @@ class KdTitrationPage(BasePage):
         self.conc_form.setContentsMargins(SPACING_SM, 0, SPACING_SM, 0)
         b2.addWidget(self.conc_form_frame)
         self.conc_spins = []
+        self.conc_labels = []
         self.scale_spins = []
 
         b2.addWidget(self._make_field_row("Protein concentration [P]₀",
@@ -280,7 +281,9 @@ class KdTitrationPage(BasePage):
             if not points:
                 self.points_label.setText(
                     f"Detected 0 points — is this a titration series CSV? ({len(residues)} residues)")
-            self._build_conc_rows(points)
+            from kd_input import unnamed_points
+            self.result_label.hide()
+            self._build_conc_rows(points, unnamed=unnamed_points(path))
             self._set_conc_units(None)
             from kd_params import thresholds
             self.thresholds = thresholds()
@@ -290,6 +293,13 @@ class KdTitrationPage(BasePage):
                           f"{self.p0_spin.value():g}")
             if not has_positions:
                 self.obs_combo.setCurrentIndex(2)  # no positions -> intensity only wins
+            empty = self._empty_conc_labels()
+            if empty:
+                msg = (f"{len(empty)} point label(s) name no titration point, so their [L] "
+                       f"is left empty: {', '.join(empty)}. A concentration must be typed "
+                       f"or loaded from a params file before the fit can run.")
+                self._log(msg)
+                self._show_result(msg, WARNING_ORANGE)
         except Exception as e:
             # Don't leave the PREVIOUS series committed — otherwise a later "Run Kd fit"
             # silently fits the old series ("shows previous series").
@@ -299,20 +309,29 @@ class KdTitrationPage(BasePage):
             self.detected_points = []
             self.points_label.setText(f"Could not read titration points: {e}")
 
-    def _build_conc_rows(self, points):
+    # An [L] field below zero holds no concentration; at the minimum it shows as empty.
+    _EMPTY_CONC = -1.0
+
+    def _build_conc_rows(self, points, unnamed=None):
         """Per titration point: a concentration field (prefilled with the point
-        label) and an intensity-scale field (default 1.0)."""
+        label) and an intensity-scale field (default 1.0). A point in `unnamed`
+        ({point: [label, ...]}, kd_input.unnamed_points) is named by labels that carry
+        no concentration: its field starts empty and its row shows those labels."""
+        unnamed = unnamed or {}
         while self.conc_form.rowCount():
             self.conc_form.removeRow(0)
         self.conc_form.setVerticalSpacing(SPACING_XS)
         self.conc_spins = []
         self.scale_spins = []
+        self.conc_labels = []
         for p in points:
+            labels = unnamed.get(p)
             conc = QDoubleSpinBox()
-            conc.setRange(0.0, 1e9)
+            conc.setRange(self._EMPTY_CONC, 1e9)
+            conc.setSpecialValueText("—")
             conc.setDecimals(4)
             conc.setSingleStep(1.0)
-            conc.setValue(float(p))
+            conc.setValue(self._EMPTY_CONC if labels else float(p))
             conc.setMinimumHeight(26)
             conc.setMaximumWidth(140)
             scale = QDoubleSpinBox()
@@ -331,7 +350,9 @@ class KdTitrationPage(BasePage):
             h.addWidget(QLabel("× int"))
             h.addWidget(scale)
             h.addStretch()
-            self.conc_form.addRow(create_label(f"Point  {p}"), cell)
+            row_label = ", ".join(labels) if labels else f"{p}"
+            self.conc_form.addRow(create_label(f"Point  {row_label}"), cell)
+            self.conc_labels.append(row_label)
             self.conc_spins.append(conc)
             self.scale_spins.append(scale)
         # Let the form take its natural (tall) height inside the page scroll area.
@@ -363,6 +384,14 @@ class KdTitrationPage(BasePage):
         else:
             self.conc_units_combo.setCurrentIndex(
                 1 if str(units).lower().startswith('eq') else 0)
+
+    def _conc_is_empty(self, spin):
+        return spin.value() < 0
+
+    def _empty_conc_labels(self):
+        """The labels of the [L] rows that hold no concentration."""
+        return [label for label, spin in zip(self.conc_labels, self.conc_spins)
+                if self._conc_is_empty(spin)]
 
     def _parse_concentrations(self):
         if not self.conc_spins:
@@ -454,7 +483,8 @@ class KdTitrationPage(BasePage):
         units = self._conc_units()
         return {
             'points': list(self.detected_points),
-            'concentrations': self._parse_concentrations() if units else None,
+            'concentrations': (self._parse_concentrations()
+                               if units and not self._empty_conc_labels() else None),
             'intensity_scales': [s.value() for s in self.scale_spins] or None,
             'protein_conc': float(self.p0_spin.value()),
             'alpha': float(self.alpha_spin.value()),
@@ -506,6 +536,13 @@ class KdTitrationPage(BasePage):
         concs = self._parse_concentrations()
         if not concs:
             show_error(self, "No concentrations", "Load a CSV so the titration points appear, then set [L].")
+            return
+        empty = self._empty_conc_labels()
+        if empty:
+            msg = (f"Not run: no concentration for {', '.join(empty)}. Type it, or load "
+                   f"it from a params file.")
+            self._log(msg)
+            self._show_result(msg, WARNING_ORANGE)
             return
         if self._conc_units() is None:
             # On the page, not in a modal: the refusal stays readable beside the [L] values.
