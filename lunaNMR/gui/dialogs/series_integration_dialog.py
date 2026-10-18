@@ -75,6 +75,7 @@ class ProcessingWorker(QObject):
                  peak_list_contour_min: float = None, lock_detection_threshold: bool = True,
                  series_name: str = None):
         super().__init__()
+        self.processor = None  # the run's MultiSpectrumProcessor, once it starts
         self.nmr_files = nmr_files
         self.reference_peaks = reference_peaks
         self.peak_source_mode = peak_source_mode
@@ -115,6 +116,7 @@ class ProcessingWorker(QObject):
 
             # Create processor with parameters
             processor = MultiSpectrumProcessor(self.voigt_params)
+            self.processor = processor
 
             progress_callback = self.progress_callback
 
