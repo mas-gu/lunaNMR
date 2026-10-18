@@ -207,3 +207,49 @@ def test_tracking_blanks_the_points_the_tidy_file_of_the_same_run_marks_failed(t
     for name, rec in by_tidy.items():
         if name in by_tracking:
             assert by_tracking[name]["n_failed_points"] == rec["n_failed_points"], name
+
+
+_BINDING_TIDY = _DATA_TEST / "data_binding" / "tidy" / "DNAJA1_HSPA8_tidy.csv"
+
+
+class TestRepeatAndUnreadableLabels:
+    """A second acquisition at a titration point is labelled '<point>_2' by the series
+    writer. float() accepts underscores, so '1_2' read as point 12."""
+
+    def test_repeat_suffix_names_the_same_point(self):
+        from kd_input import _to_point
+        assert _to_point("1_2") == 1.0
+        assert _to_point("0.125_2") == 0.125
+        assert _to_point("1o0_2") == 1.0
+
+    @pytest.mark.skipif(not _BINDING_TIDY.exists(), reason="data_test not present")
+    def test_a_repeat_acquisition_joins_its_point(self, tmp_path):
+        from kd_input import load_titration_tidy
+        rows = pd.read_csv(_BINDING_TIDY, dtype={"spectrum_name": str})
+        repeat = rows[rows["spectrum_name"] == "2"].assign(spectrum_name="2_2")
+        csv = tmp_path / "series_analysis_tidy.csv"
+        pd.concat([rows, repeat]).to_csv(csv, index=False)
+        points, _ = load_titration_tidy(str(csv))
+        assert points == load_titration_tidy(str(_BINDING_TIDY))[0]
+
+    @pytest.mark.skipif(not _BINDING_TIDY.exists(), reason="data_test not present")
+    def test_a_spectrum_name_with_no_point_is_refused_not_dropped(self, tmp_path):
+        # Dropping the point shifts every concentration after it by one place.
+        from kd_input import load_titration_tidy
+        rows = pd.read_csv(_BINDING_TIDY, dtype={"spectrum_name": str})
+        rows.loc[rows["spectrum_name"] == "1", "spectrum_name"] = "2D_sample_1o0b"
+        csv = tmp_path / "series_analysis_tidy.csv"
+        rows.to_csv(csv, index=False)
+        with pytest.raises(ValueError, match="2D_sample_1o0b"):
+            load_titration_tidy(str(csv))
+
+    def test_a_tracking_label_with_no_point_is_refused_not_dropped(self, tmp_path):
+        from kd_input import load_titration_tracking
+        cols = {"Assignment": ["R1"]}
+        for lbl in ("0", "0o5", "2D_sample_1o0b"):
+            for suffix in ("Position_X", "Position_Y", "Height", "Volume"):
+                cols[f"{lbl}_{suffix}"] = [1.0]
+        csv = tmp_path / "comprehensive_peak_tracking.csv"
+        pd.DataFrame(cols).to_csv(csv, index=False)
+        with pytest.raises(ValueError, match="2D_sample_1o0b"):
+            load_titration_tracking(str(csv))

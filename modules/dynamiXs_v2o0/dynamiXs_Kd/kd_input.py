@@ -24,12 +24,16 @@ def _to_point(label):
     from which the trailing numeric token is taken as the point index
     (e.g. '03_2D_series_ref_001' -> 1.0). Actual concentrations come from the
     caller's --conc; the point value only needs to order and count the points.
+    A '_<n>' repeat suffix ('1_2', the second acquisition at point 1) names the same
+    point, so the bare-number read skips any label with an underscore: float()
+    accepts one as a digit separator and reads '1_2' as 12.
     """
     s = str(label).strip()
-    try:
-        return float(s.replace('o', '.'))
-    except (ValueError, TypeError):
-        pass
+    if '_' not in s:
+        try:
+            return float(s.replace('o', '.'))
+        except (ValueError, TypeError):
+            pass
     match = re.search(r'(\d+(?:[o.]\d+)?)(?:_\d+)?$', s)
     if match:
         try:
@@ -37,6 +41,20 @@ def _to_point(label):
         except ValueError:
             return None
     return None
+
+
+def _refuse_unread_points(labels):
+    """Raise if any point label has no titration point to read.
+
+    Concentrations are matched to the points by position, so a point dropped here
+    would move every concentration after it onto the wrong spectrum.
+    """
+    unread = sorted({str(lbl) for lbl in labels if _to_point(lbl) is None})
+    if unread:
+        raise ValueError(
+            f"no titration point can be read from {len(unread)} spectrum label(s): "
+            f"{', '.join(unread)}. Each spectrum must be named by its point "
+            f"(e.g. '0.5', '0o5' or '..._001').")
 
 
 def load_titration_tidy(csv_path):
@@ -59,8 +77,8 @@ def load_titration_tidy(csv_path):
     """
     df = pd.read_csv(csv_path)
     df = df.copy()
+    _refuse_unread_points(df['spectrum_name'].unique())
     df['_pt'] = df['spectrum_name'].map(_to_point)
-    df = df[df['_pt'].notna()]
     points = sorted(df['_pt'].unique())
 
     cols = ['ppm_x', 'ppm_y', 'height', 'volume']
@@ -123,7 +141,7 @@ def load_titration_tracking(csv_path):
     """
     df = pd.read_csv(csv_path)
     labels = [c[:-len('_Position_X')] for c in df.columns if c.endswith('_Position_X')]
-    labels = [lbl for lbl in labels if _to_point(lbl) is not None]
+    _refuse_unread_points(labels)
     labels.sort(key=_to_point)
     points = [_to_point(lbl) for lbl in labels]
 
