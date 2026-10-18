@@ -1429,8 +1429,11 @@ class MultiSpectrumProcessor:
                     snr = float(fit_result['snr'])
                 elif 'peak_snr' in fit_result:
                     snr = float(fit_result['peak_snr'])
-                elif height > 0 and 'noise_level' in fit_result:
-                    snr = height / fit_result['noise_level']
+                elif fit_result.get('detection_sigma') is not None:
+                    # |height| / noise, stamped by the fit
+                    snr = float(fit_result['detection_sigma'])
+                elif height != 0 and 'noise_level' in fit_result:
+                    snr = abs(height) / fit_result['noise_level']
 
                 # R-squared extraction - try multiple sources
                 r_squared = 0.0

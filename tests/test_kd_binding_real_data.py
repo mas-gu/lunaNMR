@@ -153,7 +153,6 @@ class TestFailedPointsAreExcluded:
         df = pd.read_csv(dnaja1_tidy)
         failed = df[df["quality"].astype(str).str.lower() == "failed"]
         assert len(failed) > 0
-        assert (failed["snr"] == 0).all()
         negative = df[df["height"] < 0]["quality"].astype(str).str.lower()
         assert (negative != "failed").any(), "a measured negative height is not a failure"
 
