@@ -142,7 +142,7 @@ All fitting engines return dicts with a consistent shape (GUI tables and exports
   'quality': str, 'method': str, 'fitted': bool, 'failure_reason': str
 }
 ```
-`method` example: `'2d_simultaneous_multi_peak'`. Failed peaks are kept in place (`fitted=False`) to preserve 1:1 index mapping with `peak_list` — the Peak Navigator uses index-based lookups.
+A 2D-fitted peak also carries `position_pinned` / `intensity_pinned` (the fit stopped on a bound; `None` when the fit did not report its box) and `detection_sigma` (|height| / noise). `method` example: `'2d_simultaneous_multi_peak'`. Failed peaks are kept in place (`fitted=False`) to preserve 1:1 index mapping with `peak_list` — the Peak Navigator uses index-based lookups.
 
 ---
 
