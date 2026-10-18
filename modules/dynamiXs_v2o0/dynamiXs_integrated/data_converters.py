@@ -126,6 +126,10 @@ def calculate_hetnoe_from_intensities(saturated_data: Dict[str, float],
         I_sat = saturated_data[res_id]
         I_unsat = unsaturated_data[res_id]
 
+        if not (np.isfinite(I_sat) and np.isfinite(I_unsat)):
+            # An empty cell: the series did not measure this residue in that plane.
+            continue
+
         if I_unsat <= 0:
             # Can't calculate hetNOE with zero or negative reference intensity
             continue

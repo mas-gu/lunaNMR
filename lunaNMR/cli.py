@@ -17,6 +17,7 @@ Each subcommand imports its own dependencies lazily so that unrelated subcommand
 
 import argparse
 import glob
+import math
 import os
 import re
 import sys
@@ -1610,12 +1611,17 @@ def _run_dynamixs_hetnoe(args):
     supplied = {(True, True): 'both', (True, False): 'sat',
                 (False, True): 'unsat', (False, False): 'none'}[
                     (sat_e is not None, unsat_e is not None)]
+    common = set(sat_i) & set(unsat_i)
+    # An empty cell in either plane is a residue the series did not measure there.
+    n_unmeasured = sum(1 for r in common
+                       if not (math.isfinite(sat_i[r]) and math.isfinite(unsat_i[r])))
     _emit(args, _recorded(args,
           {'command': 'dynamixs hetnoe', 'n_residues': len(noe),
            'errors_supplied': supplied,
            'n_sat': len(sat_i), 'n_unsat': len(unsat_i),
-           'n_common': len(set(sat_i) & set(unsat_i)),
-           'n_dropped_nonpositive_ref': len(set(sat_i) & set(unsat_i)) - len(noe),
+           'n_common': len(common),
+           'n_dropped_unmeasured': n_unmeasured,
+           'n_dropped_nonpositive_ref': len(common) - n_unmeasured - len(noe),
            'output': out_csv, 'plot': out_pdf}),
           f"hetNOE complete: {len(noe)} residues "
           f"({len(sat_i)} sat, {len(unsat_i)} unsat, errors: {supplied})",
