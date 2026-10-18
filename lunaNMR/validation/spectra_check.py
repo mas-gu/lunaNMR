@@ -66,13 +66,20 @@ def estimate_noise(data: np.ndarray) -> float:
     return peak * 1e-9 if peak > 0 else 1.0
 
 
+def _box_max(data: np.ndarray, iy: int, ix: int) -> float:
+    """Maximum in a 7x7 box at (iy, ix); NaN for a point outside the spectrum, where a
+    box is either empty or, at a negative index, a region nowhere near the point."""
+    ny, nx = data.shape
+    if not (0 <= iy < ny and 0 <= ix < nx):
+        return np.nan
+    return float(data[max(0, iy - 3):iy + 4, max(0, ix - 3):ix + 4].max())
+
+
 def peak_heights(path, peaks: Sequence[Tuple[str, float, float]]) -> Tuple[np.ndarray, float]:
-    """Maximum in a 7x7 box at each peak, plus the noise level. Not a fit — see module docstring."""
+    """Maximum in a 7x7 box at each peak, plus the noise level. Not a fit — see module docstring.
+    A peak outside the spectral window has no box and reads NaN."""
     _, data, uy, ux = _read(path)
-    heights = np.array([
-        data[max(0, uy(y, 'ppm') - 3):uy(y, 'ppm') + 4,
-             max(0, ux(x, 'ppm') - 3):ux(x, 'ppm') + 4].max()
-        for _, x, y in peaks])
+    heights = np.array([_box_max(data, uy(y, 'ppm'), ux(x, 'ppm')) for _, x, y in peaks])
     return heights, estimate_noise(data)
 
 
@@ -116,12 +123,12 @@ def _capture(path, peaks) -> Dict:
     captured = sum(1 for _, x, y in peaks
                    if ((np.abs(found_x - x) <= SEARCH_WINDOW)
                        & (np.abs(found_y - y) <= SEARCH_WINDOW)).any())
-    snr = np.array([
-        magnitude[max(0, uy(y, 'ppm') - 3):uy(y, 'ppm') + 4,
-                  max(0, ux(x, 'ppm') - 3):ux(x, 'ppm') + 4].max() / noise
-        for _, x, y in peaks])
+    snr = np.array([_box_max(magnitude, uy(y, 'ppm'), ux(x, 'ppm')) / noise
+                    for _, x, y in peaks])
+    outside = [name for (name, _, _), v in zip(peaks, snr) if np.isnan(v)]
     return dict(captured=captured, n_peaks=len(peaks), noise=noise,
-                median_snr=float(np.median(snr)), weak=int((snr < _DETECT_SNR).sum()))
+                median_snr=float(np.nanmedian(snr)) if len(outside) < len(peaks) else 0.0,
+                weak=int((snr < _DETECT_SNR).sum()), outside=outside)
 
 
 # ------------------------------------------------------------------- peaks and delays
@@ -314,6 +321,12 @@ def check_experiment(spectra_dir, peaks_path, *, quick: bool = False,
                                       n_peaks=cap['n_peaks'], capture_rate=rate,
                                       median_snr=cap['median_snr'], weak=cap['weak'],
                                       decayed=decayed, is_reference=name == reference))
+        if cap['outside'] and path == assessed[0]:
+            result['findings'].append(Finding(
+                'WARN', 'window',
+                f'{name}: {len(cap["outside"])} listed peak(s) lie outside the spectral '
+                f'window and were not measured ({", ".join(cap["outside"])}) — folded, '
+                f'or from a different experiment'))
         offset = max(abs(dx), abs(dy)) / SEARCH_WINDOW
         if offset > 0.5:
             result['findings'].append(Finding(
@@ -379,8 +392,15 @@ def check_dataset(root, *, quick: bool = False, sample: bool = False,
         if not peaks_path:
             result['findings'].append(Finding('WARN', 'peak_list', f'{rel}: no peak list in this folder'))
             continue
-        experiment = check_experiment(folder, peaks_path, quick=quick, sample=sample,
-                                      series_mode=series_mode)
+        try:
+            experiment = check_experiment(folder, peaks_path, quick=quick, sample=sample,
+                                          series_mode=series_mode)
+        except Exception as exc:
+            # One folder this check cannot read must not cost every other its result.
+            result['findings'].append(Finding(
+                'FAIL', 'spectra', f'{rel}: could not be checked '
+                                   f'({type(exc).__name__}: {exc})'))
+            continue
         experiment['experiment'] = rel
         result['experiments'].append(experiment)
         result['findings'].extend(experiment['findings'])
