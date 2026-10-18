@@ -338,6 +338,7 @@ class KdTitrationFittingParams:
     observables: Optional[list] = None      # subset of ['csp', 'intensity']
     intensity_value: str = "height"         # 'height' or 'volume'
     n_bootstrap: int = 0
+    thresholds: Optional[dict] = None       # kd_params.THRESHOLD_KEYS -> value
     input_df: Optional[pd.DataFrame] = field(default=None, repr=False)
     series_name: str = ""
 
@@ -384,6 +385,7 @@ class KdTitrationFittingWorker(AnalysisWorker):
                 "observables": self.params.observables or ["csp", "intensity"],
                 "intensity_value": self.params.intensity_value,
                 "n_bootstrap": self.params.n_bootstrap,
+                **(self.params.thresholds or {}),
             }
 
             def progress_callback(completed, total, residue_name, message):

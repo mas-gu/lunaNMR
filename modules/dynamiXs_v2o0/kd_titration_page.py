@@ -43,6 +43,10 @@ class KdTitrationPage(BasePage):
         self.last_json_folder = None
         self.last_json_file = None
         self.worker = None
+        # The survey thresholds the dataset was judged with (kd_params.THRESHOLD_KEYS).
+        # No widget shows them: they come from a params source and go to the fit as is.
+        from kd_params import thresholds
+        self.thresholds = thresholds()
         # Series identity — every series writes the SAME generic filename
         # (series_analysis_tidy.csv), so the saved-fit name must come from the series
         # name (drag) or the series folder, not the file stem.
@@ -272,6 +276,8 @@ class KdTitrationPage(BasePage):
                 self.points_label.setText(
                     f"Detected 0 points — is this a titration series CSV? ({len(residues)} residues)")
             self._build_conc_rows(points)
+            from kd_params import thresholds
+            self.thresholds = thresholds()
             self._maybe_apply_params_json(path, points)
             if not has_positions:
                 self.obs_combo.setCurrentIndex(2)  # no positions -> intensity only wins
@@ -338,6 +344,10 @@ class KdTitrationPage(BasePage):
         """'equivalents' or 'absolute', as the Concentration units selector says."""
         return 'equivalents' if self.conc_units_combo.currentIndex() == 1 else 'absolute'
 
+    def _set_conc_units(self, units):
+        """Point the Concentration units selector at `units` ('equivalents'/'absolute')."""
+        self.conc_units_combo.setCurrentIndex(1 if str(units).lower().startswith('eq') else 0)
+
     def _parse_concentrations(self):
         if not self.conc_spins:
             return None
@@ -352,15 +362,31 @@ class KdTitrationPage(BasePage):
 
     # ---------- importable binding parameters ----------
 
-    def _apply_params(self, params, n_points):
+    def _apply_params(self, params, n_points, stated=None):
         """Populate the Binding-parameters panel from a normalized params dict. Per-point
         lists ([L], intensity scales) are applied only when their length matches the
-        detected points, so a mismatched file can't silently corrupt the run."""
-        from kd_params import observables_to_combo_index
+        detected points, so a mismatched file can't silently corrupt the run.
+
+        Concentrations and their units are one statement, as in `kd`: applied together,
+        or not at all. A source that records no concentrations but states its units
+        (`stated`: the keys it actually records; None for a dict that states them all)
+        names the units of the point labels. Returns why the concentrations were not
+        applied, or None."""
+        from kd_params import observables_to_combo_index, points_mismatch, thresholds
+        stated = set(params) if stated is None else stated
         concs = params.get('concentrations')
-        if concs and len(concs) == n_points:
-            for spin, val in zip(self.conc_spins, concs):
-                spin.setValue(float(val))
+        not_applied = None
+        if concs:
+            not_applied = (points_mismatch(params, self.detected_points)
+                           if self.detected_points else None)
+            if not_applied is None and len(concs) != n_points:
+                not_applied = f"{len(concs)} concentrations for {n_points} titration points"
+            if not_applied is None:
+                for spin, val in zip(self.conc_spins, concs):
+                    spin.setValue(float(val))
+                self._set_conc_units(params.get('conc_units', 'absolute'))
+        elif 'conc_units' in stated:
+            self._set_conc_units(params['conc_units'])
         scales = params.get('intensity_scales')
         if scales and len(scales) == n_points:
             for spin, val in zip(self.scale_spins, scales):
@@ -369,25 +395,38 @@ class KdTitrationPage(BasePage):
         self.alpha_spin.setValue(float(params.get('alpha', 0.14)))
         self.obs_combo.setCurrentIndex(observables_to_combo_index(params.get('observables')))
         self.intvalue_combo.setCurrentText(str(params.get('intensity_value', 'height')))
-        self.conc_units_combo.setCurrentIndex(
-            1 if str(params.get('conc_units', 'absolute')).lower().startswith('eq') else 0)
         self.boot_spin.setValue(int(params.get('n_bootstrap', 0)))
+        self.thresholds = thresholds(params)
+        return not_applied
 
     def _maybe_apply_params_json(self, csv_path, points):
         """Auto-detect a sibling binding-parameters JSON (or a prior fit JSON) next to the
         input CSV and populate the panel. Values stay editable; absent → manual entry."""
         try:
-            from kd_params import find_params_source, load_params
+            from kd_params import find_params_source
             skipped = []
             src = find_params_source(csv_path, points=points, rejected=skipped)
             for s in skipped:
                 self._log(f"Not using {os.path.basename(s['path'])}: {s['reason']}")
             if not src:
                 return
-            self._apply_params(load_params(src), n_points=len(points))
-            self._log(f"Loaded binding parameters from {os.path.basename(src)}")
+            self._load_params_file(src)
         except Exception as e:
             self._log(f"Could not read binding-parameters JSON: {e}")
+
+    def _load_params_file(self, path):
+        """Apply a params source to the panel and say on the page what it supplied."""
+        from kd_params import load_params, recorded_keys, thresholds
+        not_applied = self._apply_params(load_params(path), n_points=len(self.conc_spins),
+                                         stated=recorded_keys(path))
+        msg = f"Loaded binding parameters from {os.path.basename(path)}"
+        if not_applied:
+            msg += f" - not using its concentrations and units: {not_applied}"
+        self._log(msg)
+        defaults = thresholds()
+        stored = [f"{k}={v:g}" for k, v in self.thresholds.items() if v != defaults[k]]
+        if stored:
+            self._log("Thresholds from that file: " + ", ".join(stored))
 
     def _gather_params_dict(self):
         """The current panel values as a params dict (for saving a params JSON)."""
@@ -402,6 +441,7 @@ class KdTitrationPage(BasePage):
             'intensity_value': self.intvalue_combo.currentText(),
             'conc_units': self._conc_units(),
             'n_bootstrap': int(self.boot_spin.value()),
+            **self.thresholds,
         }
 
     def _load_params_dialog(self):
@@ -416,9 +456,7 @@ class KdTitrationPage(BasePage):
         if not path:
             return
         try:
-            from kd_params import load_params
-            self._apply_params(load_params(path), n_points=len(self.conc_spins))
-            self._log(f"Loaded binding parameters from {os.path.basename(path)}")
+            self._load_params_file(path)
         except Exception as e:
             show_error(self, "Could not load parameters", str(e))
 
@@ -468,6 +506,7 @@ class KdTitrationPage(BasePage):
             observables=observables,
             intensity_value=self.intvalue_combo.currentText(),
             n_bootstrap=int(self.boot_spin.value()),
+            thresholds=dict(self.thresholds),
         )
 
         self.progress_bar.setValue(0)
@@ -508,14 +547,29 @@ class KdTitrationPage(BasePage):
             if warnings_:
                 # A dataset the titration cannot answer must not be reported as a plain
                 # success — the number would look ordinary and mean nothing.
-                self._show_result("Fit complete, but the result is not usable: "
-                                  + " ".join(warnings_), WARNING_ORANGE)
+                self._show_result(self._NOT_USABLE + " ".join(warnings_), WARNING_ORANGE)
             else:
                 self._show_result(f"Fitted {n} residues. Open the viewer to inspect.",
                                   SUCCESS_GREEN)
         else:
             self._show_result("No fits succeeded: all residues failed. Check the log.",
                               WARNING_ORANGE)
+
+    _NOT_USABLE = "Fit complete, but the result is not usable: "
+
+    def _state_saved_verdict(self, json_file):
+        """State the quality warnings a reopened fit's JSON stores, as its run stated
+        them; with none, clear the outcome of whichever fit the page showed before."""
+        import json
+        try:
+            meta = json.loads(Path(json_file).read_text()).get('metadata') or {}
+        except Exception:
+            meta = {}
+        warnings_ = meta.get('quality_warnings') or []
+        if warnings_:
+            self._show_result(self._NOT_USABLE + " ".join(warnings_), WARNING_ORANGE)
+        else:
+            self.result_label.hide()
 
     def _show_result(self, text, colour):
         """State the last fit's outcome on the page, in `colour`."""
@@ -567,6 +621,7 @@ class KdTitrationPage(BasePage):
             from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
             self._viewer = open_kd_titration_viewer(parent=self, json_file=path)
             self.last_json_file = path
+            self._state_saved_verdict(path)
             self.viewer_btn.setEnabled(True)
             self.save_to_project_btn.setEnabled(True)
         except Exception as e:
@@ -838,6 +893,7 @@ class KdTitrationPage(BasePage):
         if meta:
             self.restore_session_state(meta)
         self.last_json_file = path
+        self._state_saved_verdict(path)
         self.viewer_btn.setEnabled(True)
         self.save_to_project_btn.setEnabled(True)
         from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
@@ -862,12 +918,14 @@ class KdTitrationPage(BasePage):
             'output_dir': self.output_dir,
             'detected_points': list(self.detected_points),
             'concentrations': [s.value() for s in self.conc_spins],
+            'conc_units': self._conc_units(),
             'intensity_scales': [s.value() for s in self.scale_spins],
             'p0': self.p0_spin.value(),
             'alpha': self.alpha_spin.value(),
             'observable': self.obs_combo.currentIndex(),
             'intensity_value': self.intvalue_combo.currentText(),
             'bootstrap_iter': self.boot_spin.value(),
+            'thresholds': dict(self.thresholds),
             'last_json_file': self.last_json_file,
             'last_json_folder': self.last_json_folder,
         }
@@ -886,6 +944,7 @@ class KdTitrationPage(BasePage):
         self._build_conc_rows(self.detected_points)
         for spin, val in zip(self.conc_spins, state.get('concentrations', [])):
             spin.setValue(val)
+        self._set_conc_units(state.get('conc_units', 'absolute'))
         for spin, val in zip(self.scale_spins, state.get('intensity_scales', [])):
             spin.setValue(val)
 
@@ -894,6 +953,8 @@ class KdTitrationPage(BasePage):
         self.obs_combo.setCurrentIndex(state.get('observable', 0))
         self.intvalue_combo.setCurrentText(state.get('intensity_value', 'height'))
         self.boot_spin.setValue(state.get('bootstrap_iter', 0))
+        from kd_params import thresholds
+        self.thresholds = thresholds(state.get('thresholds'))
 
         if self.input_file:
             self.file_drop.setText(os.path.basename(self.input_file))

@@ -38,6 +38,10 @@ _DEFAULTS = {
     'ref_max_ratio': 10.0,
 }
 
+# The survey thresholds above: how a dataset was judged, restored with it by every front end.
+THRESHOLD_KEYS = ('csp_sigma_multiple', 'kd_outlier_z', 'noise_quantile',
+                  'dd_runaway_ratio', 'ref_max_ratio')
+
 _OBS_BY_INDEX = {0: ['csp', 'intensity'], 1: ['csp'], 2: ['intensity']}
 
 
@@ -90,6 +94,12 @@ def normalize_params(d):
     }
 
 
+def thresholds(params=None):
+    """The survey thresholds a params dict records, schema defaults filling the rest."""
+    p = normalize_params(params)
+    return {k: p[k] for k in THRESHOLD_KEYS}
+
+
 def load_params(path):
     """Load params from a standalone *_kd_params.json OR a saved *_kd_fit_data.json
     (params live under its 'metadata'). Returns the normalized params dict."""
@@ -135,11 +145,19 @@ def _newest(pattern):
     return max(matches, key=os.path.getmtime) if matches else None
 
 
-def _mismatch(path, stored, csv_path, points):
-    """Why a stored params file does not describe this input, or None if it does."""
+def points_mismatch(stored, points):
+    """Why the titration points a params source records are not `points`, or None."""
     recorded = stored.get('points')
     if recorded is not None and [float(p) for p in recorded] != [float(p) for p in points]:
         return f"its titration points {recorded} are not this input's {list(points)}"
+    return None
+
+
+def _mismatch(path, stored, csv_path, points):
+    """Why a stored params file does not describe this input, or None if it does."""
+    reason = points_mismatch(stored, points)
+    if reason:
+        return reason
     name = os.path.basename(csv_path)
     if stored.get('input') is not None:
         return None if stored['input'] == name else f"it was written for {stored['input']}"
