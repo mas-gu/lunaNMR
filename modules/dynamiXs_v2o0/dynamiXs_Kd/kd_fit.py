@@ -10,7 +10,7 @@ import numpy as np
 from scipy.optimize import curve_fit, least_squares
 from scipy.optimize import OptimizeWarning
 
-from kd_models import csp_model, intensity_decay, residue_sort_key
+from kd_models import csp_model, intensity_decay, residue_sort_key, REF_MAX_RATIO
 from kd_input import load_titration, csp_series, intensity_ratio_series
 
 _MIN_POINTS = 3
@@ -730,6 +730,9 @@ def run_kd_analysis_with_params(params, progress_callback=None):
                      'concentrations': concs, 'conc_units': 'absolute', 'points': points,
                      'intensity_scales': list(scales) if scales else None,
                      'intensity_value': value,
+                     # The figures blank a broken reference by the same cap as the fit.
+                     'ref_max_ratio': (REF_MAX_RATIO if ref_max_ratio is None
+                                       else float(ref_max_ratio)),
                      'observables': observables, 'n_bootstrap': n_boot,
                      'n_excluded_dummy': n_excluded_dummy,
                      'csp_significance': csp_sig,

@@ -1425,6 +1425,7 @@ def _run_export_kd(args):
         labels = meta.get('concentrations') or meta.get('points') or []
         alpha = float(meta.get('alpha', 0.14))
         value = meta.get('intensity_value', 'height')
+        ref_max_ratio = meta.get('ref_max_ratio')
         # Ref→point is model-free (computed from the raw series), so default to BOTH
         # observables even when only one was fitted; --observable still restricts.
         ref_observables = args.observable or ['csp', 'intensity']
@@ -1433,7 +1434,8 @@ def _run_export_kd(args):
             for obs in ref_observables:
                 outputs.extend(export_ref_vs_point(
                     os.path.join(_data_dir(args.out), f"{tag}{obs}_ref_vs_point"),
-                    fits, labels, obs, alpha=alpha, value=value))
+                    fits, labels, obs, alpha=alpha, value=value,
+                    ref_max_ratio=ref_max_ratio))
             if 'pdf' in args.fig_format:
                 from matplotlib.backends.backend_pdf import PdfPages
                 for obs in ref_observables:
@@ -1441,7 +1443,8 @@ def _run_export_kd(args):
                     with PdfPages(pdf_path) as pdf:
                         for j in range(1, len(labels)):
                             names, vals = ref_point_values(fits, 0, j, obs,
-                                                           alpha=alpha, value=value)
+                                                           alpha=alpha, value=value,
+                                                           ref_max_ratio=ref_max_ratio)
                             fig, ax = plt.subplots(figsize=(11, 6))
                             sig = (meta.get('csp_significance') or {}) if obs == 'csp' else {}
                             thr = sig.get('threshold')
