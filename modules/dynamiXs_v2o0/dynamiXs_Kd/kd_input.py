@@ -75,7 +75,8 @@ def load_titration_tidy(csv_path):
     an unphysical ratio. Blanking is POINT-WISE: a residue that failed at one point
     keeps every other point.
     """
-    df = pd.read_csv(csv_path)
+    # Residue names are text: an all-numeric column with a blank would read as float.
+    df = pd.read_csv(csv_path, dtype={'assignment': str})
     df = df.copy()
     _refuse_unread_points(df['spectrum_name'].unique())
     df['_pt'] = df['spectrum_name'].map(_to_point)
@@ -139,7 +140,7 @@ def load_titration_tracking(csv_path):
     {label}_Height, {label}_Volume, ... for each titration point label. A point whose
     {label}_Quality is 'Failed' is blanked in every column, as the tidy loader does.
     """
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, dtype={'Assignment': str})
     labels = [c[:-len('_Position_X')] for c in df.columns if c.endswith('_Position_X')]
     _refuse_unread_points(labels)
     labels.sort(key=_to_point)
@@ -186,7 +187,7 @@ def load_intensity_matrix(csv_path):
     intensity matrix is refused: with no point columns or no residue rows there is
     nothing to fit, and a matrix of 0/1 detection flags fits every residue to one Kd.
     """
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, dtype={'Assignment': str})
     point_cols = [c for c in df.columns if _to_point(c) is not None]
     if not point_cols:
         raise ValueError(f"no titration point columns in {csv_path}: it is not a series "

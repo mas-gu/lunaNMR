@@ -286,3 +286,26 @@ class TestOnlyAnIntensityMatrixLoadsAsOne:
         from kd_input import load_titration
         with pytest.raises(ValueError, match="no titration point"):
             load_titration(str(_MATRIX_FOLDER / "processing_summary.csv"))
+
+
+def test_numeric_residue_names_read_the_same_from_every_input(tmp_path):
+    # pandas reads an all-numeric Assignment column with a blank in it as float, so a
+    # residue named 10 came back as '10.0' from the tracking and matrix files.
+    from kd_input import load_titration
+    names = ["10", "11", None]
+    tidy = tmp_path / "series_analysis_tidy.csv"
+    pd.DataFrame({"spectrum_name": ["0", "1"] * 3,
+                  "assignment": [n for n in names for _ in (0, 1)],
+                  "ppm_x": 8.0, "ppm_y": 120.0, "height": 1000.0,
+                  "volume": 2000.0}).to_csv(tidy, index=False)
+    tracking = tmp_path / "comprehensive_peak_tracking.csv"
+    matrix = tmp_path / "peak_intensity_matrix.csv"
+    wide = {"Assignment": names}
+    for lbl in ("0", "1"):
+        for suffix in ("Position_X", "Position_Y", "Height", "Volume"):
+            wide[f"{lbl}_{suffix}"] = [1000.0] * 3
+    pd.DataFrame(wide).to_csv(tracking, index=False)
+    pd.DataFrame({"Assignment": names, "0": [1000.0] * 3, "1": [900.0] * 3}).to_csv(
+        matrix, index=False)
+    for csv in (tidy, tracking, matrix):
+        assert set(load_titration(str(csv))[1]) == {"10", "11"}, csv.name
