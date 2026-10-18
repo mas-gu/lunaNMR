@@ -817,25 +817,14 @@ class ParallelVoigtProcessor:
         mad_f1 = np.median(np.abs(lw_f1_array - spectrum_lw_f1))
         mad_f2 = np.median(np.abs(lw_f2_array - spectrum_lw_f2))
 
-        # Also compute std, min, max for ML training data collection
-        std_f1 = np.std(lw_f1_array) if len(lw_f1_array) > 1 else 0.0
-        std_f2 = np.std(lw_f2_array) if len(lw_f2_array) > 1 else 0.0
-
         return {
             'lw_f1_median': spectrum_lw_f1,
             'lw_f2_median': spectrum_lw_f2,
             'lg_f1_median': spectrum_lg_f1,
             'lg_f2_median': spectrum_lg_f2,
             'n_samples': n_samples,  # Use actual valid samples, not successful_fits
-            'n_good_peaks': n_samples,  # Alias for ML collector
             'lw_f1_mad': mad_f1,
             'lw_f2_mad': mad_f2,
-            'lw_f1_std': std_f1,  # For ML training data
-            'lw_f2_std': std_f2,
-            'lw_f1_min': float(np.min(lw_f1_array)),
-            'lw_f1_max': float(np.max(lw_f1_array)),
-            'lw_f2_min': float(np.min(lw_f2_array)),
-            'lw_f2_max': float(np.max(lw_f2_array)),
             'alpha': alpha  # Sample-size-dependent multiplier for PASS2 bounds
         }
 
