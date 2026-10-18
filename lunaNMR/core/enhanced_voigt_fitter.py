@@ -3128,7 +3128,7 @@ class EnhancedVoigtFitter:
                                         parent_integrator=None, locked_clusters_by_assignment=None,
                                         pre_learned_statistics=None, reference_linewidths=None,
                                         skip_series_params=False, reference_positions=None,
-                                        in_process=False):
+                                        in_process=False, stop=None):
         """
         Fit a peak list with the cluster-based parallel workflow.
 
@@ -3150,6 +3150,8 @@ class EnhancedVoigtFitter:
                 original reference positions a cascade's absolute drift limit holds to.
             in_process: Run the same pipeline in this process rather than over a pool -
                 sequential mode.
+            stop: Optional threading.Event that ends the fit between clusters; a stopped
+                fit raises lunaNMR.utils.cancellation.Cancelled.
 
         Returns:
             Tuple of (fitted_results, learned_statistics) where learned_statistics is the
@@ -3219,7 +3221,7 @@ class EnhancedVoigtFitter:
             enable_adaptive = parent_integrator.gui_params.get('use_adaptive_optimization', False)
         log_progress(f"Using parallel Voigt fitting for {len(peak_list)} peaks")
         parallel_processor = ParallelVoigtProcessor(self, enable_adaptive=enable_adaptive,
-                                                    in_process=in_process)
+                                                    in_process=in_process, stop=stop)
         self.parallel_processor = parallel_processor  # Store for ML training data collection
 
         # Pass series_params if available (for subsequent spectra in series)

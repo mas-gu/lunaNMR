@@ -5,6 +5,7 @@ import os
 import glob
 import re
 import logging
+import threading
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QThread, QObject
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
+from lunaNMR.utils.cancellation import Cancelled
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
@@ -85,13 +87,12 @@ class ProcessingWorker(QObject):
         self.peak_list_contour_min = peak_list_contour_min
         self.lock_detection_threshold = lock_detection_threshold
         self.series_name = series_name
-        self._cancelled = False
+        # Set by cancel(); the series checks it before each spectrum and each cluster
+        self._stop = threading.Event()
         self._paused = False
 
     def cancel(self):
-        self._cancelled = True
-        if self.processor:
-            self.processor.processing_active = False
+        self._stop.set()
 
     def set_paused(self, paused: bool):
         """Set pause state."""
@@ -102,11 +103,7 @@ class ProcessingWorker(QObject):
     def progress_callback(self, progress_pct, task_desc, log_msg, failed=False):
         """OutputManager callback for the series thread: every message drives the
         progress display, and a warning or error is also forwarded for the log."""
-        if self._cancelled:
-            # The series sets processing_active when it starts, over a cancel
-            # that came first; its loop stops at the next spectrum on this
-            if self.processor:
-                self.processor.processing_active = False
+        if self._stop.is_set():
             return False  # Signal to stop
         if failed or (log_msg or '').startswith('Warning:'):
             self.notice.emit(log_msg, bool(failed))
@@ -156,14 +153,17 @@ class ProcessingWorker(QObject):
                 pre_detected_peaks=self.pre_detected_peaks,
                 sn_from_gui_locked=self.sn_from_gui_locked,
                 peak_list_contour_min=self.peak_list_contour_min,
-                lock_detection_threshold=self.lock_detection_threshold
+                lock_detection_threshold=self.lock_detection_threshold,
+                stop=self._stop
             )
 
-            if not self._cancelled:
+            if not self._stop.is_set():
                 self.finished.emit(batch_results)
             else:
                 self.cancelled.emit()
 
+        except Cancelled:
+            self.cancelled.emit()
         except Exception as e:
             import traceback
             logger.error(f"Series processing error: {e}\n{traceback.format_exc()}")
@@ -1028,7 +1028,7 @@ class SeriesIntegrationDialog(BaseDialog):
             self.worker.cancel()
         self.cancel_btn.setEnabled(False)
         self.pause_btn.setEnabled(False)
-        self._log("Cancelling... the spectrum being fitted is finished first")
+        self._log("Cancelling... the fit stops before its next cluster")
         self.status_label.setText("Cancelling...")
 
     def _on_cancelled(self):

@@ -30,6 +30,7 @@ Date: 2025
 """
 
 import logging
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -64,6 +65,7 @@ from lunaNMR.core.ps2d_config import (set_ps2d_config, get_ps2d_config, mark_ps2
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.utils.config_manager import ConfigurationManager, UserPreferences, ProcessingParameters
 from lunaNMR.utils.parameter_manager import NMRParameterManager
+from lunaNMR.utils.cancellation import Cancelled
 from lunaNMR.utils.project_manager import ProjectManager
 from lunaNMR.utils.recent_projects_manager import RecentProjectsManager
 
@@ -155,13 +157,16 @@ class VoigtFittingWorker(QThread):
         progress_updated: (int, str, str) - Progress percentage, task, log message
         fitting_complete: (dict) - Fitting summary with results
         fitting_failed: (str) - Error message if fitting fails
+        fitting_cancelled: () - The stop event ended the fit; it returned nothing
     """
 
     progress_updated = Signal(int, str, str)  # progress, task, log_msg
     fitting_complete = Signal(dict)            # summary dict
     fitting_failed = Signal(str)               # error_message
+    fitting_cancelled = Signal()
 
-    def __init__(self, integrator, param_manager, processing_options, peaks_to_fit=None):
+    def __init__(self, integrator, param_manager, processing_options, peaks_to_fit=None,
+                 stop=None):
         """Initialize the Voigt fitting worker.
 
         Args:
@@ -172,12 +177,14 @@ class VoigtFittingWorker(QThread):
                 - use_global_optimization: bool (optional, default False)
                 - use_voigt_fitting: bool
             peaks_to_fit: DataFrame of peaks to fit. If None, uses integrator.peak_list
+            stop: Optional threading.Event; setting it ends the fit before its next cluster
         """
         super().__init__()
         self.integrator = integrator
         self.param_manager = param_manager
         self.processing_options = processing_options
         self.peaks_to_fit = peaks_to_fit
+        self.stop = stop
 
     def run(self):
         """Run Voigt fitting in background thread using SingleSpectrumProcessor."""
@@ -211,7 +218,8 @@ class VoigtFittingWorker(QThread):
             fitted_results, learned_statistics = processor.process_peak_list(
                 peak_list,
                 self.processing_options,
-                progress_callback
+                progress_callback,
+                stop=self.stop
             )
 
             self.progress_updated.emit(90, "Getting summary...", "")
@@ -232,6 +240,9 @@ class VoigtFittingWorker(QThread):
             # Emit results
             self.fitting_complete.emit(summary)
 
+        except Cancelled:
+            logger.info("Voigt fitting stopped by its stop event")
+            self.fitting_cancelled.emit()
         except Exception as e:
             logger.error(f"Voigt fitting failed: {e}", exc_info=True)
             self.fitting_failed.emit(f"Fitting error: {str(e)}")
@@ -6668,12 +6679,17 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         logger.info(f"Processing options: {processing_options}")
 
+        # Cancel sets the stop event: the fit ends before its next cluster
+        stop = threading.Event()
+        progress_dialog.cancelled.connect(stop.set)
+
         # Create and configure worker with SingleSpectrumProcessor
         self.fitting_worker = VoigtFittingWorker(
             self.integrator,
             self.param_manager,
             processing_options,
-            peaks_to_fit=peaks_to_fit  # Use detected peaks if available
+            peaks_to_fit=peaks_to_fit,  # Use detected peaks if available
+            stop=stop
         )
 
         # Connect worker signals to dialog and handlers
@@ -6711,6 +6727,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         self.fitting_worker.fitting_failed.connect(
             lambda error: self.on_fitting_failed(error, progress_dialog)
         )
+        self.fitting_worker.fitting_cancelled.connect(
+            lambda: self._discard_cancelled_fit(previous_series_params)
+        )
         # Do not auto-close - let user review log and close manually
         self.fitting_worker.finished.connect(
             lambda: progress_dialog.complete("Fitting complete - click Close to continue")
@@ -6725,7 +6744,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         progress_dialog.exec()
 
     def _discard_cancelled_fit(self, previous_series_params):
-        """A fit the user cancelled finished: its results are neither shown nor saved."""
+        """A fit the user cancelled ended: its results are neither shown nor saved."""
         if self.integrator.enhanced_fitter is not None:
             self.integrator.enhanced_fitter.series_params = previous_series_params
         logger.info("Cancelled fit finished; its results were discarded")

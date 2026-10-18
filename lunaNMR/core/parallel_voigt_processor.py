@@ -32,6 +32,7 @@ import os
 
 
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
+from lunaNMR.utils.cancellation import Cancelled, raise_if_stopped
 
 # Adaptive optimization imports
 from lunaNMR.core.adaptive_optimizer import (
@@ -63,7 +64,7 @@ class ParallelVoigtProcessor:
     """
     
     def __init__(self, enhanced_voigt_fitter, max_workers=None, enable_adaptive=False,
-                 in_process=False):
+                 in_process=False, stop=None):
         """
         Initialize parallel Voigt processor
 
@@ -73,11 +74,14 @@ class ParallelVoigtProcessor:
             enable_adaptive: Enable adaptive parameter optimization (default: False)
             in_process: Run every cluster task, and the adaptive search, in this process
                 rather than over a pool. The same pipeline: this is sequential mode.
+            stop: Optional threading.Event; once set, no further cluster is fitted or
+                waited on, the pool is ended and the fit raises Cancelled.
         """
         self.original_fitter = enhanced_voigt_fitter
         self.shared_memory_blocks = []  # Track for cleanup
         self.enable_adaptive = enable_adaptive
         self.in_process = in_process
+        self.stop = stop
 
         # Adaptive optimization state
         self.optimal_params = None  # Stores grid search optimization results
@@ -607,6 +611,9 @@ class ParallelVoigtProcessor:
             # Return tuple: (results, learned_statistics)
             # learned_statistics is None if we used pre-learned stats (nothing new was learned)
             return (consolidated_results, learned_statistics)
+
+        except Cancelled:
+            raise
 
         except Exception as e:
             reason = f"{type(e).__name__}: {e}"
@@ -1192,6 +1199,7 @@ class ParallelVoigtProcessor:
         pass_prefix = f"{pass_name}: " if pass_name else ""
 
         try:
+            raise_if_stopped(self.stop)
             with contextlib.ExitStack() as stack:
                 if self.in_process:
                     # The worker called directly, in task order: one pipeline, no pool
@@ -1203,6 +1211,7 @@ class ParallelVoigtProcessor:
                         test_result = test_pool.apply(_test_parallel_worker, ("test",))
                         if test_result != "test_success":
                             raise Exception(f"Multiprocessing test failed: {test_result}")
+                    raise_if_stopped(self.stop)
 
                     # Execute parallel cluster fitting
                     pool = stack.enter_context(_SPAWN.Pool(processes=self.max_workers))
@@ -1214,8 +1223,9 @@ class ParallelVoigtProcessor:
 
                 # Collect results with progress tracking
                 for task_id, cluster_size, async_result in async_results:
+                    raise_if_stopped(self.stop)
                     try:
-                        result = async_result.get(timeout=600)  # 10 minute timeout per cluster
+                        result = self._cluster_result(async_result, timeout=600)  # 10 minute timeout per cluster
 
                         if result['success']:
                             cluster_results.append(result)
@@ -1246,12 +1256,19 @@ class ParallelVoigtProcessor:
                                 task_desc = f"{pass_prefix}Parallel cluster fitting:\n{successful_clusters + failed_clusters}/{len(async_results)} clusters\n{total_peaks_processed} peaks fitted"
                                 progress_callback(progress, task_desc, f"Cluster {task_id + 1} failed: {error_msg}")
 
+                    except Cancelled:
+                        raise
                     except mp.TimeoutError:
                         failed_clusters += 1
                         log_warning(f"Cluster {task_id + 1}: Timeout (>10 minutes)")
                     except Exception as e:
                         failed_clusters += 1
                         log_error(f"Cluster {task_id + 1}: Execution error - {str(e)}")
+
+        except Cancelled:
+            log_info(f"{pass_prefix}Fit cancelled after {successful_clusters + failed_clusters}"
+                     f"/{len(cluster_tasks)} clusters")
+            raise
 
         except Exception as e:
             log_error(f"Parallel cluster execution failed: {e}")
@@ -1263,6 +1280,18 @@ class ParallelVoigtProcessor:
         log_info(f"  Total peaks fitted: {total_peaks_processed}")
 
         return cluster_results
+
+    def _cluster_result(self, async_result, timeout):
+        """A cluster task's result. Over the pool with a stop event, the wait is polled so
+        that setting the event ends it (Cancelled) instead of the cluster's own end."""
+        if self.stop is None or self.in_process:
+            return async_result.get(timeout=timeout)
+        deadline = time.monotonic() + timeout
+        while not async_result.ready() and time.monotonic() < deadline:
+            raise_if_stopped(self.stop)
+            async_result.wait(0.1)
+        raise_if_stopped(self.stop)
+        return async_result.get(timeout=0)
         
     def _consolidate_cluster_results(self, cluster_results, peak_list, peak_metadata):
         """
@@ -1376,6 +1405,7 @@ class ParallelVoigtProcessor:
         # Call existing enhanced_peak_fitting method for each peak
         results = []
         for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
+            raise_if_stopped(self.stop)
             peak_x = float(peak_row['Position_X'])
             peak_y = float(peak_row['Position_Y'])
             assignment = peak_row.get('Assignment', f'Peak_{i+1}')
