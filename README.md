@@ -104,7 +104,7 @@ anything else, and gate residues on the flags in `series_analysis_tidy.csv`, not
 
 ```
 lunaNMR_v1o0/
-├── launch_lunaNMR.py          # GUI launcher (tkinter selector → Qt app)
+├── launch_lunaNMR.py          # GUI launcher (starts the Qt app)
 ├── lunaNMR/
 │   ├── cli.py / __main__.py   # headless CLI (python -m lunaNMR)
 │   ├── core/                  # peak picker, Voigt fitter, integrator, PS2D, parallel processor
