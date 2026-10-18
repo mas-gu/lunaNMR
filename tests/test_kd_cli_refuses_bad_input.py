@@ -56,3 +56,14 @@ def test_a_csv_that_is_no_titration_is_refused(tmp_path):
     assert summary["ok"] is False
     assert "no titration point" in summary["error"]["message"]
     assert not (tmp_path / "out").exists()
+
+
+def test_an_unknown_export_kind_is_reported_on_stdout_under_json(tidy, tmp_path):
+    code, fit = _run("kd", "--input", str(tidy), "--out", str(tmp_path / "fit"), "--p0", "50",
+                     "--conc", ABSOLUTE, "--observable", "intensity")
+    assert code == 0
+    code, summary = _run("export", "kd", "--json", fit["json_file"],
+                         "--out", str(tmp_path / "export"), "--kind", "curvs")
+    assert code == 1
+    assert summary["ok"] is False
+    assert "curvs" in summary["error"]["message"]

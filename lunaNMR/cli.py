@@ -1333,8 +1333,8 @@ def _run_export_kd(args):
     unknown_kind = [k for k in args.kind if k not in ('curves', 'ref-bars', 'kd-bars',
                                                       'global-fit')]
     if unknown_kind:
-        print(f"Unknown --kind value(s): {','.join(unknown_kind)} "
-              "(use curves, ref-bars, kd-bars and/or global-fit)", file=sys.stderr)
+        _emit_error(args, ValueError(f"Unknown --kind value(s): {','.join(unknown_kind)} "
+                                     "(use curves, ref-bars, kd-bars and/or global-fit)"))
         return 1
 
     with open(args.json) as fh:
