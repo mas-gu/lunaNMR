@@ -33,9 +33,9 @@ What it checks and why each matters:
 
 | check | pass | if it fails |
 |---|---|---|
-| **peak-list registration** | shift = 0.000, 0.000 | wrong list, or mis-referenced. hetNOE usually needs its own list — typically ~0.07 ppm ¹H / ~0.7 ppm ¹⁵N off the T1/T2 frame, i.e. 10× the 0.070 ppm search window. Symptom: Height 0 or R²≈0.2 shoulder fits, which read as "noisy data" |
+| **peak-list registration** | shift = 0.000, 0.000 | wrong list, or mis-referenced. hetNOE usually needs its own list — typically ~0.07 ppm ¹H / ~0.7 ppm ¹⁵N off the T1/T2 frame, i.e. 1× and 10× the 0.070 ppm search window. Symptom: Height 0 or R²≈0.2 shoulder fits, which read as "noisy data" |
 | **capture rate** | >85% at the **reference point** (shortest delay) | peaks outside the search window. Only meaningful before decay — further down the series a low rate is the experiment working. Judge by this, never by "zeros in the intensity matrix" — that metric can move the wrong way |
-| **assignment hygiene** | no leading whitespace, no `dummy_*`, no duplicates | whitespace breaks exact-string merging (silently → 0 common residues) |
+| **assignment hygiene** | no leading whitespace, no `dummy_*`, no duplicates | whitespace breaks exact-string merging (silently → 0 common residues); `series` refuses a duplicated assignment outright |
 | **residue sets across fields** | identical | merge is an intersection; the smallest set is the ceiling |
 | **hetNOE plane identity** | sat/unsat ≈ 0.75–0.85 | files named `001`/`002` don't say which is saturated. Decided by intensity ratio over high-S/N peaks; saturated is lower, never >1 |
 | **split T2 sub-series** | shared-delay ratio ≈ 0.99 | ~0.85–0.90 is instrumental (scans / receiver gain). The low sub-series usually supplies the whole tail, and a free baseline compensates by stretching T2 |
@@ -65,10 +65,12 @@ python -m lunaNMR dynamixs modelfree [--dual] \
 ```
 
 `--dry-run` first. A matrix written by `series` is already normalised to ms (`_2.4s` becomes
-`2400.0`), and every relaxation subcommand now **reads that from `series_metadata.json`**
+`2400.0`), and every relaxation subcommand **reads that from `series_metadata.json`**
 rather than asking you: the units flags are for tables `series` did not write, which have no
 sidecar. A flag that contradicts the sidecar is refused rather than believed — a T1 in s
-beside a T2 in ms puts R1 out by 1000×, and neither value looks wrong afterwards.
+beside a T2 in ms puts R1 out by 1000×, and neither value looks wrong afterwards. So is a
+series whose sidecar records spectra with no parseable delay (`n_value_unparsed > 0`),
+naming them, unless you pass `--allow-unparsed-delays`.
 
 **`--time-units` does not mean the same thing everywhere.** On `t1t2`/`methyl-t2` it only
 *labels* the output; on `t1rho` and via `--f{1,2}-t{1,2}-units` on `modelfree` it **rescales**.
