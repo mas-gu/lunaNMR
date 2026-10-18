@@ -379,3 +379,63 @@ def test_a_later_run_into_the_same_folder_leaves_a_saved_analysis_alone(run_dir,
     assert pm.save_project(other)[0]
     page = other / "dynamixs" / "analyses" / "first" / "results" / "methyl_t2"
     assert json.loads((page / METHYL_JSON).read_text())["run"] == "first"
+
+
+# ---------- a bundle saved with its region data says so when reopened ----------
+
+REGION = {"f1_ppm": [1.0], "f2_ppm": [2.0], "intensity": [[3.0]]}
+
+
+def test_a_slim_bundle_reopens_as_slim(bundle_a):
+    window, _, _ = _loaded(bundle_a)
+    assert window.region_data_embedded is False
+
+
+def test_a_bundle_with_embedded_fit_regions_reopens_as_embedded(bundle_a, tmp_path):
+    bundle = _copy(bundle_a, tmp_path)
+    window, pm, _ = _loaded(bundle)
+    for row in window.last_fitting_results:
+        row["region_2d"] = dict(REGION)
+    assert pm.save_project(bundle, embed_region_data=True)[0]
+    assert window.region_data_embedded is True
+    assert _loaded(bundle)[0].region_data_embedded is True
+
+
+def test_a_bundle_with_embedded_series_regions_reopens_as_embedded(bundle_a, tmp_path):
+    bundle = _copy(bundle_a, tmp_path)
+    window, pm, _ = _loaded(bundle)
+    window.last_fitting_results = None
+    for result in window.saved_series[SERIES].results.values():
+        for row in result["integration_results"]:
+            row["region_2d"] = dict(REGION)
+    assert pm.save_project(bundle, embed_region_data=True)[0]
+    assert _loaded(bundle)[0].region_data_embedded is True
+    window, pm, _ = _loaded(bundle)
+    assert pm.save_project(bundle)[0]
+    assert window.region_data_embedded is False
+    assert _loaded(bundle)[0].region_data_embedded is False
+
+
+@pytest.mark.parametrize("embedded", [False, True])
+def test_the_save_box_starts_from_how_the_project_was_saved(app, monkeypatch, tmp_path,
+                                                            embedded):
+    """Unticked by default, a re-save of an embedded bundle opened without its spectra
+    strips the regions it can no longer rebuild."""
+    from PySide6.QtWidgets import QMessageBox
+    from lunaNMR.gui.main_window import LunaNMRMainWindow
+    shown = []
+
+    def answer(box):
+        shown.append(box.checkBox().isChecked())
+        return QMessageBox.Cancel
+
+    monkeypatch.setattr(QMessageBox, "exec", answer)
+    window = LunaNMRMainWindow()
+    try:
+        window.region_data_embedded = embedded
+        window._do_save_project(tmp_path / "P.lunaNMR")
+        assert shown == [embedded]
+        assert not (tmp_path / "P.lunaNMR").exists()
+    finally:
+        window.close()
+        window.deleteLater()

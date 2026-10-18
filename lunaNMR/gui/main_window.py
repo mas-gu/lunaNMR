@@ -347,6 +347,7 @@ class LunaNMRMainWindow(BaseWindow):
 
         # Project management
         self.current_project_path = None  # Path to currently loaded .lunaNMR project
+        self.region_data_embedded = False  # Whether the project's bundle embeds fit regions
         self.series_all_results = None  # For reopening multi-spectrum viewer
         self.project_manager = None  # Initialized after self is fully set up
 
@@ -8084,14 +8085,15 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         from PySide6.QtWidgets import QProgressDialog, QMessageBox, QCheckBox
         from PySide6.QtCore import Qt
 
-        # Ask whether to embed raw fit-region data (off by default)
+        # Ask whether to embed raw fit-region data: as the project was last saved or
+        # opened, off for a new one
         box = QMessageBox(self)
         box.setWindowTitle("Save Project")
         box.setIcon(QMessageBox.Question)
         box.setText(f"Save project to:\n{project_path.name}")
         embed_checkbox = QCheckBox(
             "Embed raw fit-region data (larger file; opens without the original spectrum)")
-        embed_checkbox.setChecked(False)
+        embed_checkbox.setChecked(bool(getattr(self, 'region_data_embedded', False)))
         box.setCheckBox(embed_checkbox)
         box.setStandardButtons(QMessageBox.Save | QMessageBox.Cancel)
         box.setDefaultButton(QMessageBox.Save)

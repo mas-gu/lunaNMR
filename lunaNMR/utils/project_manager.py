@@ -442,6 +442,7 @@ class ProjectManager:
                 summary['saved_items'].append('Spectral Inspector')
             process_events()
 
+            self.main_window.region_data_embedded = embed_region_data
             logger.info(f"Project saved to {project_path}")
             return True, summary
 
@@ -712,6 +713,10 @@ class ProjectManager:
             if self._load_series_results(project_path):
                 summary['loaded_items'].append('Series results')
 
+            # Read before reconstruct_fit_arrays: only an embedded region holds its
+            # intensity yet. The save dialog starts from it, so a re-save keeps it.
+            self.main_window.region_data_embedded = self._holds_region_data()
+
             # Load DynamiXs state and get summary
             dynamixs_summary = self._load_dynamixs_state_with_summary(project_path)
             if dynamixs_summary:
@@ -744,6 +749,16 @@ class ProjectManager:
         mw.dynamixs_analyses = None
         mw.kd_analyses = None
         mw.spectral_inspector_state = None
+
+    def _holds_region_data(self) -> bool:
+        """Whether a fit or series row in the session carries its region's intensity."""
+        rows = list(getattr(self.main_window, 'last_fitting_results', None) or [])
+        for batch in (getattr(self.main_window, 'saved_series', None) or {}).values():
+            for result in getattr(batch, 'results', {}).values():
+                for key in ('integration_results', 'fitted_results'):
+                    rows.extend(result.get(key) or [])
+        return any(isinstance(row, dict) and isinstance(row.get('region_2d'), dict)
+                   and row['region_2d'].get('intensity') is not None for row in rows)
 
     def _load_manifest(self, bundle_path: Path) -> Optional[Dict]:
         """Load and validate project.json."""
