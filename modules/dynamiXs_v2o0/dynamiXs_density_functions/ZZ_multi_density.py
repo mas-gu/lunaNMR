@@ -28,7 +28,8 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Multiprocessing imports
-from multiprocessing import Pool, cpu_count
+import multiprocessing
+from multiprocessing import cpu_count
 from functools import partial
 import pickle
 
@@ -738,7 +739,7 @@ class ReducedSpectralDensityAnalysis:
         
         # Process residues in parallel
         print("Starting parallel processing...")
-        with Pool(processes=n_processes) as pool:
+        with multiprocessing.get_context('spawn').Pool(processes=n_processes) as pool:
             worker_results = pool.map(_worker_process_residue_single, worker_args)
         
         # Collect results and count statistics

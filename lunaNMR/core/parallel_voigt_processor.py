@@ -23,7 +23,7 @@ Date: 2025
 
 import contextlib
 import multiprocessing as mp
-from multiprocessing import Pool, cpu_count, shared_memory
+from multiprocessing import cpu_count, shared_memory
 import numpy as np
 import time
 import traceback
@@ -41,14 +41,11 @@ from lunaNMR.core.adaptive_optimizer import (
     check_lw_deviation
 )
 
-# CRITICAL FIX for Linux deadlock: Set multiprocessing start method to 'spawn'
-# On Linux, default 'fork' causes pipe buffer deadlock when workers print verbose output
-# On Mac, 'spawn' is already the default, so this has no effect there
-try:
-    mp.set_start_method('spawn', force=False)
-except RuntimeError:
-    # Already set (can only be called once)
-    current_method = mp.get_start_method()
+# Pools are created from a 'spawn' context rather than the process default: on Linux,
+# the default 'fork' causes a pipe buffer deadlock when workers print verbose output (on
+# Mac, 'spawn' is already the default). A context, not mp.set_start_method, so importing
+# this module leaves the start method of the process that imports it alone.
+_SPAWN = mp.get_context('spawn')
 
 class ParallelVoigtProcessor:
     """
@@ -1202,13 +1199,13 @@ class ParallelVoigtProcessor:
                                       _InProcessResult(task)) for task in cluster_tasks]
                 else:
                     # Test multiprocessing capability first
-                    with Pool(processes=1) as test_pool:
+                    with _SPAWN.Pool(processes=1) as test_pool:
                         test_result = test_pool.apply(_test_parallel_worker, ("test",))
                         if test_result != "test_success":
                             raise Exception(f"Multiprocessing test failed: {test_result}")
 
                     # Execute parallel cluster fitting
-                    pool = stack.enter_context(Pool(processes=self.max_workers))
+                    pool = stack.enter_context(_SPAWN.Pool(processes=self.max_workers))
                     # Submit all cluster tasks
                     async_results = []
                     for task in cluster_tasks:
