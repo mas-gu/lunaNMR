@@ -446,8 +446,8 @@ Examples:
             )
 
             self.last_summary = {key: results[key] for key in
-                                 ('total_files', 'processed_files', 'failed_files',
-                                  'total_ml_samples') if key in results}
+                                 ('total_files', 'processed_files', 'failed_files')
+                                 if key in results}
 
             # Report final results
             if not args.quiet:
@@ -456,7 +456,6 @@ Examples:
                 print("="*60)
                 print(f"Total files processed: {results['processed_files']}/{results['total_files']}")
                 print(f"Success rate: {(results['processed_files']/results['total_files']*100):.1f}%")
-                print(f"ML training samples collected: {results['total_ml_samples']}")
 
                 if results['failed_files'] > 0:
                     print(f"Failed files: {results['failed_files']}")

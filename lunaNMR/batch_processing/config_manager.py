@@ -80,7 +80,6 @@ class ConfigManager:
             'output': {
                 'generate_summary': True,
                 'summary_format': 'text',  # 'text', 'json', 'both'
-                'ml_data_path': None,  # If None, use default ML data directory
                 'backup_results': False
             }
         }

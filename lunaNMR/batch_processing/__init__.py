@@ -2,14 +2,12 @@
 Batch Processing Module for LunaNMR
 
 This module provides batch processing capabilities for automated NMR spectrum
-analysis and ML training data generation. It operates completely independently
-from the GUI interface.
+analysis. It operates completely independently from the GUI interface.
 
 Features:
 - Batch processing of multiple NMR spectra
 - Automatic parameter optimization
 - Command-line interface for easy usage
-- Integration with ML training data collection
 - Robust error handling and progress tracking
 
 Components:
