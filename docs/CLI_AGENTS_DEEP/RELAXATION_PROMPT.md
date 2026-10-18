@@ -96,8 +96,8 @@ measured number that justified it, and keep the uncorrected version alongside.**
 
 1. **hetNOE plane identity** — if planes are named `001`/`002`, determine saturated by
    intensity ratio over high-S/N peaks (saturated is lower). Symlink to explicit names.
-2. **hetNOE usable gate** — both planes non-zero, both fits Excellent/Good, ratio in
-   −0.2…1.05.
+2. **hetNOE usable gate** — both planes non-zero, both fits Excellent/Good, neither plane
+   `position_pinned` or `intensity_pinned` (`series_analysis_tidy.csv`), ratio in −0.2…1.05.
 3. **Split T2 sub-series** — if the shared-delay ratio deviates from 1 by >5%,
    cross-normalise the low sub-series onto the other. Keep the raw fit too.
 4. **hetNOE error floor** — 0.044 relative per plane (→ hetNOE_err ≈ 0.05).

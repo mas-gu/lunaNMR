@@ -37,8 +37,12 @@ Under `--format json` both `1` and `2` also print an `{"ok": false, …}` object
 rejected command line reports `error.type` `UsageError`. `ok` is `true` exactly when the exit
 code is `0`. A run that returns `1` after producing its summary — the findings below, or a
 dry-run with a missing input — keeps the summary's keys and adds `ok: false` with an `error`
-of type `MissingInput`, `NothingFitted` or `PreflightFailed`. Called in-process, `lunaNMR.cli.main()`
-returns these codes — including `0` for `--help`/`--version` — rather than raising `SystemExit`.
+of type `MissingInput`, `NothingFitted`, `PreflightFailed` or (`batch`) `BatchFailed`. A
+`series` that fits nothing reports `NothingFitted` with no summary keys; any other failure
+names the exception's class (`ValueError`, `FileNotFoundError`, …), and one no input should
+cause is marked `error.internal: true`, with its traceback on stderr. Called in-process,
+`lunaNMR.cli.main()` returns these codes — including `0` for `--help`/`--version` — rather
+than raising `SystemExit`.
 
 ### One call at a time per process
 
@@ -246,13 +250,19 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
 ```
 - Peak list: `Assignment, Position_X, Position_Y[, Height]` header. Every assignment must be
   unique: the series matches peaks by assignment, so a duplicated label is refused, naming it.
-- `--mode time` (relaxation, default) or `titration` (forces cascade tracking + wider margins).
+- `--mode time` (relaxation, default) or `titration` (forces cascade tracking with no
+  absolute drift limit, and gives each peak its own position window — the shared one, shrunk
+  to 0.49× the gap to its nearest neighbour — so no peak can reach another's). The summary reports the
+  `peak_source` that ran beside the `requested_peak_source`.
   `--peak-source independent` is refused with `titration`: it detects every point against the
   reference list, which anchors each point to the free state instead of tracking it.
 - Filename values: `time` mode reads a trailing delay with an explicit unit (`_300ms`, `_2.4s`,
   `_2400us`). `titration` mode reads a trailing `_<value>` whose value carries a **decimal
   separator** — `o` or `.` (`_0o0`, `_0o5`, `_2.4`). Digits alone (`sample_2.ft`, `ref_100.ft`)
-  parse in neither mode; those spectra get a stem-named column instead of a value.
+  parse in neither mode; those spectra get a stem-named column instead of a value (and `kd`
+  reads that stem's trailing digits as a titration point, so rename them first).
+- Spectra run in order of their parsed value — the order a cascade seeds each point from
+  the one before — and spectra with no value run last, by name.
 - `--peak-source reference` (default) holds list positions fixed across the series — correct for
   T1/T2/hetNOE.
 - `--params <file.json>` overrides the detection/fitting knobs this page tells you to tune,
@@ -282,7 +292,10 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   default**; those dummies are fitted at every point and appear in the matrices and the tidy
   CSV. The series dialog takes it from the Expert "Auto-add nearby unmatched peaks" box.
 - Writes `peak_intensity_matrix.csv`, `_volume_matrix`, `comprehensive_peak_tracking.csv`,
-  `series_analysis_tidy.csv`, `series_metadata.json`, per-spectrum CSVs.
+  `series_analysis_tidy.csv`, `series_metadata.json`, `batch_results.json` (the series as
+  the GUI holds it, read by `project build`), per-spectrum CSVs. A spectrum that produced no
+  fits is named in the summary's `failed_spectra` (its matrix columns are empty), and one
+  some of whose peaks a fallback algorithm fitted in `fitting_fallbacks`.
   `peak_detection_matrix.csv` (and each `{pt}_Detected` tracking column) is 1 where the fit
   stands at least 3 sigma above the noise (`detection_sigma`, the Kd loader's floor), else 0.
 
@@ -300,9 +313,10 @@ each matrix column is labelled with the delay parsed from the filename (`8`, `10
 when one parses, and with the filename stem (`hetnoe_600_saturated`) when none does. Repeated
 delays get `_2`, `_3`. **`series_metadata.json`**, written beside the matrices, holds the map: per column, the source
 spectrum, the parsed value, and whether it parsed at all. Use it — `processing_summary.csv`
-lists spectra in processing order, which is **not** the column order (under `--parallel` the two
-differ). This matters as soon as you need to treat one sub-series differently from another
-(cross-normalising a re-acquired tail, say).
+lists spectrum files, not columns. This matters as soon as you need to treat one sub-series
+differently from another (cross-normalising a re-acquired tail, say). The same file records
+how the series fitted, so one point can be refitted the same way: `ps2d_config`, and per
+column, where that point had them, the `territories` and `linewidth_caps` it was fitted with.
 
 Values are normalised to **ms**: `_2.4s` becomes `2400.0` and `_2400us` becomes `2.4`. The
 unit must be explicit (`ms`, `s` or `us`) at the end of the stem, optionally followed by a
@@ -351,6 +365,11 @@ python -m lunaNMR dynamixs methyl-t2 --input <matrix.csv> --out <dir> \
 Input = a series `peak_intensity_matrix.csv` / `comprehensive_peak_tracking.csv`. Delay column
 headers are parsed by `parse_delay_column` (explicit `ms`/`s`/`us` unit + optional repeat
 marker `b` or `_2`), which returns every delay in ms. Exit code 1 if nothing fits.
+Writes `<prefix>_fit_results.txt` (`t1t2` adds its `_fig{1,2,3}.pdf` plots), the fit JSON
+`<prefix>_<field-name>_<exp>_fit_data.json` (`methyl-t2`: `<prefix>_<field-name>_methylT2_fit_data.json`),
+and the `<prefix>_dynamixs.json` record every `dynamixs` subcommand leaves for `project build`.
+A series sidecar with `n_value_unparsed > 0` is refused, naming the spectra, unless
+`--allow-unparsed-delays` (also on `t1rho` and `modelfree`).
 
 `--time-units` labels the output (summary, fit JSON, plot axes); it does not rescale. Left
 out, it is taken from `series_metadata.json` beside the input, else `ms` — the unit the
@@ -400,7 +419,10 @@ python -m lunaNMR dynamixs density --input <table.csv> --out <dir> [--field1-fre
     [--rnh 1.015] [--csa -172] [--no-parallel] [--no-plot] [--prefix spectral_density]
 ```
 Input table columns: `Residue, R1, R1err, R2, R2err, hetNOE, hetNOEerr`. Outputs
-J(0)/J(ωN)/J(ωH), S², τc, τe, Rex.
+J(0)/J(ωN)/J(ωH), S², τc, τe, Rex in `<prefix>_results.csv` (`--dual`: `_basic.csv` and
+`_detailed.csv`) plus `<prefix>_plots.pdf`. S², τe and Rex are fitted by bounded least
+squares from a grid of starts, which carries no uncertainty of its own: their errors are
+NaN unless `--monte-carlo`.
 
 ### dynamixs modelfree
 Runs the whole chain per field from raw series matrices.
@@ -422,7 +444,9 @@ python -m lunaNMR dynamixs modelfree [--dual] \
   refused too). The flag is for bare-number headers `series` did not write: a hand-built or
   DynamiXs-format T1 in seconds (`0.1, 0.4, …`) beside a T2 in ms → `--f1-t1-units s`, without
   which R1 is out by 1000×.
-- **Outputs:** `<prefix>_field{1,2}_hetnoe.pdf`, `<prefix>_spectral_density_basic.csv` (one row
+- **Outputs:** `<prefix>_field{1,2}_T{1,2}_fit_results.txt` (+ `_fig{1,2,3}.pdf`),
+  `<prefix>_field{1,2}_input.csv` (the R1/R2/hetNOE table the density step read),
+  `<prefix>_field{1,2}_hetnoe.pdf`, `<prefix>_spectral_density_basic.csv` (one row
   per residue — this is the per-residue result), `_detailed.csv`, and
   `<prefix>_spectral_density_plots.pdf`.
 - **Column names differ between single- and dual-field runs.** Dual writes `R1_f1`/`R1_f2`,
@@ -431,11 +455,15 @@ python -m lunaNMR dynamixs modelfree [--dual] \
   te_err, chi2, fit_success` are never suffixed. CSVs written before the aliases existed have
   only the bare names, and a `_f1` selection on those returns an empty selection instead of
   raising — which reads as a real result ("no residue has Rex > 1"), not an error.
-- **`n_successful` counts a fit that ran out of iterations.** The Monte-Carlo model-free fit
-  reports `fit_success` whether it converged or used all of its iterations, so the summary
-  carries `n_at_iteration_cap` and `at_iteration_cap_residues` beside it, and the per-residue
-  CSV an `at_iteration_cap` column. On a real 600 MHz single-field run 33 of 55 residues hit
-  the cap; on the dual-field `087` method every residue did.
+- **The model-free fit is bounded least squares from a grid of starts** (S², τe and Rex,
+  including Rex > 0 starts, at fixed τc), deterministic for the same input. The model's
+  hetNOE is predicted from the model's own T1, not the measured one. The fit itself carries
+  no uncertainty; the errors come from the `--n-monte-carlo` refits.
+- **`n_successful` counts a fit that ran out of evaluations.** A fit whose best start stopped
+  on its evaluation cap rather than a convergence test still reports `fit_success`, so the
+  summary carries `n_at_iteration_cap` and `at_iteration_cap_residues` beside it, and the
+  per-residue CSV an `at_iteration_cap` column. On a real 600/700 MHz dataset none did,
+  single- or dual-field.
 - **It re-fits T1/T2 internally** from the matrices, so its residue count is its own and will
   not match a `t1t2` run you filtered yourself. Run `t1t2` separately for per-residue T values.
 - **Run each field alone alongside `--dual`.** Dual assumes one global τc; when the two
@@ -444,21 +472,39 @@ python -m lunaNMR dynamixs modelfree [--dual] \
   `--dual` and the two single-field runs is what tells you whether the dual fit is reporting
   chemistry or a τc mismatch.
 - Also accepts the density physical flags (`--rnh 1.015`, `--csa -172`) and fit-init overrides
-  `--init-amp 5.0`, `--init-t1 800`, `--init-t2 100`, `--n-bootstrap 1000`,
+  `--init-amp` (default: derived from the data), `--init-t1 800`, `--init-t2 100`, `--n-bootstrap 1000`,
   `--error-method {analytical,bootstrap}`, `--n-monte-carlo 50`.
 
 ### kd / export kd
 ```bash
 python -m lunaNMR kd --input <titration.csv> --out <dir> --p0 <conc> [--prefix kd] \
+    [--conc c0,c1,...] [--conc-units {absolute,equivalents}] \
     [--observable csp,intensity] [--alpha 0.14] [--intensity-from {height,volume}] \
-    [--conc c0,c1,...] [--bootstrap 0] [--intensity-scale s0,s1,...]
-python -m lunaNMR export kd --json <kd_fit.json> --out <dir> \
+    [--bootstrap 0] [--intensity-scale s0,s1,...] [--survey | --residues <file|list>]
+python -m lunaNMR export kd --json <out>/data/<prefix>_kd_fit_data.json --out <dir> \
     [--fig-format pdf,png] [--per-page 20] [--kind curves,ref-bars,kd-bars,global-fit] \
     [--observable csp,intensity] [--summary-only] [--prefix DNAJA1_HSPA8]
 ```
 CSP uses the full 1:1 quadratic isotherm; intensity uses exponential decay + plateau. All fits
-bound Kd ≥ 0. `export kd` writes `summary.csv` plus, per `--kind`, all prefixed with `--prefix`
-if given (default: none, i.e. unprefixed `summary.csv`/`<obs>_fits.pdf`/...):
+bound Kd ≥ 0. `kd` writes `<prefix>_kd_results.txt` in `--out` and the fit JSON and
+`<prefix>_kd_params.json` under `<out>/data/`. `--survey` fits nothing global: it writes the
+vs-sequence figures, `<out>/data/<prefix>_survey.csv`, and an editable
+`<prefix>_residues.txt` beside the input for `--residues`. The thresholds, the survey →
+fit workflow and the pool gates are in [CLI_AGENT.md](CLI_AGENT.md#kd-workflow-survey--choose--fit).
+
+**Concentrations are required, with their units.** `--conc` is read in `--conc-units`
+(default `absolute`; `equivalents` are multiplied by `--p0`). Without `--conc` they come from
+a params file stored for this same input and titration points (the survey's, beside the
+input, or `kd_analysis/` beside it); a `--conc-units` contradicting it is refused. With
+neither, `--conc-units` alone says the spectrum names are the concentrations. With none of
+these the run — survey included — is refused rather than fitting point labels as µM. The
+summary's `params_source` names the file read and `params_skipped` every file passed over,
+with the reason. Only concentrations, intensity scales and the survey thresholds are restored;
+`--p0`, `--alpha`, `--intensity-from` and `--observable` are taken from the command line.
+
+`export kd` writes PDFs in `--out` and its CSV/JSON under `<out>/data/`: `summary.csv` plus,
+per `--kind`, all prefixed with `--prefix` if given (default: none, i.e. unprefixed
+`summary.csv`/`<obs>_fits.pdf`/...):
 - `curves` — `<obs>_fits.pdf` (multi-page grid of per-residue binding fits; `--fig-format png`
   writes one file per residue under `<obs>/` instead).
 - `ref-bars` — `<obs>_ref_vs_point.pdf`, the observable per residue between point 0 and each
