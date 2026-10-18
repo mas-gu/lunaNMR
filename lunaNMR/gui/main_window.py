@@ -81,22 +81,27 @@ class PeakDetectionWorker(QThread):
         progress_updated: (int, str) - Progress percentage and status message
         detection_complete: (list) - Detected peaks list
         detection_failed: (str) - Error message if detection fails
+        detection_cancelled: () - The stop event ended the detection; it returned nothing
     """
 
     progress_updated = Signal(int, str)  # progress_percent, status_message
     detection_complete = Signal(list)     # detected_peaks
     detection_failed = Signal(str)        # error_message
+    detection_cancelled = Signal()
 
-    def __init__(self, integrator, workflow_mode: str):
+    def __init__(self, integrator, workflow_mode: str, stop=None):
         """Initialize the peak detection worker.
 
         Args:
             integrator: Core integrator instance with nmr_data loaded
             workflow_mode: 'peak_list' or 'sn_threshold'
+            stop: Optional threading.Event; setting it ends the detection before its next
+                candidate or reference peak
         """
         super().__init__()
         self.integrator = integrator
         self.workflow_mode = workflow_mode
+        self.stop = stop
 
     def run(self):
         """Run peak detection in background thread."""
@@ -120,10 +125,10 @@ class PeakDetectionWorker(QThread):
             # Call appropriate detection method based on workflow mode
             if self.workflow_mode == 'sn_threshold':
                 # S/N native detection
-                detected_peaks = self.integrator.detect_peaks_sn_native()
+                detected_peaks = self.integrator.detect_peaks_sn_native(stop=self.stop)
             else:
                 # Peak list mode - use process_peaks
-                detected_peaks = self.integrator.process_peaks()
+                detected_peaks = self.integrator.process_peaks(stop=self.stop)
 
             self.progress_updated.emit(80, "Processing results...")
 
@@ -138,6 +143,9 @@ class PeakDetectionWorker(QThread):
             # Emit results
             self.detection_complete.emit(detected_peaks)
 
+        except Cancelled:
+            logger.info("Peak detection stopped by its stop event")
+            self.detection_cancelled.emit()
         except Exception as e:
             logger.error(f"Peak detection failed: {e}", exc_info=True)
             self.detection_failed.emit(f"Detection error: {str(e)}")
@@ -6447,8 +6455,12 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             title="Peak Detection"
         )
 
+        # Cancel sets the stop event: the detection ends before its next peak
+        stop = threading.Event()
+        progress_dialog.cancelled.connect(stop.set)
+
         # Create and configure worker
-        self.detection_worker = PeakDetectionWorker(self.integrator, self.workflow_mode)
+        self.detection_worker = PeakDetectionWorker(self.integrator, self.workflow_mode, stop=stop)
         # The detection replaces fitted_peaks itself; a cancelled one puts these back
         previous_peaks = self.integrator.fitted_peaks
 
@@ -6460,6 +6472,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         )
         self.detection_worker.detection_failed.connect(
             lambda error: self.on_detection_failed(error, progress_dialog)
+        )
+        self.detection_worker.detection_cancelled.connect(
+            lambda: self._discard_cancelled_detection(previous_peaks)
         )
         # Do not auto-close - let user review log and close manually
         self.detection_worker.finished.connect(
@@ -6475,9 +6490,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         progress_dialog.exec()
 
     def _discard_cancelled_detection(self, previous_peaks):
-        """A detection the user cancelled finished: keep the peaks it was started over."""
+        """A detection the user cancelled ended: keep the peaks it was started over."""
         self.integrator.fitted_peaks = previous_peaks
-        logger.info("Cancelled peak detection finished; its peaks were discarded")
+        logger.info("Cancelled peak detection ended; its peaks were discarded")
         self.update_status("Detection cancelled - its results were discarded")
 
     @Slot(list)
