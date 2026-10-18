@@ -215,7 +215,7 @@ class VoigtFittingWorker(QThread):
             # Process peak list using SingleSpectrumProcessor (exact v0o9 logic)
             # This internally handles PS2D multi-peak fitting
             # Returns tuple: (fitted_results, learned_statistics)
-            fitted_results, learned_statistics = processor.process_peak_list(
+            fitted_results, _ = processor.process_peak_list(
                 peak_list,
                 self.processing_options,
                 progress_callback,
@@ -232,7 +232,6 @@ class VoigtFittingWorker(QThread):
 
             # Add fitted_results to summary for GUI update
             summary['fitted_results'] = fitted_results
-            summary['learned_statistics'] = learned_statistics
 
             self.progress_updated.emit(100, "Fitting complete", "")
             logger.info(f"Voigt fitting complete: {summary['successful_peaks']}/{summary['total_peaks']} successful")
