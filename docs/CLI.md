@@ -33,7 +33,10 @@ The CLI imports no Qt: `lunaNMR/__init__.py` is lazy, and matplotlib is forced t
 | `2` | no subcommand, or a command line the parser rejects: an unrecognised flag, a bad value, or a flag combination a subcommand refuses (argparse's usage report on stderr) |
 
 Under `--format json` both `1` and `2` also print an `{"ok": false, …}` object on stdout; a
-rejected command line reports `error.type` `UsageError`. Called in-process, `lunaNMR.cli.main()`
+rejected command line reports `error.type` `UsageError`. `ok` is `true` exactly when the exit
+code is `0`. A run that returns `1` after producing its summary — the findings below, or a
+dry-run with a missing input — keeps the summary's keys and adds `ok: false` with an `error`
+of type `MissingInput`, `NothingFitted` or `PreflightFailed`. Called in-process, `lunaNMR.cli.main()`
 returns these codes — including `0` for `--help`/`--version` — rather than raising `SystemExit`.
 
 ### One call at a time per process
