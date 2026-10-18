@@ -4467,6 +4467,16 @@ class LunaNMRMainWindow(BaseWindow):
         self.current_peak_folder = result['peak_folder']
 
         logger.info(f"Files selected - NMR: {nmr_file}, Peak: {peak_file}")
+        self.load_data(nmr_file, peak_file)
+
+    def load_data(self, nmr_file: str, peak_file: str = None):
+        """Load a spectrum, and optionally a peak list, as the data of a fresh analysis.
+
+        The previous data's detection, fit results and fitted clusters are forgotten:
+        Fit Spectrum fits detected peaks in preference to the list, and a series locks
+        the clusters of the last fit, so either would otherwise belong to other data.
+        """
+        self._forget_previous_results()
 
         # Load files into integrator
         try:
@@ -4485,6 +4495,15 @@ class LunaNMRMainWindow(BaseWindow):
             from lunaNMR.gui.components import show_error
             show_error(self, "Load Error", f"Failed to load data files: {e}")
             logger.error(f"Failed to load data: {e}")
+
+    def _forget_previous_results(self):
+        """Drop the detected peaks, fit results and fitted clusters of the data loaded before."""
+        self.integrator.fitted_peaks = []
+        if self.integrator.enhanced_fitter is not None:
+            self.integrator.enhanced_fitter.series_params = None
+        self.last_fitting_results = None
+        if self.peak_navigator is not None:
+            self.peak_navigator.load_detected_peaks([])
 
     def load_nmr_file(self, file_path: str):
         """Load NMR spectrum file into the integrator.
@@ -6514,8 +6533,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         # Clear cached series_params to ensure fresh clustering with current settings.
         # This prevents stale cluster assignments from being reused when the user
         # changes parameters like max_cluster_size between fits.
-        if hasattr(self.integrator, 'fitter') and hasattr(self.integrator.fitter, 'series_params'):
-            self.integrator.fitter.series_params = None
+        if self.integrator.enhanced_fitter is not None:
+            self.integrator.enhanced_fitter.series_params = None
 
         # Validate peak_list is loaded (required for fitting)
         if not hasattr(self.integrator, 'peak_list') or self.integrator.peak_list is None:
