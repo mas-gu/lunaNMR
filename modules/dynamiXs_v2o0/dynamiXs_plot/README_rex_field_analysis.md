@@ -37,11 +37,11 @@ python plot_rex_field_analysis.py <csv_file> --field1 600 --field2 700
 
 ```bash
 # Analyze the control dataset at 600/700 MHz
-python plot_rex_field_analysis.py ../../density_function_macro/087_density_basic.csv \
+python plot_rex_field_analysis.py control_density_results.csv \
     --field1 600 --field2 700 --title "control" --output rex_analysis_ctrl.pdf
 
 # Analyze a variant with a stricter threshold
-python plot_rex_field_analysis.py ../../density_function_macro/087_variant_density_basic.csv \
+python plot_rex_field_analysis.py variant_density_results.csv \
     --field1 600 --field2 700 --title "variant" --min-rex 1.0 --output rex_analysis_variant.pdf
 
 # Use alternative column names (if your CSV uses Rex_field1/Rex_field2)
@@ -84,7 +84,7 @@ Index,Rex_f1,Rex_f2,S2,te,...
 
 The script prints detailed statistics:
 ```
-Loaded CSV file: 087_density_basic.csv
+Loaded CSV file: control_density_results.csv
   Total rows: 45
   Using columns: Rex_f1, Rex_f2
 
@@ -152,13 +152,11 @@ The default threshold (0.5 s⁻¹) works well for most datasets. Adjust if:
 
 ## Integration with Other Scripts
 
-This standalone script uses the **same filtering logic** as:
-- `dynamiXs/dynamiXs_density_functions/ZZ_2fields_density_087.py`
-- `dynamiXs/dynamiXs_density_functions/ZZ_multi_2fields_density_087.py`
-- `density_function_macro/ZZ_2fields_density_087.py`
-- `density_function_macro/ZZ_multi_2fields_density_087.py`
+This standalone script uses the **same filtering logic** as the Rex field scaling panel of:
+- `../dynamiXs_density_functions/ZZ_2fields_density_087.py`
+- `../dynamiXs_density_functions/ZZ_multi_2fields_density_087.py`
 
-All these scripts now implement Option 3 filtering for consistent Rex field scaling analysis.
+Both implement Option 3 filtering for consistent Rex field scaling analysis.
 
 ## Troubleshooting
 

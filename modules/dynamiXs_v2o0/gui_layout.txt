@@ -1,32 +1,32 @@
-main (5options)
-> format_data (empty option)
-> fit_T1_T2
-  > T1
-    > import_data
-    > results_name
-    > start_analysis (2 options single core or mutlti core)
-    > display_results
-  > T2
-    > import_data
-    > results_name
-    > start_analysis (2 options single core or mutlti core)
-    > display_results
+main (6 options in the LunaNMR dialog; 5 standalone, without hetNOE)
+> model_free_analysis
+  > project_series (drag a series onto a T1/T2/hetNOE field)
+  > field_1 / field_2 (auto-load from folder or browse)
+  > analysis_method (single or dual field, J(wH) or J(0.87wH))
+  > start_analysis
+  > display_results (view results / view fits)
+> fit_T1_T2 (one page for T1, T2 and T1rho, per field)
+  > project_series
+  > field_1 / field_2 (auto-load from folder or browse)
+  > t1rho_to_t2_conversion
+  > analysis_to_run (Field 1/2 - T1 / T2 / T1rho / All, Both Fields - All)
+  > results_prefix
+  > start_analysis (multi core)
+  > display_results (view results / view fits)
+> fit_methyl_T2
+  > import_data
+  > start_analysis
+  > display_results (viewer / plot T2 vs residue / open previous dataset)
+> hetnoe (LunaNMR dialog only)
+  > import_data (series matrix, or saturated + unsaturated files)
+  > compute_hetnoe
 > spectral_density
   > import_data
   > results_name
-  > start_analysis (2 options single core or multi core)
+  > start_analysis
     > 1 field
     > 2 fields
   > display_results
-> plot_data
-  > plot_dual_field_data
-    > import_data
-    > results_name
-    > start_analysis
-    > display_results
-  > compare_datasets.py
-    > import_data
-    > results_name
-    > start_analysis
-    > display_results
-> cpmg (empty option)
+> plot_data (placeholder: buttons not connected)
+  > compare_datasets
+  > dual_field_overlay

@@ -13,7 +13,7 @@ Quality (R²): Excellent ≥0.9, Good 0.8–0.9, Fair 0.5–0.8, Poor 0.2–0.5,
 **Pipeline**: noise estimation → candidate detection → overlap clustering → centroid refinement.
 
 - **Noise**: corner sampling / MAD.
-- **Candidates**: local maxima via `scipy.ndimage.maximum_filter` + prominence/S-N thresholding.
+- **Candidates**: local extrema via `scipy.ndimage.maximum_filter` + prominence/S-N thresholding, **per sign** (`_detect_peaks_by_threshold`): maxima above +threshold and minima below −threshold, so a negative peak beside a positive lobe is kept.
 - **Search window** default **0.070 ppm in both 1H and the indirect dimension, for 15N and 13C** (`ps2d_config.SEARCH_WINDOW_PPM`: startup, Reset, a nucleus switch and the CLI series). Wide 15N windows are harmful on low-S/N spectra (peaks fit to noise → Height 0 → residues dropped).
 
 ### 1.1 Top-Contour Centroid
@@ -47,22 +47,29 @@ Internal Voigt units: σ = FWHM/2.3548 (Gaussian), γ = FWHM/2 (Lorentzian); pro
 | Stage | Floating | Notes |
 |-------|----------|-------|
 | 0 | intensities only | DISABLED (caused intensity collapse) — fitting starts at Stage 1 |
-| 1 | linewidths + intensities (positions fixed) | skipped if `fix_linewidths=True` |
+| 1 | linewidths + intensities (positions fixed) | always runs; with `fix_linewidths=True` the linewidths are held and only intensities float |
 | 2 | positions + linewidths + intensities | skipped if `fix_positions=True` |
 | 3 | reserved / unused | |
-| 4 | all parameters (global refine) | fixed params restored exactly after `np.clip` bounds |
+| 4 | all parameters (global refine) | positions held if `fix_positions`, linewidths if `fix_linewidths`; fixed params restored exactly after `np.clip` bounds |
 
-GUI **Fix Positions**→skip Stage 2; **Fix Linewidths**→skip Stage 1. Stages 1/4 support optional L/G-ratio and intensity-ratio soft penalties (applied only for too-close clusters).
+GUI **Fix Positions**→skip Stage 2 and hold positions in Stage 4; **Fix Linewidths**→hold linewidths in every stage (Stage 1 still fits the intensities). A near-noise peak (`weak_peak_indices`, §2.6) has its position and linewidths held in every stage. Stages 1/4 support optional L/G-ratio and intensity-ratio soft penalties (applied only for too-close clusters).
 
 **Optimizer** (`PS2DStyleFitter`): additive damping `α + λ·I`; λ init 1e-4, ×5 on rejection, ×0.2 on acceptance. Analytical Jacobian (`compute_multi_voigt_jacobian_2d`). Parameter normalization `self.scales = max(|params|, 1e-8)` (Hessian condition ~10¹⁰→10³–10⁴); Jacobian scaled by `scales`, covariance denormalized via `outer(scales, scales)`.
 
 ### 2.4 Bounds
-- **Positions**: `pos ± max(0.04·FWHM, pos_margin)`; `pos_margin` 15N F1=0.02, F2=0.01 (titration mode passes wider margins). Cascade mode additionally clips to `±max_drift` of the reference position.
-- **Linewidths**: min 0.03 (F1/15N), 0.005 (F2/1H); max = `min(config_max, learned_median + α·MAD)` from two-pass stats, config_max 15N F1=0.8, F2=0.08.
-- **Intensities**: `[0.001, 5.0] × max cluster intensity`.
+- **Positions**: `pos ± max(0.04·FWHM, pos_margin)`; `pos_margin` 15N F1=0.02, F2=0.01 (13C F1=0.01). Titration mode passes a per-step window of 4 × the reference spectrum's median linewidth (capped at 1.0 / 0.2 ppm; `titration_pos_margin` 0.3 / 0.05 before linewidths are learned), and each peak's own **territory** (`ps2d_territories.territory_margins`: 0.49 × the distance to its nearest neighbour, in units of that window) through `fit_multi_peak_2d(pos_margins=...)`, taken exactly with no floor — all-or-nothing per cluster. Cascade mode additionally clips to `±max_drift` of the reference position (15N F1=0.025, F2=0.005) when **Enforce max drift from reference** is on (default); titration mode turns that limit off.
+- **Linewidths**: min 0.03 (F1/15N), 0.005 (F2/1H); max = `min(config_max, learned_median + α·MAD)` from two-pass stats (α sample-size dependent, default 5; MAD floored at 5% of the typical linewidth), config_max 15N F1=0.8, F2=0.08. `fit_multi_peak_2d(lw_margins=...)` can also cap each peak's **total** `lw_lor + lw_gau` per dimension (`cap_linewidth_totals`, a projection that scales the pair together and keeps the lor/gau ratio); no lunaNMR series sets it — only the overlay refit does, from a point's `linewidth_caps` in `series_metadata.json`.
+- **Intensities**: cluster-relative, signed by the seed (§2.6): `[0.001, 5.0] × max cluster intensity` for a positive peak, the mirror image for a negative one, `[−5, 5] × max` for a near-noise peak.
 
 ### 2.5 Output (per peak)
-`pos_f1/pos_f2`, `lw_lor_f1/lw_gau_f1/lw_lor_f2/lw_gau_f2` (FWHM), `intensity` (volume), `height`, `r_squared`, `method='2d_simultaneous_multi_peak'`.
+`pos_f1/pos_f2`, `lw_lor_f1/lw_gau_f1/lw_lor_f2/lw_gau_f2` (FWHM), `intensity` (volume), `height` (the signed extremum of the fitted surface), `r_squared`, `method='2d_simultaneous_multi_peak'`, plus `detection_sigma`, `position_pinned`, `intensity_pinned` (§4).
+
+### 2.6 Sign and Near-Noise Peaks
+`core_integrator.peak_sign` classifies each peak from the largest-magnitude sample the fit can reach (its territory or position margin, never less than the seed radius):
+- **+1 / −1** at 3σ or more: the seed and intensity box carry that sign; the box never contains zero, where the derivatives with respect to position and linewidth vanish.
+- **0** (near-noise): position and linewidths are held, the intensity spans ±5 × max, so the fit is linear in intensity and crossing zero costs nothing. A cluster of only near-noise peaks is reported as solved (`near_noise_only`) and labelled Poor, never Failed.
+
+Without a noise level every peak is treated as positive. Mixed-sign clusters are not handled.
 
 ---
 
@@ -78,15 +85,19 @@ GUI **Fix Positions**→skip Stage 2; **Fix Linewidths**→skip Stage 1. Stages 
 - size 1 → 1D consensus / staged Voigt (`enhanced_peak_fitting`).
 - size >1 → `fit_overlap_group_2d` → PS2D; falls back to 1D cross-sections on failure.
 
-**Parallel** (`parallel_voigt_processor.py::fit_all_peaks_parallel`): same clustering runs once, then whole clusters distribute across workers; results consolidated by integer `peak_number`. ~2.7× speedup (6 cores). **Two-pass linewidth learning**: pass 1 fits isolated peaks → median linewidths (+MAD); pass 2 seeds multi-peak clusters with them (falls back to `ps2d_config.py` defaults).
+**One pipeline, sequential or parallel** (`parallel_voigt_processor.py::fit_all_peaks_parallel`): the clustering runs once, then whole clusters are fitted as tasks of `_parallel_cluster_worker` — over a `spawn` pool in parallel mode, as direct calls in this process in sequential mode (`ParallelVoigtProcessor(in_process=True)`, also used below 3 peaks). Results are consolidated by integer `peak_number`, and the two modes give identical results; parallel pays off only on large lists (~2.7× on 6 cores). **Two-pass linewidth learning**: pass 1 fits isolated peaks → median linewidths (+MAD); pass 2 seeds multi-peak clusters with them (R² > 0.85, at least 3 good fits; otherwise `ps2d_config.py` defaults).
+
+**Adaptive radius search** (`adaptive_optimizer.py`, between pass 1 and pass 2): a grid over radF1/radF2 at 1.0 / 1.5 / 2.0 × the median linewidth. **Off by default** (`use_adaptive_optimization`); the Expert-Mode box applies to Fit Spectrum only, a series from the dialog never runs it, and the CLI opts in through `series --params`. It writes its radii into the global PS2D config, so a fresh run (no locked clusters or learned statistics, and every series) first calls `restore_base_ps2d_config()` — the base being the nucleus defaults plus the Expert panel's Apply (`mark_ps2d_config_as_base`).
+
+**Cancel**: a `threading.Event` passed down as `stop=` (`utils/cancellation.py`), checked before each cluster, each detection peak and each adaptive-search fit, and polled while waiting on a pool task. A stopped fit or series raises `Cancelled` and returns nothing: no fallback, no partial results, no `series_results_*` folder.
 
 ---
 
 ## 4. Quality Assessment
 
-`_assign_quality_from_r2` (`core_integrator.py`, applied to PS2D and 1D results alike): Excellent ≥0.9, Good ≥0.8, Fair ≥0.5, Poor ≥0.2, else Failed. Colors: green (Excellent/Good), yellow (Fair), red (Poor/Failed/unfitted).
+`_assign_quality_from_r2` (`core_integrator.py`, applied to PS2D and 1D results alike): Excellent ≥0.9, Good ≥0.8, Fair ≥0.5, Poor ≥0.2, else Failed. Marker colors: lime (Excellent), green (Good), orange (Fair), red (Poor/Failed/unfitted).
 
-**Acceptance**: PS2D pragmatic `r_squared > 0.2` (or formal convergence / chi² reduction); 1D `min_r_squared` default 0.3.
+**Acceptance**: PS2D pragmatic `r_squared > 0.2` (or formal convergence / chi² reduction / a near-noise-only cluster); 1D `min_r_squared` default 0.3.
 
 **Failed peaks** stored with placeholders (`fitted=False, r_squared=0, intensity=0, quality='Failed'`) to keep 1:1 peak_list↔results index mapping for the Navigator.
 
@@ -150,14 +161,14 @@ Bruker `.2ii`/`.2rr`, Varian/Agilent `.fid`/`.ft`, NMRPipe `.ft`/`.pipe`, SPARKY
 
 ## 8. Downstream Models (Modules)
 
-Fitted series feed DynamiXs and Kd (GUI Modules menu / CLI).
+Fitted series feed DynamiXs and Kd (GUI Modules menu / CLI). DynamiXs fits the intensity or volume matrix, where an intensity-pinned or Failed point is left empty.
 
 | Analysis | Model |
 |----------|-------|
 | T₁ / T₂ | Mono-exponential decay |
 | Methyl T₂ | Shared-amp bi-exp `I(t)=0.5·A·[e^(−t/T2a)+e^(−t/T2b)]`, fit in (A, T2_avg, ΔT2); T2a (slow/TROSY) is the reportable T₂ |
 | hetNOE | `I_sat/I_unsat` per residue (+ QC plot vs residue) |
-| Spectral density / model-free | Reduced spectral density → Lipari-Szabo (single/dual field) |
+| Spectral density / model-free | Reduced spectral density → Lipari-Szabo (single/dual field), fitted by bounded least squares from a grid of starts including Rex > 0; NOE predicted from the calculated T₁; errors NaN without Monte Carlo refits |
 | Kd — CSP | 1:1 quadratic isotherm `Δδ = Δδ_max·fraction_bound(L,P0,Kd)` |
 | Kd — intensity | `I = I_inf + (I0−I_inf)·e^(−L/Kd)` |
 

@@ -4,7 +4,7 @@
 
 **Advanced NMR Peak Analysis and Integration Suite**
 
-[![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://python.org)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/mas-gu/lunaNMR)
 
@@ -42,13 +42,13 @@ PySide6/Qt6 suite for NMR peak detection, Voigt profile fitting, and integration
 
 - **Voigt fitting**: Gaussian + Lorentzian lineshapes, ArPLS baseline correction, multi-peak deconvolution with simultaneous fitting of overlapping peaks.
 - **2D simultaneous multi-peak fitting (PS2D)**: closely-spaced peaks auto-routed to 2D Levenberg-Marquardt deconvolution.
-- **Peak detection**: network-based clustering with prominence analysis, no manual seeding required.
-- **Quality assessment**: R², uncertainties (bootstrap / covariance), color-coded markers — plus per-peak flags for what R² cannot see: a fit that stopped on a position or intensity bound, and a peak below the detection floor.
+- **Peak detection**: prominence / S-N peak picking, per sign (negative peaks are kept), no manual seeding required.
+- **Quality assessment**: R², covariance-based uncertainties (bootstrap for Kd fits), color-coded markers — plus per-peak flags for what R² cannot see: a fit that stopped on a position or intensity bound, and a peak below the detection floor.
 - **Series workflows**: relaxation (T₁, T₂, hetNOE), titration, and multi-spectrum (temperature/pH) processing with automated peak tracking.
 - **Kd / titration**: CSP (quadratic 1:1 isotherm) and intensity-decay binding fits.
 - **Dynamics (DynamiXs)**: T₁/T₂, methyl T₂ (bi-exponential), T₁ρ, spectral density, model-free.
 - **1D integration**: peak picking on a 1D spectrum, then height / region-sum / Voigt-area measurement across a series.
-- **Parallel processing**: two-pass cluster-based, ~2.7× speedup.
+- **Parallel processing**: two-pass cluster-based, ~2.7× speedup on large peak lists; sequential mode runs the same pipeline in process and gives identical results.
 - **Headless CLI**: `python -m lunaNMR` — every analysis is scriptable with no display. Subcommand reference: [docs/CLI.md](docs/CLI.md).
 
 **File formats**: Bruker TopSpin (`.2ii`, `.2rr`), Varian/Agilent (`.fid`, `.ft`), NMRPipe (`.ft`, `.pipe`), SPARKY (`.ucsf`). Export: CSV, JSON, PNG, PDF, SVG, EPS.
@@ -63,7 +63,7 @@ cd lunaNMR/lunaNMR_v1o0
 
 pip install -r requirements.txt                          # dependencies
 python3 lunaNMR/validation/verify_installation.py        # verify
-python3 launch_lunaNMR.py                                 # GUI launcher (LunaNMR / DynamiXs selector)
+python3 launch_lunaNMR.py                                 # GUI (starts the LunaNMR main window)
 python -m lunaNMR --help                                  # headless CLI
 ```
 
@@ -73,7 +73,7 @@ Requires **numba** (2D multi-peak fitting) and **PySide6** (GUI).
 
 ## Driving LunaNMR from an Agent
 
-Everything the GUI does is reachable through one headless CLI, built to be run by an AI
+Every analysis the GUI performs is reachable through one headless CLI, built to be run by an AI
 coding agent as well as by hand: `--format json` puts a single summary object on stdout,
 `--dry-run` validates inputs and prints the plan, and exit codes are fixed.
 
@@ -85,7 +85,7 @@ coding agent as well as by hand: `--format json` puts a single summary object on
 | `kd`, `export kd` | Kd titration (CSP / intensity) and its figures |
 | `integrate-1d` | 1D peak integration across a series |
 | `peaks shift` | Apply the registration offset `diagnose` measured |
-| `project inventory` / `export` / `remove` | Inspect, copy out, or prune a `.lunaNMR` bundle |
+| `project build` / `inventory` / `export` / `remove` | Build a `.lunaNMR` bundle from a run folder; inspect, copy out, or prune one |
 | `batch` | Folder-wide detect + fit |
 
 Start with **[AGENTS.md](AGENTS.md)**, then:
@@ -126,7 +126,7 @@ lunaNMR_v1o0/
 ## Scientific Background
 
 - **Voigt function**: convolution of Gaussian (instrumental) and Lorentzian (natural linewidth) components; multi-peak deconvolution with constraints.
-- **Peak detection**: network-based clustering with prominence analysis.
+- **Peak detection**: local extrema with prominence / S-N analysis and top-contour centroid refinement; overlapping peaks grouped by agglomerative clustering.
 - **Optimization**: Levenberg-Marquardt with parameter normalization.
 - **Uncertainty**: bootstrap and covariance-based error estimation.
 
@@ -137,7 +137,8 @@ lunaNMR_v1o0/
 ```bash
 python3 -m venv dev_env && source dev_env/bin/activate   # or dev_env\Scripts\activate on Windows
 pip install -r requirements.txt
-make test        # all three test roots, headless (QT_QPA_PLATFORM=offscreen)
+QT_QPA_PLATFORM=offscreen python -m pytest \
+    tests/ modules/dynamiXs_v2o0/tests/ modules/integration_1d_v1o0/tests/ -q   # all three test roots, headless
 ```
 
 Fork → feature branch → add tests → PR. PEP 8, NumPy-style docstrings.
@@ -160,5 +161,3 @@ Fork → feature branch → add tests → PR. PEP 8, NumPy-style docstrings.
 ## License
 
 MIT — see [LICENSE](LICENSE).
-</content>
-</invoke>

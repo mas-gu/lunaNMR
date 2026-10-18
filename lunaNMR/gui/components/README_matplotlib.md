@@ -13,17 +13,17 @@ The `MatplotlibWidget` provides a standardized way to embed matplotlib plots in 
 
 2. **Design System Integration**
    - Automatic application of LunaNMR design system colors
-   - Panel background: `#F5F5F7` (PANEL_BG_COLOR)
-   - Figure background: `#FFFFFF` (FRAME_BG_COLOR)
+   - Figure background: `#F5F5F7` (PANEL_BG_COLOR)
+   - Axes background: `#FFFFFF` (FRAME_BG_COLOR), set by `clear_full()`, `get_axes()` and
+     on every `MatplotlibMultiAxesWidget` subplot
    - Text colors match design system
 
 3. **Helper Methods**
-   - `clear()` - Clear plot data
-   - `clear_full()` - Complete reset
+   - `clear()` - Clear the axes
+   - `clear_full()` - Clear the axes and reset their background
    - `refresh()` - Redraw canvas
    - `set_title()` - Set plot title with styling
-   - `set_labels()` - Set axis labels with styling
-   - `configure_grid()` - Configure grid appearance
+   - `add_subplot()` / `get_axes()` - Add a subplot / get the primary axes
    - `save_figure()` - Export to file
 
 4. **Multi-Axes Support**
@@ -50,8 +50,9 @@ x = np.linspace(0, 10, 100)
 y = np.sin(x)
 plot_widget.axes.plot(x, y)
 plot_widget.set_title("Sine Wave")
-plot_widget.set_labels("X", "Y")
-plot_widget.configure_grid(True)
+plot_widget.axes.set_xlabel("X")
+plot_widget.axes.set_ylabel("Y")
+plot_widget.axes.grid(True)
 plot_widget.refresh()
 ```
 
@@ -72,8 +73,8 @@ multi_plot = MatplotlibMultiAxesWidget(
 multi_plot.axes_list[0].plot(x, y1)
 multi_plot.axes_list[1].plot(x, y2)
 
-# Or use grid indexing
-ax = multi_plot.get_axes_at(row=0, col=1)
+# axes_list is in row-major order: row 0, col 1 of a 2x2 grid is index 1
+ax = multi_plot.axes_list[0 * multi_plot.ncols + 1]
 ax.plot(x, y3)
 
 # Refresh all
@@ -96,20 +97,18 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 
 ### Backend Setup
 
-**Critical: Import Order Matters**
+**Critical: Set the Backend First**
 
-The matplotlib backend must be set AFTER importing PySide6:
+`launch_lunaNMR.py` forces the QtAgg backend at its very top, before any other matplotlib
+import, so that `NavigationToolbar2QT` renders properly:
 
 ```python
-# Correct order (as in launch_lunaNMR.py)
-from PySide6.QtWidgets import QApplication
+# As in launch_lunaNMR.py
 import matplotlib
 matplotlib.use('QtAgg', force=True)
 
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
 ```
-
-**Do NOT** call `matplotlib.use()` before importing PySide6, as this can cause Qt plugin loading errors.
 
 ### Canvas Integration
 
@@ -148,6 +147,8 @@ The widget automatically applies LunaNMR design system colors:
 ```python
 # Applied automatically in __init__
 figure.patch.set_facecolor(PANEL_BG_COLOR)  # #F5F5F7
+
+# Applied by clear_full(), get_axes() and each MatplotlibMultiAxesWidget subplot
 axes.set_facecolor(FRAME_BG_COLOR)          # #FFFFFF
 ```
 
@@ -179,7 +180,7 @@ axes.plot(x, y, color=mpl_color)
 ```python
 MatplotlibWidget(
     parent=None,        # Parent Qt widget
-    toolbar=True,       # Include navigation toolbar
+    toolbar=False,      # Include navigation toolbar
     figsize=(8, 6),     # Figure size in inches
     dpi=100,           # Resolution
     tight_layout=True   # Use tight_layout
@@ -196,10 +197,10 @@ MatplotlibWidget(
 #### Methods
 
 **clear()**
-Clear axes without removing labels/settings.
+Clear the axes (`Axes.clear()`: data, title and axis labels).
 
 **clear_full()**
-Complete reset of axes.
+`clear()`, then reset the axes background to FRAME_BG_COLOR.
 
 **refresh()**
 Redraw canvas with latest changes.
@@ -207,20 +208,14 @@ Redraw canvas with latest changes.
 **set_title(title, **kwargs)**
 Set plot title with design system styling.
 
-**set_labels(xlabel=None, ylabel=None, **kwargs)**
-Set axis labels with design system styling.
+**add_subplot(nrows, ncols, index)**
+Add a subplot to the figure (1-indexed) and return its Axes.
 
-**configure_grid(visible=True, **kwargs)**
-Configure grid appearance.
-
-**set_axes_background(color=None)**
-Set axes background color (defaults to FRAME_BG_COLOR).
+**get_axes(create_if_missing=True)**
+Return the primary axes, creating one (FRAME_BG_COLOR background) if the figure has none.
 
 **save_figure(filename, **kwargs)**
-Export figure to file.
-
-**enable_toolbar()** / **disable_toolbar()**
-Show/hide navigation toolbar.
+Export figure to file (defaults: `dpi=300`, `bbox_inches='tight'`, white face color).
 
 ### MatplotlibMultiAxesWidget
 
@@ -251,9 +246,6 @@ MatplotlibMultiAxesWidget(
 
 **clear_all()**
 Clear all subplots.
-
-**get_axes_at(row, col)**
-Get axes at specific grid position (0-indexed).
 
 ## Migration Guide
 
@@ -316,19 +308,9 @@ self.plot_widget.refresh()
 
 ## Testing
 
-### Run Unit Tests
-
-```bash
-# Simple import and instantiation test
-python3 test_mpl_widget_simple.py
-
-# Interactive demo with multiple tabs
-python3 test_matplotlib_widget.py
-```
-
 ### Verify Integration
 
-1. Import order is correct (PySide6 first)
+1. The QtAgg backend is set before any other matplotlib import
 2. Backend is QtAgg (not TkAgg)
 3. Canvas type is FigureCanvasQTAgg
 4. Toolbar type is NavigationToolbar2QT
@@ -336,24 +318,6 @@ python3 test_matplotlib_widget.py
 6. All helper methods work
 
 ## Common Issues
-
-### Issue: "could not import module 'PySide6.QtGui'"
-
-**Cause:** matplotlib.use() called before PySide6 import
-
-**Solution:** Always import PySide6 before calling matplotlib.use()
-
-```python
-# Correct
-from PySide6.QtWidgets import QApplication
-import matplotlib
-matplotlib.use('QtAgg', force=True)
-
-# Wrong
-import matplotlib
-matplotlib.use('QtAgg', force=True)
-from PySide6.QtWidgets import QApplication  # Too late!
-```
 
 ### Issue: Plot not updating after changes
 
@@ -371,14 +335,14 @@ widget.refresh()  # Required!
 
 **Cause:** Colors set before widget styling
 
-**Solution:** Let widget apply colors, or use set_axes_background()
+**Solution:** Let widget apply colors, or set the axes background yourself
 
 ```python
 # Automatic
 widget = MatplotlibWidget()  # Colors applied
 
 # Manual
-widget.set_axes_background("#FFFFFF")
+widget.axes.set_facecolor("#FFFFFF")
 widget.refresh()
 ```
 
@@ -386,24 +350,16 @@ widget.refresh()
 
 1. **Batch Updates:** Make all plot changes before calling refresh()
 2. **Clear Efficiently:** Use clear() instead of clear_full() when possible
-3. **Toolbar:** Disable toolbar if not needed to save memory
+3. **Toolbar:** Leave `toolbar=False` (the default) if not needed to save memory
 4. **Figure Size:** Choose appropriate figsize for your use case
 5. **DPI:** Lower DPI (75-100) for faster rendering, higher (150-300) for export
 
 ## Examples
 
 See the following files for complete examples:
-- `test_mpl_widget_simple.py` - Basic usage
-- `test_matplotlib_widget.py` - Interactive demo with all features
-- `lunaNMR/gui/visualization.py` - Original TkAgg implementation (for comparison)
-
-## Next Steps
-
-1. Port existing plotters to use MatplotlibWidget
-2. Update main_gui.py to use Qt canvas
-3. Test with real NMR data
-4. Verify toolbar functionality
-5. Check design system color consistency
+- `lunaNMR/gui/components/spectrum_plotter.py` - `SpectrumPlotter(MatplotlibWidget)`
+- `lunaNMR/gui/components/voigt_analysis_plotter.py` - `VoigtAnalysisPlotter(MatplotlibMultiAxesWidget)`, a 2x2 grid
+- `lunaNMR/gui/dialogs/results_browser_dialog.py` - plain `MatplotlibWidget` charts
 
 ---
 

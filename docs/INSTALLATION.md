@@ -5,7 +5,7 @@ Runs on macOS, Linux, Windows. All commands run from the `lunaNMR_v1o0/` directo
 ## 1. Prerequisites
 
 - **Python** ≥ 3.9 (64‑bit).
-- **Tk** — used only by the launcher's selector dialog. Bundled with most Python builds; on Linux install `python3-tk` (Debian/Ubuntu) or `python3-tkinter` (Fedora/RHEL).
+- **Tk** — imported by the launcher, which uses it only for its startup error dialogs. Bundled with most Python builds; on Linux install `python3-tk` (Debian/Ubuntu) or `python3-tkinter` (Fedora/RHEL).
 - **Git** — to clone the repo.
 
 ## 2. Get the Sources
@@ -33,7 +33,7 @@ All runtime deps are in `requirements.txt`:
 | matplotlib ≥3.5 | backend forced to `QtAgg` |
 | PySide6 ≥6.6 | Qt6 GUI — **required** |
 | numba ≥0.57 | **required** — 3–5× faster 2D multi-peak fitting |
-| networkx ≥2.5 | peak-detection clustering |
+| networkx ≥2.5 | listed requirement; no module imports it |
 | nmrglue ≥0.9 | NMR file reading |
 | psutil ≥5.8 | optional — performance tracking |
 
@@ -66,16 +66,16 @@ read as `python -m lunaNMR …`.
 python3 lunaNMR/validation/verify_installation.py
 ```
 
-Reports Python version, required packages, and GUI availability.
+Reports the Python version, the required packages (and optional `psutil`), the internal modules, whether the main GUI imports, and whether the fitting pipeline initialises.
 
 ## 6. Launch
 
-- **GUI**: `python3 launch_lunaNMR.py` — opens the selector; choose **LunaNMR** (or **DynamiXs** if the optional module is present).
+- **GUI**: `python3 launch_lunaNMR.py` — opens the LunaNMR main window. DynamiXs, Kd / Titration Analysis and 1D Integration are entries of its **Modules** menu.
 - **Headless CLI**: `python -m lunaNMR <subcommand>`. See [CLI.md](CLI.md) for the subcommand list and flags.
 
 ## 7. Sample Data
 
-Example spectra ship under `data_example/`. Copy them into a separate workspace if you prefer not to modify the repo.
+Example spectra ship under `data_example/` (a 1D series in `1D/`, and an eight-point 2D T1 series split between `2DHSQC/`, which also holds the peak lists, and `more/`). Copy them into a separate workspace if you prefer not to modify the repo.
 
 ## 8. Update
 
@@ -89,5 +89,3 @@ Re-run the verification script to confirm Numba still imports.
 ## 9. Cleanup
 
 Deactivate and delete the venv, then remove the repo directory. No system-wide services.
-</content>
-</invoke>

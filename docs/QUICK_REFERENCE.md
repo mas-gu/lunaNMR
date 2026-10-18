@@ -12,7 +12,7 @@ python3 launch_lunaNMR.py
 
 ## Main Workflow
 ```
-Load Spectrum → Detect Peaks → Fit All Peaks → Export Results
+Load Data → Detect → Fit Spectrum → File ▸ Export Results
 ```
 
 ---
@@ -21,24 +21,26 @@ Load Spectrum → Detect Peaks → Fit All Peaks → Export Results
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
-| Search window 1H / X (ppm) | 0.070 / 0.070 | Both dims; keep tight for low-S/N (e.g. saturated hetNOE) |
+| Search window 1H / X (ppm) | 0.070 / 0.070 | Both dims, 15N and 13C (`ps2d_config.SEARCH_WINDOW_PPM`); keep tight for low-S/N (e.g. saturated hetNOE) |
 | Centroid window X / Y (ppm) | 0.01 / 0.10 | Max position shift |
 
 ## Fitting Controls
 
 | Toggle | Default | Effect |
 |--------|---------|--------|
-| PS2D multi-peak | ✓ ON | Auto 2D fitting for overlaps |
+| PS2D multi-peak | always on (no toggle) | Auto 2D fitting for overlaps |
 | Fix Positions | ☐ OFF | Zero drift (use for series) |
 | Fix Linewidths | ☐ OFF | Lock widths to reference |
-| Parallel Processing | ✓ ON | ~2.7× faster |
-| Per-Peak Linewidth Reuse | ☐ OFF | Learned LW as initial guess |
+| Use Parallel Processing | ✓ ON | ~2.7× faster on large peak lists; same results as sequential |
+| Adaptive Parameter Optimization | ☐ OFF | radF1/radF2 grid search; Fit Spectrum only — a series never runs it |
+| Use Spectrum 1 Linewidths as Initial Guess | ☐ OFF | Learned LW as initial guess |
+| Auto-add nearby unmatched peaks | ✓ ON | Adds detected peaks missing from the peak list (dummies), in a series too |
 
 ---
 
 ## Overlap Thresholds (auto-clustering)
 
-Peaks within these elliptical radii cluster for 2D fitting.
+Each peak carries an ellipse with these semi-axes; two peaks cluster for 2D fitting when their ellipses touch (normalised elliptical distance ≤ 2, i.e. < 0.08 ppm ¹H / < 0.8 ppm ¹⁵N on axis).
 
 | Nucleus | F1 / Y (ppm) | F2 / 1H (ppm) |
 |---------|--------------|---------------|
@@ -64,13 +66,13 @@ Marker colors follow the result `quality` field (`_assign_quality_from_r2`, `cor
 
 ## Series Integration (Titration/Relaxation)
 
-1. Fit reference spectrum
-2. ✓ Fix Positions ON
-3. Set as Reference
-4. Process Series
-5. Export Series Results → CSV
+1. Fit the reference spectrum (Fit Spectrum)
+2. **Fit Series** → choose the Peak Source (Cascade / Detected / Independent; Independent is refused for a titration) and the X-axis mode (Off / Time series / Titration point)
+3. ▶ Start Integration (✕ Cancel stops it within a cluster; a cancelled series writes nothing)
 
-Writes `series_results_*/`: `comprehensive_peak_tracking.csv` (wide), `series_analysis_tidy.csv` (long), `peak_intensity_matrix.csv`. Fitted positions to 4 decimals (CSP needs it).
+Fix Positions holds every peak at its seed: leave it off for a titration (CSP).
+
+Writes `series_results_*/`: `comprehensive_peak_tracking.csv` (wide), `series_analysis_tidy.csv` (long), `peak_intensity_matrix.csv` / `peak_volume_matrix.csv` / `peak_detection_matrix.csv` / `peak_intensity_detected_matrix.csv`, `series_metadata.json`. Fitted positions to 4 decimals (CSP needs it).
 
 ---
 
@@ -80,6 +82,7 @@ Writes `series_results_*/`: `comprehensive_peak_tracking.csv` (wide), `series_an
 |--------|---------|
 | **DynamiXs** | T₁/T₂, methyl T₂ (bi-exp), T₁ρ, spectral density, model-free |
 | **Kd / Titration** | Binding Kd — CSP (quadratic isotherm) + intensity decay |
+| **1D Integration** | 1D peak picking, then height / region sum / Voigt area across a series |
 
 ---
 
@@ -95,7 +98,9 @@ python -m lunaNMR <subcommand>          # `lunanmr` needs `pip install -e .`
 | `series` | Process a series/titration → intensity/position matrices |
 | `dynamixs t1t2 / methyl-t2 / hetnoe / t1rho / density / modelfree` | Relaxation + model-free |
 | `kd` / `export kd` | Kd titration fit / figures from a fit JSON |
-| `project inventory / remove` | Inspect / prune a `.lunaNMR` bundle |
+| `integrate-1d` | 1D peak integration across a series |
+| `peaks shift` | Apply the registration offset `diagnose` measured |
+| `project build / inventory / export / remove` | Build a `.lunaNMR` bundle from a run; inspect / copy out / prune one |
 | `batch` | Folder-wide detect + fit |
 
 Full flags: [CLI.md](CLI.md).
@@ -148,7 +153,7 @@ multiple named analyses; reopen from the Project Browser (File ▸ Project Conte
 | Topic | File |
 |-------|------|
 | Installation | [INSTALLATION.md](INSTALLATION.md) |
-| 5-min tutorial | [README.md](README.md#getting-started-5-minutes) |
+| 5-min tutorial | [README.md](README.md#getting-started) |
 | GUI features | [lunaNMR_guide.html](lunaNMR_guide.html) |
 | Series integration | [MULTI_SPECTRUM_GUIDE.md](MULTI_SPECTRUM_GUIDE.md) |
 | Headless CLI | [CLI.md](CLI.md) |

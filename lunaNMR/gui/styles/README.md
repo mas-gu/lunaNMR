@@ -245,12 +245,15 @@ Run the validation:
 python3 -m lunaNMR.gui.styles.design_system
 ```
 
-Run the demo application (requires PySide6):
+Run the demo application (requires PySide6), from `lunaNMR_v1o0/`:
 
 ```bash
-cd lunaNMR/gui/styles
-python3 example_usage.py
+python3 -m lunaNMR.gui.styles.example_usage
 ```
+
+`tests/test_design_token_consistency.py` fails on a font token written in `px`
+(`{FONT_SIZE_*}px`; the tokens are point values) and on the off-palette `#007AFF` /
+`#FF3B30`.
 
 ## Design Philosophy
 
@@ -272,6 +275,4 @@ The design follows Apple's modern design language:
 
 ## References
 
-- Source: `LUNАНMR_UX_STYLE_GUIDE.md`
-- CustomTkinter constants: `lunaNMR/gui/gui_components.py`
 - Qt Style Sheets: https://doc.qt.io/qt-6/stylesheet.html

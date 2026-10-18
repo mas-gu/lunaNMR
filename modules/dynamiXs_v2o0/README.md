@@ -5,9 +5,10 @@ A comprehensive graphical user interface for NMR relaxation data analysis built 
 ## Features
 
 ### 1. T1/T2 Fitting Analysis
-- **Single and multi-core processing** for exponential decay fitting
-- **Bootstrap error estimation** for reliable parameter uncertainties
-- **Interactive parameter adjustment** (initial amplitude, time constant, bootstrap iterations)
+- **Multi-core exponential decay fitting** in the GUI (`fitmulti__Tx_NMRRE.py`); the CLI `dynamixs t1t2` runs the single-core `fit_Tx_NMRRE.py`
+- **Error method**: analytical (default) or bootstrap
+- **Interactive parameter adjustment** (initial amplitude, time constant, delay units ms/s/us, bootstrap iterations) and **Fit on: Height / Volume**
+- **T1ρ → T2 conversion** per field (theta, omega1 and the 15N carrier entered per field)
 - **Automatic plot generation** with customizable layouts
 - **Real-time progress monitoring** and results display
 
@@ -21,26 +22,32 @@ A comprehensive graphical user interface for NMR relaxation data analysis built 
 - **Open previous dataset** entry point loads any prior `*_methylT2_fit_data.json` folder into the viewer without re-running the fit
 - **CSV input format**: descriptive spectrum-name headers (e.g. `003_T2_ADDA_3ms`, `600_T1_0o3` with `o` as filesystem-safe `.`) are parsed for their embedded delays; bare numeric headers and `<num>_N` duplicate-measurement suffixes also supported
 
-### 3. Data Plotting Tools
-- **Dataset comparison** with difference plots and statistical analysis
-- **Dual field plotting** for multi-field NMR experiments  
-- **Interactive parameter selection** for flexible data visualization
+### 3. hetNOE, Spectral Density and Model-Free
+- **hetNOE page**: I_sat / I_unsat per residue from a series intensity matrix or two intensity files
+- **Spectral density page**: single- or dual-field reduced spectral density mapping and model-free fit from data files, J(ωH) or J(0.87ωH)
+- **Model Free Analysis page**: the same analysis run from relaxation series (T1/T2 fitted first), single- or dual-field, J(ωH) or J(0.87ωH) (default: dual-field J(0.87ωH))
+
+### 4. Data Plotting Tools
+The GUI's "Plot Data" page is a placeholder: its buttons are not connected. The tools run as standalone scripts in `dynamiXs_plot/`:
+- **Dataset comparison** (`compare_datasets.py`) with difference plots and mean/std of the difference
+- **Dual field plotting** (`plot_dual_field_datasets.py`) for multi-field NMR experiments
+- **Rex field analysis** (`plot_rex_field_analysis.py`, see [README_rex_field_analysis.md](dynamiXs_plot/README_rex_field_analysis.md))
 - **PDF output** with publication-ready formatting
 
-### 4. Cross-Platform Compatibility
+### 5. Cross-Platform Compatibility
 - **macOS, Windows, and Linux** support through PySide6 (Qt)
 - **Modern Qt-based interface** with LunaNMR styling
 - **User-friendly interface** requiring no scripting knowledge
 
 ## Quick Start
 
-1. **Launch the GUI:**
+1. **Launch the GUI:** from LunaNMR, **Modules ▸ DynamiXs Relaxation Analysis**; or standalone (no hetNOE page, no project saving):
    ```bash
-   cd dynamiXs/
+   cd modules/dynamiXs_v2o0/
    python run_dynamixs_gui.py
    ```
 
-2. **Select your analysis type** from the main menu
+2. **Select your analysis type** from the main menu (Model Free Analysis, T1/T2 Fitting Analysis, T2 Methyl Fitting Analysis, hetNOE Analysis, Spectral Density Analysis, Plot Data)
 
 3. **Import your CSV data files** using the browse buttons
 
@@ -52,7 +59,7 @@ A comprehensive graphical user interface for NMR relaxation data analysis built 
 
 ### T1/T2 Data Files
 - **CSV format** with comma separation
-- **First row:** Time delays (headers: t1, t2, t3, ...)
+- **First row:** Time delays: bare numbers, or spectrum names ending in a delay (`..._300ms`, `..._0o3`); a bare number is read in the page's Delay units (default ms)
 - **First column:** Residue names (rows 2+)
 - **Data matrix:** Signal intensities for each residue and time point
 
@@ -67,18 +74,18 @@ L6,156.7,123.4,89.2,61.5,42.3,28.9,17.1,10.2
 
 ### T1/T2 Fitting
 - **Input:** CSV file with relaxation decay data
-- **Processing:** Single-core or multi-core exponential fitting
+- **Processing:** Multi-core exponential fitting (GUI); single-core (CLI)
 - **Output:** 
   - Results text file with fitted parameters and errors
   - Multi-page PDF plots showing data and fits
-  - Statistical summaries
+  - `<prefix>_<field>_<exp>_fit_data.json` for the Fit Viewer
 
-### Dataset Comparison
+### Dataset Comparison (`dynamiXs_plot/compare_datasets.py`, command line)
 - **Input:** Two CSV files with analysis results
-- **Processing:** Statistical comparison and difference calculation
+- **Processing:** Difference calculation with error propagation
 - **Output:**
   - Comparison plots (original data + differences)
-  - Statistical summaries (mean, std, range)
+  - Mean and std of the difference, on the plot and in the terminal
 
 ## Mathematical Framework
 
@@ -94,11 +101,11 @@ R₁ = A × (3J(ωN) + 6J(ωH + ωN) + J(|ωH - ωN|)) + C × J(ωN)
 
 **Transverse relaxation (R₂):**
 ```
-R₂ = 0.5 × A × (4J(0) + 3J(ωN) + 6J(ωH + ωN) + 6J(0.87ωH) + J(|ωH - ωN|))
+R₂ = 0.5 × A × (4J(0) + 3J(ωN) + 6J(ωH + ωN) + 6J(ωH) + J(|ωH - ωN|))
    + C × (2J(0)/3 + 0.5J(ωN)) + Rex
 ```
 
-**Heteronuclear NOE:**
+**Heteronuclear NOE** (T₁ is the T₁ calculated from the same parameters, not the measured one):
 ```
 NOE = 1 + (A × γH/γN × T₁ × (6J(ωH + ωN) - J(|ωH - ωN|)))
 ```
@@ -130,8 +137,11 @@ Where:
 - `τe` = Internal motion correlation time
 - `Rex` = Chemical exchange contribution to R₂
 
-#### Enhanced J(0.87ωH) Implementation
-For improved accuracy, the analysis uses `J(0.87ωH)` instead of `J(ωH)` to better account for cross-correlation effects and dipolar-CSA interference.
+#### J(0.87ωH) Variants
+The `_087` variants (`ZZ_*density_087.py`) evaluate the `J(ωH)` term of R₂ at `0.87ωH`; `J(ωH ± ωN)` stays at the true frequencies in every variant.
+
+#### Fitting
+Every model-free variant fits S², τe and Rex by bounded least squares from a grid of starts (`dynamiXs_density_functions/model_free_search.py`), including starts with Rex > 0. The fit is unweighted: without Monte Carlo error refits the parameter errors are NaN.
 
 #### Dual-Field Analysis
 The dual-field approach provides better parameter separation by using data from two magnetic fields:
@@ -150,7 +160,7 @@ J(0.87ωH) = [4/(5d²)] × σNOE
 
 Where:
 - `σNOE = (NOE - 1) × R₁ × (γN/γH)`
-- `d² = [μ₀ħγNγH/(8π²r³NH)]²` (dipolar coupling constant)
+- `d² = [μ₀ħγNγH/(4πr³NH)]²` (dipolar coupling constant)
 - `c² = (ωN × Δσ)²/3` (CSA constant)
 
 **Reference:** Farrow et al. J. Biomol. NMR, 6 (1995) 153-162, Equations 5-7
@@ -177,10 +187,10 @@ Install with: `pip install PySide6 numpy matplotlib pandas lmfit scipy`
 - **Stylesheets:** `styles/main.qss` - Qt stylesheet for consistent theming
 - **Workers:** `workers.py` - QThread workers for background analysis
 - **Visualization:** `visualization/` - Results and fit viewers
-- **Launcher:** `run_dynamixs_gui.py` - Application entry point
+- **Launcher:** `run_dynamixs_gui.py` - Standalone entry point; inside LunaNMR the pages are hosted by `DynamiXsDialog` (`lunaNMR/gui/dialogs/dynamixs_dialog.py`)
 
 ### Performance
-- **Multi-core support** for T1/T2 fitting using all available CPU cores
+- **Multi-core support** for GUI T1/T2 fitting
 - **Threading** for non-blocking GUI during long calculations
 - **Memory efficient** processing for large datasets
 - **Progress tracking** for user feedback
@@ -200,35 +210,44 @@ dynamiXs_v2o0/
 ├── visualization/
 │   ├── results_viewer.py     # Model-free results viewer
 │   ├── fit_viewer.py         # T1/T2 fit viewer
+│   ├── t1t2_results_viewer.py # T1/T2 values vs residue
+│   ├── series_results_viewer.py # LunaNMR series results
+│   ├── kd_titration_fit_viewer.py # Kd fit viewer
 │   └── methyl_t2_fit_viewer.py # Methyl bi-exp viewer (per-residue editor and
 │                                #   summary-only mode for "Plot T2 vs Residue")
 ├── methyl_t2_page.py         # Methyl bi-exp T2 page (Run / Open viewer /
 │                              #   Plot T2 vs Residue / Open previous dataset)
+├── hetnoe_page.py            # hetNOE page (LunaNMR dialog only)
+├── kd_titration_page.py      # Kd / titration page (own LunaNMR Modules entry)
+├── dynamiXs_Kd/              # Kd / titration engine (CSP + intensity fits)
+├── tests/                    # dynamiXs + Kd tests
 ├── dynamiXs_T1_T2/           # T1/T2 fitting modules
 │   ├── fit_Tx_NMRRE.py       # Single-core T1/T2 fitting (mono-exp)
 │   ├── fitmulti__Tx_NMRRE.py # Multi-core T1/T2 fitting
 │   ├── fit_methyl_T2.py      # Methyl shared-amp bi-exp fitter (A, T2_avg, ΔT2)
+│   ├── delay_parser.py       # Delay-column header parser
+│   ├── delay_units.py        # Delay units from series_metadata.json / headers
 │   └── refit.py              # Headless refit helpers (sidecar IO,
 │                              #   single-residue refit, TSV/JSON in-place update)
 ├── dynamiXs_integrated/      # Integrated analysis pipeline
 ├── dynamiXs_density_functions/ # Spectral density analysis
-├── dynamiXs_cpmg/            # CPMG analysis modules
+├── dynamiXs_cpmg/            # CPMG scripts (standalone; no page or subcommand)
 ├── dynamiXs_plot/            # Plotting utilities
-└── dynamiXs_format/          # Data formatting tools
+└── dynamiXs_format/          # Data formatting scripts (standalone)
 ```
 
 ## Current Implementation Status
 
 ✅ **Completed:**
-- Main GUI with 5-option menu
-- T1/T2 fitting interface (single and multi-core)
-- Dataset comparison interface
-- Dual field plotting interface
+- Main GUI menu: 6 options in LunaNMR (Model Free, T1/T2, Methyl T2, hetNOE, Spectral Density, Plot Data), 5 standalone (no hetNOE)
+- T1/T2 fitting interface (multi-core), with T1ρ → T2 conversion
+- Methyl T2, hetNOE, spectral density and model-free interfaces
+- "Save run to project" on each page (inside LunaNMR)
 - File handling and parameter configuration
 - Real-time progress monitoring
 
 🚧 **In Development:**
-- Spectral density analysis module
+- Plot Data page (dataset comparison and dual-field plotting run as scripts only)
 - CPMG analysis integration
 - Data formatting utilities
 
@@ -252,18 +271,16 @@ dynamiXs_v2o0/
 - Review error messages in results panel
 
 ### Performance Issues
-- Use multi-core option for large datasets
 - Close other applications to free memory
-- Consider reducing bootstrap iterations for faster results
+- Use the analytical error method, or fewer bootstrap iterations, for faster results
 
 ### Threading Warnings
-- Matplotlib threading warnings have been resolved by using the Agg backend
-- All analysis scripts now use non-interactive plotting for thread safety
+- The T1/T2 fitters, the spectral density / model-free scripts, `compare_datasets.py` and `plot_dual_field_datasets.py` select matplotlib's non-interactive Agg backend
 - Generated plots are saved as PDF files without requiring GUI interaction
 
 ## Future Enhancements
 
-- **CPMG relaxation dispersion** fitting
+- **CPMG relaxation dispersion** fitting in the GUI
 - **Batch processing** for multiple datasets
 - **Parameter optimization** suggestions
 - **Export to common formats** (Excel, Origin, etc.)

@@ -107,10 +107,10 @@
 then tracks them across a <em>series</em> of spectra to extract quantitative observables —
 relaxation rates, binding affinities (K<sub>d</sub>), chemical-shift perturbations (CSP), and intensities.</p>
 <div class="grid">
-  <div class="card"><h4>Detect</h4><p class="muted">Network-clustered peak picking with prominence analysis and quality assessment.</p></div>
+  <div class="card"><h4>Detect</h4><p class="muted">Prominence / S-N peak picking, per sign (negative peaks are kept), with top-contour centroid refinement.</p></div>
   <div class="card"><h4>Fit</h4><p class="muted">Professional Voigt profiles (Gaussian + Lorentzian) with ArPLS baseline correction; 2D simultaneous deconvolution of overlapping clusters (PS2D).</p></div>
   <div class="card"><h4>Track</h4><p class="muted">Cascade propagation across a series so moving peaks (titration) stay locked to the right signal.</p></div>
-  <div class="card"><h4>Analyze</h4><p class="muted">DynamiXs (T1/T2, methyl T2, model-free) and a Kd/titration module (CSP + intensity binding fits).</p></div>
+  <div class="card"><h4>Analyze</h4><p class="muted">DynamiXs (T1/T2, T1ρ, methyl T2, hetNOE, spectral density, model-free), a Kd/titration module (CSP + intensity binding fits) and 1D integration across a series.</p></div>
 </div>
 <p>The active, production codebase is <code>lunaNMR_v1o0/</code> (released at
 <a href="https://github.com/mas-gu/lunaNMR.git">github.com/mas-gu/lunaNMR</a>).</p>
@@ -122,8 +122,9 @@ relaxation rates, binding affinities (K<sub>d</sub>), chemical-shift perturbatio
 pip install -r requirements.txt
 python3 lunaNMR/validation/verify_installation.py   # verify
 python3 launch_lunaNMR.py                            # run
-python -m pytest tests/                              # tests</code></pre>
-<p><strong>Key dependencies:</strong> numpy, pandas, scipy, networkx, matplotlib (backend
+QT_QPA_PLATFORM=offscreen python -m pytest \
+    tests/ modules/dynamiXs_v2o0/tests/ modules/integration_1d_v1o0/tests/ -q   # tests (all three roots)</code></pre>
+<p><strong>Key dependencies:</strong> numpy, pandas, scipy, networkx (listed in <code>requirements.txt</code>; no module imports it), matplotlib (backend
 forced to <code>QtAgg</code>), nmrglue, <strong>PySide6 ≥ 6.6</strong> (required), <strong>numba</strong>
 (required — 3–5× faster 2D fitting; without it large clusters are impractical).</p>
 </section>
@@ -147,26 +148,27 @@ analysis modules (DynamiXs, Kd) consume.</p>
 <section id="arch">
 <h2>Architecture — layers &amp; packages</h2>
 <pre><code>lunaNMR_v1o0/
-├── launch_lunaNMR.py            # launcher (tkinter selector → Qt app)
+├── launch_lunaNMR.py            # launcher: opens the Qt main window
 ├── lunaNMR/
 │   ├── core/                    # processing engines
-│   │   ├── enhanced_peak_picker.py        # network-based peak detection
+│   │   ├── enhanced_peak_picker.py        # prominence / S-N peak detection
 │   │   ├── enhanced_voigt_fitter.py       # 1D Voigt + ArPLS baseline
 │   │   ├── core_integrator.py             # master orchestrator (EnhancedVoigtIntegrator)
-│   │   ├── parallel_voigt_processor.py    # two-pass parallel (≈2.7× speedup)
+│   │   ├── parallel_voigt_processor.py    # two-pass cluster pipeline, sequential or parallel
 │   │   ├── ps2d_*.py                       # 2D simultaneous multi-peak fitting
 │   │   └── adaptive_optimizer.py          # grid search for PS2D radii
 │   ├── gui/                     # PySide6/Qt6 UI (main_window, dialogs, components)
 │   ├── processors/              # single & multi-spectrum workflows
 │   ├── utils/                   # config, parameter, output, file, project managers
-│   └── validation/             # install verification
+│   └── validation/             # install verification + diagnose pre-flight
 └── modules/
-    └── dynamiXs_v2o0/           # relaxation analysis + dynamiXs_Kd/ (titration Kd)</code></pre>
+    ├── dynamiXs_v2o0/           # relaxation analysis + dynamiXs_Kd/ (titration Kd)
+    └── integration_1d_v1o0/     # 1D peak integration across a series</code></pre>
 <table>
 <tr><th>Layer</th><th>Responsibility</th></tr>
 <tr><td><code>core/</code></td><td>The numerical engines: detection, Voigt fitting, 2D deconvolution, parallelism.</td></tr>
 <tr><td><code>processors/</code></td><td>Orchestrate single-spectrum and multi-spectrum (series) runs; produce outputs.</td></tr>
-<tr><td><code>gui/</code></td><td>Qt main window, dialogs (viewers, DynamiXs, Kd), reusable components.</td></tr>
+<tr><td><code>gui/</code></td><td>Qt main window, dialogs (viewers, DynamiXs, Kd, 1D integration), reusable components.</td></tr>
 <tr><td><code>utils/</code></td><td>Cross-cutting: config, parameter sync, unified logging, project save/load.</td></tr>
 <tr><td><code>modules/</code></td><td>Optional analysis apps launched from the <strong>Modules</strong> menu.</td></tr>
 </table>
@@ -174,7 +176,7 @@ analysis modules (DynamiXs, Kd) consume.</p>
 
 <section id="gui">
 <h2>GUI framework</h2>
-<p>Entirely Qt6 via PySide6. The launcher uses tkinter <em>only</em> for the app-selector dialog.
+<p>Entirely Qt6 via PySide6. The launcher uses tkinter <em>only</em> for its startup error dialogs.
 The matplotlib backend is forced to <code>QtAgg</code> before any matplotlib import (critical for
 <code>NavigationToolbar2QT</code> compatibility). The main window <code>LunaNMRMainWindow(BaseWindow)</code>
 lives in <code>gui/main_window.py</code>; all dialogs inherit <code>BaseDialog(QDialog)</code>; styles load
@@ -187,10 +189,12 @@ log area; in CLI mode they fall back to <code>print()</code>. Thread-local callb
 
 <section id="detect">
 <h2>Peak detection</h2>
-<p><code>core/enhanced_peak_picker.py</code> uses <strong>network-based clustering</strong> (via
-<code>networkx</code>) with <strong>prominence analysis</strong> for robust detection, then quality
-assessment with R² and uncertainty. Detection supports manual region restriction and nucleus-adaptive
-search windows.</p>
+<p>Local extrema (<code>scipy.ndimage.maximum_filter</code>) with <strong>prominence / S-N analysis</strong>
+(<code>core/enhanced_peak_picker.py</code>, <code>core_integrator._detect_peaks_by_threshold</code>), kept
+<strong>per sign</strong>: maxima above +threshold and minima below −threshold, so a negative peak beside a
+positive lobe survives. Positions are refined to the top-contour centroid. Detection supports manual region
+restriction; the search window is 0.070 ppm in both dimensions for ¹⁵N and ¹³C
+(<code>ps2d_config.SEARCH_WINDOW_PPM</code>). Cancel stops a detection before its next peak.</p>
 </section>
 
 <section id="voigt">
@@ -213,10 +217,10 @@ with <strong>all</strong> overlapping peaks at once. This is an exact port of th
 1D cross-section fit R² ≈ 0.84 → 2D fit R² ≈ 0.90, position accuracy &lt; 10 ppb.</p>
 <h3>Clustering (critical)</h3>
 <p><code>identify_overlap_clusters()</code> is called <strong>once</strong> before fitting and builds
-hierarchical, graph-based clusters with <strong>transitive</strong> overlap: if A overlaps B and B overlaps
-C, then {A,B,C} form one cluster. Clusters are <em>disjoint</em> — each peak appears in exactly one — and
-respect diameter and max-size limits from <code>ps2d_config.py</code>. This is <em>not</em> a simple radial
-search; it uses full connectivity analysis.</p>
+clusters by agglomerative closest-pair merging: two peaks overlap when their ellipses touch, and clusters
+keep merging while the merged diameter (0.20 ppm ¹H / 1.5 ppm ¹⁵N) and size (20) limits allow, so overlap
+is transitive within those limits: if A overlaps B and B overlaps C, then {A,B,C} form one cluster.
+Clusters are <em>disjoint</em> — each peak appears in exactly one. This is <em>not</em> a simple radial search.</p>
 <h3>Parameter normalization</h3>
 <p><code>ps2d_style_fitter.py</code> normalizes every parameter to O(1) via
 <code>scales = max(|params|, 1e-8)</code>, dropping the Hessian condition number from ~10¹⁰ to ~10³–10⁴.
@@ -228,20 +232,24 @@ The Jacobian is chain-ruled (<code>J_norm = J_phys · scales</code>) and the cov
 (threshold R² &gt; 0.85, ≥ 3 good fits, else fall back to config defaults).</p>
 <table>
 <tr><th>GUI parameter</th><th>Effect</th></tr>
-<tr><td><strong>Fix Positions</strong></td><td>Skips Stage 2 (position refinement) in the L-M optimizer.</td></tr>
-<tr><td><strong>Fix Linewidths</strong></td><td>Skips Stage 1 (linewidth optimization).</td></tr>
+<tr><td><strong>Fix Positions</strong></td><td>Skips Stage 2 (position refinement) and holds positions in the global stage.</td></tr>
+<tr><td><strong>Fix Linewidths</strong></td><td>Holds linewidths in every stage; Stage 1 still fits the intensities.</td></tr>
 </table>
-<p class="muted">5-stage Levenberg-Marquardt: (0) intensity-only, (1) linewidths, (2) positions, (4) global.
+<p class="muted">5-stage Levenberg-Marquardt: (0) intensity-only (disabled), (1) linewidths + intensities, (2) positions, (4) global.
+The intensity box carries the seed's sign (negative peaks are fitted); a peak inside the noise has its shape held.
 Hard position bounds are enforced via <code>np.clip()</code> every iteration. Falls back to 1D cross-sections
 if 2D fitting fails.</p>
 </section>
 
 <section id="parallel">
 <h2>Parallel processing</h2>
-<p><code>core/parallel_voigt_processor.py</code> distributes <strong>whole clusters</strong> (not individual
-peaks) across worker processes after <code>identify_overlap_clusters()</code> has run once — so sequential
-and parallel modes produce <strong>identical</strong> results. ≈2.7× speedup on 6 cores
-(~120 s → ~45 s for 150 peaks). Failed fits always emit a placeholder so the result list stays 1:1 with
+<p><code>core/parallel_voigt_processor.py</code> fits <strong>whole clusters</strong> (not individual
+peaks) as tasks after <code>identify_overlap_clusters()</code> has run once. Sequential mode is the same
+pipeline run in process (<code>ParallelVoigtProcessor(in_process=True)</code>), so the two modes produce
+<strong>identical</strong> results; parallel sends the tasks to worker processes and pays off on large lists,
+≈2.7× on 6 cores (~120 s → ~45 s for 150 peaks). The adaptive radius search is off by default and never runs
+in a series from the dialog; each fresh run starts from the base PS2D config
+(<code>restore_base_ps2d_config</code>). Cancel stops a fit before its next cluster and returns nothing. Failed fits always emit a placeholder so the result list stays 1:1 with
 the peak list (index alignment that downstream cascade tracking depends on).</p>
 </section>
 
@@ -254,19 +262,20 @@ tracking policy:</p>
 <tr><td>Peaks</td><td>Stay put</td><td><strong>Move</strong> (fast exchange)</td></tr>
 <tr><td>x-axis</td><td>Relaxation delay (ms/s)</td><td>Dimensionless point (e.g. 0, 0.5, 1, 2)</td></tr>
 <tr><td>Filename suffix</td><td><code>_50ms</code></td><td><code>_0o5</code> / <code>_1o0</code> (the <code>o</code>-for-<code>.</code> convention)</td></tr>
-<tr><td>Tracking</td><td>Reference positions reused as-is</td><td>Cascade + drift clamp off + wider position margin</td></tr>
+<tr><td>Tracking</td><td>Cascade (default) with the absolute drift clamp to the reference, or Detected / Independent</td><td>Cascade forced (Independent refused) + drift clamp off + linewidth-based per-step window + per-peak territories</td></tr>
 </table>
 <p>The mode is chosen by a dropdown in the series-integration dialog (off / time series / titration),
-threaded through <code>DelayExtractor(mode=...)</code>. The titration path is purely additive — the
-time-series path is unchanged.</p>
+threaded through <code>DelayExtractor(mode=...)</code>.</p>
 </section>
 
 <section id="cascade">
 <h2>Cascade tracking (titration)</h2>
 <p>In a titration, interface residues shift while distal ones don't. The cascade fits the reference
 spectrum, then seeds spectrum <em>N+1</em> from spectrum <em>N</em>'s fitted positions, accumulating drift
-across the series. The per-step search window scales to the reference linewidth (k = 4 × average LW),
-and the fit's per-step position bound (<code>pos_margin</code>) is widened in titration mode.</p>
+across the series. Spectrum 2+ skips detection; the fit's per-step position bound is 4 × the reference
+spectrum's median linewidth (capped at 1.0 / 0.2 ppm), and each peak is further bounded by its own
+<em>territory</em> — 0.49 × the distance to its nearest neighbour — so no peak can reach another. A peak that
+has decayed to 3 × noise or below keeps its last good position as the next seed.</p>
 <div class="callout"><span class="tag">Seed-on-failure</span><p>When a peak's fit <em>fails</em> at spectrum
 <em>N+5</em>, its seed for the next spectrum stays at the last spectrum where a position was actually found
 (<em>N+4</em>) rather than resetting to the reference. <code>_carry_forward_seed</code> matches peaks by
@@ -281,13 +290,14 @@ toward visible failure; use the overlay viewer's manual edit + refit to fix the 
 
 <section id="outputs">
 <h2>Series output files</h2>
-<p>A series run writes a <code>series_results_*/</code> folder consumed by the analysis modules:</p>
+<p>A series run writes a <code>series_results_*/</code> folder consumed by the analysis modules. A cancelled series writes nothing.</p>
 <table>
 <tr><th>File</th><th>Shape</th><th>Read by</th></tr>
 <tr><td><code>comprehensive_peak_tracking.csv</code></td><td>Wide: one row per reference peak; per-point columns <code>{pt}_Position_X/Y</code>, <code>{pt}_Height</code>, <code>{pt}_Volume</code>, …</td><td>Kd module (CSP + intensity), overlay viewer</td></tr>
-<tr><td><code>series_analysis_tidy.csv</code></td><td>Long: one row per (spectrum × peak): <code>spectrum_name, assignment, ppm_x, ppm_y, height, volume, …</code></td><td>DynamiXs, Kd module, manual-audit save</td></tr>
-<tr><td><code>peak_intensity_matrix.csv</code> / <code>_volume_matrix</code> / <code>_detected_matrix</code></td><td>Matrix: rows = residues, columns = point labels (intensity values)</td><td>Kd module (intensity only — no positions)</td></tr>
-<tr><td><code>peak_detection_matrix.csv</code>, <code>processing_summary.csv</code>, <code>per_spectrum_results/</code></td><td>QC / detection / per-spectrum detail</td><td>Browsers, QC</td></tr>
+<tr><td><code>series_analysis_tidy.csv</code></td><td>Long: one row per (spectrum × peak): <code>spectrum_name, assignment, ppm_x, ppm_y, height, volume, …, detection_sigma, position_pinned, intensity_pinned</code></td><td>Kd module, manual-audit save</td></tr>
+<tr><td><code>peak_intensity_matrix.csv</code> / <code>peak_volume_matrix.csv</code> / <code>peak_intensity_detected_matrix.csv</code></td><td>Matrix: rows = residues, columns = point labels (intensity values; an intensity-pinned or Failed point is empty in the fitted matrices)</td><td>DynamiXs (Fit on Height / Volume), Kd module (intensity only — no positions)</td></tr>
+<tr><td><code>series_metadata.json</code></td><td>Each matrix column's spectrum and parsed value, <code>value_units</code>, <code>repeat_scale</code>, the base <code>ps2d_config</code>, per-point <code>territories</code></td><td>DynamiXs delay units, overlay viewer refit and Save corrected</td></tr>
+<tr><td><code>peak_detection_matrix.csv</code>, <code>processing_summary.csv</code>, <code>per_spectrum_results/</code></td><td>Detection / per-spectrum detail</td><td>Browsers</td></tr>
 </table>
 <div class="callout danger"><span class="tag">Position precision</span><p>Fitted positions are written at
 <strong>4 decimals</strong> (≈0.0001 ppm). CSP shifts are ~0.01–0.05 ppm, so any coarser rounding destroys CSP.
@@ -304,9 +314,11 @@ spectra are overlaid, each in its own color. Peak handling:</p>
   markers, colored to match its contour, so overlaid lists are distinguishable. Showing a spectrum
   auto-enables its peak list; the right-panel <em>Peak lists</em> group toggles each list on/off (a global
   <em>Show Peak Markers</em> checkbox gates all of them).</li>
-  <li><strong>Manual edit + refit</strong>: enable <em>Edit positions</em>, then middle-click a mis-tracked
-  peak and middle-click its true location to set an anchor; <em>Re-fit corrected</em> re-fits each corrected
-  peak across all spectra (cluster-aware, reusing learned linewidths), with undo and save-back to the CSVs.</li>
+  <li><strong>Manual edit + refit</strong>: enable <em>Edit positions</em>, then click a mis-tracked peak and
+  click its true location (middle-click does the same without edit mode); <em>Re-fit corrected</em> re-fits each
+  corrected peak across all spectra with the series' recorded PS2D config and its own position window,
+  with <em>Undo</em>; <em>Save corrected</em> finds each point's columns through <code>series_metadata.json</code>
+  (a series without it is refused) and writes the refit's quality and pinned flags back to the CSVs.</li>
   <li><strong>Peak navigator sync</strong>: showing/selecting a spectrum updates the peak table to match.</li>
 </ul>
 </section>
@@ -314,7 +326,10 @@ spectra are overlaid, each in its own color. Peak handling:</p>
 <section id="dynamixs">
 <h2>DynamiXs — relaxation analysis</h2>
 <p><code>modules/dynamiXs_v2o0/</code>, launched from <strong>Modules → DynamiXs Relaxation Analysis</strong>.
-Pages: T1/T2 (mono-exponential), methyl T2 (bi-exponential), spectral density, and Model-Free (integrated).</p>
+Pages: Model-Free (integrated), T1/T2 (mono-exponential, with T1ρ → T2 conversion), methyl T2 (bi-exponential),
+hetNOE, spectral density. The relaxation pages have a delay-units selector (ms/s/us) and fit Height or Volume
+(<em>Fit on</em>); each page's <em>Save run to project</em> stores the run under a name it suggests. Model-free
+fits are bounded least squares; the NOE is predicted from the calculated T1; errors are NaN without Monte Carlo.</p>
 <h3>Methyl T2 (bi-exponential)</h3>
 <p>Tugarinov–Kay shared-amplitude form <code>I(t) = ½·A·[exp(−t/T2a) + exp(−t/T2b)]</code> for ¹³CH₃ groups.
 Fitted internally in the <strong>(A, T2_avg, ΔT2)</strong> basis — <em>not</em> (A, t2a, t2b) — because the
@@ -338,10 +353,13 @@ series:</p>
 <tr><td><strong>Intensity</strong></td><td><em>Not</em> an isotherm:<br><code>I = I_inf + (I₀ − I_inf)·exp(−L/Kd)</code></td>
 <td>Phenomenological decay (lab convention). I₀ anchors L=0; I_inf is the fitted plateau — peaks keep residual intensity at saturation. The quadratic isotherm does not fit intensity.</td></tr>
 </table>
-<p>Fits are <strong>per-residue</strong> plus a <strong>global shared-Kd</strong> CSP fit. Inputs auto-detect
+<p>Fits are <strong>per-residue</strong> plus a <strong>global shared-Kd</strong> fit for each observable
+(the intensity one is an <em>apparent</em> decay constant), pooled over residues with R² ≥ 0.8. The
+concentration units start unstated and Run is refused until they are chosen. Inputs auto-detect
 the tidy CSV, the tracking CSV, or an intensity matrix. Per-point <em>intensity scales</em> correct for
 differing scan counts (× height/volume, never positions). The viewer shows per-residue binding curves and
-Kd-vs-residue bars, with click-to-exclude points + refit.</p>
+Kd-vs-residue bars, with click-to-exclude points + refit; the exported Kd-vs-residue figure shows the global
+fit's pool only.</p>
 <div class="callout warn"><span class="tag">Always bound Kd ≥ 0</span><p>Unbounded curve fitting lands on a
 degenerate <em>negative</em>-Kd minimum. Every Kd fit bounds Kd ≥ 0. A uniform intensity scale across all
 points cancels in the I/I₀ ratio — only the <em>difference</em> between one point and the rest (e.g. a
@@ -350,14 +368,14 @@ half-scan reference) matters.</p></div>
 
 <section id="quality">
 <h2>Quality-based color coding</h2>
-<p>Peak markers in all viewers are colored by fit quality (R²). Extraction checks multiple keys:
+<p>Peak markers in the spectrum viewers are colored by the fit's quality label (assigned from R²). Extraction checks multiple keys:
 <code>quality</code>, <code>Quality</code>, <code>fitting_quality</code>.</p>
 <table>
 <tr><th>Category</th><th>R²</th><th>Color</th></tr>
-<tr><td>Excellent</td><td>≥ 0.9</td><td><span class="dot" style="background:#32cd32"></span>lime/green</td></tr>
-<tr><td>Good</td><td>≥ 0.8</td><td><span class="dot" style="background:#2e8b57"></span>green/blue</td></tr>
+<tr><td>Excellent</td><td>≥ 0.9</td><td><span class="dot" style="background:#32cd32"></span>lime</td></tr>
+<tr><td>Good</td><td>≥ 0.8</td><td><span class="dot" style="background:#34c759"></span>green</td></tr>
 <tr><td>Fair</td><td>≥ 0.5</td><td><span class="dot" style="background:#ffa500"></span>orange</td></tr>
-<tr><td>Poor / Unknown</td><td>&lt; 0.5 / unfitted</td><td><span class="dot" style="background:#ff4040"></span>red</td></tr>
+<tr><td>Poor / Failed / Unknown</td><td>&lt; 0.5 / unfitted</td><td><span class="dot" style="background:#ff4040"></span>red</td></tr>
 </table>
 <p class="muted">Note: in the overlay viewer, per-spectrum peak lists are colored by <em>spectrum</em> (to tell
 lists apart), while single-spectrum views use the quality colors above.</p>
@@ -368,8 +386,9 @@ lists apart), while single-spectrum views use the quality colors above.</p>
 <ul>
   <li><strong>Input spectra</strong>: Bruker TopSpin (<code>.2rr/.2ii</code>), Varian/Agilent (<code>.fid/.ft</code>),
   NMRPipe (<code>.ft/.pipe</code>), Sparky (<code>.ucsf</code>) — via <code>nmrglue</code>.</li>
-  <li><strong>Projects</strong>: <code>.lunaNMR</code> bundle files for state-based save/load
-  (<code>utils/project_manager.py</code>).</li>
+  <li><strong>Projects</strong>: <code>.lunaNMR</code> bundle directories for state-based save/load
+  (<code>utils/project_manager.py</code>). Opening a project starts a clean session; a series opened from a
+  project reads and saves only its bundled files.</li>
   <li><strong>Decimals convention</strong>: filesystem-safe <code>o</code>-for-<code>.</code> in titration
   filenames (<code>1o0</code> = 1.0), shared with the dynamiXs parsers.</li>
 </ul>
@@ -378,7 +397,7 @@ lists apart), while single-spectrum views use the quality colors above.</p>
 <section id="gotchas">
 <h2>Gotchas &amp; design principles</h2>
 <div class="grid">
-  <div class="card"><h4>Silent failure &gt; visible failure</h4><p class="muted">Prefer a fit that fails loudly
+  <div class="card"><h4>Visible failure &gt; silent failure</h4><p class="muted">Prefer a fit that fails loudly
   (low R²) over one that confidently grabs a neighbour and corrupts data. Don't inflate margins to catch the
   last movers — fix those by hand.</p></div>
   <div class="card"><h4>Bound Kd ≥ 0</h4><p class="muted">Unbounded fits find a degenerate negative-Kd minimum.</p></div>
