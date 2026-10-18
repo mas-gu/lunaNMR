@@ -8,6 +8,7 @@ Date: 2025
 
 import os
 import json
+import shutil
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -22,7 +23,7 @@ from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
 from lunaNMR.utils.parameter_manager import NMRParameterManager
 from lunaNMR.utils.quality_categories import DETECTION_SIGMA_FLOOR
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
-from lunaNMR.utils.cancellation import Cancelled
+from lunaNMR.utils.cancellation import Cancelled, raise_if_stopped
 
 
 def resolve_titration_tracking(series_mode, peak_source_mode, enable_drift_limit):
@@ -437,8 +438,10 @@ class MultiSpectrumProcessor:
             peak_list_contour_min: Optional float for Peak List mode detection threshold
                                Each spectrum computes: threshold = max_intensity * contour_min * 1.05
             lock_detection_threshold: If True, use spectrum 1 threshold for all spectra (default True)
-            stop: Optional threading.Event. Checked before each spectrum, and handed to each
-                spectrum's fit, which ends before its next cluster and raises Cancelled.
+            stop: Optional threading.Event. Checked before each spectrum and before the
+                output is written, and handed to each spectrum's fit, which ends before its
+                next cluster. A stopped series writes nothing - an output folder it created
+                is removed - and raises Cancelled.
         """
         refuse_duplicate_assignments(reference_peaks)
 
@@ -505,6 +508,10 @@ class MultiSpectrumProcessor:
 
 
 
+        # Only the output files are written at the end; training data collection writes
+        # into the folder while the run goes on. A cancelled run removes a folder it made.
+        output_folder_is_new = bool(output_folder) and not os.path.exists(output_folder)
+
         # Track processing duration
         start_time = datetime.now()
 
@@ -521,7 +528,8 @@ class MultiSpectrumProcessor:
 
             # Process each spectrum independently
             for i, nmr_file in enumerate(nmr_files):
-                if not self.processing_active or (stop is not None and stop.is_set()):
+                raise_if_stopped(stop)
+                if not self.processing_active:
                     break
 
                 spectrum_name = os.path.basename(nmr_file)
@@ -581,6 +589,7 @@ class MultiSpectrumProcessor:
             }
 
             # Create all output files for downstream compatibility
+            raise_if_stopped(stop)
             self._create_comprehensive_output_files(batch_results)
 
             # Convert dict to BatchResults object for GUI compatibility
@@ -589,6 +598,9 @@ class MultiSpectrumProcessor:
             return batch_results_obj
 
         except Cancelled:
+            if output_folder_is_new and os.path.isdir(output_folder):
+                shutil.rmtree(output_folder)
+            log_info("Series cancelled - nothing written")
             raise
         except Exception as e:
             log_error(f"Multi-spectrum processing failed: {e}")

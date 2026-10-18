@@ -157,10 +157,8 @@ class ProcessingWorker(QObject):
                 stop=self._stop
             )
 
-            if not self._stop.is_set():
-                self.finished.emit(batch_results)
-            else:
-                self.cancelled.emit()
+            # A series that returned was written in full, whatever a late Cancel says
+            self.finished.emit(batch_results)
 
         except Cancelled:
             self.cancelled.emit()
@@ -1032,12 +1030,12 @@ class SeriesIntegrationDialog(BaseDialog):
         self.status_label.setText("Cancelling...")
 
     def _on_cancelled(self):
-        """The run stopped after a cancel."""
+        """The run stopped after a cancel; the series wrote no files and nothing is saved."""
         self.start_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
         self.pause_btn.setEnabled(False)
-        self.status_label.setText("Cancelled")
-        self._log("Series integration cancelled")
+        self.status_label.setText("Cancelled - nothing written")
+        self._log("Series integration cancelled - nothing written")
 
     def _is_running(self) -> bool:
         return self.thread is not None and self.thread.isRunning()
