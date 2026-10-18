@@ -90,6 +90,13 @@ Intensities are deliberate approximations (the maximum in a small box, not a fit
 sub-series ratio from here is an estimate to be re-measured on fitted intensities before it
 is applied.
 
+**Which peak list a spectrum is checked against.** A folder with one `*.txt` uses it for
+every spectrum. A folder with several pairs each spectrum with the list of the same stem
+(`state.ft` ↔ `state.txt`), each pair reported as its own experiment named `folder:stem`,
+since one folder often holds several states each with its own list. A spectrum with no list
+of its name in such a folder is not checked, and a `WARN` names it and the lists that were
+there — judging it against some other list reads a wrong list as decay.
+
 `--quick` uses a coarser registration grid. `--sample` assesses only the first and last
 spectrum of each experiment instead of all of them.
 
