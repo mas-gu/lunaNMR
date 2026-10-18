@@ -339,6 +339,21 @@ def _reference_spectrum(batch):
     return None
 
 
+def _series_at(path):
+    """The series in `path`, its output folder taken to be the one holding it.
+
+    `series` writes batch_results.json beside its CSVs, so that is where they are. The
+    folder the metadata records is where they were first written: gone when the run was
+    moved, and when it was copied, a folder that may since hold a different run.
+    """
+    batch = batch_results_from_dict(json.loads(path.read_text()))
+    folder = path.parent.resolve()
+    batch.metadata['output_folder'] = str(folder)
+    batch.metadata['csv_path'] = str(folder / Path(
+        batch.metadata.get('csv_path') or 'series_analysis_tidy.csv').name)
+    return batch
+
+
 def build_project(run_dir, bundle, spectrum=None, peaks=None):
     """Write `bundle` from what the run under `run_dir` produced.
 
@@ -360,8 +375,7 @@ def build_project(run_dir, bundle, spectrum=None, peaks=None):
 
 def _build(run_dir, bundle, spectrum, peaks, series_files, kd_files, staging):
 
-    saved_series = {name: batch_results_from_dict(json.loads(path.read_text()))
-                    for name, path in series_files.items()}
+    saved_series = {name: _series_at(path) for name, path in series_files.items()}
     first = next(iter(saved_series.values()), None)
     if spectrum is None and first is not None:
         spectrum = _reference_spectrum(first)

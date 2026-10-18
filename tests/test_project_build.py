@@ -130,3 +130,45 @@ def test_a_series_run_on_relative_paths_records_absolute_ones(tmp_path):
     for key in ("data_folder", "output_folder", "csv_path", "peak_list_file"):
         assert Path(meta[key]).is_absolute(), key
     assert Path(meta["data_folder"]) == DNAJA1
+
+
+SERIES_CSVS = ("series_analysis_tidy.csv", "peak_intensity_matrix.csv")
+
+
+def _copy_of_run(run_dir, dest):
+    """A run folder copied elsewhere, with each series CSV marked so a copy taken from
+    the original folder is told apart from one taken from this folder."""
+    import shutil
+    shutil.copytree(run_dir, dest)
+    for name in SERIES_CSVS:
+        path = dest / "series" / "DNAJA1" / name
+        path.write_text(path.read_text() + "\n")
+    return dest
+
+
+def test_a_copied_run_bundles_its_own_csvs_not_the_originals(run_dir, tmp_path):
+    """batch_results.json records where the series first wrote; a copy of the run still
+    names the original folder, which may since hold a different run."""
+    from lunaNMR.cli import main
+    moved = _copy_of_run(run_dir, tmp_path / "moved")
+    out = tmp_path / "B.lunaNMR"
+    assert main(["project", "build", str(moved), "--out", str(out)]) == 0
+    for name in SERIES_CSVS:
+        assert ((out / "series_results" / "DNAJA1" / name).read_text()
+                == (moved / "series" / "DNAJA1" / name).read_text()), name
+
+
+def test_a_moved_run_still_bundles_its_csvs(run_dir, tmp_path):
+    """A moved run's recorded folder is gone; its CSVs sit beside its batch_results.json."""
+    from lunaNMR.cli import main
+    moved = _copy_of_run(run_dir, tmp_path / "moved")
+    batch = moved / "series" / "DNAJA1" / "batch_results.json"
+    data = json.loads(batch.read_text())
+    gone = tmp_path / "gone"
+    data["metadata"]["output_folder"] = str(gone)
+    data["metadata"]["csv_path"] = str(gone / "series_analysis_tidy.csv")
+    batch.write_text(json.dumps(data))
+    out = tmp_path / "B.lunaNMR"
+    assert main(["project", "build", str(moved), "--out", str(out)]) == 0
+    for name in SERIES_CSVS:
+        assert (out / "series_results" / "DNAJA1" / name).exists(), name
