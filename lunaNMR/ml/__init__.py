@@ -16,20 +16,9 @@ from .stats_predictor import StatisticalPredictor
 from .decision_engine import DecisionEngine
 from .model_manager import ModelManager
 
-# Existing training collector (PS2D)
-from .ps2d_training_collector import PS2DTrainingDataCollector
-
 # Local adaptation
 from .training_collector import TrainingCollector
 from .adaptation_engine import AdaptationEngine
-
-# Comprehensive training data collection
-from .storage import get_ml_data_dir, get_training_data_path
-from .comprehensive_collector import (
-    ComprehensiveTrainingCollector,
-    ComprehensiveTrainingSample,
-    PeakTrainingData,
-)
 
 # Peak classifier for ML-based peak detection
 from .peak_feature_extractor import PeakFeatures, PeakFeatureExtractor
@@ -50,15 +39,8 @@ __all__ = [
     'DecisionEngine',
     'ModelManager',
     # Training and adaptation
-    'PS2DTrainingDataCollector',
     'TrainingCollector',
     'AdaptationEngine',
-    # Comprehensive collection
-    'get_ml_data_dir',
-    'get_training_data_path',
-    'ComprehensiveTrainingCollector',
-    'ComprehensiveTrainingSample',
-    'PeakTrainingData',
     # Peak classifier
     'PeakFeatures',
     'PeakFeatureExtractor',
