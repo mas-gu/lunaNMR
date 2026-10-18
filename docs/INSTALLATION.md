@@ -30,6 +30,7 @@ All runtime deps are in `requirements.txt`:
 | Package | Notes |
 |---|---|
 | numpy ≥1.20, pandas ≥1.3, scipy ≥1.7 | core |
+| lmfit ≥1.3.4 | DynamiXs T1/T2 and methyl T2 fitting |
 | matplotlib ≥3.5 | backend forced to `QtAgg` |
 | PySide6 ≥6.6 | Qt6 GUI — **required** |
 | numba ≥0.57 | **required** — 3–5× faster 2D multi-peak fitting |

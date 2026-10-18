@@ -7,6 +7,9 @@ pandas>=1.3.0
 matplotlib>=3.5.0
 scipy>=1.7.0
 
+# Relaxation curve fitting (DynamiXs T1/T2 and methyl T2)
+lmfit>=1.3.4
+
 # Performance optimization - REQUIRED for 2D multi-peak fitting
 # Provides 3-5× speedup for overlapping peak clusters (object mode with scipy.special.wofz)
 # REQUIRED: System will not function properly without Numba acceleration
