@@ -628,11 +628,14 @@ def _run_dynamixs_methyl(args):
         result = run_methyl_t2_analysis_with_params(params)
     _emit(args, _recorded(args,
           {'command': 'dynamixs methyl-t2', 'n_fitted': result['n_fitted'],
+           'n_bi_exp_unidentifiable': result['n_bi_exp_unidentifiable'],
            'time_units': time_units, 'series_metadata': _sidecar_summary(sidecar),
            'dropped_columns': result.get('dropped_columns') or [],
            'n_total': result['n_total'], 'results_file': result['results_file'],
            'json_file': result['json_file']}),
           f"Methyl T2 analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted",
+          f"  {result['n_bi_exp_unidentifiable']} of them bi-exp unidentifiable "
+          f"(T2a/T2b not told apart; see bi_exp_unidentifiable per row)",
           f"  Results: {result['results_file']}",
           f"  JSON:    {result['json_file']}")
     return 0 if result['n_fitted'] else 1
