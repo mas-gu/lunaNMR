@@ -6,14 +6,15 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DENSITY_DIR = REPO_ROOT / "modules" / "dynamiXs_v2o0" / "dynamiXs_density_functions"
+# The density modules are imported by package name, as every caller imports them.
+DYNAMIXS_DIR = REPO_ROOT / "modules" / "dynamiXs_v2o0"
 
 
 def _recorded(body):
     """The numba warnings `body` raised in a fresh process, and whether it left the
     process's warning filters as it found them."""
     code = ("import sys, warnings\n"
-            f"sys.path.insert(0, {str(DENSITY_DIR)!r})\n"
+            f"sys.path.insert(0, {str(DYNAMIXS_DIR)!r})\n"
             "import matplotlib; matplotlib.use('Agg')\n"
             "import numpy as np\n"
             # What these libraries add to the filters on import is theirs, not lunaNMR's.
@@ -50,7 +51,8 @@ def test_the_2d_voigt_kernel_compiles_quietly():
 
 def test_the_density_kernels_raise_no_deprecation():
     numba_warnings, unchanged = _recorded(
-        "import ZZ_multi_density, ZZ_multi_density_087\n"
-        "import ZZ_multi_2fields_density, ZZ_multi_2fields_density_087\n")
+        "from dynamiXs_density_functions import ZZ_multi_density, ZZ_multi_density_087\n"
+        "from dynamiXs_density_functions import (ZZ_multi_2fields_density,\n"
+        "                                        ZZ_multi_2fields_density_087)\n")
     assert numba_warnings == "[]"
     assert unchanged

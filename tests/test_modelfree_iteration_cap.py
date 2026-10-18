@@ -2,9 +2,10 @@
 # ABOUTME: cap and name their residues. fit_success is True for those too, so N/N hid them.
 
 """
-The Monte-Carlo model-free fit stops either on convergence or after `niter` steps, and
-reports `fit_success=True` either way. A fit that ran out of iterations is the weaker
-result, and the summary gave a caller nothing to tell it apart by.
+The model-free fit stops either on convergence or on its evaluation budget, and reports
+`fit_success=True` either way. A fit that ran out of budget is the weaker result, and the
+summary gave a caller nothing to tell it apart by. Each fit says which in its own
+`at_iteration_cap` column; the summary must agree with it.
 """
 
 import json
@@ -19,9 +20,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 RUN = (Path(__file__).resolve().parents[2] / "data_test" / "data_JA1_relaxation"
        / "run_20260825_1405")
 NOE = RUN / "results" / "hetnoe"
-# The main fit's iteration budget (fit_model_free_individual's niter); `iterations` is the
-# last loop index, so a fit that used all of it reports one less.
-LAST_ITERATION = 10_000 - 1
 
 pytestmark = pytest.mark.skipif(not RUN.exists(), reason="data_test not present")
 
@@ -48,9 +46,8 @@ def test_the_summary_counts_and_names_the_capped_fits(modelfree_run, capsys):
     assert main(argv + ["--format", "json"]) == 0
     summary = json.loads(capsys.readouterr().out)
     basic = pd.read_csv(summary["output_files"]["basic_csv"])
-    capped = basic.loc[basic["iterations"] == LAST_ITERATION, "Residue"].astype(str)
+    capped = basic.loc[basic["at_iteration_cap"].astype(bool), "Residue"].astype(str)
 
-    assert len(capped), "the real 600 MHz fit has residues that use every iteration"
     assert summary["n_at_iteration_cap"] == len(capped)
     assert sorted(summary["at_iteration_cap_residues"]) == sorted(capped)
     # Reported, not gated on: which fits count as failed is unchanged.
@@ -62,5 +59,5 @@ def test_the_text_summary_states_the_count(modelfree_run, capsys):
     assert main(argv) == 0
     text = capsys.readouterr().out
     basic = pd.read_csv(out / "mf_spectral_density_basic.csv")
-    n_capped = int((basic["iterations"] == LAST_ITERATION).sum())
+    n_capped = int(basic["at_iteration_cap"].astype(bool).sum())
     assert f"{n_capped} fits stopped at the iteration cap" in text

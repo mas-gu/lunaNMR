@@ -29,6 +29,8 @@ from scipy.optimize import minimize
 import multiprocessing
 from multiprocessing import cpu_count
 from functools import partial
+from dynamiXs_density_functions.model_free_search import (
+    SINGLE_FIELD_STARTS, S2_BOUNDS, TE_BOUNDS, REX_BOUNDS, TE_SCALE, best_least_squares)
 import pickle
 
 # Numba JIT compilation for performance (optional but recommended)
@@ -256,154 +258,58 @@ class ReducedSpectralDensityAnalysis:
             
         return max(1e-12, min(100e-9, tc_est))  # Constrain to reasonable range
 
+    def _single_field_residuals(self, s2, te, rex, t1, t2, noe, tc_fixed):
+        """Relative deviations of the predicted T1, T2 and (when measured) NOE from the
+        measured ones, at fixed tc - the fit's objective, summed in squares."""
+        A = self.d_factor
+        C = self.c_factor
+        gammaHN = GAMMA_H / GAMMA_N
+        jH = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.omegaH)
+        jN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, abs(self.omegaN))
+        jHpN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.omegaH + abs(self.omegaN))
+        jHmN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.omegaH - abs(self.omegaN))
+        j0 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, 0.0)
+
+        r1_calc = (A / 4.0) * (3*jN + 6*jHpN + jHmN) + C * jN
+        r2_calc = 0.5 * (A / 4.0) * (4*j0 + 3*jN + 6*jHpN + 6*jH + jHmN) + C * (2*j0/3.0 + 0.5*jN) + rex
+
+        deviations = [(1.0 / r1_calc - t1) / t1, (1.0 / r2_calc - t2) / t2]
+        if noe is not None and not pd.isna(noe):
+            noe_calc = 1.0 + ((A / 4.0) * gammaHN * t1 * (6*jHpN - jHmN))
+            deviations.append((noe_calc - noe) / (0.1 if noe == 0 else abs(noe)))
+        return deviations
+
     def _fit_single_dataset(self, r1, r2, noe, tc_fixed, niter):
+        """Fit S2, te and Rex for one residue at fixed tc.
+
+        Bounded least squares from a grid of starts (model_free_search): a parameter on a
+        bound can leave it, and the answer does not depend on a random seed. `niter` caps
+        the residual evaluations of each start. The fit carries no uncertainty of its own -
+        the residuals are relative deviations, not weighted by measurement errors - so the
+        errors are NaN here and come from fit_model_free_individual's Monte-Carlo refits.
         """
-        Original fitting function, now separated for clarity
-        This is the existing fit_model_free_individual code
-        """
-        from random import random, randint
-        from math import exp
-        
-        # Convert to T1, T2
         t1 = 1.0 / r1
         t2 = 1.0 / r2
-        
-        # Constants
-        A = self.d_factor
-        C = self.c_factor  
-        gammaHN = GAMMA_H / GAMMA_N
-        
-        # Initialize parameter ensemble
-        ensemble = []
-        
-        # Parameter starting values - RESTORED to original for accuracy
-        s2_start = [x * 0.05 for x in range(1, 21)]  # 0.05 to 1.0 (20 values)
-        te_start = [x * 1e-12 for x in [0.1, 0.5, 1, 2, 5, 10, 20, 50]]  # 8 values
-        rex_start = [float(x) for x in range(16)]  # 0 to 15 s-1 (16 values)
-        
-        # Create initial ensemble
-        for s2 in s2_start:
-            for te in te_start:
-                for rex in rex_start:
-                    ensemble.append((None, s2, te, rex))
-        
-        # Calculate initial scores
-        for k, (score, s2, te, rex) in enumerate(ensemble):
-            # Calculate spectral densities
-            jH = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.omegaH)
-            jN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, abs(self.omegaN))
-            jHpN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.omegaH + abs(self.omegaN))
-            jHmN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.omegaH - abs(self.omegaN))
-            j0 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, 0.0)
-            
-            # Calculate predicted relaxation parameters
-            r1_calc = (A / 4.0) * (3*jN + 6*jHpN + jHmN) + C * jN
-            r2_calc = 0.5 * (A / 4.0) * (4*j0 + 3*jN + 6*jHpN + 6*jH + jHmN) + C * (2*j0/3.0 + 0.5*jN) + rex
-            
-            t1_calc = 1.0 / r1_calc
-            t2_calc = 1.0 / r2_calc
-            
-            # Calculate score (chi-squared)
-            d1 = (t1_calc - t1) / t1
-            d2 = (t2_calc - t2) / t2
-            score = d1*d1 + d2*d2
-            
-            # Add NOE contribution if available
-            if noe is not None and not pd.isna(noe):
-                noe_calc = 1.0 + ((A / 4.0) * gammaHN * t1 * (6*jHpN - jHmN))
-                dn = (noe_calc - noe) / (0.1 if noe == 0 else abs(noe))  # Avoid division by zero
-                score += dn*dn
-                
-            ensemble[k] = (score, s2, te, rex, t1_calc, t2_calc)
-        
-        # Sort and keep best 10
-        ensemble.sort()
-        ensemble = ensemble[:10]
-        ensemble_size = len(ensemble)
-        
-        # Monte Carlo optimization
-        # Convergence is the loop's only early exit, so a fit that never takes it
-        # used every iteration: reported, since fit_success is True for it as well.
-        at_iteration_cap = True
-        for i in range(niter):
-            f = exp(-10.0 * i / float(niter))  # Cooling factor
-
-            ensemble.sort()
-            if ensemble[0][0] < 1e-10:  # Converged
-                at_iteration_cap = False
-                break
-
-            prevScore, s2, te, rex, t1_calc, t2_calc = ensemble[-1]
-            
-            # Mutate parameters
-            d = ((random() - 0.382) * f) + 1.0
-            s2_new = max(0.01, min(1.0, s2 * d))
-            
-            d = ((random() - 0.382) * f) + 1.0  
-            te_new = max(1e-15, min(10e-10, te * d)) #GM 10e-9 to 10e-10
-            
-            d = ((random() - 0.382) * f) + 1.0
-            rex_new = max(0.0, min(50.0, rex * d))
-            
-            # Calculate new score
-            jH = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, self.omegaH)
-            jN = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, abs(self.omegaN))
-            jHpN = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, self.omegaH + abs(self.omegaN))
-            jHmN = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, self.omegaH - abs(self.omegaN))
-            j0 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, 0.0)
-            
-            r1_calc = (A / 4.0) * (3*jN + 6*jHpN + jHmN) + C * jN
-            r2_calc = 0.5 * (A / 4.0) * (4*j0 + 3*jN + 6*jHpN + 6*jH + jHmN) + C * (2*j0/3.0 + 0.5*jN) + rex_new
-            
-            t1_calc = 1.0 / r1_calc
-            t2_calc = 1.0 / r2_calc
-            
-            d1 = (t1_calc - t1) / t1
-            d2 = (t2_calc - t2) / t2
-            score = d1*d1 + d2*d2
-            
-            if noe is not None and not pd.isna(noe):
-                noe_calc = 1.0 + ((A / 4.0) * gammaHN * t1 * (6*jHpN - jHmN))
-                dn = (noe_calc - noe) / (0.1 if noe == 0 else abs(noe))
-                score += dn*dn
-            
-            # Accept or reject
-            ratio = exp(prevScore - score)
-            if ratio > 1.0:
-                ensemble[-1] = (score, s2_new, te_new, rex_new, t1_calc, t2_calc)
-            else:
-                k = randint(0, ensemble_size - 1)
-                ensemble[-1] = ensemble[k]
-        
-        # Return best result
-        ensemble.sort()
-        if len(ensemble) > 0:
-            score, s2_best, te_best, rex_best, t1_calc, t2_calc = ensemble[0]
-            
-            # Calculate errors from ensemble spread
-            s2_values = [e[1] for e in ensemble[:100]]  # Top 100 results
-            te_values = [e[2] for e in ensemble[:10]]
-            rex_values = [e[3] for e in ensemble[:100]]
-            
-            return {
-                'S2': s2_best,
-                'tc': tc_fixed * 1e9,  # Convert to ns
-                'te': te_best * 1e12,  # Convert to ps
-                'Rex': rex_best,
-                'S2_err': np.std(s2_values),
-                'te_err': np.std(te_values) * 1e12,
-                'Rex_err': np.std(rex_values), 
-                'fit_success': True,
-                'chi2': score,
-                'iterations': i,
-                'at_iteration_cap': at_iteration_cap
-            }
-        else:
-            return {
-                'S2': np.nan, 'tc': np.nan, 'te': np.nan, 'Rex': np.nan,
-                'S2_err': np.nan, 'te_err': np.nan, 'Rex_err': np.nan,
-                'fit_success': False, 'chi2': np.inf, 'iterations': niter
-            }
+        fit = best_least_squares(
+            lambda p: self._single_field_residuals(p[0], p[1], p[2], t1, t2, noe, tc_fixed),
+            SINGLE_FIELD_STARTS,
+            lower=(S2_BOUNDS[0], TE_BOUNDS[0], REX_BOUNDS[0]),
+            upper=(S2_BOUNDS[1], TE_BOUNDS[1], REX_BOUNDS[1]),
+            scale=(1.0, TE_SCALE, 1.0), max_nfev=niter)
+        s2_best, te_best, rex_best = fit['params']
+        return {
+            'S2': s2_best,
+            'tc': tc_fixed * 1e9,  # Convert to ns
+            'te': te_best * 1e12,  # Convert to ps
+            'Rex': rex_best,
+            'S2_err': np.nan,
+            'te_err': np.nan,
+            'Rex_err': np.nan,
+            'fit_success': True,
+            'chi2': fit['chi2'],
+            'iterations': fit['nfev'],
+            'at_iteration_cap': not fit['converged']
+        }
 
     def fit_model_free_individual(self, r1, r2, noe, tc_fixed,
                                 r1_err=None, r2_err=None, noe_err=None,

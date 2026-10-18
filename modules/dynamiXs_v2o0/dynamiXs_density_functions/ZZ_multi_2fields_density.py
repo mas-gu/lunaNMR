@@ -33,6 +33,8 @@ from scipy.optimize import minimize
 import multiprocessing
 from multiprocessing import cpu_count
 from functools import partial
+from dynamiXs_density_functions.model_free_search import (
+    DUAL_FIELD_STARTS, S2_BOUNDS, TE_BOUNDS, REX_BOUNDS, TE_SCALE, best_least_squares)
 import pickle
 
 # Numba JIT compilation for performance (optional but recommended)
@@ -207,220 +209,84 @@ class DualFieldSpectralDensityAnalysis:
             
         return max(1e-12, min(100e-9, tc_est))
 
+    def _field_residuals(self, field, s2, te, rex, t1, t2, noe, tc_fixed):
+        """Relative deviations of one field's predicted T1, T2 and (when measured) NOE from
+        the measured ones, at fixed tc. `field` is 1 or 2."""
+        A = getattr(self, f'field{field}_d_factor')
+        C = getattr(self, f'field{field}_c_factor')
+        omegaH = getattr(self, f'field{field}_omegaH')
+        omegaN = abs(getattr(self, f'field{field}_omegaN'))
+        gammaHN = GAMMA_H / GAMMA_N
+        jH = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaH)
+        jN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaN)
+        jHpN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaH + omegaN)
+        jHmN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaH - omegaN)
+        j0 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, 0.0)
+
+        r1_calc = (A / 4.0) * (3*jN + 6*jHpN + jHmN) + C * jN
+        r2_calc = 0.5 * (A / 4.0) * (4*j0 + 3*jN + 6*jHpN + 6*jH + jHmN) + C * (2*j0/3.0 + 0.5*jN) + rex
+        t1_calc = 1.0 / r1_calc
+
+        deviations = [(t1_calc - t1) / t1, (1.0 / r2_calc - t2) / t2]
+        if noe is not None and not pd.isna(noe):
+            noe_calc = 1.0 + ((A / 4.0) * gammaHN * t1_calc * (6*jHpN - jHmN))
+            deviations.append((noe_calc - noe) / (0.1 if noe == 0 else abs(noe)))
+        return deviations
+
     def _fit_dual_field_dataset(self, r1_f1, r2_f1, noe_f1, r1_f2, r2_f2, noe_f2, tc_fixed, niter):
         """
-        Fit dual-field dataset for a single residue
-        
+        Fit a shared S2 and te, and one Rex per field, to both fields of one residue.
+
+        Bounded least squares from a grid of starts (model_free_search): a parameter on a
+        bound can leave it, and the answer does not depend on a random seed. `niter` caps
+        the residual evaluations of each start. The fit carries no uncertainty of its own -
+        the residuals are relative deviations, not weighted by measurement errors - so the
+        errors are NaN here and come from fit_dual_field_model_free's Monte-Carlo refits.
+
         Parameters:
         -----------
         r1_f1, r2_f1, noe_f1 : float
             Field 1 relaxation parameters
-        r1_f2, r2_f2, noe_f2 : float  
+        r1_f2, r2_f2, noe_f2 : float
             Field 2 relaxation parameters
         tc_fixed : float
             Fixed overall correlation time
         niter : int
-            Number of iterations
-            
+            Residual evaluations allowed per start
+
         Returns:
         --------
         dict : Fitted parameters
         """
-        from random import random, randint
-        from math import exp
-        
-        # Convert to T1, T2 for both fields
         t1_f1, t2_f1 = 1.0 / r1_f1, 1.0 / r2_f1
         t1_f2, t2_f2 = 1.0 / r1_f2, 1.0 / r2_f2
-        
-        # Constants for both fields
-        A1, A2 = self.field1_d_factor, self.field2_d_factor  # Same for both fields
-        C1, C2 = self.field1_c_factor, self.field2_c_factor  # Different for each field
-        gammaHN = GAMMA_H / GAMMA_N
-        
-        # Initialize parameter ensemble
-        ensemble = []
-        
-        # Parameter starting values
-        # Parameter starting values - RESTORED to original for accuracy
-        s2_start = [x * 0.05 for x in range(1, 21)]  # 0.05 to 1.0
-        te_start = [x * 1e-12 for x in [0.1, 0.5, 1, 2, 5, 10, 20, 50]]  # 1ps to 1ns
-        rex1_start = [float(x) for x in range(16)]  # 0 to 15 s-1 for field 1
-        rex2_start = [float(x) for x in range(16)]  # 0 to 15 s-1 for field 2
-        
-        # Create initial ensemble - now includes Rex for both fields
-        for s2 in s2_start:
-            for te in te_start:
-                for rex1 in rex1_start:
-                    for rex2 in rex2_start:
-                        ensemble.append((None, s2, te, rex1, rex2))
-        
-        # Calculate initial scores
-        for k, (score, s2, te, rex1, rex2) in enumerate(ensemble):
-            # Calculate spectral densities for both fields
-            # Field 1
-            jH1 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.field1_omegaH)
-            jN1 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, abs(self.field1_omegaN))
-            jHpN1 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.field1_omegaH + abs(self.field1_omegaN))
-            jHmN1 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.field1_omegaH - abs(self.field1_omegaN))
-            j01 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, 0.0)
-            
-            # Field 2
-            jH2 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.field2_omegaH)
-            jN2 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, abs(self.field2_omegaN))
-            jHpN2 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.field2_omegaH + abs(self.field2_omegaN))
-            jHmN2 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.field2_omegaH - abs(self.field2_omegaN))
-            j02 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, 0.0)
-            
-            # Calculate predicted relaxation parameters for both fields
-            # Field 1
-            r1_calc_f1 = (A1 / 4.0) * (3*jN1 + 6*jHpN1 + jHmN1) + C1 * jN1
-            r2_calc_f1 = 0.5 * (A1 / 4.0) * (4*j01 + 3*jN1 + 6*jHpN1 + 6*jH1 + jHmN1) + C1 * (2*j01/3.0 + 0.5*jN1) + rex1
 
-            # Field 2
-            r1_calc_f2 = (A2 / 4.0) * (3*jN2 + 6*jHpN2 + jHmN2) + C2 * jN2
-            r2_calc_f2 = 0.5 * (A2 / 4.0) * (4*j02 + 3*jN2 + 6*jHpN2 + 6*jH2 + jHmN2) + C2 * (2*j02/3.0 + 0.5*jN2) + rex2
-            
-            t1_calc_f1, t2_calc_f1 = 1.0 / r1_calc_f1, 1.0 / r2_calc_f1
-            t1_calc_f2, t2_calc_f2 = 1.0 / r1_calc_f2, 1.0 / r2_calc_f2
-            
-            # Calculate combined score (chi-squared for both fields)
-            d1_f1 = (t1_calc_f1 - t1_f1) / t1_f1
-            d2_f1 = (t2_calc_f1 - t2_f1) / t2_f1
-            d1_f2 = (t1_calc_f2 - t1_f2) / t1_f2
-            d2_f2 = (t2_calc_f2 - t2_f2) / t2_f2
-            
-            score = d1_f1*d1_f1 + d2_f1*d2_f1 + d1_f2*d1_f2 + d2_f2*d2_f2
-            
-            # Add NOE contributions for both fields
-            if noe_f1 is not None and not pd.isna(noe_f1):
-                noe_calc_f1 = 1.0 + ((A1 / 4.0) * gammaHN * t1_calc_f1 * (6*jHpN1 - jHmN1))
-                dn_f1 = (noe_calc_f1 - noe_f1) / (0.1 if noe_f1 == 0 else abs(noe_f1))
-                score += dn_f1*dn_f1
+        def residuals(p):
+            s2, te, rex1, rex2 = p
+            return (self._field_residuals(1, s2, te, rex1, t1_f1, t2_f1, noe_f1, tc_fixed)
+                    + self._field_residuals(2, s2, te, rex2, t1_f2, t2_f2, noe_f2, tc_fixed))
 
-            if noe_f2 is not None and not pd.isna(noe_f2):
-                noe_calc_f2 = 1.0 + ((A2 / 4.0) * gammaHN * t1_calc_f2 * (6*jHpN2 - jHmN2))
-                dn_f2 = (noe_calc_f2 - noe_f2) / (0.1 if noe_f2 == 0 else abs(noe_f2))
-                score += dn_f2*dn_f2
-                
-            ensemble[k] = (score, s2, te, rex1, rex2, t1_calc_f1, t2_calc_f1, t1_calc_f2, t2_calc_f2)
-        
-        # Sort and keep best 10
-        ensemble.sort()
-        ensemble = ensemble[:10]
-        ensemble_size = len(ensemble)
-        
-        # Monte Carlo optimization
-        # Convergence is the loop's only early exit, so a fit that never takes it
-        # used every iteration: reported, since fit_success is True for it as well.
-        at_iteration_cap = True
-        for i in range(niter):
-            f = exp(-10.0 * i / float(niter))  # Cooling factor
-
-            ensemble.sort()
-            if ensemble[0][0] < 1e-10:  # Converged
-                at_iteration_cap = False
-                break
-
-            prevScore, s2, te, rex1, rex2, t1_calc_f1, t2_calc_f1, t1_calc_f2, t2_calc_f2 = ensemble[-1]
-            
-            # Mutate parameters
-            d = ((random() - 0.382) * f) + 1.0
-            s2_new = max(0.01, min(1.0, s2 * d))
-            
-            d = ((random() - 0.382) * f) + 1.0  
-            te_new = max(1e-15, min(10e-10, te * d))
-            
-            d = ((random() - 0.382) * f) + 1.0
-            rex1_new = max(0.0, min(50.0, rex1 * d))
-            
-            d = ((random() - 0.382) * f) + 1.0
-            rex2_new = max(0.0, min(50.0, rex2 * d))
-            
-            # Calculate new score with dual-field data
-            # Field 1
-            jH1 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, self.field1_omegaH)
-            jN1 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, abs(self.field1_omegaN))
-            jHpN1 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, self.field1_omegaH + abs(self.field1_omegaN))
-            jHmN1 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, self.field1_omegaH - abs(self.field1_omegaN))
-            j01 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, 0.0)
-            
-            # Field 2
-            jH2 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, self.field2_omegaH)
-            jN2 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, abs(self.field2_omegaN))
-            jHpN2 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, self.field2_omegaH + abs(self.field2_omegaN))
-            jHmN2 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, self.field2_omegaH - abs(self.field2_omegaN))
-            j02 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, 0.0)
-            
-            # Calculate relaxation parameters
-            r1_calc_f1 = (A1 / 4.0) * (3*jN1 + 6*jHpN1 + jHmN1) + C1 * jN1
-            r2_calc_f1 = 0.5 * (A1 / 4.0) * (4*j01 + 3*jN1 + 6*jHpN1 + 6*jH1 + jHmN1) + C1 * (2*j01/3.0 + 0.5*jN1) + rex1_new
-            r1_calc_f2 = (A2 / 4.0) * (3*jN2 + 6*jHpN2 + jHmN2) + C2 * jN2
-            r2_calc_f2 = 0.5 * (A2 / 4.0) * (4*j02 + 3*jN2 + 6*jHpN2 + 6*jH2 + jHmN2) + C2 * (2*j02/3.0 + 0.5*jN2) + rex2_new
-            
-            t1_calc_f1, t2_calc_f1 = 1.0 / r1_calc_f1, 1.0 / r2_calc_f1
-            t1_calc_f2, t2_calc_f2 = 1.0 / r1_calc_f2, 1.0 / r2_calc_f2
-            
-            d1_f1 = (t1_calc_f1 - t1_f1) / t1_f1
-            d2_f1 = (t2_calc_f1 - t2_f1) / t2_f1
-            d1_f2 = (t1_calc_f2 - t1_f2) / t1_f2
-            d2_f2 = (t2_calc_f2 - t2_f2) / t2_f2
-            
-            score = d1_f1*d1_f1 + d2_f1*d2_f1 + d1_f2*d1_f2 + d2_f2*d2_f2
-            
-            # Add NOE contributions
-            if noe_f1 is not None and not pd.isna(noe_f1):
-                noe_calc_f1 = 1.0 + ((A1 / 4.0) * gammaHN * t1_calc_f1 * (6*jHpN1 - jHmN1))
-                dn_f1 = (noe_calc_f1 - noe_f1) / (0.1 if noe_f1 == 0 else abs(noe_f1))
-                score += dn_f1*dn_f1
-
-            if noe_f2 is not None and not pd.isna(noe_f2):
-                noe_calc_f2 = 1.0 + ((A2 / 4.0) * gammaHN * t1_calc_f2 * (6*jHpN2 - jHmN2))
-                dn_f2 = (noe_calc_f2 - noe_f2) / (0.1 if noe_f2 == 0 else abs(noe_f2))
-                score += dn_f2*dn_f2
-            
-            # Accept or reject
-            ratio = exp(prevScore - score)
-            if ratio > 1.0:
-                ensemble[-1] = (score, s2_new, te_new, rex1_new, rex2_new, t1_calc_f1, t2_calc_f1, t1_calc_f2, t2_calc_f2)
-            else:
-                k = randint(0, ensemble_size - 1)
-                ensemble[-1] = ensemble[k]
-        
-        # Return best result
-        ensemble.sort()
-        if len(ensemble) > 0:
-            score, s2_best, te_best, rex1_best, rex2_best, t1_calc_f1, t2_calc_f1, t1_calc_f2, t2_calc_f2 = ensemble[0]
-            
-            # Calculate errors from ensemble spread
-            s2_values = [e[1] for e in ensemble[:10]]
-            te_values = [e[2] for e in ensemble[:10]]
-            rex1_values = [e[3] for e in ensemble[:10]]
-            rex2_values = [e[4] for e in ensemble[:10]]
-            
-            return {
-                'S2': s2_best,
-                'tc': tc_fixed * 1e9,  # Convert to ns
-                'te': te_best * 1e12,  # Convert to ps
-                'Rex_f1': rex1_best,
-                'Rex_f2': rex2_best,
-                'S2_err': np.std(s2_values),
-                'te_err': np.std(te_values) * 1e12,
-                'Rex_f1_err': np.std(rex1_values),
-                'Rex_f2_err': np.std(rex2_values),
-                'fit_success': True,
-                'chi2': score,
-                'iterations': i,
-                'at_iteration_cap': at_iteration_cap
-            }
-        else:
-            return {
-                'S2': np.nan, 'tc': np.nan, 'te': np.nan, 
-                'Rex_f1': np.nan, 'Rex_f2': np.nan,
-                'S2_err': np.nan, 'te_err': np.nan, 
-                'Rex_f1_err': np.nan, 'Rex_f2_err': np.nan,
-                'fit_success': False, 'chi2': np.inf, 'iterations': niter
-            }
+        fit = best_least_squares(
+            residuals, DUAL_FIELD_STARTS,
+            lower=(S2_BOUNDS[0], TE_BOUNDS[0], REX_BOUNDS[0], REX_BOUNDS[0]),
+            upper=(S2_BOUNDS[1], TE_BOUNDS[1], REX_BOUNDS[1], REX_BOUNDS[1]),
+            scale=(1.0, TE_SCALE, 1.0, 1.0), max_nfev=niter)
+        s2_best, te_best, rex1_best, rex2_best = fit['params']
+        return {
+            'S2': s2_best,
+            'tc': tc_fixed * 1e9,  # Convert to ns
+            'te': te_best * 1e12,  # Convert to ps
+            'Rex_f1': rex1_best,
+            'Rex_f2': rex2_best,
+            'S2_err': np.nan,
+            'te_err': np.nan,
+            'Rex_f1_err': np.nan,
+            'Rex_f2_err': np.nan,
+            'fit_success': True,
+            'chi2': fit['chi2'],
+            'iterations': fit['nfev'],
+            'at_iteration_cap': not fit['converged']
+        }
 
     def fit_dual_field_model_free(self, r1_f1, r2_f1, noe_f1, r1_f2, r2_f2, noe_f2, tc_fixed,
                                 r1_f1_err=None, r2_f1_err=None, noe_f1_err=None,
