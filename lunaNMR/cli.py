@@ -1124,13 +1124,18 @@ def _run_project_remove(args):
               f"  would free {_human_size(sum(s for _, _, s in targets))}")
         return 0
     try:
+        targets = manager.resolve_bundle_paths(args.bundle, args.paths)
         freed = manager.remove_bundle_paths(args.bundle, args.paths)
     except ValueError as exc:
         _emit_error(args, exc)
         return 1
+    removed = [p for p, exists, _ in targets if exists]
+    missing = [p for p, exists, _ in targets if not exists]
     _emit(args, {'command': 'project remove', 'bundle': args.bundle,
-                 'paths': args.paths, 'freed': freed},
-          f"Removed {len(args.paths)} path(s), freed {_human_size(freed)}")
+                 'paths': args.paths, 'removed': removed, 'missing': missing,
+                 'freed': freed},
+          f"Removed {len(removed)} path(s), freed {_human_size(freed)}",
+          *(f"  not present: {rel}" for rel in missing))
     return 0
 
 

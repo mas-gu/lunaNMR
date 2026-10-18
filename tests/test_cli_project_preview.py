@@ -65,3 +65,51 @@ class TestRemoveHasAPreview:
         bundle = _bundle(tmp_path)
         assert main(["project", "remove", str(bundle), "fit_results/fits.json"]) == 0
         assert not (bundle / "fit_results" / "fits.json").exists()
+
+
+class TestRemoveActsOnlyOnABundle:
+    """Containment inside the given folder is not enough: the folder itself has to be a
+    bundle, its manifest is protected, and the summary names only what was deleted."""
+
+    def test_a_folder_without_a_manifest_is_refused(self, tmp_path):
+        from lunaNMR.cli import main
+        folder = tmp_path / "notabundle"
+        (folder / "important").mkdir(parents=True)
+        (folder / "important" / "data.txt").write_text("keep")
+        assert main(["project", "remove", str(folder), "important"]) == 1
+        assert main(["project", "remove", str(folder), "important", "--dry-run"]) == 1
+        assert (folder / "important" / "data.txt").exists()
+
+    @pytest.mark.parametrize("rel", ["project.json", "./project.json",
+                                     "fit_results/../project.json"])
+    def test_the_manifest_is_protected(self, tmp_path, rel):
+        from lunaNMR.cli import main
+        bundle = _bundle(tmp_path)
+        assert main(["project", "remove", str(bundle), rel]) == 1
+        assert main(["project", "remove", str(bundle), rel, "--dry-run"]) == 1
+        assert (bundle / "project.json").exists()
+
+    def test_a_refused_path_deletes_nothing_else_in_the_call(self, tmp_path):
+        from lunaNMR.cli import main
+        bundle = _bundle(tmp_path)
+        assert main(["project", "remove", str(bundle),
+                     "gui_state.json", "project.json"]) == 1
+        assert (bundle / "gui_state.json").exists()
+
+    def test_a_missing_path_is_reported_missing_not_removed(self, tmp_path, capsys):
+        from lunaNMR.cli import main
+        bundle = _bundle(tmp_path)
+        assert main(["project", "remove", str(bundle), "fit_results/fits.json",
+                     "series_results/nonexistent", "--format", "json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["removed"] == ["fit_results/fits.json"]
+        assert payload["missing"] == ["series_results/nonexistent"]
+
+    def test_the_text_summary_counts_only_removed_paths(self, tmp_path, capsys):
+        from lunaNMR.cli import main
+        bundle = _bundle(tmp_path)
+        assert main(["project", "remove", str(bundle), "fit_results/fits.json",
+                     "series_results/nonexistent"]) == 0
+        out = capsys.readouterr().out
+        assert "Removed 1 path(s)" in out
+        assert "not present: series_results/nonexistent" in out
