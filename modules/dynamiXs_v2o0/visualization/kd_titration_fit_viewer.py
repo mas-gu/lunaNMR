@@ -347,7 +347,8 @@ class KdTitrationFitViewer(QMainWindow):
         # "Missing" is the SAME for both observables: the peak must be present (detected
         # position + a real intensity) at both endpoints, so a residue isn't shown as
         # present in one mode and grey in the other. (ref_point_values applies that rule.)
-        names, vals = ref_point_values(self.fits, i, j, obs, alpha=alpha, value=value)
+        names, vals = ref_point_values(self.fits, i, j, obs, alpha=alpha, value=value,
+                                       ref_max_ratio=meta.get("ref_max_ratio"))
         bar_color = "seagreen" if obs == "csp" else "indianred"
         # I/I₀ is a ratio → fix the axis at 0–1; CSP is in ppm → auto-scale.
         self._plot_residue_bars(ax, names, vals, bar_color,
@@ -785,7 +786,8 @@ class KdTitrationFitViewer(QMainWindow):
         value = meta.get("intensity_value", "height")
         from kd_export import export_ref_vs_point
         return export_ref_vs_point(os.path.join(dest, f"{base}_{obs}_ref_vs_point"),
-                                   self.fits, labels, obs, alpha=alpha, value=value)
+                                   self.fits, labels, obs, alpha=alpha, value=value,
+                                   ref_max_ratio=meta.get("ref_max_ratio"))
 
     def _write_global_fit_data(self, dest, base, obs):
         """Write the CSV + JSON of the per-residue global shared-Kd params for one

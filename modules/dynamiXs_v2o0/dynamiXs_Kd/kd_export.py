@@ -18,7 +18,8 @@ def _none_if_nonfinite(v):
     return None if isinstance(v, float) and not math.isfinite(v) else v
 
 
-def export_ref_vs_point(base_path, fits, labels, obs, ref=0, alpha=0.14, value='height'):
+def export_ref_vs_point(base_path, fits, labels, obs, ref=0, alpha=0.14, value='height',
+                        ref_max_ratio=None):
     """Write '<base_path>.csv' (wide, Excel-ready) and '<base_path>.json' (structured
     mirror) for one observable's per-residue values across titration points, relative
     to the reference point. Returns the list of written file paths.
@@ -27,7 +28,8 @@ def export_ref_vs_point(base_path, fits, labels, obs, ref=0, alpha=0.14, value='
     peak is absent. JSON: {observable, unit, reference_point, labels, residues:[{residue,
     values}]} with null where absent.
     """
-    header, rows = ref_vs_point_table(fits, labels, obs, ref=ref, alpha=alpha, value=value)
+    header, rows = ref_vs_point_table(fits, labels, obs, ref=ref, alpha=alpha, value=value,
+                                      ref_max_ratio=ref_max_ratio)
 
     csv_path = base_path + ".csv"
     with open(csv_path, 'w', newline='') as fh:

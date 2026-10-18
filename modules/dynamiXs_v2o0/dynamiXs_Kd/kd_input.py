@@ -24,12 +24,16 @@ def _to_point(label):
     from which the trailing numeric token is taken as the point index
     (e.g. '03_2D_series_ref_001' -> 1.0). Actual concentrations come from the
     caller's --conc; the point value only needs to order and count the points.
+    A '_<n>' repeat suffix ('1_2', the second acquisition at point 1) names the same
+    point, so the bare-number read skips any label with an underscore: float()
+    accepts one as a digit separator and reads '1_2' as 12.
     """
     s = str(label).strip()
-    try:
-        return float(s.replace('o', '.'))
-    except (ValueError, TypeError):
-        pass
+    if '_' not in s:
+        try:
+            return float(s.replace('o', '.'))
+        except (ValueError, TypeError):
+            pass
     match = re.search(r'(\d+(?:[o.]\d+)?)(?:_\d+)?$', s)
     if match:
         try:
@@ -37,6 +41,20 @@ def _to_point(label):
         except ValueError:
             return None
     return None
+
+
+def _refuse_unread_points(labels):
+    """Raise if any point label has no titration point to read.
+
+    Concentrations are matched to the points by position, so a point dropped here
+    would move every concentration after it onto the wrong spectrum.
+    """
+    unread = sorted({str(lbl) for lbl in labels if _to_point(lbl) is None})
+    if unread:
+        raise ValueError(
+            f"no titration point can be read from {len(unread)} spectrum label(s): "
+            f"{', '.join(unread)}. Each spectrum must be named by its point "
+            f"(e.g. '0.5', '0o5' or '..._001').")
 
 
 def load_titration_tidy(csv_path):
@@ -57,10 +75,11 @@ def load_titration_tidy(csv_path):
     an unphysical ratio. Blanking is POINT-WISE: a residue that failed at one point
     keeps every other point.
     """
-    df = pd.read_csv(csv_path)
+    # Residue names are text: an all-numeric column with a blank would read as float.
+    df = pd.read_csv(csv_path, dtype={'assignment': str})
     df = df.copy()
+    _refuse_unread_points(df['spectrum_name'].unique())
     df['_pt'] = df['spectrum_name'].map(_to_point)
-    df = df[df['_pt'].notna()]
     points = sorted(df['_pt'].unique())
 
     cols = ['ppm_x', 'ppm_y', 'height', 'volume']
@@ -118,11 +137,12 @@ def load_titration_tracking(csv_path):
     per-residue format as load_titration_tidy.
 
     Columns look like: Assignment, {label}_Position_X, {label}_Position_Y,
-    {label}_Height, {label}_Volume, ... for each titration point label.
+    {label}_Height, {label}_Volume, ... for each titration point label. A point whose
+    {label}_Quality is 'Failed' is blanked in every column, as the tidy loader does.
     """
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, dtype={'Assignment': str})
     labels = [c[:-len('_Position_X')] for c in df.columns if c.endswith('_Position_X')]
-    labels = [lbl for lbl in labels if _to_point(lbl) is not None]
+    _refuse_unread_points(labels)
     labels.sort(key=_to_point)
     points = [_to_point(lbl) for lbl in labels]
 
@@ -133,7 +153,9 @@ def load_titration_tracking(csv_path):
         a = str(row.get('Assignment', '')).strip()
         if not a or a.lower() in ('nan', 'dummy', ''):
             continue
-        rec = {'points': list(points)}
+        failed = {lbl for lbl in labels
+                  if str(row.get(f'{lbl}_Quality', '')).strip().lower() == 'failed'}
+        rec = {'points': list(points), 'n_failed_points': len(failed)}
         # As load_titration_tidy: a point on its intensity floor is blanked in every
         # column, a position on its margin only in the position columns. The flags are
         # written as '1.0'/'0.0'; a file from before they existed has no such columns.
@@ -145,7 +167,7 @@ def load_titration_tracking(csv_path):
             vals = []
             for lbl in labels:
                 col = f'{lbl}_{suffix}'
-                is_pinned = (_pinned(lbl, 'Intensity')
+                is_pinned = (lbl in failed or _pinned(lbl, 'Intensity')
                              or (suffix.startswith('Position') and _pinned(lbl, 'Position')))
                 usable = col in df.columns and pd.notna(row[col]) and not is_pinned
                 vals.append(float(row[col]) if usable else np.nan)
@@ -160,9 +182,16 @@ def load_intensity_matrix(csv_path):
     These files (peak_intensity_matrix.csv, peak_volume_matrix.csv,
     peak_intensity_detected_matrix.csv) hold only intensities — no per-point
     positions — so they support intensity Kd but not CSP.
+
+    Every CSV that is neither tidy nor tracking arrives here, so one that cannot be an
+    intensity matrix is refused: with no point columns or no residue rows there is
+    nothing to fit, and a matrix of 0/1 detection flags fits every residue to one Kd.
     """
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, dtype={'Assignment': str})
     point_cols = [c for c in df.columns if _to_point(c) is not None]
+    if not point_cols:
+        raise ValueError(f"no titration point columns in {csv_path}: it is not a series "
+                         f"tidy, peak-tracking or intensity-matrix CSV")
     point_cols.sort(key=_to_point)
     points = [_to_point(c) for c in point_cols]
 
@@ -175,6 +204,13 @@ def load_intensity_matrix(csv_path):
         nan = [np.nan] * len(points)
         residues[a] = {'points': list(points), 'ppm_x': list(nan), 'ppm_y': list(nan),
                        'height': vals, 'volume': list(vals)}
+    if not residues:
+        raise ValueError(f"no residue rows (Assignment) in {csv_path}")
+    values = np.array([r['height'] for r in residues.values()], dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size and np.isin(finite, (0.0, 1.0)).all():
+        raise ValueError(f"every value in {csv_path} is 0 or 1: these are detection flags, "
+                         f"not intensities. Use the intensity or volume matrix.")
     return points, residues
 
 

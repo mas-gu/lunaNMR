@@ -92,13 +92,14 @@ def peak_present(series, k, value='height'):
             and np.isfinite(v[k]) and v[k] > 0.0)
 
 
-def pair_observable(series, i, j, obs, alpha=0.14, value='height'):
+def pair_observable(series, i, j, obs, alpha=0.14, value='height', ref_max_ratio=None):
     """Observable for one residue between reference point i and point j.
 
     obs='csp'  -> CSP (ppm) from the position shift: sqrt(ΔδH² + (alpha·ΔδN)²).
     obs='intensity' -> ratio v[j]/v[i] of the chosen value ('height'/'volume').
     Returns NaN if an endpoint is missing — a 0.0 position is the undetected
     sentinel, a non-positive reference intensity makes the ratio undefined.
+    `ref_max_ratio` is the cap the fit was run with (metadata 'ref_max_ratio').
     """
     if obs == 'csp':
         px = np.asarray(series.get('ppm_x', []), float)
@@ -116,14 +117,14 @@ def pair_observable(series, i, j, obs, alpha=0.14, value='height'):
     # Same rule the fit path applies. A residue the fitter dropped for a broken reference
     # must not reappear in a figure at a ratio of 1e9 — one such bar flattens every real
     # one, and the figure would be describing a residue the fit already rejected.
-    if not reference_usable(v, ref):
+    if not reference_usable(v, ref, ref_max_ratio):
         return float('nan')
     if not np.isfinite(v[j]) or v[j] <= 0.0:
         return float('nan')
     return float(v[j] / ref)
 
 
-def ref_point_values(fits, i, j, obs, alpha=0.14, value='height'):
+def ref_point_values(fits, i, j, obs, alpha=0.14, value='height', ref_max_ratio=None):
     """(names, vals) of the observable between reference point i and point j for each
     fit, NaN where the peak is absent (per peak_present) at either endpoint. Shared by
     the GUI viewer's ref→point bars and the CLI export."""
@@ -131,7 +132,8 @@ def ref_point_values(fits, i, j, obs, alpha=0.14, value='height'):
     for f in fits:
         series = f.get('series')
         if series and peak_present(series, i, value) and peak_present(series, j, value):
-            v = pair_observable(series, i, j, obs, alpha=alpha, value=value)
+            v = pair_observable(series, i, j, obs, alpha=alpha, value=value,
+                                ref_max_ratio=ref_max_ratio)
         else:
             v = float('nan')
         names.append(f.get('residue'))
@@ -190,7 +192,8 @@ def global_fit_table(fits, global_fit, obs, P0):
     return header, rows
 
 
-def ref_vs_point_table(fits, labels, obs, ref=0, alpha=0.14, value='height'):
+def ref_vs_point_table(fits, labels, obs, ref=0, alpha=0.14, value='height',
+                       ref_max_ratio=None):
     """Wide table of the observable per residue across titration points, relative to
     the reference point `ref`. Returns (header, rows).
 
@@ -201,7 +204,8 @@ def ref_vs_point_table(fits, labels, obs, ref=0, alpha=0.14, value='height'):
     """
     header = ['Residue'] + [str(lbl) for lbl in labels]
     names = [f.get('residue') for f in fits]
-    columns = [ref_point_values(fits, ref, j, obs, alpha=alpha, value=value)[1]
+    columns = [ref_point_values(fits, ref, j, obs, alpha=alpha, value=value,
+                                ref_max_ratio=ref_max_ratio)[1]
                for j in range(len(labels))]
     rows = []
     for idx, name in enumerate(names):

@@ -10,7 +10,7 @@ import numpy as np
 from scipy.optimize import curve_fit, least_squares
 from scipy.optimize import OptimizeWarning
 
-from kd_models import csp_model, intensity_decay, residue_sort_key
+from kd_models import csp_model, intensity_decay, residue_sort_key, REF_MAX_RATIO
 from kd_input import load_titration, csp_series, intensity_ratio_series
 
 _MIN_POINTS = 3
@@ -552,6 +552,10 @@ def load_inputs(params):
     if len(concs) != len(points):
         raise ValueError(f"{len(concs)} concentrations given but {len(points)} titration points found")
     P0 = float(params['protein_conc'])
+    # fraction_bound divides by P0: zero makes every CSP residual non-finite, and a
+    # negative value fits to a confident Kd for a protein that cannot exist.
+    if not np.isfinite(P0) or P0 <= 0.0:
+        raise ValueError(f"protein concentration P0 must be positive, got {P0:g}")
     # Equivalents are a ratio to [P]0, so they only become concentrations once scaled.
     # Applied to an explicit --conc too: the flag describes the numbers, not their source.
     if str(params.get('conc_units', 'absolute')).lower().startswith('eq'):
@@ -726,6 +730,9 @@ def run_kd_analysis_with_params(params, progress_callback=None):
                      'concentrations': concs, 'conc_units': 'absolute', 'points': points,
                      'intensity_scales': list(scales) if scales else None,
                      'intensity_value': value,
+                     # The figures blank a broken reference by the same cap as the fit.
+                     'ref_max_ratio': (REF_MAX_RATIO if ref_max_ratio is None
+                                       else float(ref_max_ratio)),
                      'observables': observables, 'n_bootstrap': n_boot,
                      'n_excluded_dummy': n_excluded_dummy,
                      'csp_significance': csp_sig,
