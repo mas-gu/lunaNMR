@@ -1,5 +1,5 @@
-# ABOUTME: Tests the manual position-edit (two-click move) in the result viewer.
-# ABOUTME: Phase 1 — picking a peak and recording a corrected position; no refit yet.
+# ABOUTME: Tests the manual position-edit (two-click move) in the result viewer: picking a peak,
+# ABOUTME: recording its corrected position, and the real constrained re-fit and its undo.
 
 import sys
 
@@ -111,47 +111,51 @@ class TestTwoClickMove:
 
 
 class TestRefitAndUndo:
-    """Orchestration of the constrained re-fit (the fit itself is stubbed)."""
+    """The constrained re-fit, on a real 3-point DNAJA1 titration written by `lunaNMR series`."""
 
-    @staticmethod
-    def _stub_refit(dialog):
-        # Replace the real fit with a deterministic write-back.
-        def fake(spec_idx, assignment, x, y):
-            peak = dialog._find_peak_obj(spec_idx, assignment)
-            dialog._set_peak_position(peak, x, y)
-            peak['r_squared'] = 0.95
-            peak['quality'] = 'Excellent'
-            return 0.95
-        dialog._refit_peak_in_spectrum = fake
+    ASSIGNMENT = '42GlyH'
 
-    def test_refit_marks_edited_and_clears_pending(self, dialog):
-        dialog.overlay_selected_spectrum_idx = 0
-        dialog._on_toggle_edit_mode(True)
-        dialog._pending_corrections[(0, 'R1')] = (8.40, 121.5)
-        self._stub_refit(dialog)
-        dialog._on_refit_corrected()
-        # R1 appears in both spectra, so both get re-fit (corrected anchor / current anchor).
-        assert (0, 'R1') in dialog._edited
-        assert (1, 'R1') in dialog._edited
-        assert dialog._pending_corrections == {}
-        assert dialog._find_peak_obj(0, 'R1')['r_squared'] == 0.95
+    @pytest.fixture
+    def series_viewer(self, app, dnaja1_titration_series, open_overlay_viewer):
+        viewer = open_overlay_viewer(dnaja1_titration_series)
+        yield viewer
+        viewer.deleteLater()
 
-    def test_undo_restores_original_position_and_state(self, dialog):
-        dialog.overlay_selected_spectrum_idx = 0
-        dialog._on_toggle_edit_mode(True)
-        orig = dialog._peak_center(dialog._find_peak_obj(0, 'R1'))
+    def test_refit_marks_edited_and_clears_pending(self, series_viewer):
+        viewer = series_viewer
+        viewer.overlay_selected_spectrum_idx = 0
+        viewer._on_toggle_edit_mode(True)
+        before = dict(viewer._find_peak_obj(0, self.ASSIGNMENT))
+        cx, cy = viewer._peak_center(before)
+        viewer._pending_corrections[(0, self.ASSIGNMENT)] = (cx + 0.002, cy)
+        viewer._on_refit_corrected()
+        # The peak is in every spectrum, so each is re-fit (corrected anchor / current anchor).
+        n = len(viewer.spectra)
+        assert viewer._edited == {(i, self.ASSIGNMENT) for i in range(n)}
+        assert viewer._pending_corrections == {}
+        assert viewer.edit_status_label.text().startswith(f"Re-fit {n} peak-fits (0 failed)")
+        after = viewer._find_peak_obj(0, self.ASSIGNMENT)
+        assert after['height'] != before['height']   # written back from the refit
+
+    def test_undo_restores_original_position_and_state(self, series_viewer):
+        import copy
+        viewer = series_viewer
+        viewer.overlay_selected_spectrum_idx = 0
+        viewer._on_toggle_edit_mode(True)
+        originals = [copy.deepcopy(viewer._find_peak_obj(i, self.ASSIGNMENT))
+                     for i in range(len(viewer.spectra))]
+        cx, cy = viewer._peak_center(originals[0])
         # select, move, then re-fit
-        dialog._on_edit_left_click(8.01, 120.1)
-        dialog._on_edit_left_click(8.40, 121.5)
-        self._stub_refit(dialog)
-        dialog._on_refit_corrected()
-        assert dialog._find_peak_obj(0, 'R1').get('r_squared') == 0.95
-        dialog._on_undo_corrections()
-        # undo reverts the drag AND the re-fit, back to the original fit
-        assert dialog._peak_center(dialog._find_peak_obj(0, 'R1')) == orig
-        assert 'r_squared' not in dialog._find_peak_obj(0, 'R1')
-        assert dialog._edited == set()
-        assert dialog._pending_corrections == {}
+        viewer._on_edit_left_click(cx, cy)
+        viewer._on_edit_left_click(cx + 0.002, cy)
+        viewer._on_refit_corrected()
+        assert viewer._find_peak_obj(0, self.ASSIGNMENT) != originals[0]
+        viewer._on_undo_corrections()
+        # undo reverts the drag AND the re-fit, back to the original fit, in every spectrum
+        assert [viewer._find_peak_obj(i, self.ASSIGNMENT)
+                for i in range(len(viewer.spectra))] == originals
+        assert viewer._edited == set()
+        assert viewer._pending_corrections == {}
 
 
 class TestShowSyncsPeakNavigator:
