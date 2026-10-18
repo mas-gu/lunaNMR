@@ -91,3 +91,26 @@ def export_global_fit(base_path, fits, global_fit, obs, P0):
         json.dump(payload, fh, indent=2)
 
     return [csv_path, json_path]
+
+
+def global_pool(global_fit, obs):
+    """The residues the shared `obs` fit pooled, as a set; None when the fit records no
+    pool (no global fit for `obs`)."""
+    pool = ((global_fit or {}).get(obs) or {}).get('residues')
+    return None if pool is None else set(pool)
+
+
+def kd_bars_pool(fits, global_fit, metadata, obs):
+    """The fits a Kd-vs-residue figure for `obs` plots, and the note its title carries.
+
+    Only the residues in the shared fit's pool: the global Kd rests on them, and drawing
+    the rest beside them says nothing about which count. Without a recorded pool every
+    fit is plotted and the note is empty."""
+    pool = global_pool(global_fit, obs)
+    if pool is None:
+        return list(fits), ''
+    kept = [f for f in fits if f.get('residue') in pool]
+    note = f"{len(kept)} of {len(fits)} residues"
+    if obs == 'csp' and (metadata or {}).get('csp_pool_excluded'):
+        note += " (see csp_pool_excluded for the rest)"
+    return kept, note
