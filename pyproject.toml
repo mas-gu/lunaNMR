@@ -30,3 +30,10 @@ lunanmr = "lunaNMR.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["lunaNMR*"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    # nmrglue's Tecmag reader builds 'a'-alias dtypes at import, which NumPy 2 deprecates.
+    # A DeprecationWarning from a library is hidden outside a test runner by default.
+    "ignore:Data type alias 'a' was deprecated:DeprecationWarning:nmrglue.fileio.tecmag",
+]

@@ -14,6 +14,9 @@ Date: 2025-10-03
 Version: 1.0 - 
 """
 
+import functools
+import warnings
+
 import numpy as np
 from scipy.special import wofz
 
@@ -43,7 +46,25 @@ if NUMBA_AVAILABLE:
         implementation to pure Python/NumPy, which is feasible but requires 2-3 hours.
         Current 3-5× speedup is sufficient for practical NMR use.
         """
-        return numba.jit(forceobj=True, cache=True)(func)
+        compiled = numba.jit(forceobj=True, cache=True)(func)
+        first_call_done = []
+
+        @functools.wraps(func)
+        def call(*args, **kwargs):
+            if first_call_done:
+                return compiled(*args, **kwargs)
+            # The first call compiles. numba then warns that the kernel fell back to
+            # object mode - which forceobj asks for - and that object-mode code with
+            # lifted loops cannot be cached; both are expected for these kernels.
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', category=numba.NumbaWarning,
+                                        message=r'\s*Compilation is falling back to object mode')
+                warnings.filterwarnings('ignore', category=numba.NumbaWarning,
+                                        message=r'\s*Cannot cache compiled function')
+                result = compiled(*args, **kwargs)
+            first_call_done.append(True)
+            return result
+        return call
 else:
     def jit_decorator(func):
         """No-op decorator when Numba not available - function runs as normal Python"""

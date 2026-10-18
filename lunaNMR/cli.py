@@ -21,6 +21,7 @@ import math
 import os
 import re
 import sys
+import threading
 
 
 def _float_list(text):
@@ -159,17 +160,24 @@ def _recorded(args, summary):
     return summary
 
 
-def _emit(args, summary, *human_lines):
+def _emit(args, summary, *human_lines, error=None):
     """Print the run summary: a single JSON object under --format json, else human lines.
 
     `ok`, `schema_version` and the full `command` are injected here rather than written
     into every call site, so a summary cannot be added without them.
+
+    `error` is a (type, message) pair for a run that completed and reports a summary but
+    returns non-zero - a dry-run with a missing input, a fit with nothing fitted. `ok`
+    means the exit code is 0, so such a summary carries `ok: false` and the `error`
+    object every failure carries.
     """
     import json
     if getattr(args, 'format', 'text') == 'json':
-        envelope = {'ok': True, 'schema_version': SCHEMA_VERSION,
+        envelope = {'ok': error is None, 'schema_version': SCHEMA_VERSION,
                     'command': _full_command(args)}
         envelope.update(summary)
+        if error is not None:
+            envelope['error'] = {'type': error[0], 'message': error[1]}
         print(json.dumps(_json_safe(envelope), allow_nan=False))
     else:
         for line in human_lines:
@@ -255,8 +263,22 @@ def _dry_run(args, inputs, planned):
         human.append(f"  input  {label}: {path} [{'OK' if ok else 'MISSING'}]")
     for key, val in planned.items():
         human.append(f"  output {key}: {val}")
-    _emit(args, summary, *human)
+    _emit(args, summary, *human, error=_missing_input_error(missing))
     return 1 if missing else 0
+
+
+def _missing_input_error(missing):
+    """The `error` of a dry-run whose inputs are not all there, or None."""
+    if not missing:
+        return None
+    return ('MissingInput', f"Input(s) not found: {', '.join(str(p) for p in missing)}")
+
+
+def _nothing_fitted_error(n_fitted, what='residues fitted'):
+    """The `error` of a fit run that produced nothing, or None."""
+    if n_fitted:
+        return None
+    return ('NothingFitted', f"No {what}")
 
 
 def _add_modules_path(*parts):
@@ -670,7 +692,7 @@ def _run_dynamixs_t1t2(args):
            'json_file': result.get('json_file'),
            'baseline_fixed': result.get('baseline_fixed', True),
            'n_window_marginal': marginal}),
-          *human)
+          *human, error=_nothing_fitted_error(result['n_fitted']))
     return 0 if result['n_fitted'] else 1
 
 
@@ -711,7 +733,8 @@ def _run_dynamixs_methyl(args):
           f"  {result['n_bi_exp_unidentifiable']} of them bi-exp unidentifiable "
           f"(T2a/T2b not told apart; see bi_exp_unidentifiable per row)",
           f"  Results: {result['results_file']}",
-          f"  JSON:    {result['json_file']}")
+          f"  JSON:    {result['json_file']}",
+          error=_nothing_fitted_error(result['n_fitted']))
     return 0 if result['n_fitted'] else 1
 
 
@@ -888,6 +911,14 @@ def _findings_exit_code(findings, strict=False):
     return 1 if (strict and 'WARN' in severities) else 0
 
 
+def _preflight_error(code, findings):
+    """The `error` of a pre-flight whose findings gate the run, or None."""
+    if not code:
+        return None
+    counts = {s: sum(1 for f in findings if f.severity == s) for s in ('FAIL', 'WARN')}
+    return ('PreflightFailed', f"{counts['FAIL']} FAIL, {counts['WARN']} WARN finding(s)")
+
+
 def _run_diagnose(args):
     """Read-only pre-flight over a whole dataset: registration, capture, delays, peak lists."""
     from lunaNMR.validation.spectra_check import check_dataset
@@ -906,8 +937,10 @@ def _run_diagnose(args):
                      f"union: {result['assignments']['union']}")
     human.append('\n' + '=' * 72)
     human.extend(_format_findings(result['findings']))
-    _emit(args, {'command': 'diagnose', **_serialise_checks(result)}, *human)
-    return _findings_exit_code(result['findings'], strict=args.strict)
+    code = _findings_exit_code(result['findings'], strict=args.strict)
+    _emit(args, {'command': 'diagnose', **_serialise_checks(result)}, *human,
+          error=_preflight_error(code, result['findings']))
+    return code
 
 
 def _validate_series(parser, args):
@@ -1074,7 +1107,7 @@ def _run_series(args):
                    'peaks': args.peaks, 'peaks_exists': peaks_ok, 'mode': args.mode,
                    **tracking, 'parallel': args.parallel,
                    'output_dir': args.out, 'missing_inputs': missing}
-        deep_lines, deep_code = [], 0
+        deep_lines, deep_code, deep_error = [], 0, None
         if getattr(args, 'deep', False) and nmr_files and peaks_ok:
             from lunaNMR.validation.spectra_check import check_experiment
             checks = check_experiment(os.path.dirname(nmr_files[0]), args.peaks,
@@ -1086,6 +1119,7 @@ def _run_series(args):
             # thing: do not run this series. A dry-run that reports one and exits 0
             # is the gap `diagnose` had.
             deep_code = _findings_exit_code(checks['findings'])
+            deep_error = _preflight_error(deep_code, checks['findings'])
         _emit(args, summary,
               "[dry-run] series",
               f"  spectra found: {len(nmr_files)}",
@@ -1093,7 +1127,7 @@ def _run_series(args):
               f"  mode={args.mode} peak-source={tracking['peak_source']} "
               f"drift-limit={tracking['drift_limit']} parallel={args.parallel}",
               f"  output: {args.out}",
-              *deep_lines)
+              *deep_lines, error=_missing_input_error(missing) or deep_error)
         return 1 if missing else deep_code
 
     if not nmr_files:
@@ -1897,7 +1931,8 @@ def _run_dynamixs_t1rho(args):
           f"T1rho complete: R2 derived for {len(table)} residues",
           f"  theta (nominal): {args.theta} deg, omega1: {args.omega1} Hz "
           f"(per-residue tilt applied)",
-          f"  R2 table: {out_csv}")
+          f"  R2 table: {out_csv}",
+          error=_nothing_fitted_error(len(table), 'residue has a positive R2'))
     return 0 if len(table) else 1
 
 
@@ -2641,7 +2676,20 @@ def _version():
     return __version__
 
 
+# One call at a time per process. A call redirects fd 1 and sys.stdout for the whole
+# process while its engine runs, so two overlapping calls each saved the other's
+# redirection and one summary - and, depending on the order they finished, every later
+# write to stdout - landed on stderr. A host that needs calls to overlap runs each one in
+# its own process.
+_CALL_LOCK = threading.Lock()
+
+
 def main(argv=None):
+    with _CALL_LOCK:
+        return _main(argv)
+
+
+def _main(argv):
     if argv is None:
         argv = sys.argv[1:]
     # Delegate `batch` before argparse so the batch CLI parses its own flags cleanly.

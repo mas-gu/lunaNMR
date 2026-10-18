@@ -84,8 +84,6 @@ import matplotlib.pyplot as plt
 import os
 import sys
 
-import warnings
-warnings.filterwarnings('ignore')
 
 try:
     import nmrglue as ng

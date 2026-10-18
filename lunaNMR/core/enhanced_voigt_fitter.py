@@ -22,8 +22,6 @@ import numpy as np
 from scipy.special import wofz
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_widths
-import warnings
-warnings.filterwarnings('ignore')
 
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 

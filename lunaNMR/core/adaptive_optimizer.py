@@ -544,7 +544,6 @@ class AdaptiveOptimizer:
             worker_tasks.append((len(train_peaks) + peak_idx, peak, False, combinations, extended_context))
 
         # Execute parallel optimization
-        from multiprocessing import Pool
         max_workers = mp.cpu_count() - 2  # Leave 2 cores free
         max_workers = max(1, max_workers)
 
@@ -553,7 +552,7 @@ class AdaptiveOptimizer:
         combo_results = [{'train_scores': [], 'val_scores': []} for _ in range(n_combinations)]
 
         try:
-            with Pool(processes=max_workers) as pool:
+            with mp.get_context('spawn').Pool(processes=max_workers) as pool:
                 # Submit all peak tasks
                 async_results = []
                 for task in worker_tasks:

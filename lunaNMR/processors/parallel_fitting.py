@@ -17,7 +17,7 @@ Date: 2025
 """
 
 import multiprocessing as mp
-from multiprocessing import Pool, cpu_count
+from multiprocessing import cpu_count
 import numpy as np
 import time
 import traceback
@@ -98,12 +98,12 @@ class ParallelPeakFitter:
 
         try:
             # Test if multiprocessing works with a simple task first
-            with Pool(processes=self.max_workers) as test_pool:
+            with mp.get_context('spawn').Pool(processes=self.max_workers) as test_pool:
                 test_result = test_pool.apply(_test_worker, ("test",))
                 if test_result != "test_ok":
                     raise Exception(f"Multiprocessing test failed: {test_result}")
 
-            with Pool(processes=self.max_workers) as pool:
+            with mp.get_context('spawn').Pool(processes=self.max_workers) as pool:
                 # Submit all tasks and collect results
                 async_results = []
                 for task in peak_tasks:

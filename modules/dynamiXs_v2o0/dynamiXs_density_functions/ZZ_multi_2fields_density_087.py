@@ -31,11 +31,10 @@ matplotlib.use('Agg')  # Non-interactive backend (must be before pyplot import)
 import matplotlib.pyplot as plt
 from scipy import stats
 from scipy.optimize import minimize
-import warnings
-warnings.filterwarnings('ignore')
 
 # Multiprocessing imports
-from multiprocessing import Pool, cpu_count
+import multiprocessing
+from multiprocessing import cpu_count
 from functools import partial
 import pickle
 
@@ -60,7 +59,7 @@ PI = 3.14159265359
 OMEGA_H_FACTOR = 0.87  # Factor for more accurate spectral density calculation J(0.87ωH)
 
 # JIT-compiled spectral density calculation for performance
-@jit(nopython=False, cache=True, forceobj=True)
+@jit(cache=True, forceobj=True)
 def _calculate_spectral_density_jit(s2, tc, te, omega):
     """
     Calculate J(w) using Lipari-Szabo model-free approach (JIT-compiled version)
@@ -758,7 +757,7 @@ class DualFieldSpectralDensityAnalysis:
             
             # Process residues in parallel
             print("Starting parallel processing...")
-            with Pool(processes=n_processes) as pool:
+            with multiprocessing.get_context('spawn').Pool(processes=n_processes) as pool:
                 worker_results = pool.map(_worker_process_residue_087, worker_args)
             
             # Collect results

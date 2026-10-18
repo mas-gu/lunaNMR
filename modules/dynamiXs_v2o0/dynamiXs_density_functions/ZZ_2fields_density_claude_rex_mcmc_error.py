@@ -16,8 +16,6 @@ matplotlib.use('Agg')  # Use non-interactive backend for thread safety
 import matplotlib.pyplot as plt
 from scipy import stats
 from scipy.optimize import minimize
-import warnings
-warnings.filterwarnings('ignore')
 
 # Physical constants
 GAMMA_H = 2.67522128e8  # 1H gyromagnetic ratio (rad s-1 T-1)

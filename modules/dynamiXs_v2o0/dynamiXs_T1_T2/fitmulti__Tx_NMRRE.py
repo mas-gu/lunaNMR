@@ -30,7 +30,7 @@ from fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
                           MARGINAL_TMAX_OVER_T, _is_reliable_t2, measured_points)
 import pandas as pd
 import multiprocessing
-from multiprocessing import Pool, cpu_count
+from multiprocessing import cpu_count
 from functools import partial
 import pickle
 import json
@@ -589,7 +589,7 @@ def main():
     print(f"Starting parallel fitting with {n_processes} processes...")
     start_time = time.time()
 
-    with Pool(processes=n_processes) as pool:
+    with multiprocessing.get_context('spawn').Pool(processes=n_processes) as pool:
         results_list = pool.map(fit_single_residue_parallel, args_list)
 
     end_time = time.time()
@@ -776,7 +776,7 @@ def run_analysis_with_params(params, progress_callback=None):
     print(f"Starting parallel fitting with {n_processes} processes...")
     start_time = time.time()
 
-    with Pool(processes=n_processes) as pool:
+    with multiprocessing.get_context('spawn').Pool(processes=n_processes) as pool:
         # Use imap_unordered for per-residue progress tracking
         results_list = []
         completed = 0

@@ -17,8 +17,6 @@ def dnaja1_titration_series(tmp_path_factory):
         pytest.skip("data_test not present")
     import contextlib
     import io
-    import warnings
-    from numba.core.errors import NumbaWarning
     from lunaNMR.cli import main
     root = tmp_path_factory.mktemp("dnaja1_titration")
     (root / "spectra").mkdir()
@@ -26,11 +24,7 @@ def dnaja1_titration_series(tmp_path_factory):
         source = next(DNAJA1.glob(f"2D_*_{point}.ft"))
         (root / "spectra" / source.name).symlink_to(source)
     summary = io.StringIO()
-    # The PS2D kernels compile in object mode, which numba warns about on first use in a
-    # process. The engine silences that at import, but pytest restores the filters after
-    # each test, so whichever test first fits a cluster gets the warning.
-    with contextlib.redirect_stdout(summary), warnings.catch_warnings():
-        warnings.simplefilter("ignore", NumbaWarning)
+    with contextlib.redirect_stdout(summary):
         code = main(["series", "--spectra", str(root / "spectra"), "--peaks", str(DNAJA1 / "DNAJA1.txt"),
                      "--mode", "titration", "--out", str(root / "out"), "--format", "json"])
     assert code == 0

@@ -40,7 +40,9 @@ def run(tmp_path_factory):
         (spectra / f"T1_{delay}.ft").symlink_to(_spectrum(delay))
     (spectra / f"T1_{BROKEN}.ft").write_bytes(_spectrum(BROKEN).read_bytes()[:4096])
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
+    # nmrglue says so as it reads the truncated file.
+    with contextlib.redirect_stdout(out), \
+            pytest.warns(UserWarning, match="cannot be shaped into"):
         code = main(["series", "--spectra", str(spectra), "--peaks",
                      str(next(T1.glob("*_assignment.txt"))), "--mode", "time",
                      "--peak-source", "reference", "--out", str(root / "out"),
