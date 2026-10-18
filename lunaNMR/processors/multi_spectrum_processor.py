@@ -789,6 +789,14 @@ class MultiSpectrumProcessor:
             if spectrum_number > 1:
                 self.integrator.auto_add_dummy_peaks = False
 
+            # Detect with the series' own search window. The rest of its parameters reach
+            # the integrator in process_peak_list, after detection - so without this,
+            # spectrum 1 was detected with the integrator's defaults.
+            detection = self.voigt_params.get('detection_params', self.voigt_params)
+            if 'search_window_x' in detection and 'search_window_y' in detection:
+                self.integrator.set_search_window(detection['search_window_x'],
+                                                  detection['search_window_y'])
+
             # Call the same detection method used by GUI - this finds actual peak positions
             detected_peaks = self.integrator._detect_peaks_reference_based()
 
