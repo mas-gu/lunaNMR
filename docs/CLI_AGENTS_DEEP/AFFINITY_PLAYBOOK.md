@@ -29,8 +29,8 @@ titration points, and peak-list hygiene.
 |---|---|---|
 | **peak-list registration** | shift ≈ 0.000, 0.000 | wrong list or mis-referenced. Symptom is Height 0 / R² ≈ 0.2 shoulder fits that read as "noisy data" |
 | **capture rate at the reference point** | >85% at zero titrant | peaks outside the search window. Judge **only** at the reference — a low rate further along a titration is exchange broadening, i.e. the experiment working |
-| **assignment hygiene** | no whitespace, no `dummy_*`, no duplicates | whitespace breaks exact-string merging silently |
-| **titration points parse** | one value per spectrum, ascending | the trailing token needs a **decimal separator** (`_0o5`, `_2.4`), not merely digits — `sample_2.ft` and `ref_100.ft` do **not** parse and are **silently dropped**, not errored. Name points `_0o0`, `_0o5`, `_2o0`. |
+| **assignment hygiene** | no whitespace, no `dummy_*`, no duplicates | whitespace breaks exact-string merging silently; `series` refuses a duplicated assignment outright |
+| **titration points parse** | one value per spectrum, ascending | the trailing token needs a **decimal separator** (`_0o5`, `_2.4`), not merely digits — `sample_2.ft` and `ref_100.ft` do **not** parse: `series` fits them last under a stem-named column, and `kd` then reads the stem's trailing digits as a point (`sample_2` → 2), not erroring. Name points `_0o0`, `_0o5`, `_2o0`. |
 | **reference peak sanity** | every residue's I(0) comparable to its own series max | a reference orders of magnitude low rescales that residue entirely, and survives a `quality='Good'` label |
 
 **Capture collapse at high titrant is expected, not a fault.** The most strongly perturbed
@@ -46,12 +46,17 @@ gets lost.
 
 ```bash
 python -m lunaNMR kd --survey --input <tidy.csv> --out <RESULTS> --p0 <conc> \
-    [--conc-units equivalents] --format json
+    --conc-units equivalents --format json
 ```
+
+The survey needs concentrations like the fit does: `--conc` (in `--conc-units`), or
+`--conc-units` alone when the spectrum names carry them. With neither, and no params file
+stored for this input, it is refused.
 
 Produces `<out>/<prefix>_<obs>_vs_sequence.pdf` (prefix first, one per observable),
 `<out>/data/<prefix>_survey.csv`, and an editable `<prefix>_residues.txt` **beside the
-input CSV** — not in `--out`, so a different output path cannot lose it.
+input CSV** — not in `--out`, so a different output path cannot lose it — with the run's
+settings in `<prefix>_kd_params.json` beside it.
 
 Selection file: one residue per line, `#` comments a line out, deleting the `#` puts it
 back. Trailing comments are **evidence, not exclusions**. Re-running `--survey` merges —
@@ -122,7 +127,7 @@ titration's own concentrations. A Kd outside it was not measured, however good i
 
 | trap | why it is invisible |
 |---|---|
-| **Equivalents read as concentrations** | filenames commonly encode equivalents (`_3o0`). Read as absolute they give a confident Kd wrong by the factor `--p0`, with `success=True` and no warning. Pass `--conc-units equivalents` |
+| **Equivalents read as concentrations** | filenames commonly encode equivalents (`_3o0`). Read as absolute they give a confident Kd wrong by the factor `--p0`, with `success=True` and no warning. `kd` refuses to guess the units, but `--conc` given without `--conc-units` is read as absolute. Pass `--conc-units equivalents` |
 | **A broken reference point** | I(0) far below the residue's own series max rescales *every* point for that residue. It is not a bad point, it is a bad denominator — and it passes a `quality='Good'` label |
 | **Failed points dropped residue-wise** | a residue that failed at one titration point still has good data at the others. Dropping the whole residue silently discards it |
 | **σ significance is not scale-free** | at an early titration point where nothing has happened, the spread is tiny and most residues clear it. The criterion is only meaningful at the **highest** titrant point |
@@ -142,13 +147,16 @@ to tune — anything that fails to reproduce was never measured.
 ## Speed
 
 - `--dry-run` validates inputs and prints the plan without running.
-- Settings persist per dataset and are read back automatically — concentrations,
-  `conc_units`, `--p0`, `--alpha`, `--intensity-from` and every threshold, recorded as you
-  typed them. Don't re-enter them, and don't re-derive what a prior run already recorded.
-  A survey writes `<input_dir>/<prefix>_kd_params.json`; a fit writes
-  `<out>/data/<prefix>_kd_params.json`, which the next run finds when `--out` is the
-  conventional `<input_dir>/kd_analysis`. The run summary's `params_source` names the file
-  that was read, or `null` if none was — check it rather than assuming.
+- Settings persist per dataset and are read back automatically — concentrations with
+  their `conc_units`, `intensity_scales` and every threshold, recorded as you typed them —
+  but only from a file written for this same input CSV and titration points. `--p0`,
+  `--alpha`, `--intensity-from` and `--observable` are recorded and NOT read back: pass
+  them on every run. A survey writes `<input_dir>/<prefix>_kd_params.json`, which the fit
+  after it finds; a fit writes `<out>/data/<prefix>_kd_params.json`, which a later run
+  finds only when `--out` is `<input_dir>/kd_analysis` — not the timestamped folders above.
+  The run summary's `params_source` names the file that was read, or `null` if none was,
+  and `params_skipped` every file passed over with the reason — check them rather than
+  assuming.
 - Independent datasets are independent processes: run them concurrently, don't queue them.
 - The survey is cheap (per-residue fits only, no global). Iterate on the selection there
   rather than re-running full fits.
