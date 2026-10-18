@@ -54,6 +54,7 @@ def _resolve():
 
 
 def test_resolve_prefers_bundled_copy(tmp_path):
+    """A series opened from a project reads the copy beside its batch_results.json."""
     resolve_series_csv = _resolve()
     bundle = tmp_path / "proj.lunaNMR"
     bundled = bundle / "series_results" / "S1" / "series_analysis_tidy.csv"
@@ -63,33 +64,39 @@ def test_resolve_prefers_bundled_copy(tmp_path):
     orig.parent.mkdir(parents=True)
     orig.write_text("original\n")
 
-    meta = {'csv_path': str(orig), 'output_folder': str(orig.parent)}
-    got = resolve_series_csv('S1', meta, str(bundle))
-    assert got == str(bundled)
+    batch = BatchResults()
+    batch.metadata.update({'csv_path': str(orig), 'output_folder': str(orig.parent)})
+    batch.bundled_folder = str(bundled.parent)
+    assert resolve_series_csv(batch) == str(bundled)
 
 
 def test_resolve_falls_back_to_recorded_path(tmp_path):
     resolve_series_csv = _resolve()
     bundle = tmp_path / "proj.lunaNMR"          # no bundled copy present
+    (bundle / "series_results" / "S1").mkdir(parents=True)
     orig = tmp_path / "elsewhere" / "series_analysis_tidy.csv"
     orig.parent.mkdir(parents=True)
     orig.write_text("original\n")
 
-    meta = {'csv_path': str(orig), 'output_folder': str(orig.parent)}
-    got = resolve_series_csv('S1', meta, str(bundle))
-    assert got == str(orig)
+    batch = BatchResults()
+    batch.metadata.update({'csv_path': str(orig), 'output_folder': str(orig.parent)})
+    batch.bundled_folder = str(bundle / "series_results" / "S1")
+    assert resolve_series_csv(batch) == str(orig)
 
 
 def test_resolve_no_extra_lunaNMR_component(tmp_path):
     """The bundle dir IS the .lunaNMR path — resolution must not insert a second one."""
     resolve_series_csv = _resolve()
+    batch, tidy = _make_series(tmp_path)
+    mw = types.SimpleNamespace(saved_series={'S1': batch})
     bundle = tmp_path / "proj.lunaNMR"
-    bundled = bundle / "series_results" / "S1" / "series_analysis_tidy.csv"
-    bundled.parent.mkdir(parents=True)
-    bundled.write_text("bundled\n")
+    bundle.mkdir()
+    ProjectManager(mw)._save_series_results(bundle)
+    tidy.unlink()                               # the run folder has moved
+    ProjectManager(mw)._load_series_results(bundle)
 
-    got = resolve_series_csv('S1', {}, str(bundle))
-    assert got == str(bundled)
+    got = resolve_series_csv(mw.saved_series['S1'])
+    assert got == str(bundle / "series_results" / "S1" / "series_analysis_tidy.csv")
     assert ".lunaNMR/.lunaNMR" not in got.replace(os.sep, "/")
 
 

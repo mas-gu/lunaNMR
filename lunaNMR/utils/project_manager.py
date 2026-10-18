@@ -134,6 +134,31 @@ def batch_results_from_dict(data: dict, deserialize_result=None):
     return batch_results
 
 
+# The CSVs a series' analyses read, bundled beside its batch_results.json.
+SERIES_CSVS = ('series_analysis_tidy.csv', 'peak_intensity_matrix.csv')
+
+
+def series_csv_path(batch_results, filename: str, bundled_first: bool) -> Optional[Path]:
+    """Where one of a series' SERIES_CSVS is on disk, or None.
+
+    Two places can hold it: the run's own output folder (for the tidy CSV, first the
+    csv_path it recorded), and - for a series opened from a project - the copy beside
+    the batch_results.json it was read from (`bundled_folder`). A series run in this
+    session has no bundled copy, so a project's copy under the same name never stands
+    in for it.
+    """
+    metadata = getattr(batch_results, 'metadata', None) or {}
+    own = []
+    if filename == 'series_analysis_tidy.csv' and metadata.get('csv_path'):
+        own.append(Path(metadata['csv_path']))
+    if metadata.get('output_folder'):
+        own.append(Path(metadata['output_folder']) / filename)
+    folder = getattr(batch_results, 'bundled_folder', None)
+    bundled = [Path(folder) / filename] if folder else []
+    return next((path for path in (bundled + own if bundled_first else own + bundled)
+                 if path.exists()), None)
+
+
 # A fit's surfaces are rebuilt from its parameters (`all_peaks`) and its region's ppm
 # axes; the region's intensity is re-sliced from the spectrum. Stored whole they are 99%
 # of a series: ~80 MB for a 7-point titration, against ~3 MB without them.
@@ -417,6 +442,7 @@ class ProjectManager:
                 summary['saved_items'].append('Spectral Inspector')
             process_events()
 
+            self.main_window.region_data_embedded = embed_region_data
             logger.info(f"Project saved to {project_path}")
             return True, summary
 
@@ -500,6 +526,7 @@ class ProjectManager:
 
         # Fallback: save reference peak list if no fit results
         if not self._has_peak_list():
+            (bundle_path / "peak_list.csv").unlink(missing_ok=True)
             return True  # Nothing to save
 
         peak_list = self.main_window.integrator.peak_list.copy()
@@ -524,19 +551,18 @@ class ProjectManager:
         be re-sliced on load. When embed_region_data is True, the raw intensity is
         also stored so the project opens without the original spectrum.
         """
-        if not self._has_fit_results():
-            return True  # Nothing to save
-
-        # Create fit_results directory structure
+        import shutil
+        # Written whole each save: what a previous save stored is either rewritten
+        # below or no longer part of the session. Loaded fits hold their arrays in memory.
         fit_dir = bundle_path / "fit_results"
-        fit_dir.mkdir(exist_ok=True)
-        arrays_dir = fit_dir / "arrays"
-        arrays_dir.mkdir(exist_ok=True)
+        shutil.rmtree(fit_dir, ignore_errors=True)
 
-        # Get fit results from main_window
         fit_results = getattr(self.main_window, 'last_fitting_results', None)
-        if fit_results is None or len(fit_results) == 0:
-            return True
+        if not fit_results:
+            return False  # Nothing to save
+
+        arrays_dir = fit_dir / "arrays"
+        arrays_dir.mkdir(parents=True)
 
         integrator = getattr(self.main_window, 'integrator', None)
 
@@ -657,8 +683,10 @@ class ProjectManager:
         summary = {
             'project_name': project_path.stem,
             'loaded_items': [],
-            'dynamixs': {}
+            'dynamixs': {},
+            'skipped': [],
         }
+        self._skipped = summary['skipped']   # what a loader found but could not read
 
         try:
             # Load and validate manifest
@@ -667,6 +695,7 @@ class ProjectManager:
                 return False, ["project.json not found or invalid"], summary
 
             summary['loaded_items'].append('Project manifest')
+            self._clear_session()
 
             # Check file references
             missing_files = self._validate_file_references(manifest)
@@ -686,6 +715,10 @@ class ProjectManager:
             if self._load_series_results(project_path):
                 summary['loaded_items'].append('Series results')
 
+            # Read before reconstruct_fit_arrays: only an embedded region holds its
+            # intensity yet. The save dialog starts from it, so a re-save keeps it.
+            self.main_window.region_data_embedded = self._holds_region_data()
+
             # Load DynamiXs state and get summary
             dynamixs_summary = self._load_dynamixs_state_with_summary(project_path)
             if dynamixs_summary:
@@ -703,6 +736,37 @@ class ProjectManager:
         except Exception as e:
             logger.error(f"Failed to load project: {e}")
             return False, [str(e)], summary
+
+    def _clear_session(self) -> None:
+        """Empty everything a bundle can hold, so a project opened after another keeps
+        nothing the second does not hold - and the next save writes none of it."""
+        mw = self.main_window
+        integrator = getattr(mw, 'integrator', None)
+        if integrator is not None:
+            integrator.peak_list = None
+        mw.last_fitting_results = None
+        mw.current_voigt_result = None
+        mw.saved_series = {}
+        mw.batch_results = None
+        mw.dynamixs_analyses = None
+        mw.kd_analyses = None
+        mw.spectral_inspector_state = None
+
+    def _skip(self, item: str) -> None:
+        """Report, in the load summary, an item the bundle has but could not be read."""
+        skipped = getattr(self, '_skipped', None)
+        if skipped is not None:
+            skipped.append(item)
+
+    def _holds_region_data(self) -> bool:
+        """Whether a fit or series row in the session carries its region's intensity."""
+        rows = list(getattr(self.main_window, 'last_fitting_results', None) or [])
+        for batch in (getattr(self.main_window, 'saved_series', None) or {}).values():
+            for result in getattr(batch, 'results', {}).values():
+                for key in ('integration_results', 'fitted_results'):
+                    rows.extend(result.get(key) or [])
+        return any(isinstance(row, dict) and isinstance(row.get('region_2d'), dict)
+                   and row['region_2d'].get('intensity') is not None for row in rows)
 
     def _load_manifest(self, bundle_path: Path) -> Optional[Dict]:
         """Load and validate project.json."""
@@ -981,9 +1045,8 @@ class ProjectManager:
         except ImportError:
             process_events = lambda: None  # No-op if not in GUI context
 
-        # Create series_results directory
+        import shutil
         series_dir = bundle_path / "series_results"
-        series_dir.mkdir(exist_ok=True)
 
         # Get all saved series
         saved_series = getattr(self.main_window, 'saved_series', {}) or {}
@@ -996,7 +1059,9 @@ class ProjectManager:
                 saved_series = {'default': batch_results}
 
         if not saved_series:
-            return True  # Nothing to save
+            shutil.rmtree(series_dir, ignore_errors=True)
+            return False  # Nothing to save
+        series_dir.mkdir(exist_ok=True)
 
         # Save manifest listing all series
         manifest = {
@@ -1016,10 +1081,9 @@ class ProjectManager:
             write_batch_results(batch_results, series_subdir / "batch_results.json",
                                 slim=not embed_region_data)
 
-            # Copy the tidy CSV into the bundle so the project is self-contained:
+            # Copy the CSVs into the bundle so the project is self-contained:
             # a moved/renamed source run folder still resolves for Kd/titration input.
-            self._copy_series_csv(batch_results, series_subdir)
-            self._copy_series_matrix(batch_results, series_subdir)
+            self._copy_series_csvs(batch_results, series_subdir)
 
             # Add to manifest
             spectrum_count = len(batch_results.results) if hasattr(batch_results, 'results') else 0
@@ -1035,33 +1099,34 @@ class ProjectManager:
         with open(manifest_file, 'w') as f:
             json.dump(manifest, f)
 
+        # Prune what the session no longer holds: a deleted or renamed series. Only now,
+        # after every copy, since a renamed series' CSVs may come from its old folder.
+        kept = set(saved_series) | {manifest_file.name}
+        for sub in series_dir.iterdir():
+            if sub.name not in kept:
+                if sub.is_dir():
+                    shutil.rmtree(sub, ignore_errors=True)
+                else:
+                    sub.unlink()
+
         logger.info(f"Saved {len(saved_series)} series integrations")
         return True
 
-    def _copy_series_csv(self, batch_results, series_subdir: Path) -> None:
-        """Copy a series' series_analysis_tidy.csv into its bundle subdirectory.
+    def _copy_series_csvs(self, batch_results, series_subdir: Path) -> None:
+        """Copy a series' SERIES_CSVS - the tidy CSV Kd and DynamiXs read, the matrix
+        the hetNOE and methyl T2 pages read - into its bundle subdirectory.
 
-        Source is the recorded csv_path, else output_folder/series_analysis_tidy.csv.
-        Silently does nothing if no source CSV exists on disk.
+        From its run folder, else from the project it was opened from (a moved run, a
+        Save As, a renamed series). A CSV found in neither is left out.
         """
         import shutil
-        metadata = batch_results.metadata if hasattr(batch_results, 'metadata') else {}
-        src = metadata.get('csv_path')
-        if not (src and Path(src).exists()):
-            output_folder = metadata.get('output_folder')
-            src = str(Path(output_folder) / "series_analysis_tidy.csv") if output_folder else None
-        if src and Path(src).exists():
-            shutil.copy2(src, series_subdir / "series_analysis_tidy.csv")
-
-    def _copy_series_matrix(self, batch_results, series_subdir: Path) -> None:
-        """Copy a series' peak_intensity_matrix.csv - the file the hetNOE and methyl T2
-        pages read - from its output_folder into its bundle subdirectory, if it exists."""
-        import shutil
-        metadata = batch_results.metadata if hasattr(batch_results, 'metadata') else {}
-        output_folder = metadata.get('output_folder')
-        src = Path(output_folder) / "peak_intensity_matrix.csv" if output_folder else None
-        if src and src.exists():
-            shutil.copy2(src, series_subdir / "peak_intensity_matrix.csv")
+        for filename in SERIES_CSVS:
+            src = series_csv_path(batch_results, filename, bundled_first=False)
+            dest = series_subdir / filename
+            if src is not None and src.resolve() != dest.resolve():
+                shutil.copy2(src, dest)
+        if getattr(batch_results, 'bundled_folder', None):
+            batch_results.bundled_folder = str(series_subdir)
 
     def _load_series_results(self, bundle_path: Path) -> bool:
         """Load series integration results (multiple series) and reconstruct BatchResults.
@@ -1072,7 +1137,7 @@ class ProjectManager:
         series_dir = bundle_path / "series_results"
 
         if not series_dir.exists():
-            return True  # No series results to load
+            return False  # No series results to load
 
         # Initialize saved_series dict
         self.main_window.saved_series = {}
@@ -1091,6 +1156,7 @@ class ProjectManager:
 
                 if not batch_file.exists():
                     logger.warning(f"Series '{series_name}' data not found, skipping")
+                    self._skip(f"Series '{series_name}' (no batch_results.json)")
                     continue
 
                 with open(batch_file, 'r') as f:
@@ -1099,6 +1165,7 @@ class ProjectManager:
                 # Reconstruct BatchResults object
                 batch_results = batch_results_from_dict(data, self._deserialize_spectrum_result)
                 batch_results.metadata['series_name'] = series_name
+                batch_results.bundled_folder = str(series_subdir)
 
                 # Add to saved_series
                 self.main_window.saved_series[series_name] = batch_results
@@ -1119,6 +1186,7 @@ class ProjectManager:
                     data = json.load(f)
 
                 batch_results = batch_results_from_dict(data, self._deserialize_spectrum_result)
+                batch_results.bundled_folder = str(series_dir)
 
                 # Store in both places
                 self.main_window.batch_results = batch_results
@@ -1126,7 +1194,7 @@ class ProjectManager:
 
                 logger.info(f"Loaded legacy series results: {len(batch_results.results)} spectra")
 
-        return True
+        return bool(self.main_window.saved_series)
 
     def _deserialize_spectrum_result(self, result: dict) -> dict:
         """Deserialize spectrum result, converting lists back to numpy arrays.
@@ -1192,8 +1260,10 @@ class ProjectManager:
             except Exception as e:
                 logger.warning(f"Could not auto-capture current DynamiXs analysis: {e}")
 
+        import shutil
         analyses = getattr(self.main_window, 'dynamixs_analyses', None)
         if not isinstance(analyses, dict) or not analyses:
+            shutil.rmtree(bundle_path / "dynamixs", ignore_errors=True)
             return False
 
         analyses_dir = bundle_path / "dynamixs" / "analyses"
@@ -1213,8 +1283,11 @@ class ProjectManager:
                 json.dump(entry.get('file_refs') or {}, f, indent=2,
                           default=self._json_serializer)
             self._copy_dynamixs_results(state, adir / "results")
+            # From now on the analysis is its bundled copy, as after a load: a page writes
+            # every run into one folder under the same names, so a later save copying
+            # from there again would hand this analysis a later run's results.
+            self._repoint_dynamixs_results(state, adir / "results")
 
-        import shutil
         for sub in analyses_dir.iterdir():
             if sub.is_dir() and sub.name not in kept:
                 shutil.rmtree(sub, ignore_errors=True)
@@ -1237,13 +1310,15 @@ class ProjectManager:
             out = page_state.get('output_dir')
             if not out or not Path(out).is_dir():
                 continue
+            page_dir = dest / page
+            if Path(out).resolve() == page_dir.resolve():
+                continue    # a reopened analysis saved onto its own bundle: in place
             files = (glob.glob(str(Path(out) / "*.csv")) + glob.glob(str(Path(out) / "*.txt"))
                      + glob.glob(str(Path(out) / "*.json")))
             files = [f for f in files if any(p in Path(f).name for p in patterns)]
             json_dirs = [d for d in glob.glob(str(Path(out) / "json*")) if Path(d).is_dir()]
             if not files and not json_dirs:
                 continue
-            page_dir = dest / page
             page_dir.mkdir(parents=True, exist_ok=True)
             for src in files:
                 shutil.copy2(src, page_dir / Path(src).name)
@@ -1316,6 +1391,7 @@ class ProjectManager:
                 file_refs = json.loads(rf.read_text()) if rf.exists() else {}
             except (ValueError, OSError) as e:
                 logger.warning(f"Skipping unreadable DynamiXs analysis '{adir.name}': {e}")
+                self._skip(f"DynamiXs analysis '{adir.name}' (unreadable)")
                 continue
             self._repoint_dynamixs_results(state, adir / "results")
             loaded[adir.name] = {'state': state, 'file_refs': file_refs}
@@ -1354,8 +1430,10 @@ class ProjectManager:
             except Exception as e:
                 logger.warning(f"Could not auto-capture current Kd fit: {e}")
 
+        import shutil
         analyses = getattr(self.main_window, 'kd_analyses', None)
         if not isinstance(analyses, dict) or not analyses:
+            shutil.rmtree(bundle_path / "kd", ignore_errors=True)
             return False
 
         analyses_dir = bundle_path / "kd" / "analyses"
@@ -1376,7 +1454,6 @@ class ProjectManager:
                           default=self._json_serializer)
 
         # Prune folders for analyses the user deleted from the session.
-        import shutil
         for sub in analyses_dir.iterdir():
             if sub.is_dir() and sub.name not in kept:
                 shutil.rmtree(sub, ignore_errors=True)
@@ -1406,6 +1483,7 @@ class ProjectManager:
                 meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
             except (ValueError, OSError) as e:
                 logger.warning(f"Skipping unreadable Kd analysis '{adir.name}': {e}")
+                self._skip(f"Kd analysis '{adir.name}' (unreadable)")
                 continue
             loaded[adir.name] = {
                 'fit_data': fit_data, 'meta': meta, 'fit_data_path': str(fit_path),

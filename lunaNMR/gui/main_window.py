@@ -347,6 +347,7 @@ class LunaNMRMainWindow(BaseWindow):
 
         # Project management
         self.current_project_path = None  # Path to currently loaded .lunaNMR project
+        self.region_data_embedded = False  # Whether the project's bundle embeds fit regions
         self.series_all_results = None  # For reopening multi-spectrum viewer
         self.project_manager = None  # Initialized after self is fully set up
 
@@ -8084,14 +8085,15 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         from PySide6.QtWidgets import QProgressDialog, QMessageBox, QCheckBox
         from PySide6.QtCore import Qt
 
-        # Ask whether to embed raw fit-region data (off by default)
+        # Ask whether to embed raw fit-region data: as the project was last saved or
+        # opened, off for a new one
         box = QMessageBox(self)
         box.setWindowTitle("Save Project")
         box.setIcon(QMessageBox.Question)
         box.setText(f"Save project to:\n{project_path.name}")
         embed_checkbox = QCheckBox(
             "Embed raw fit-region data (larger file; opens without the original spectrum)")
-        embed_checkbox.setChecked(False)
+        embed_checkbox.setChecked(bool(getattr(self, 'region_data_embedded', False)))
         box.setCheckBox(embed_checkbox)
         box.setStandardButtons(QMessageBox.Save | QMessageBox.Cancel)
         box.setDefaultButton(QMessageBox.Save)
@@ -8152,21 +8154,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             lines.append("")
             lines.append("DynamiXs Analysis:")
 
-            if 't1t2_fitting' in dynamixs:
-                t1t2 = dynamixs['t1t2_fitting']
-                experiments = t1t2.get('fitted_experiments', [])
-                if experiments:
-                    exp_str = ', '.join(e.replace('_', ' ').title() for e in experiments)
-                    lines.append(f"  • T1/T2 Fitting: {exp_str}")
-
-            if 'spectral_density' in dynamixs:
-                lines.append("  • Spectral Density: Analysis complete")
-
-            if 'model_free' in dynamixs:
-                lines.append("  • Model Free: Analysis complete")
-
-            if 'methyl_t2' in dynamixs:
-                lines.append("  • Methyl T2: Fit complete")
+            for name in dynamixs.get('analyses', []):
+                lines.append(f"  • {name}")
 
         if not dynamixs and len(summary.get('saved_items', [])) <= 2:
             lines.append("")
@@ -8199,27 +8188,21 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             lines.append("")
             lines.append("DynamiXs Analysis:")
 
-            if 't1t2_fitting' in dynamixs:
-                t1t2 = dynamixs['t1t2_fitting']
-                experiments = t1t2.get('fitted_experiments', [])
-                if experiments:
-                    exp_str = ', '.join(e.replace('_', ' ').title() for e in experiments)
-                    lines.append(f"  • T1/T2 Fitting: {exp_str}")
-
-            if 'spectral_density' in dynamixs:
-                lines.append("  • Spectral Density: Analysis complete")
-
-            if 'model_free' in dynamixs:
-                lines.append("  • Model Free: Analysis complete")
-
-            if 'methyl_t2' in dynamixs:
-                lines.append("  • Methyl T2: Fit complete")
+            for name in dynamixs.get('analyses', []):
+                lines.append(f"  • {name}")
 
             lines.append("")
             lines.append("Open DynamiXs to view results.")
         else:
             lines.append("")
             lines.append("No DynamiXs analysis results in project.")
+
+        # Found in the bundle but not read: without this, an absent item looks loaded
+        if summary.get('skipped'):
+            lines.append("")
+            lines.append("Could not be loaded:")
+            for item in summary['skipped']:
+                lines.append(f"  • {item}")
 
         logger.info("Showing load summary popup")
         msg = QMessageBox(self)
@@ -8248,6 +8231,15 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         if hasattr(self, 'undo_manager') and self.undo_manager is not None:
             self.undo_manager.on_file_load()
 
+        # The Kd and DynamiXs windows show the previous project's fits, and a project
+        # save captures what they show; reopened, they start from this project.
+        for attr in ('kd_titration_dialog', 'dynamixs_dialog'):
+            dialog = getattr(self, attr, None)
+            if dialog is not None:
+                dialog.close()
+                dialog.deleteLater()
+                setattr(self, attr, None)
+
         # Update file labels
         self.update_file_status_labels(
             nmr_file=self.current_nmr_file,
@@ -8256,8 +8248,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         # Sync fit results to integrator.fitted_peaks BEFORE loading spectrum
         # (load_nmr_file uses integrator.fitted_peaks for peak display)
+        self.integrator.fitted_peaks = self.last_fitting_results or []
         if self.last_fitting_results:
-            self.integrator.fitted_peaks = self.last_fitting_results
             logger.info(f"Synced {len(self.last_fitting_results)} fit results to integrator.fitted_peaks")
 
         # Refresh spectrum display if NMR file is loaded
@@ -8296,12 +8288,13 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             except Exception as e:
                 logger.warning(f"Could not update Voigt plotter: {e}")
 
-        # Apply restored Spectral Inspector state to an already-open window; a
-        # closed/not-yet-opened one picks it up on the next launch_spectral_inspector.
-        if getattr(self, '_spectral_inspector', None) is not None \
-                and getattr(self, 'spectral_inspector_state', None):
+        # Apply restored Spectral Inspector state to an already-open window - emptied when
+        # the project holds none; a not-yet-opened one picks it up on the next
+        # launch_spectral_inspector.
+        if getattr(self, '_spectral_inspector', None) is not None:
             try:
-                self._spectral_inspector.load_state(self.spectral_inspector_state)
+                self._spectral_inspector.load_state(
+                    getattr(self, 'spectral_inspector_state', None) or {})
             except Exception as e:
                 logger.warning(f"Could not refresh Spectral Inspector after load: {e}")
 

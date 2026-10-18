@@ -432,26 +432,20 @@ class DynamiXsMainWindow(QMainWindow):
 # BASE PAGE CLASS
 # =============================================================================
 
-def resolve_series_csv(name, meta, project_path):
+def resolve_series_csv(batch_results):
     """Path to a series' series_analysis_tidy.csv for the Kd input.
 
-    Prefers the copy bundled inside the project (so a moved/renamed source run
-    folder still resolves), then the recorded csv_path, then output_folder.
-    Returns the first candidate that exists on disk; if none exist, returns the
-    recorded csv_path (or best-effort candidate) for display.
+    A series opened from a project reads the copy bundled beside its
+    batch_results.json (so a moved/renamed source run folder still resolves); a
+    series run in this session reads its own run's. If none exists on disk, returns
+    the recorded csv_path for display.
     """
-    candidates = []
-    if project_path:
-        candidates.append(os.path.join(str(project_path), "series_results",
-                                       name, "series_analysis_tidy.csv"))
-    if meta.get('csv_path'):
-        candidates.append(meta['csv_path'])
-    if meta.get('output_folder'):
-        candidates.append(os.path.join(meta['output_folder'], "series_analysis_tidy.csv"))
-    for c in candidates:
-        if c and os.path.exists(c):
-            return c
-    return meta.get('csv_path') or (candidates[0] if candidates else "")
+    _ensure_lunaNMR_path()
+    from lunaNMR.utils.project_manager import series_csv_path
+    path = series_csv_path(batch_results, "series_analysis_tidy.csv", bundled_first=True)
+    if path is not None:
+        return str(path)
+    return (getattr(batch_results, 'metadata', None) or {}).get('csv_path') or ""
 
 
 class BasePage(QWidget):
@@ -510,23 +504,19 @@ class BasePage(QWidget):
         include = include or getattr(self, '_series_include', None)
         main = self._lunanmr_main_window()
         saved_series = getattr(main, 'saved_series', {}) or {}
-        project_path = getattr(main, 'current_project_path', None)
-        return [{'name': name,
-                 'csv_path': resolve_series_csv(name, getattr(br, 'metadata', None) or {},
-                                                project_path)}
+        return [{'name': name, 'csv_path': resolve_series_csv(br)}
                 for name, br in saved_series.items() if include is None or include(br)]
 
     def _series_intensity_matrix(self, series_name):
-        """A series' intensity matrix, or None: the project's bundled copy first (the
-        run folder may have moved), then the one beside the series' outputs."""
+        """A series' intensity matrix, or None: for a series opened from a project, the
+        copy bundled beside it (the run folder may have moved), then the one beside the
+        series' outputs."""
+        _ensure_lunaNMR_path()
+        from lunaNMR.utils.project_manager import series_csv_path
         main = self._lunanmr_main_window()
         batch = (getattr(main, 'saved_series', {}) or {}).get(series_name)
-        folder = (getattr(batch, 'metadata', None) or {}).get('output_folder')
-        project_path = getattr(main, 'current_project_path', None)
-        candidates = [os.path.join(str(project_path), "series_results", series_name,
-                                   "peak_intensity_matrix.csv") if project_path else None,
-                      os.path.join(folder, "peak_intensity_matrix.csv") if folder else None]
-        return next((c for c in candidates if c and os.path.exists(c)), None)
+        path = series_csv_path(batch, "peak_intensity_matrix.csv", bundled_first=True)
+        return str(path) if path is not None else None
 
     def _add_series_panel(self, layout, hint, empty_text, include=None, max_height=120):
         """Add the draggable list of the project's series, with its hint, an empty-state

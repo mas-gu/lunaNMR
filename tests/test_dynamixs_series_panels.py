@@ -86,11 +86,13 @@ def test_the_kd_page_lists_titrations_only(window):
 
 
 def test_a_series_in_the_project_resolves_to_its_bundled_csv(dialog, window, tmp_path):
-    """The bundle's own copy first: the series' run folder may have moved."""
+    """A series opened from the project reads the bundle's own copy first: its run
+    folder may have moved."""
     bundled = tmp_path / "p.lunaNMR" / "series_results" / "DNAJA1" / "series_analysis_tidy.csv"
     bundled.parent.mkdir(parents=True)
     bundled.write_text("spectrum_name,assignment\n")
     window.current_project_path = str(tmp_path / "p.lunaNMR")
+    window.saved_series["DNAJA1"].bundled_folder = str(bundled.parent)   # as loaded
     found = {s["name"]: s["csv_path"] for s in dialog.t1t2_page._get_available_series()}
     assert found["DNAJA1"] == str(bundled)
 
@@ -118,6 +120,7 @@ def test_a_series_in_the_project_drops_its_bundled_matrix(dialog, window, tmp_pa
     bundled.parent.mkdir(parents=True)
     bundled.write_text("Assignment,hetnoe_600_saturated,hetnoe_600_unsaturated\n3LysH,1.0,2.0\n")
     window.current_project_path = str(tmp_path / "p.lunaNMR")
+    window.saved_series["hetNOE600"].bundled_folder = str(bundled.parent)   # as loaded
     page = dialog.methyl_t2_page
     page._on_series_dropped("methyl_t2", "hetNOE600", "")
     assert page.input_file == str(bundled)
