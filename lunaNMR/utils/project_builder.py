@@ -20,6 +20,7 @@ never copied: a bundle moved to another machine needs the data at the same place
 """
 
 import json
+import os
 import shutil
 import tempfile
 import types
@@ -166,10 +167,14 @@ def t1t2_analysis(records, name, staging, t1rho_records=()):
         json_dir = staging / f'json_{key}'
         json_dir.mkdir()
         staged_json = json_dir / f"{key}_{Path(json_file).name}" if json_file else None
-        if json_file:
-            shutil.copy2(json_file, staged_json)
         results = staging / f"{key}_{Path(results_file).name}"
         shutil.copy2(results_file, results)
+        if json_file:
+            # The JSON records its results file relative to itself, for a refit to
+            # update: here, the staged copy beside it.
+            fit = json.loads(Path(json_file).read_text())
+            fit['metadata']['results_file'] = os.path.relpath(results, json_dir)
+            staged_json.write_text(json.dumps(fit, indent=2))
         session[field][exp] = {'output_dir': str(staging), 'json_folder': str(json_dir),
                                'json_file': str(staged_json) if staged_json else None,
                                'file_prefix': key,

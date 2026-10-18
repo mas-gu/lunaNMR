@@ -25,11 +25,12 @@ from lmfit import Model
 # One definition of the fit conventions, shared with the single-core fitter.
 try:
     from fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
-                              MARGINAL_TMAX_OVER_T, _is_reliable_t2, measured_points)
+                              MARGINAL_TMAX_OVER_T, _is_reliable_t2, measured_points,
+                              results_file_from_json)
 except ImportError:  # imported as dynamiXs_T1_T2.fitmulti__Tx_NMRRE (parent dir on path)
     from dynamiXs_T1_T2.fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
                                              MARGINAL_TMAX_OVER_T, _is_reliable_t2,
-                                             measured_points)
+                                             measured_points, results_file_from_json)
 import pandas as pd
 import multiprocessing
 from multiprocessing import cpu_count
@@ -392,7 +393,7 @@ def save_results(results_list, output_file, experiment_type="T1"):
 
 
 def save_fit_data_json(results_list, output_file, experiment_type, time_units,
-                       signal_units, n_bootstrap, field_freq):
+                       signal_units, n_bootstrap, field_freq, results_file=None):
     """
     Save complete fitting data as JSON for interactive visualization
 
@@ -412,6 +413,8 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
         Number of bootstrap iterations used
     field_freq : float
         Magnetic field frequency in MHz
+    results_file : str, optional
+        The run's results file, recorded relative to the JSON for a refit to update
     """
     # Get time points from first successful result (same for all residues)
     successful_results = [r for r in results_list if r.get('success', False)]
@@ -461,7 +464,9 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
             'signal_units': signal_units,
             'n_bootstrap': n_bootstrap,
             'n_residues': len(fits_data),
-            'time_points': [float(t) for t in time_points]
+            'time_points': [float(t) for t in time_points],
+            'results_file': (results_file_from_json(output_file, results_file)
+                             if results_file else None)
         },
         'fits': fits_data
     }
@@ -852,7 +857,8 @@ def run_analysis_with_params(params, progress_callback=None):
             time_units=time_units,
             signal_units=signal_units,
             n_bootstrap=n_bootstrap,
-            field_freq=params.get('field_freq', 600.0)
+            field_freq=params.get('field_freq', 600.0),
+            results_file=results_txt_file
         )
 
     # Summary statistics
