@@ -229,6 +229,7 @@ class TestReferencePointIntegrity:
 
     def test_the_series_really_does_contain_a_broken_reference(self, dnaja1_tidy):
         """Guards the premise for the assertions below."""
+        sys.path.insert(0, str(REPO_ROOT / "modules" / "dynamiXs_v2o0" / "dynamiXs_Kd"))
         from kd_models import REF_MAX_RATIO
         df = pd.read_csv(dnaja1_tidy)
         assert (self._reference_shortfall(df) > REF_MAX_RATIO).any()
@@ -253,6 +254,7 @@ class TestReferencePointIntegrity:
         """29LeuH is labelled 'Excellent' at the reference point while sitting 51x below
         its own series, so filtering on quality='Failed' is necessary but not
         sufficient."""
+        sys.path.insert(0, str(REPO_ROOT / "modules" / "dynamiXs_v2o0" / "dynamiXs_Kd"))
         from kd_models import REF_MAX_RATIO
         df = pd.read_csv(dnaja1_tidy)
         ref = df[df["spectrum_name"] == 0.0].set_index("assignment")
