@@ -182,7 +182,8 @@ class T1T2FittingParams:
     results_prefix: str = ""
     multicore: bool = True
     initial_amplitude: float = 1.0
-    initial_decay: float = 1000.0
+    initial_decay: float = 1000.0  # in time_units
+    time_units: str = "ms"  # units of the series' delays
     n_bootstrap: int = 1000
     error_method: str = "analytical"  # "analytical" or "bootstrap"
     json_folder: str = ""
@@ -254,7 +255,7 @@ class T1T2FittingWorker(AnalysisWorker):
                 'output_prefix': output_prefix,
                 'results_txt_file': results_txt_file,
                 'experiment_type': self.params.experiment_type,
-                'time_units': 'ms',
+                'time_units': self.params.time_units,
                 'signal_units': 'Intensity',
                 'initial_A': self.params.initial_amplitude,
                 'initial_t2': self.params.initial_decay,
@@ -322,8 +323,9 @@ class MethylT2FittingParams:
     field_name: str = "field1"
     field_freq: float = 0.0
     initial_A: Optional[float] = None  # None -> data-driven default = span(y)
-    initial_t2_a: float = 100.0  # ms (slow component)
-    initial_t2_b: float = 20.0   # ms (fast component)
+    initial_t2_a: float = 100.0  # slow component, in time_units
+    initial_t2_b: float = 20.0   # fast component, in time_units
+    time_units: str = "ms"  # units of the series' delays
     n_bootstrap: int = 1000
     error_method: str = "analytical"
     input_df: Optional[pd.DataFrame] = field(default=None, repr=False)
@@ -457,7 +459,7 @@ class MethylT2FittingWorker(AnalysisWorker):
                 "json_folder": self.params.json_folder,
                 "field_name": self.params.field_name,
                 "field_freq": self.params.field_freq,
-                "time_units": "ms",
+                "time_units": self.params.time_units,
                 "signal_units": "Intensity",
                 "initial_A": self.params.initial_A,
                 "initial_t2_a": self.params.initial_t2_a,
@@ -681,6 +683,14 @@ class IntegratedAnalysisParams:
     results_prefix: str = "analysis"
     json_folder: str = ""
 
+    # Units of every relaxation series' delays (the page states one for all four)
+    time_units: str = "ms"
+
+
+def pipeline_units(params: IntegratedAnalysisParams) -> Dict[str, str]:
+    """The pipeline's per-series delay units, each the page's one choice."""
+    return {f"field{f}_t{t}_units": params.time_units for f in (1, 2) for t in (1, 2)}
+
 
 class IntegratedAnalysisWorker(AnalysisWorker):
     """
@@ -749,6 +759,8 @@ class IntegratedAnalysisWorker(AnalysisWorker):
             pipeline_params.t2_bootstrap_iterations = self.params.n_bootstrap
             pipeline_params.error_method = self.params.error_method
             pipeline_params.monte_carlo_iterations = self.params.n_monte_carlo
+            for name, units in pipeline_units(self.params).items():
+                setattr(pipeline_params, name, units)
 
             # Output settings
             pipeline_params.output_dir = self.params.output_dir

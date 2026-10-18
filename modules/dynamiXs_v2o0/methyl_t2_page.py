@@ -26,7 +26,7 @@ from gui_components import (
 
 
 # Imported from dynamiXs_gui to avoid duplication of widget classes.
-from dynamiXs_gui import BasePage, DropTargetLabel
+from dynamiXs_gui import BasePage, DropTargetLabel, MS_TO_UNITS, TIME_UNITS_DEFAULT
 from workers import MethylT2FittingParams, MethylT2FittingWorker
 
 
@@ -95,6 +95,8 @@ class MethylT2FittingPage(BasePage):
                                           self._make_float_spin("t2a_spin", 0.1, 1e5, 100.0, decimals=2, step=10.0)))
         gb.addWidget(self._make_field_row("Initial T2b (fast, ms)",
                                           self._make_float_spin("t2b_spin", 0.1, 1e5, 20.0, decimals=2, step=5.0)))
+        gb.addWidget(self._make_field_row("Delay units", self._make_units_combo()))
+        gb.addWidget(self._make_observable_combo())
 
         hint = create_label(
             "A defaults to span(y) = max(y) − min(y). "
@@ -201,9 +203,10 @@ class MethylT2FittingPage(BasePage):
         matrix = self._series_intensity_matrix(series_name)
         if matrix:
             self._set_input_file(matrix)
+            self._take_recorded_units(matrix, self._log)
             self.file_drop.setText(f"Series '{series_name}'  →  {os.path.basename(matrix)}")
         else:
-            self.file_drop.setText(f"Series '{series_name}'  (no intensity matrix)")
+            self.file_drop.setText(f"Series '{series_name}'  (no {self._observable_matrix_name()})")
 
     def _browse_input_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -247,6 +250,10 @@ class MethylT2FittingPage(BasePage):
             self._choose_output_dir()
             if not self.output_dir:
                 return
+        time_units = self._checked_units([self.input_file])
+        if time_units is None:
+            return
+        to_units = MS_TO_UNITS[time_units]   # the initial guesses are entered in ms
 
         # The CLI's <prefix>_<field> naming: the JSON is <prefix>_field1_methylT2_fit_data.json
         run_name = f"{self.prefix_edit.text().strip() or 'methyl'}_field1"
@@ -258,8 +265,9 @@ class MethylT2FittingPage(BasePage):
             field_name=run_name,
             field_freq=float(self.field_freq_spin.value()),
             initial_A=None,  # data-driven: span(y)
-            initial_t2_a=float(self.t2a_spin.value()),
-            initial_t2_b=float(self.t2b_spin.value()),
+            initial_t2_a=float(self.t2a_spin.value()) * to_units,
+            initial_t2_b=float(self.t2b_spin.value()) * to_units,
+            time_units=time_units,
             n_bootstrap=int(self.boot_spin.value()),
             error_method="bootstrap" if self.error_combo.currentIndex() == 1 else "analytical",
         )
@@ -396,6 +404,8 @@ class MethylT2FittingPage(BasePage):
             'field_freq': self.field_freq_spin.value(),
             'bootstrap_iter': self.boot_spin.value(),
             'error_method': self.error_combo.currentIndex(),
+            'delay_units': self.units_combo.currentText(),
+            'fit_on': self._observable(),
         }
 
     def restore_session_state(self, state: dict):
@@ -416,6 +426,10 @@ class MethylT2FittingPage(BasePage):
         self.field_freq_spin.setValue(state.get('field_freq', 600.0))
         self.boot_spin.setValue(state.get('bootstrap_iter', 1000))
         self.error_combo.setCurrentIndex(state.get('error_method', 0))
+        self.units_combo.setCurrentText(state.get('delay_units', TIME_UNITS_DEFAULT))
+        self.observable_combo.blockSignals(True)   # restoring, not choosing: no re-drop
+        self._set_observable(state.get('fit_on'))
+        self.observable_combo.blockSignals(False)
 
         if self.input_file:
             self.file_drop.setText(os.path.basename(self.input_file))

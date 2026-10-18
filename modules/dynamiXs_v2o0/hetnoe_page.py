@@ -77,6 +77,7 @@ class HetNOEPage(BasePage):
         self.mode_combo.addItems(["Series intensity matrix", "Two intensity files"])
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         body.addWidget(self._make_field_row("Input", self.mode_combo, width=260))
+        body.addWidget(self._make_observable_combo("Ratio of (series matrix):"))
 
         self.input_stack = QStackedWidget()
         self.input_stack.addWidget(self._matrix_inputs())
@@ -200,7 +201,7 @@ class HetNOEPage(BasePage):
             self._set_matrix(matrix)
             self.matrix_drop.setText(f"Series '{series_name}'  →  {os.path.basename(matrix)}")
         else:
-            self.matrix_drop.setText(f"Series '{series_name}'  (no intensity matrix)")
+            self.matrix_drop.setText(f"Series '{series_name}'  (no {self._observable_matrix_name()})")
 
     def _browse_matrix(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -350,6 +351,7 @@ class HetNOEPage(BasePage):
             'field_freq': self.field_freq_spin.value(),
             'source_series_map': dict(self.source_series_map),
             'last_results_file': self.last_results_file,
+            'fit_on': self._observable(),
             # What the files of the run shown here start with (<prefix>_hetnoe.csv/.pdf)
             'file_prefixes': ([os.path.splitext(os.path.basename(self.last_results_file))[0]]
                               if self.last_results_file else []),
@@ -360,6 +362,9 @@ class HetNOEPage(BasePage):
         if not state:
             return
         self.mode_combo.setCurrentIndex(state.get('mode', MATRIX_MODE))
+        self.observable_combo.blockSignals(True)   # restoring, not choosing: no re-drop
+        self._set_observable(state.get('fit_on'))
+        self.observable_combo.blockSignals(False)
         self.source_series_map = dict(state.get('source_series_map', {}))
         matrix = state.get('matrix_file')
         if matrix and os.path.exists(matrix):

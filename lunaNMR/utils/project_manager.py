@@ -135,7 +135,8 @@ def batch_results_from_dict(data: dict, deserialize_result=None):
 
 
 # The CSVs a series' analyses read, bundled beside its batch_results.json.
-SERIES_CSVS = ('series_analysis_tidy.csv', 'peak_intensity_matrix.csv')
+SERIES_CSVS = ('series_analysis_tidy.csv', 'peak_intensity_matrix.csv',
+               'peak_volume_matrix.csv')
 
 
 def series_csv_path(batch_results, filename: str, bundled_first: bool) -> Optional[Path]:
@@ -1136,8 +1137,8 @@ class ProjectManager:
         return True
 
     def _copy_series_csvs(self, batch_results, series_subdir: Path) -> None:
-        """Copy a series' SERIES_CSVS - the tidy CSV Kd and DynamiXs read, the matrix
-        the hetNOE and methyl T2 pages read - into its bundle subdirectory.
+        """Copy a series' SERIES_CSVS - the tidy CSV Kd and DynamiXs read, the height
+        and volume matrices the DynamiXs pages read - into its bundle subdirectory.
 
         From its run folder, else from the project it was opened from (a moved run, a
         Save As, a renamed series). A CSV found in neither is left out.

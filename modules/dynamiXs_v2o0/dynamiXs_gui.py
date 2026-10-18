@@ -62,6 +62,18 @@ from workers import (
     SpectralDensityWorker, SpectralDensityParams,
     IntegratedAnalysisWorker, IntegratedAnalysisParams
 )
+from dynamiXs_T1_T2.delay_units import (
+    TIME_UNITS_DEFAULT, resolve_time_units, series_sidecar
+)
+
+# The delay units a page can state for its series, and the factor turning ms into each:
+# the initial-guess fields are in ms, the fitters work in the series' own units.
+DELAY_UNITS = ('ms', 's', 'us')
+MS_TO_UNITS = {'ms': 1.0, 's': 1e-3, 'us': 1e3}
+
+# The intensity a page fits, its series column, and the series matrix that holds it.
+OBSERVABLES = (('Height', 'height', 'peak_intensity_matrix.csv'),
+               ('Volume', 'volume', 'peak_volume_matrix.csv'))
 
 
 # =============================================================================
@@ -508,15 +520,83 @@ class BasePage(QWidget):
                 for name, br in saved_series.items() if include is None or include(br)]
 
     def _series_intensity_matrix(self, series_name):
-        """A series' intensity matrix, or None: for a series opened from a project, the
-        copy bundled beside it (the run folder may have moved), then the one beside the
-        series' outputs."""
+        """A series' matrix of the intensity the page fits on, or None: for a series
+        opened from a project, the copy bundled beside it (the run folder may have
+        moved), then the one beside the series' outputs."""
         _ensure_lunaNMR_path()
         from lunaNMR.utils.project_manager import series_csv_path
         main = self._lunanmr_main_window()
         batch = (getattr(main, 'saved_series', {}) or {}).get(series_name)
-        path = series_csv_path(batch, "peak_intensity_matrix.csv", bundled_first=True)
+        path = series_csv_path(batch, self._observable_matrix_name(), bundled_first=True)
         return str(path) if path is not None else None
+
+    # ---------- what is fitted: height or volume ----------
+
+    def _make_observable_combo(self, label="Fit on:", redrop=True):
+        """The row choosing the intensity the page fits, Height (the default, as the CLI
+        reads peak_intensity_matrix.csv) or Volume. With `redrop`, a series already
+        dropped takes its other matrix when the choice changes."""
+        self.observable_combo = create_combo_box([o[0] for o in OBSERVABLES], width=110)
+        if redrop:
+            self.observable_combo.currentTextChanged.connect(self._redrop_series)
+        return self._make_field_row(label, self.observable_combo, width=110)
+
+    def _observable(self) -> str:
+        """The series column fitted: 'height' or 'volume'."""
+        combo = getattr(self, 'observable_combo', None)
+        text = combo.currentText() if combo is not None else OBSERVABLES[0][0]
+        return next(o[1] for o in OBSERVABLES if o[0] == text)
+
+    def _observable_matrix_name(self) -> str:
+        """The series matrix holding the intensity the page fits."""
+        return next(o[2] for o in OBSERVABLES if o[1] == self._observable())
+
+    def _set_observable(self, column):
+        """Select the observable whose series column is `column`, if it is one."""
+        label = next((o[0] for o in OBSERVABLES if o[1] == column), None)
+        if label and getattr(self, 'observable_combo', None) is not None:
+            self.observable_combo.setCurrentText(label)
+
+    def _redrop_series(self, *_):
+        """Give every slot a series was dropped on that series' matrix of the chosen
+        intensity."""
+        for field_name, series_name in list(getattr(self, 'source_series_map', {}).items()):
+            self._on_series_dropped(field_name, series_name, "")
+
+    # ---------- delay units ----------
+
+    def _make_units_combo(self):
+        """The page's one delay-units selector (ms, s, us; ms by default, the CLI's
+        --time-units default): the units the series' delay headers are written in."""
+        self.units_combo = create_combo_box(list(DELAY_UNITS), width=70)
+        self.units_combo.setToolTip(
+            "Units of the series' delay values. A dropped series' series_metadata.json "
+            "sets it; units contradicting that record, or headers that state their own, "
+            "are refused.")
+        return self.units_combo
+
+    def _take_recorded_units(self, path, log):
+        """Set the selector to the delay units recorded in the series_metadata.json beside
+        `path`, and say so through `log`."""
+        sidecar = series_sidecar(path) if path else None
+        recorded = (sidecar or {}).get('value_units')
+        if recorded in DELAY_UNITS:
+            self.units_combo.setCurrentText(recorded)
+            log(f"Delay units: {recorded}, as recorded in {sidecar['path']}")
+
+    def _checked_units(self, paths) -> Optional[str]:
+        """The selected delay units, or None when they contradict the series_metadata.json
+        beside one of `paths` or that file's unit-stating delay headers: the refusal is
+        shown, as the CLI's is."""
+        units = self.units_combo.currentText() or TIME_UNITS_DEFAULT
+        try:
+            for path in paths:
+                if path:
+                    resolve_time_units(units, series_sidecar(path), "Delay units", path)
+        except ValueError as refusal:
+            show_error(self, "Delay units", str(refusal))
+            return None
+        return units
 
     def _add_series_panel(self, layout, hint, empty_text, include=None, max_height=120):
         """Add the draggable list of the project's series, with its hint, an empty-state
@@ -845,7 +925,7 @@ class T1T2FittingPage(BasePage):
             return None
 
         try:
-            fitting_df = batch_results.to_fitting_dataframe(value_column='volume')
+            fitting_df = batch_results.to_fitting_dataframe(value_column=self._observable())
             if fitting_df.empty:
                 return None
             return fitting_df
@@ -894,6 +974,7 @@ class T1T2FittingPage(BasePage):
             self.results_text.appendPlainText(
                 f"Assigned series '{series_name}' to {field_name.replace('_', ' ').title()}"
             )
+            self._take_recorded_units(csv_path, self.results_text.appendPlainText)
 
     def _update_field_displays(self):
         """Update field display widgets after state restore.
@@ -1353,8 +1434,11 @@ class T1T2FittingPage(BasePage):
         time_layout.addWidget(create_label("Initial Time Constant:"))
         self.time_spin = create_double_spin_box(100.0, 1.0, 10000.0, 1, " ms", width=100)
         time_layout.addWidget(self.time_spin)
+        time_layout.addWidget(create_label("Delay units:"))
+        time_layout.addWidget(self._make_units_combo())
         time_layout.addStretch()
         advanced_layout.addWidget(time_row)
+        advanced_layout.addWidget(self._make_observable_combo(redrop=False))
 
         # Error estimation method
         error_row = QFrame()
@@ -1517,6 +1601,11 @@ class T1T2FittingPage(BasePage):
             show_error(self, "Error", f"Please select a {exp_type} data file for {field_name.replace('field', 'Field ')}.")
             return
 
+        # The slot's file - a dropped series' tidy CSV - sits beside the series' record
+        time_units = self._checked_units([getattr(self, f"{data_field_key}_file", None)])
+        if time_units is None:
+            return
+
         # Use the required output directory
         output_dir = self.output_dir
 
@@ -1540,7 +1629,8 @@ class T1T2FittingPage(BasePage):
             results_prefix=f"{run_prefix}_{field_name}_{exp_type}",
             multicore=True,
             initial_amplitude=self.amp_spin.value(),
-            initial_decay=self.time_spin.value(),
+            initial_decay=self.time_spin.value() * MS_TO_UNITS[time_units],
+            time_units=time_units,
             n_bootstrap=self.boot_spin.value(),
             error_method=error_method,
             json_folder=json_folder,
@@ -2085,6 +2175,8 @@ class T1T2FittingPage(BasePage):
             'initial_decay': self.time_spin.value(),
             'error_method': self.error_method_combo.currentIndex(),
             'bootstrap_iter': self.boot_spin.value(),
+            'delay_units': self.units_combo.currentText(),
+            'fit_on': self._observable(),
         }
 
     def restore_session_state(self, state: dict):
@@ -2149,6 +2241,8 @@ class T1T2FittingPage(BasePage):
         self.time_spin.setValue(state.get('initial_decay', 100.0))
         self.error_method_combo.setCurrentIndex(state.get('error_method', 0))
         self.boot_spin.setValue(state.get('bootstrap_iter', 1000))
+        self.units_combo.setCurrentText(state.get('delay_units', TIME_UNITS_DEFAULT))
+        self._set_observable(state.get('fit_on'))
 
         # Update status indicators
         self._update_status_indicators()
@@ -2910,6 +3004,10 @@ class IntegratedAnalysisPage(BasePage):
         fit_layout.addWidget(create_label("Initial T1 (ms):"), 1, 0)
         self.init_t1_spin = create_double_spin_box(800.0, 1.0, 10000.0, 1, width=80)
         fit_layout.addWidget(self.init_t1_spin, 1, 1)
+        # One for all the T1 and T2 series; a series not in ms is fitted from a
+        # data-driven initial instead of these ms guesses, as `dynamixs modelfree` does.
+        fit_layout.addWidget(create_label("Delay units:"), 1, 2)
+        fit_layout.addWidget(self._make_units_combo(), 1, 3)
 
         fit_layout.addWidget(create_label("Initial T2 (ms):"), 2, 0)
         self.init_t2_spin = create_double_spin_box(100.0, 1.0, 5000.0, 1, width=80)
@@ -2941,6 +3039,8 @@ class IntegratedAnalysisPage(BasePage):
         self.mc_spin = create_spin_box(25, 1, 1000, width=80)
         fit_layout.addWidget(self.mc_spin, 5, 1)
         fit_layout.addWidget(create_label("iterations"), 5, 2)
+
+        fit_layout.addWidget(self._make_observable_combo(), 6, 0, 1, 3)
 
         params_content.addWidget(fit_grid)
 
@@ -3102,12 +3202,13 @@ class IntegratedAnalysisPage(BasePage):
         display = getattr(self, f"{field_name}_display", None)
         if not matrix:
             self.progress_text.appendPlainText(
-                f"Series '{series_name}' has no peak_intensity_matrix.csv beside its outputs: "
+                f"Series '{series_name}' has no {self._observable_matrix_name()} beside its outputs: "
                 f"browse for the {label} file.")
             if display:
                 display.setText(f"⚠️ {series_name} (no intensity matrix)")
             return
         setattr(self, f"{field_name}_file", matrix)
+        self._take_recorded_units(matrix, self.progress_text.appendPlainText)
         if display:
             display.setText(f"📊 {series_name}")
             display.setToolTip(f"Series: {series_name}\nMatrix: {matrix}")
@@ -3274,6 +3375,11 @@ class IntegratedAnalysisPage(BasePage):
                       "Dual-field analysis requires Field 2 data. Please enable and load Field 2 files.")
             return
 
+        time_units = self._checked_units([self.field1_t1_file, self.field1_t2_file,
+                                          self.field2_t1_file, self.field2_t2_file])
+        if time_units is None:
+            return
+
         self.progress_text.clear()
         self.progress_text.appendPlainText("Starting integrated analysis...")
 
@@ -3309,7 +3415,8 @@ class IntegratedAnalysisPage(BasePage):
             n_monte_carlo=self.mc_spin.value(),
             output_dir=self.output_dir,
             results_prefix=self.prefix_edit.text(),
-            json_folder=os.path.join(self.output_dir, self.json_display.text())
+            json_folder=os.path.join(self.output_dir, self.json_display.text()),
+            time_units=time_units
         )
 
         # Create and start worker
@@ -3526,6 +3633,8 @@ class IntegratedAnalysisPage(BasePage):
             'error_method': self.mf_error_method_combo.currentText(),
             'bootstrap_iterations': self.t1_boot_spin.value(),
             'monte_carlo_iterations': self.mc_spin.value(),
+            'delay_units': self.units_combo.currentText(),
+            'fit_on': self._observable(),
 
             # Output configuration
             'output_dir': self.output_dir,
@@ -3611,6 +3720,10 @@ class IntegratedAnalysisPage(BasePage):
 
         self.t1_boot_spin.setValue(state.get('bootstrap_iterations', 1000))
         self.mc_spin.setValue(state.get('monte_carlo_iterations', 50))
+        self.units_combo.setCurrentText(state.get('delay_units', TIME_UNITS_DEFAULT))
+        self.observable_combo.blockSignals(True)   # restoring, not choosing: no re-drop
+        self._set_observable(state.get('fit_on'))
+        self.observable_combo.blockSignals(False)
 
         # Restore output configuration
         self.output_dir = state.get('output_dir', self.output_dir)
