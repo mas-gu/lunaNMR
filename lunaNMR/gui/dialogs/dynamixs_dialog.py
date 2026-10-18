@@ -317,8 +317,8 @@ class DynamiXsDialog(BaseDialog):
 
         # Check for existing analyses to avoid duplicates
         existing_analyses = set()
-        if self.main_window and hasattr(self.main_window, 'saved_dynamixs'):
-            existing_analyses = set(self.main_window.saved_dynamixs.keys())
+        if self.main_window and getattr(self.main_window, 'dynamixs_analyses', None):
+            existing_analyses = set(self.main_window.dynamixs_analyses.keys())
 
         if suggested_name in existing_analyses:
             # Append number to make unique

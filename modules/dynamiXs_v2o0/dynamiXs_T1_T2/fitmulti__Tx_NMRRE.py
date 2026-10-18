@@ -23,8 +23,13 @@ matplotlib.use('Agg')  # Use non-interactive backend for thread safety
 import matplotlib.pyplot as plt
 from lmfit import Model
 # One definition of the fit conventions, shared with the single-core fitter.
-from fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
-                          MARGINAL_TMAX_OVER_T, _is_reliable_t2, measured_points)
+try:
+    from fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
+                              MARGINAL_TMAX_OVER_T, _is_reliable_t2, measured_points)
+except ImportError:  # imported as dynamiXs_T1_T2.fitmulti__Tx_NMRRE (parent dir on path)
+    from dynamiXs_T1_T2.fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
+                                             MARGINAL_TMAX_OVER_T, _is_reliable_t2,
+                                             measured_points)
 import pandas as pd
 import multiprocessing
 from multiprocessing import cpu_count

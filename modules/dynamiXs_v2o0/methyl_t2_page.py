@@ -21,7 +21,7 @@ from constants import (
 from gui_components import (
     create_primary_button, create_secondary_button, create_label,
     create_header_label, create_v_layout, create_h_layout,
-    get_font, show_info, show_error, show_warning, open_directory_dialog,
+    get_font, show_error, show_warning, open_directory_dialog,
 )
 
 
@@ -283,15 +283,23 @@ class MethylT2FittingPage(BasePage):
         self.run_btn.setEnabled(True)
         self.progress_bar.setValue(100)
         n_fitted = result.get("n_fitted", 0)
-        self._log(f"Fit complete: {n_fitted} residues, results -> {result.get('results_file')}")
+        n_total = result.get("n_total", n_fitted)
+        if n_fitted:
+            self._log(f"Fit complete: {n_fitted}/{n_total} residues fitted, "
+                      f"{result.get('n_bi_exp_unidentifiable', 0)} of them bi-exp unidentifiable "
+                      f"(T2a/T2b not told apart; see bi_exp_unidentifiable per row)")
+        else:
+            self._log(f"No residue fitted (0/{n_total}): nothing to view.")
+        dropped = result.get("dropped_columns") or []
+        if dropped:
+            self._log(f"WARNING: {len(dropped)} column(s) with no parseable delay were left "
+                      f"out of the fit: {', '.join(map(str, dropped))}")
+        self._log(f"Results -> {result.get('results_file')}")
         self.last_json_folder = result.get("json_folder") or os.path.dirname(result.get("json_file") or "")
         self.last_results_file = result.get("results_file")
         if n_fitted:
             self.viewer_btn.setEnabled(True)
             self.summary_btn.setEnabled(True)
-            show_info(self, "Fit complete", f"Fitted {n_fitted} residues. Open the viewer to inspect.")
-        else:
-            show_warning(self, "No fits succeeded", "All residues failed to fit. Check the log.")
 
     def _on_error(self, error_msg: str):
         self.run_btn.setEnabled(True)

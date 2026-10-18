@@ -806,11 +806,17 @@ class T1T2FittingPage(BasePage):
             filter="CSV files (*.csv);;All files (*.*)"
         )
         if filename:
-            setattr(self, f"{field_name}_file", filename)
-            display = getattr(self, f"{field_name}_display", None)
-            if display:
-                display.setText(os.path.basename(filename))
-                display.setToolTip(filename)
+            self._assign_data_file(field_name, filename)
+
+    def _assign_data_file(self, field_name: str, path: str):
+        """Make `path` the slot's data. A series dropped there before no longer is: a
+        fit reads a dropped series from memory first."""
+        setattr(self, f"{field_name}_file", path)
+        getattr(self, 'source_series_map', {}).pop(field_name, None)
+        display = getattr(self, f"{field_name}_display", None)
+        if display:
+            display.setText(os.path.basename(path))
+            display.setToolTip(path)
 
     # =========================================================================
     # SERIES PICKER METHODS
@@ -1011,11 +1017,7 @@ class T1T2FittingPage(BasePage):
 
         # Update file displays
         for exp, filepath in found_files.items():
-            setattr(self, f"{field}_{exp}_file", filepath)
-            display = getattr(self, f"{field}_{exp}_display", None)
-            if display:
-                display.setText(os.path.basename(filepath))
-                display.setToolTip(filepath)
+            self._assign_data_file(f"{field}_{exp}", filepath)
 
         if found_files:
             self.results_text.appendPlainText(
@@ -1891,10 +1893,15 @@ class T1T2FittingPage(BasePage):
     def _on_finished(self, results: dict):
         """Handle analysis completion and store results in session."""
         self.progress_bar.setValue(100)
+        n_fitted = results.get('n_fitted') or 0
+        for line in self._fit_report(results):
+            self.results_text.appendPlainText(line)
+        if not n_fitted:
+            # Nothing to view or to feed model-free: the session keeps what it had.
+            self.progress_bar.setFormat("Nothing fitted")
+            self._release_worker()
+            return
         self.progress_bar.setFormat("Complete!")
-        self.results_text.appendPlainText("\nAnalysis completed successfully!")
-        self.results_text.appendPlainText(f"Number of residues fitted: {results.get('n_fitted', 'N/A')}")
-        self.results_text.appendPlainText(f"Results saved to: {results.get('results_file', 'N/A')}")
 
         # Store results in session (persistent across fits)
         field_name = results.get('field_name', 'field1')
@@ -1930,8 +1937,35 @@ class T1T2FittingPage(BasePage):
 
         self.results_text.appendPlainText(f"\nSession updated: {session_key} stored")
         self.results_text.appendPlainText(f"Fitted experiments: {sorted(self.fitted_experiments)}")
+        self._release_worker()
 
-        # Clean up worker thread to prevent crash on exit
+    @staticmethod
+    def _fit_report(results: dict) -> list:
+        """The page's account of a finished fit: what the CLI's t1t2 summary reports."""
+        n_fitted = results.get('n_fitted') or 0
+        n_total = results.get('n_total', n_fitted)
+        exp = results.get('experiment_type', 'T1')
+        if n_fitted:
+            lines = [f"\n{exp} analysis complete: {n_fitted}/{n_total} residues fitted"]
+        else:
+            lines = [f"\nNo residue fitted (0/{n_total}): nothing is stored for this "
+                     f"experiment"]
+        failed = results.get('failed_residues') or []
+        if failed and n_fitted:
+            lines.append(f"Not fitted ({len(failed)}): {', '.join(map(str, failed))}")
+        dropped = results.get('dropped_columns') or []
+        if dropped:
+            lines.append(f"WARNING: {len(dropped)} column(s) with no parseable delay were "
+                         f"left out of the fit: {', '.join(map(str, dropped))}")
+        marginal = results.get('n_window_marginal')
+        if marginal:
+            lines.append(f"NOTE: {marginal} residues have t_max/T < 2 - the delay window is "
+                         f"too short to pin the time constant down for those")
+        lines.append(f"Results saved to: {results.get('results_file', 'N/A')}")
+        return lines
+
+    def _release_worker(self):
+        """Clean up the worker thread to prevent a crash on exit."""
         if hasattr(self, 'worker') and self.worker is not None:
             self.worker.wait()
             self.worker.deleteLater()
@@ -1942,12 +1976,7 @@ class T1T2FittingPage(BasePage):
         """Handle analysis error."""
         self.progress_bar.hide()
         self.results_text.appendPlainText(f"\nError during analysis:\n{error_msg}")
-
-        # Clean up worker thread to prevent crash on exit
-        if hasattr(self, 'worker') and self.worker is not None:
-            self.worker.wait()
-            self.worker.deleteLater()
-            self.worker = None
+        self._release_worker()
 
     def _update_status_indicators(self):
         """Update visual status indicators for fitted experiments."""
@@ -3048,44 +3077,42 @@ class IntegratedAnalysisPage(BasePage):
     def _on_series_dropped(self, field_name: str, series_name: str, csv_path: str):
         """Handle a series being dropped on a data field.
 
+        A T1 or T2 slot takes the series' intensity matrix, the file `dynamixs modelfree`
+        reads. A hetNOE slot takes no series: it reads one plane's intensities, and a
+        hetNOE series holds both planes in one matrix.
+
         Args:
             field_name: Target field (e.g., 'field1_t1', 'field2_noe_sat')
             series_name: Name of the dropped series
             csv_path: Path to series_analysis_tidy.csv
         """
-        # Set the file path
-        if csv_path:
-            setattr(self, f"{field_name}_file", csv_path)
-        else:
-            # CSV path not found - warn user
-            show_warning(
-                self,
-                "CSV Not Found",
-                f"Could not find series_analysis_tidy.csv for series '{series_name}'.\n\n"
-                "The series was saved but the CSV output file could not be located.\n"
-                "Please use the Browse button to select the CSV file manually."
-            )
-
-        # Update the display
+        label = field_name.replace('_', ' ').title()
+        if 'noe' in field_name:
+            self.progress_text.appendPlainText(
+                f"{label} takes one plane's intensities (residue,intensity[,error]), not a "
+                f"series: compute the hetNOE planes from series '{series_name}' and browse "
+                f"for the file.")
+            return
+        matrix = self._series_intensity_matrix(series_name)
         display = getattr(self, f"{field_name}_display", None)
+        if not matrix:
+            self.progress_text.appendPlainText(
+                f"Series '{series_name}' has no peak_intensity_matrix.csv beside its outputs: "
+                f"browse for the {label} file.")
+            if display:
+                display.setText(f"⚠️ {series_name} (no intensity matrix)")
+            return
+        setattr(self, f"{field_name}_file", matrix)
         if display:
-            if csv_path:
-                display.setText(f"📊 {series_name}")
-                display.setToolTip(f"Series: {series_name}\nCSV: {csv_path}")
-            else:
-                display.setText(f"⚠️ {series_name} (CSV not found)")
-                display.setToolTip(f"Series: {series_name}\nCSV: Not found - use Browse to select")
+            display.setText(f"📊 {series_name}")
+            display.setToolTip(f"Series: {series_name}\nMatrix: {matrix}")
 
         # Store source_series metadata for later use in Inspect Peak
         if not hasattr(self, 'source_series_map'):
             self.source_series_map = {}
         self.source_series_map[field_name] = series_name
 
-        # Log to results area
-        if hasattr(self, 'results_text'):
-            self.results_text.appendPlainText(
-                f"Assigned series '{series_name}' to {field_name.replace('_', ' ').title()}"
-            )
+        self.progress_text.appendPlainText(f"Assigned series '{series_name}' to {label}")
 
     def _on_mf_error_method_changed(self, index: int):
         """Show/hide bootstrap iterations based on error method selection."""
@@ -3311,6 +3338,8 @@ class IntegratedAnalysisPage(BasePage):
         self.progress_text.appendPlainText("\n" + "="*50)
         self.progress_text.appendPlainText("INTEGRATED ANALYSIS COMPLETE!")
         self.progress_text.appendPlainText("="*50)
+        for line in self._fit_report(results):
+            self.progress_text.appendPlainText(line)
 
         # Store session results for project save/load
         results_prefix = self.prefix_edit.text()
@@ -3329,6 +3358,26 @@ class IntegratedAnalysisPage(BasePage):
         # Auto-open viewers
         self._open_results_viewer()
         self._open_fit_viewer()
+
+    @staticmethod
+    def _fit_report(results: dict) -> list:
+        """The page's account of a finished model-free run: what the CLI's modelfree
+        summary reports."""
+        capped = results.get('at_iteration_cap_residues') or []
+        lines = [f"Model-free complete: {results.get('n_successful')}/"
+                 f"{results.get('n_residues')} residues",
+                 f"{results.get('n_at_iteration_cap', 0)} fits stopped at the iteration cap "
+                 f"without converging" + (f": {', '.join(capped)}" if capped else "")]
+        for field, excluded in (results.get('excluded_residues') or {}).items():
+            if excluded:
+                lines.append(f"{field.replace('field', 'Field ')}: {len(excluded)} residues "
+                             f"excluded at the merge (not in all datasets): "
+                             f"{', '.join(map(str, excluded))}")
+        flagged = {k: v for k, v in (results.get('validation_warnings') or {}).items() if v}
+        if flagged:
+            lines.append("Validation warnings (residues per check, all fields): " + ", ".join(
+                f"{k.replace('_', ' ')} {v}" for k, v in flagged.items()))
+        return lines
 
     @Slot(str)
     def _on_error(self, error_msg: str):
