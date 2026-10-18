@@ -1891,10 +1891,15 @@ class T1T2FittingPage(BasePage):
     def _on_finished(self, results: dict):
         """Handle analysis completion and store results in session."""
         self.progress_bar.setValue(100)
+        n_fitted = results.get('n_fitted') or 0
+        for line in self._fit_report(results):
+            self.results_text.appendPlainText(line)
+        if not n_fitted:
+            # Nothing to view or to feed model-free: the session keeps what it had.
+            self.progress_bar.setFormat("Nothing fitted")
+            self._release_worker()
+            return
         self.progress_bar.setFormat("Complete!")
-        self.results_text.appendPlainText("\nAnalysis completed successfully!")
-        self.results_text.appendPlainText(f"Number of residues fitted: {results.get('n_fitted', 'N/A')}")
-        self.results_text.appendPlainText(f"Results saved to: {results.get('results_file', 'N/A')}")
 
         # Store results in session (persistent across fits)
         field_name = results.get('field_name', 'field1')
@@ -1930,8 +1935,35 @@ class T1T2FittingPage(BasePage):
 
         self.results_text.appendPlainText(f"\nSession updated: {session_key} stored")
         self.results_text.appendPlainText(f"Fitted experiments: {sorted(self.fitted_experiments)}")
+        self._release_worker()
 
-        # Clean up worker thread to prevent crash on exit
+    @staticmethod
+    def _fit_report(results: dict) -> list:
+        """The page's account of a finished fit: what the CLI's t1t2 summary reports."""
+        n_fitted = results.get('n_fitted') or 0
+        n_total = results.get('n_total', n_fitted)
+        exp = results.get('experiment_type', 'T1')
+        if n_fitted:
+            lines = [f"\n{exp} analysis complete: {n_fitted}/{n_total} residues fitted"]
+        else:
+            lines = [f"\nNo residue fitted (0/{n_total}): nothing is stored for this "
+                     f"experiment"]
+        failed = results.get('failed_residues') or []
+        if failed and n_fitted:
+            lines.append(f"Not fitted ({len(failed)}): {', '.join(map(str, failed))}")
+        dropped = results.get('dropped_columns') or []
+        if dropped:
+            lines.append(f"WARNING: {len(dropped)} column(s) with no parseable delay were "
+                         f"left out of the fit: {', '.join(map(str, dropped))}")
+        marginal = results.get('n_window_marginal')
+        if marginal:
+            lines.append(f"NOTE: {marginal} residues have t_max/T < 2 - the delay window is "
+                         f"too short to pin the time constant down for those")
+        lines.append(f"Results saved to: {results.get('results_file', 'N/A')}")
+        return lines
+
+    def _release_worker(self):
+        """Clean up the worker thread to prevent a crash on exit."""
         if hasattr(self, 'worker') and self.worker is not None:
             self.worker.wait()
             self.worker.deleteLater()
@@ -1942,12 +1974,7 @@ class T1T2FittingPage(BasePage):
         """Handle analysis error."""
         self.progress_bar.hide()
         self.results_text.appendPlainText(f"\nError during analysis:\n{error_msg}")
-
-        # Clean up worker thread to prevent crash on exit
-        if hasattr(self, 'worker') and self.worker is not None:
-            self.worker.wait()
-            self.worker.deleteLater()
-            self.worker = None
+        self._release_worker()
 
     def _update_status_indicators(self):
         """Update visual status indicators for fitted experiments."""
