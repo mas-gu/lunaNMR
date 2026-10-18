@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
+# ABOUTME: Starts the LunaNMR Qt application: sets up paths and the matplotlib backend,
+# ABOUTME: checks dependencies, and reports start-up failures in a tkinter error dialog.
 """
-LunaNMR Suite - Unified Launch Script
+LunaNMR Suite - Launch Script
 
-Unified launcher for the LunaNMR suite including:
-- LunaNMR: Advanced NMR Peak Analysis and Integration
-- DynamiXs: Dynamic exchange analysis (optional module)
-
-This script handles environment setup, application selection, and graceful error handling.
+Launches LunaNMR; the optional modules (DynamiXs, Kd, 1D integration) open from its
+Modules menu. This script handles environment setup and graceful error handling.
 """
 
 import sys
@@ -27,7 +26,7 @@ matplotlib.rcParams["svg.fonttype"] = "none"
 matplotlib.rcParams["pdf.fonttype"] = 42
 
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox
 
 
 def check_dependencies():
@@ -56,116 +55,6 @@ def setup_paths():
     return current_dir, parent_dir
 
 
-def check_dynamixs_availability():
-    """Check if DynamiXs module is available"""
-    try:
-        from modules.dynamiXs import DynamiXsGUI, run_dynamixs
-
-        return True
-    except ImportError:
-        return False
-
-
-def show_application_selector():
-    """Show application selector GUI"""
-    root = tk.Tk()
-    root.title("LunaNMR Suite v1.0")
-    root.geometry("400x300")
-    root.resizable(False, False)
-
-    # Center the window
-    root.update_idletasks()
-    x = (root.winfo_screenwidth() // 2) - (400 // 2)
-    y = (root.winfo_screenheight() // 2) - (300 // 2)
-    root.geometry(f"400x300+{x}+{y}")
-
-    selected_app = tk.StringVar(value="lunaNMR")
-
-    # Main frame
-    main_frame = ttk.Frame(root, padding="20")
-    main_frame.pack(fill=tk.BOTH, expand=True)
-
-    # Title
-    title_label = ttk.Label(
-        main_frame, text="LunaNMR Suite v1.0", font=("Arial", 16, "bold")
-    )
-    title_label.pack(pady=(0, 20))
-
-    # Subtitle
-    subtitle_label = ttk.Label(main_frame, text="Select Application to Launch:")
-    subtitle_label.pack(pady=(0, 15))
-
-    # Application selection frame
-    app_frame = ttk.LabelFrame(main_frame, text="Available Applications", padding="10")
-    app_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
-
-    # LunaNMR option
-    lunaNMR_frame = ttk.Frame(app_frame)
-    lunaNMR_frame.pack(fill=tk.X, pady=(0, 10))
-
-    ttk.Radiobutton(
-        lunaNMR_frame, text="LunaNMR", variable=selected_app, value="lunaNMR"
-    ).pack(anchor=tk.W)
-    ttk.Label(
-        lunaNMR_frame,
-        text="Advanced NMR Peak Analysis and Integration",
-        foreground="gray",
-    ).pack(anchor=tk.W, padx=(20, 0))
-
-    # DynamiXs option
-    dynamixs_frame = ttk.Frame(app_frame)
-    dynamixs_frame.pack(fill=tk.X)
-
-    dynamixs_available = check_dynamixs_availability()
-    dynamixs_radio = ttk.Radiobutton(
-        dynamixs_frame, text="DynamiXs", variable=selected_app, value="dynamixs"
-    )
-
-    if dynamixs_available:
-        dynamixs_radio.pack(anchor=tk.W)
-        ttk.Label(dynamixs_frame, text="Dynamic Analysis", foreground="gray").pack(
-            anchor=tk.W, padx=(20, 0)
-        )
-    else:
-        dynamixs_radio.configure(state=tk.DISABLED)
-        dynamixs_radio.pack(anchor=tk.W)
-        ttk.Label(
-            dynamixs_frame,
-            text="Dynamic Exchange Analysis (Not Available)",
-            foreground="red",
-        ).pack(anchor=tk.W, padx=(20, 0))
-
-    # Button frame
-    button_frame = ttk.Frame(main_frame)
-    button_frame.pack(fill=tk.X)
-
-    result = {"app": None}
-
-    def launch_selected():
-        if selected_app.get() == "dynamixs" and not dynamixs_available:
-            messagebox.showerror(
-                "Module Not Available",
-                "DynamiXs module is not available.\nPlease check the modules/dynamiXs directory.",
-            )
-            return
-        result["app"] = selected_app.get()
-        root.quit()
-
-    def cancel_launch():
-        result["app"] = None
-        root.quit()
-
-    ttk.Button(button_frame, text="Launch", command=launch_selected).pack(
-        side=tk.RIGHT, padx=(10, 0)
-    )
-    ttk.Button(button_frame, text="Cancel", command=cancel_launch).pack(side=tk.RIGHT)
-
-    root.mainloop()
-    root.destroy()
-
-    return result["app"]
-
-
 def launch_lunaNMR():
     """Launch LunaNMR application (Qt/PySide6 version)"""
     try:
@@ -175,20 +64,6 @@ def launch_lunaNMR():
         return True
     except ImportError as e:
         error_msg = f"Failed to import LunaNMR modules:\n{str(e)}\n\nPlease ensure the lunaNMR package is properly installed."
-        print(f"Error: {error_msg}")
-        messagebox.showerror("Import Error", error_msg)
-        return False
-
-
-def launch_dynamixs():
-    """Launch DynamiXs application"""
-    try:
-        from modules.dynamiXs import run_dynamixs
-
-        run_dynamixs()
-        return True
-    except ImportError as e:
-        error_msg = f"Failed to import DynamiXs modules:\n{str(e)}\n\nPlease ensure the DynamiXs module is properly installed."
         print(f"Error: {error_msg}")
         messagebox.showerror("Import Error", error_msg)
         return False
@@ -216,7 +91,7 @@ def main():
 
         return False
 
-    # Directly launch LunaNMR (bypass application selector)
+    # Launch LunaNMR
     try:
         print("Launching LunaNMR...")
         success = launch_lunaNMR()

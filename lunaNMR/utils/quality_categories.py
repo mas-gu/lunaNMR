@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
+# ABOUTME: R-squared quality categories (scientific, permissive or custom thresholds) for fits,
+# ABOUTME: and usable_points: which points of a series carry a measurement of an observable.
 """
 Quality Categorization System for LunaNMR
 ==========================================
 
 Centralized system for R² quality thresholds with support for:
 - Scientific quality categories (strict, traditional)
-- ML-friendly quality categories (relaxed for training diversity)
+- Permissive quality categories (relaxed, for maximum data inclusion)
 - Full retrocompatibility with existing code
 - Configurable thresholds via JSON config
 

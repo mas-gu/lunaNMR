@@ -18,7 +18,7 @@ from lunaNMR.utils.project_manager import lacks_fit_arrays, rebuild_fit_arrays, 
 from lunaNMR.gui.components.peak_navigator_table import PeakNavigatorTable
 from lunaNMR.gui.components.signed_contours import draw_signed_contours
 from lunaNMR.gui.styles.design_system import (
-    SPACING_SM, SPACING_MD, FONT_SIZE_BODY, FONT_SIZE_SMALL,
+    SPACING_SM, SPACING_MD, FONT_SIZE_MEDIUM_HEADER, FONT_SIZE_BODY, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
@@ -976,20 +976,20 @@ class MultiSpectrumViewerDialog(BaseDialog):
         row1_layout.setSpacing(SPACING_SM)
 
         layer_group = QGroupBox("Layer Visibility")
-        layer_group.setStyleSheet("""
-            QGroupBox {
+        layer_group.setStyleSheet(f"""
+            QGroupBox {{
                 font-weight: bold;
-                font-size: 13px;
+                font-size: {FONT_SIZE_MEDIUM_HEADER}pt;
                 margin-top: 8px;
                 padding-top: 8px;
                 padding-bottom: 2px;
-            }
-            QGroupBox::title {
+            }}
+            QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 6px;
                 padding: 0 3px;
-            }
-            QCheckBox { font-weight: bold; font-size: 13px; }
+            }}
+            QCheckBox {{ font-weight: bold; font-size: {FONT_SIZE_MEDIUM_HEADER}pt; }}
         """)
         layer_layout = QHBoxLayout()
         layer_layout.setContentsMargins(6, 2, 6, 2)
@@ -1033,19 +1033,19 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         # Color scheme dropdown (next to Layer Visibility, compact)
         color_group = QGroupBox("Color Scheme")
-        color_group.setStyleSheet("""
-            QGroupBox {
+        color_group.setStyleSheet(f"""
+            QGroupBox {{
                 font-weight: bold;
-                font-size: 13px;
+                font-size: {FONT_SIZE_MEDIUM_HEADER}pt;
                 margin-top: 8px;
                 padding-top: 8px;
                 padding-bottom: 2px;
-            }
-            QGroupBox::title {
+            }}
+            QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 6px;
                 padding: 0 3px;
-            }
+            }}
         """)
         color_layout = QHBoxLayout()
         color_layout.setContentsMargins(6, 2, 6, 2)
@@ -1055,7 +1055,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.colormap_3d_combo.addItems(['Classic', 'Clean', 'Dark', 'Warm'])
         self.colormap_3d_combo.setCurrentText('Clean')
         self.colormap_3d_combo.setMinimumWidth(100)
-        self.colormap_3d_combo.setStyleSheet("QComboBox { font-size: 12px; padding: 2px 6px; }")
+        self.colormap_3d_combo.setStyleSheet(f"QComboBox {{ font-size: {FONT_SIZE_MEDIUM_HEADER}pt; padding: 2px 6px; }}")
         self.colormap_3d_combo.currentTextChanged.connect(self._on_3d_colormap_changed)
         color_layout.addWidget(self.colormap_3d_combo)
 
@@ -1290,7 +1290,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 border: none;
                 padding: {SPACING_MD}px;
                 font-family: Courier;
-                font-size: 9px;
+                font-size: {FONT_SIZE_SMALL}pt;
             }}
         """)
         layout.addWidget(self.peak_params_text)

@@ -21,7 +21,8 @@ from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
 from lunaNMR.gui.components.signed_contours import draw_signed_contours
 from lunaNMR.utils.project_manager import lacks_fit_arrays, rebuild_fit_arrays, unrebuilt_fit
 from lunaNMR.gui.styles.design_system import (
-    SPACING_SM, SPACING_MD, FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
+    SPACING_SM, SPACING_MD, FONT_SIZE_LARGE_HEADER, FONT_SIZE_MEDIUM_HEADER,
+    FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT,
     PRIMARY_BUTTON_BG, SUCCESS_GREEN, ERROR_RED,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
@@ -327,9 +328,9 @@ class SpectrumViewerDialog(BaseDialog):
         # === Row 1: Layer Visibility Controls (bold text, 25% larger font) ===
         row1_layout = QHBoxLayout()
         layer_group = QGroupBox("Layer Visibility")
-        layer_group.setStyleSheet("""
-            QGroupBox { font-weight: bold; font-size: 15px; }
-            QCheckBox { font-weight: bold; font-size: 15px; }
+        layer_group.setStyleSheet(f"""
+            QGroupBox {{ font-weight: bold; font-size: {FONT_SIZE_LARGE_HEADER}pt; }}
+            QCheckBox {{ font-weight: bold; font-size: {FONT_SIZE_LARGE_HEADER}pt; }}
         """)
         layer_layout = QHBoxLayout()
         layer_layout.setContentsMargins(8, 3, 8, 3)
@@ -382,7 +383,7 @@ class SpectrumViewerDialog(BaseDialog):
         self.colormap_3d_combo.setCurrentText('Clean')
         # Make dropdown larger with larger text
         self.colormap_3d_combo.setMinimumWidth(120)
-        self.colormap_3d_combo.setStyleSheet("QComboBox { font-size: 13px; padding: 4px 8px; }")
+        self.colormap_3d_combo.setStyleSheet(f"QComboBox {{ font-size: {FONT_SIZE_MEDIUM_HEADER}pt; padding: 4px 8px; }}")
         self.colormap_3d_combo.currentTextChanged.connect(self._on_3d_colormap_changed)
         color_layout.addWidget(self.colormap_3d_combo)
 

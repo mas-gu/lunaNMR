@@ -1,5 +1,5 @@
-# ABOUTME: Prominence-based peak detection with graph clustering and adaptive windows for 2D NMR spectra.
-# ABOUTME: Uses scipy.ndimage.maximum_filter, networkx clustering, and S/N analysis for robust candidate detection.
+# ABOUTME: 2D peak detection: local maxima of a smoothed spectrum (scipy.ndimage.maximum_filter)
+# ABOUTME: kept above S/N, percentile and local-prominence thresholds, each refined to a centroid.
 #!/usr/bin/env python3
 """
 Enhanced Peak Picker Module
