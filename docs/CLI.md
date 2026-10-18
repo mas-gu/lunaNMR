@@ -375,6 +375,11 @@ python -m lunaNMR dynamixs modelfree [--dual] \
   te_err, chi2, fit_success` are never suffixed. CSVs written before the aliases existed have
   only the bare names, and a `_f1` selection on those returns an empty selection instead of
   raising — which reads as a real result ("no residue has Rex > 1"), not an error.
+- **`n_successful` counts a fit that ran out of iterations.** The Monte-Carlo model-free fit
+  reports `fit_success` whether it converged or used all of its iterations, so the summary
+  carries `n_at_iteration_cap` and `at_iteration_cap_residues` beside it, and the per-residue
+  CSV an `at_iteration_cap` column. On a real 600 MHz single-field run 33 of 55 residues hit
+  the cap; on the dual-field `087` method every residue did.
 - **It re-fits T1/T2 internally** from the matrices, so its residue count is its own and will
   not match a `t1t2` run you filtered yourself. Run `t1t2` separately for per-residue T values.
 - **Run each field alone alongside `--dual`.** Dual assumes one global τc; when the two

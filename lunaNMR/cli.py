@@ -1992,6 +1992,8 @@ def _run_dynamixs_modelfree(args):
     with _engine_stdout(args):
         result = IntegratedAnalysisPipeline(p, progress_callback=cb).run_complete_analysis()
     out_files = result.get('output_files', {})
+    capped = result.get('at_iteration_cap_residues') or []
+    n_capped = result.get('n_at_iteration_cap', 0)
     _emit(args, _recorded(args,
           {'command': 'dynamixs modelfree', 'method': result.get('method'),
            'time_units': units, 'series_metadata': sidecars or None,
@@ -2001,8 +2003,14 @@ def _run_dynamixs_modelfree(args):
            'residue_counts': result.get('residue_counts') or {},
            'excluded_residues': result.get('excluded_residues') or {},
            'n_residues': result.get('n_residues'), 'n_successful': result.get('n_successful'),
+           # n_successful counts these too: the optimiser reports success whether it
+           # converged or ran out of iterations, so the capped ones are named apart.
+           'n_at_iteration_cap': n_capped,
+           'at_iteration_cap_residues': capped,
            'output_files': out_files}),
           f"Model-free complete: {result.get('n_successful')}/{result.get('n_residues')} residues",
+          f"  {n_capped} fits stopped at the iteration cap without converging"
+          + (f": {', '.join(capped)}" if capped else ""),
           *[f"  {k}: {v}" for k, v in out_files.items()])
     return 0
 
