@@ -225,10 +225,13 @@ class DualFieldSpectralDensityAnalysis:
         the measured ones, at fixed tc. `field` is 1 or 2."""
         A = getattr(self, f'field{field}_d_factor')
         C = getattr(self, f'field{field}_c_factor')
-        omegaH = getattr(self, f'field{field}_omegaH_eff')
+        # J(wH) at the variant's wH (0.87 wH in the 0.87 variant); J(wH +/- wN) at the
+        # true frequencies, as the single-field fit evaluates them
+        omegaH_j = getattr(self, f'field{field}_omegaH_eff')
+        omegaH = getattr(self, f'field{field}_omegaH')
         omegaN = abs(getattr(self, f'field{field}_omegaN'))
         gammaHN = GAMMA_H / GAMMA_N
-        jH = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaH)
+        jH = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaH_j)
         jN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaN)
         jHpN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaH + omegaN)
         jHmN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaH - omegaN)

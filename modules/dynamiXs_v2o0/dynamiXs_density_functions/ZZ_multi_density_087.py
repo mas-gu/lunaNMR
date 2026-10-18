@@ -280,10 +280,13 @@ class ReducedSpectralDensityAnalysis:
 
         r1_calc = (A / 4.0) * (3*jN + 6*jHpN + jHmN) + C * jN
         r2_calc = 0.5 * (A / 4.0) * (4*j0 + 3*jN + 6*jHpN + 6*jH + jHmN) + C * (2*j0/3.0 + 0.5*jN) + rex
+        t1_calc = 1.0 / r1_calc
 
-        deviations = [(1.0 / r1_calc - t1) / t1, (1.0 / r2_calc - t2) / t2]
+        deviations = [(t1_calc - t1) / t1, (1.0 / r2_calc - t2) / t2]
         if noe is not None and not pd.isna(noe):
-            noe_calc = 1.0 + ((A / 4.0) * gammaHN * t1 * (6*jHpN - jHmN))
+            # From the T1 the model predicts, so the prediction depends on the parameters
+            # alone - as the dual-field fit predicts it
+            noe_calc = 1.0 + ((A / 4.0) * gammaHN * t1_calc * (6*jHpN - jHmN))
             deviations.append((noe_calc - noe) / (0.1 if noe == 0 else abs(noe)))
         return deviations
 
