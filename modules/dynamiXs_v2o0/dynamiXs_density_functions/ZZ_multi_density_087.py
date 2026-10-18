@@ -13,7 +13,6 @@ cross-correlation effects and dipolar-CSA interference in the relaxation mechani
 
 #####
 
-import os
 
 #####
 

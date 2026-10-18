@@ -15,7 +15,6 @@ FIX VERSION: Fixed residue numbering issue by ensuring proper 0-based sequential
 
 #####
 
-import os
 
 #####
 
