@@ -1896,15 +1896,8 @@ def _run_dynamixs_modelfree(args):
     # exactly the mode the runbooks tell an agent to use.
     cb = ((lambda msg, *a, **k: print(msg, file=sys.stderr))
           if getattr(args, 'format', 'text') == 'json' else None)
-    # Run from the output dir: the single-field density plotter and the intermediate
-    # fit-result txt files are written to the CWD with relative/hard-coded names.
-    cwd = os.getcwd()
-    try:
-        os.chdir(out_dir)
-        with _engine_stdout(args):
-            result = IntegratedAnalysisPipeline(p, progress_callback=cb).run_complete_analysis()
-    finally:
-        os.chdir(cwd)
+    with _engine_stdout(args):
+        result = IntegratedAnalysisPipeline(p, progress_callback=cb).run_complete_analysis()
     out_files = result.get('output_files', {})
     _emit(args, _recorded(args,
           {'command': 'dynamixs modelfree', 'method': result.get('method'),
