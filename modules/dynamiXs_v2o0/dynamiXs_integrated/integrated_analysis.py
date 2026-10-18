@@ -14,6 +14,7 @@ Author: DynamiXs Development Team
 Date: 2025-01-23
 """
 
+import importlib
 import sys
 import os
 import tempfile
@@ -471,9 +472,12 @@ class IntegratedAnalysisPipeline:
     def _run_spectral_density_analysis(self, input_files: Dict[str, str]) -> Dict:
         """Run the appropriate spectral density analysis script using multicore versions"""
 
-        # Import spectral density module
-        density_module_path = Path(__file__).parent.parent / 'dynamiXs_density_functions'
-        sys.path.insert(0, str(density_module_path))
+        # Import spectral density module by its package name, the one `density` and the
+        # GUI use: the numba cache of its kernels rebuilds them by importing the module
+        # under the name they were compiled in, so a second name breaks the other path.
+        dynamixs_path = str(Path(__file__).parent.parent)
+        if dynamixs_path not in sys.path:
+            sys.path.insert(0, dynamixs_path)
 
         # Determine which multicore script to use
         method_map = {
@@ -493,7 +497,7 @@ class IntegratedAnalysisPipeline:
 
         # Import the appropriate class
         try:
-            module = __import__(script_name)
+            module = importlib.import_module(f'dynamiXs_density_functions.{script_name}')
             AnalysisClass = getattr(module, class_name)
         except ImportError as e:
             raise ImportError(f"Could not import {script_name}: {e}")
