@@ -1183,15 +1183,20 @@ class MultiSpectrumProcessor:
 
         tidy_df = pd.DataFrame(tidy_data)
         tidy_file = os.path.join(self.output_folder, "series_analysis_tidy.csv")
-        # Format ppm_x and ppm_y with 3 decimals (position data), other numeric columns with 1 decimal
+        # Positions, R-squared and S/N get 4 decimals: CSP needs full ppm precision, and
+        # a caller gates on the other two (the Kd loader's 3-sigma floor among them).
+        # Intensities get 1 decimal; integers and flags are written as what they are.
         tidy_df_formatted = tidy_df.copy()
         for col in tidy_df_formatted.columns:
-            if not pd.api.types.is_numeric_dtype(tidy_df_formatted[col]):
+            if col in ('position_pinned', 'intensity_pinned'):
+                tidy_df_formatted[col] = tidy_df_formatted[col].apply(
+                    lambda x: str(bool(x)) if x is not None and pd.notna(x) else '')
+            elif not pd.api.types.is_numeric_dtype(tidy_df_formatted[col]):
                 continue
-            # Position columns get 4 decimals — CSP/titration needs full ppm precision
-            if col in ['ppm_x', 'ppm_y']:
+            elif col == 'peak_number':
+                tidy_df_formatted[col] = tidy_df_formatted[col].apply(lambda x: f'{x:.0f}' if pd.notna(x) else '')
+            elif col in ['ppm_x', 'ppm_y', 'r_squared', 'snr', 'detection_sigma']:
                 tidy_df_formatted[col] = tidy_df_formatted[col].apply(lambda x: f'{x:.4f}' if pd.notna(x) else '')
-            # All other numeric columns get 1 decimal place
             else:
                 tidy_df_formatted[col] = tidy_df_formatted[col].apply(lambda x: f'{x:.1f}' if pd.notna(x) else '')
         tidy_df_formatted.to_csv(tidy_file, index=False)
