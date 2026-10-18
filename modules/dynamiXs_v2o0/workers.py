@@ -187,6 +187,9 @@ class T1T2FittingParams:
     error_method: str = "analytical"  # "analytical" or "bootstrap"
     json_folder: str = ""
     field_name: str = ""
+    # Starts the fit JSON's name, before the field (<run_prefix>_<field>_<exp>), as the
+    # CLI's --prefix does: runs sharing a JSON folder keep their own.
+    run_prefix: str = ""
     field_freq: float = 0.0
     # New fields for memory-based data flow
     input_df: Optional[pd.DataFrame] = field(default=None, repr=False)
@@ -263,7 +266,8 @@ class T1T2FittingWorker(AnalysisWorker):
             # Add JSON export parameters if provided
             if self.params.json_folder:
                 fit_params['json_folder'] = self.params.json_folder
-                fit_params['field_name'] = self.params.field_name
+                fit_params['field_name'] = "_".join(
+                    p for p in (self.params.run_prefix, self.params.field_name) if p)
                 fit_params['field_freq'] = self.params.field_freq
 
             # Create progress callback that emits signals
@@ -285,6 +289,8 @@ class T1T2FittingWorker(AnalysisWorker):
                 result['output_dir'] = self.params.output_dir
                 result['json_folder'] = self.params.json_folder
                 result['field_freq'] = self.params.field_freq
+                # What every file this run wrote starts with.
+                result['file_prefix'] = self.params.results_prefix
                 self.finished.emit(result)
 
         except Exception as e:

@@ -350,6 +350,9 @@ class HetNOEPage(BasePage):
             'field_freq': self.field_freq_spin.value(),
             'source_series_map': dict(self.source_series_map),
             'last_results_file': self.last_results_file,
+            # What the files of the run shown here start with (<prefix>_hetnoe.csv/.pdf)
+            'file_prefixes': ([os.path.splitext(os.path.basename(self.last_results_file))[0]]
+                              if self.last_results_file else []),
         }
 
     def restore_session_state(self, state: dict):

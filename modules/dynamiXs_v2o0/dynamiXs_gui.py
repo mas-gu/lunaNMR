@@ -1527,12 +1527,17 @@ class T1T2FittingPage(BasePage):
         # Determine error method from dropdown
         error_method = "bootstrap" if self.error_method_combo.currentIndex() == 1 else "analytical"
 
+        # Every file of the run starts with its prefix, the CLI's <prefix>_<field> naming:
+        # runs sharing an output folder keep their own, and a project bundles each
+        # analysis with only its own.
+        run_prefix = self._run_prefix()
+
         # Create parameters (input_df takes priority over input_file)
         params = T1T2FittingParams(
             input_file=input_file or "",
             output_dir=output_dir,
             experiment_type=exp_type,
-            results_prefix=f"{field_name}_{self.prefix_edit.text()}",
+            results_prefix=f"{run_prefix}_{field_name}_{exp_type}",
             multicore=True,
             initial_amplitude=self.amp_spin.value(),
             initial_decay=self.time_spin.value(),
@@ -1540,6 +1545,7 @@ class T1T2FittingPage(BasePage):
             error_method=error_method,
             json_folder=json_folder,
             field_name=field_name,
+            run_prefix=run_prefix,
             field_freq=field_freq,
             input_df=input_df,
             series_name=series_name or ""
@@ -1557,6 +1563,22 @@ class T1T2FittingPage(BasePage):
         self.worker.finished.connect(self._on_finished)
         self.worker.error.connect(self._on_error)
         self.worker.start()
+
+    def _run_prefix(self) -> str:
+        """The Results Prefix every file of the next run starts with."""
+        return self.prefix_edit.text().strip() or "analysis"
+
+    def _session_entries(self):
+        """Every stored fit of this page's session, across fields and experiments."""
+        for field_data in self.session_results.values():
+            for exp_type in ('t1', 't2', 't1rho'):
+                if field_data and field_data.get(exp_type):
+                    yield field_data[exp_type]
+
+    def _file_prefixes(self) -> list:
+        """What the files of each run stored in the session start with."""
+        return sorted({e['file_prefix'] for e in self._session_entries()
+                       if e.get('file_prefix')})
 
     def _run_all_analyses(self, field_name: str):
         """Run all analyses (T1, T2) for the specified field."""
@@ -1659,11 +1681,12 @@ class T1T2FittingPage(BasePage):
             peak_list=self._load_peak_list(self.peak_list_file)
         )
 
-        output_file = os.path.join(self.output_dir, f"{field}_T2_from_T1rho.csv")
+        file_prefix = f"{self._run_prefix()}_{field}_T2_from_T1rho"
+        output_file = os.path.join(self.output_dir, f"{file_prefix}.csv")
         result.to_csv(output_file, index=False)
 
         # Also create a fit_results.txt format for compatibility with View Results
-        results_txt_file = os.path.join(self.output_dir, f"{field}_T2_from_T1rho_fit_results.txt")
+        results_txt_file = os.path.join(self.output_dir, f"{file_prefix}_fit_results.txt")
         write_t2_fit_results(result, results_txt_file)
 
         # The derived T2 becomes the field's T2 unless a measured one is there: a fitted
@@ -1677,6 +1700,7 @@ class T1T2FittingPage(BasePage):
             self.session_results[field]['t2'] = {
                 'output_dir': self.output_dir,
                 'json_folder': None,  # No JSON for derived T2
+                'file_prefix': file_prefix,
                 'results_file': results_txt_file,
                 'n_fitted': len(result),
                 'frequency_mhz': spec_freq_mhz,
@@ -1901,6 +1925,8 @@ class T1T2FittingPage(BasePage):
         result_entry = {
             'output_dir': results.get('output_dir'),
             'json_folder': results.get('json_folder'),
+            'json_file': results.get('json_file'),
+            'file_prefix': results.get('file_prefix'),
             'results_file': results.get('results_file'),
             'n_fitted': results.get('n_fitted'),
             'frequency_mhz': results.get('field_freq', 600.0)
@@ -2042,6 +2068,7 @@ class T1T2FittingPage(BasePage):
             'field2_freq': self.field2_freq_spin.value(),
             'analysis_selection': self.analysis_combo.currentText(),
             'prefix': self.prefix_edit.text(),
+            'file_prefixes': self._file_prefixes(),
             'output_dir': self.output_dir,
 
             # T1rho parameters
@@ -2197,27 +2224,12 @@ class T1T2FittingPage(BasePage):
         try:
             from visualization.fit_viewer import FitViewer
 
-            # Collect ALL unique json_folders from session_results
-            json_folders = set()
-            for field_name, field_data in self.session_results.items():
-                if field_data is None:
-                    continue
-                for exp_type in ['t1', 't2', 't1rho']:
-                    result = field_data.get(exp_type)
-                    if result and result.get('json_folder'):
-                        folder = result['json_folder']
-                        if os.path.exists(folder):
-                            json_folders.add(folder)
-
-            # Fallback to output_dir if no session data
-            if not json_folders and self.output_dir:
-                json_folder_name = self.json_display.text() if hasattr(self, 'json_display') else "json"
-                fallback_folder = os.path.join(self.output_dir, json_folder_name)
-                if os.path.exists(fallback_folder):
-                    json_folders.add(fallback_folder)
-
-            # Convert to list for FitViewer
-            json_folders_list = list(json_folders)
+            # The session's own fit JSONs: a folder shared with other runs holds theirs too
+            json_files = sorted({e['json_file'] for e in self._session_entries()
+                                 if e.get('json_file') and os.path.exists(e['json_file'])})
+            # A session that recorded none: every fit in its JSON folders
+            json_folders = sorted({e['json_folder'] for e in self._session_entries()
+                                   if e.get('json_folder') and os.path.exists(e['json_folder'])})
 
             # Get source series map for Inspect Peak functionality
             series_map = getattr(self, 'source_series_map', {})
@@ -2225,7 +2237,8 @@ class T1T2FittingPage(BasePage):
             # Store as instance variable to prevent garbage collection
             self.fit_viewer = FitViewer(
                 parent=None,  # Separate window
-                json_folders=json_folders_list if json_folders_list else None,
+                json_folders=None if json_files else (json_folders or None),
+                json_files=json_files or None,
                 source_series_map=series_map
             )
 
@@ -2582,8 +2595,10 @@ class SpectralDensityPage(BasePage):
             'monte_carlo': self.mc_check.isChecked(),
             'n_samples': self.mc_spin.value(),
 
-            # Output prefix
+            # Output prefix, and what the files of the run stored here start with
             'prefix': self.prefix_edit.text(),
+            'file_prefixes': ([self.session_results['results_prefix']]
+                              if (self.session_results or {}).get('results_prefix') else []),
         }
 
     def restore_session_state(self, state: dict):
@@ -3342,6 +3357,10 @@ class IntegratedAnalysisPage(BasePage):
             'results_prefix': results_prefix,
             'output_dir': self.output_dir,
             'json_folder': json_folder,
+            # The run's own fit JSONs (<prefix>_<field>_<T1|T2>): the folder may hold
+            # another run's too.
+            'json_files': sorted(glob.glob(os.path.join(
+                glob.escape(json_folder), f"{glob.escape(results_prefix)}_field[12]_T[12]_fit_data.json"))),
             'results_file': results_file if os.path.exists(results_file) else None,
         }
 
@@ -3434,13 +3453,18 @@ class IntegratedAnalysisPage(BasePage):
                 if not os.path.exists(json_folder):
                     json_folder = None
 
+            # The run's own fits, where it recorded them and they are still there
+            json_files = [f for f in (self.session_results or {}).get('json_files') or []
+                          if os.path.exists(f)]
+
             # Get source series map for Inspect Peak functionality
             series_map = getattr(self, 'source_series_map', {})
 
             # Store as instance variable to prevent garbage collection
             self.fit_viewer = FitViewer(
                 parent=None,  # Separate window
-                json_folder=json_folder,
+                json_folder=None if json_files else json_folder,
+                json_files=json_files or None,
                 source_series_map=series_map
             )
 
@@ -3506,6 +3530,8 @@ class IntegratedAnalysisPage(BasePage):
             # Output configuration
             'output_dir': self.output_dir,
             'prefix': self.prefix_edit.text(),
+            'file_prefixes': ([self.session_results['results_prefix']]
+                              if (self.session_results or {}).get('results_prefix') else []),
             'json_folder_name': self.json_display.text(),
         }
 

@@ -232,6 +232,29 @@ def resolve_region_2d(result: dict, integrator):
     return build_region_2d(ppm_y[y0:y1], ppm_x[x0:x1], intensity)
 
 
+def _run_owns(name: str, prefix: str, rivals) -> bool:
+    """Whether the file `name` was written by the run whose files start with `prefix`:
+    it starts with it, and with no longer prefix of another run of the same folder, so
+    `a` does not claim the files of `a_b`."""
+    def starts(p):
+        return name.startswith(p + '_') or name.startswith(p + '.')
+    return starts(prefix) and not any(len(r) > len(prefix) and starts(r) for r in rivals)
+
+
+def _run_prefixes_by_folder(states) -> Dict[Path, set]:
+    """{output folder: the file prefixes of every run recorded there}, over the pages of
+    the DynamiXs analysis `states`."""
+    by_folder = {}
+    for state in states:
+        for page in DYNAMIXS_RESULT_PAGES:
+            page_state = (state or {}).get(page) or {}
+            out = page_state.get('output_dir')
+            if out and page_state.get('file_prefixes'):
+                by_folder.setdefault(Path(out).resolve(), set()).update(
+                    page_state['file_prefixes'])
+    return by_folder
+
+
 def _relocate_paths(value, old_root: Path, new_root: Path):
     """`value` with every path string under `old_root` moved to the same place under
     `new_root` - where something exists there; others are left as they were."""
@@ -1268,6 +1291,8 @@ class ProjectManager:
 
         analyses_dir = bundle_path / "dynamixs" / "analyses"
         analyses_dir.mkdir(parents=True, exist_ok=True)
+        runs_by_folder = _run_prefixes_by_folder(
+            entry.get('state') for entry in analyses.values() if isinstance(entry, dict))
         kept = set()
         for name, entry in analyses.items():
             if not isinstance(entry, dict):
@@ -1282,7 +1307,7 @@ class ProjectManager:
             with open(adir / "file_refs.json", 'w') as f:
                 json.dump(entry.get('file_refs') or {}, f, indent=2,
                           default=self._json_serializer)
-            self._copy_dynamixs_results(state, adir / "results")
+            self._copy_dynamixs_results(state, adir / "results", runs_by_folder)
             # From now on the analysis is its bundled copy, as after a load: a page writes
             # every run into one folder under the same names, so a later save copying
             # from there again would hand this analysis a later run's results.
@@ -1295,9 +1320,14 @@ class ProjectManager:
         logger.info(f"Saved {len(kept)} DynamiXs analysis(es) to {analyses_dir}")
         return True
 
-    def _copy_dynamixs_results(self, state, dest_results_dir) -> None:
+    def _copy_dynamixs_results(self, state, dest_results_dir, runs_by_folder=None) -> None:
         """Copy one analysis's result files into dest_results_dir/<page>/, using ONLY the
-        per-page output_dir in `state` (no live-dialog merge)."""
+        per-page output_dir in `state` (no live-dialog merge).
+
+        A page that records its runs' `file_prefixes` gets only the files those runs
+        wrote: runs sharing a folder are told apart by prefix, as `project build` does,
+        against every run of that folder in `runs_by_folder` ({folder: prefixes}).
+        """
         import shutil, glob
         if not isinstance(state, dict):
             return
@@ -1313,20 +1343,35 @@ class ProjectManager:
             page_dir = dest / page
             if Path(out).resolve() == page_dir.resolve():
                 continue    # a reopened analysis saved onto its own bundle: in place
+            prefixes = page_state.get('file_prefixes')
+            if prefixes is None:
+                owned = lambda name: True
+            else:
+                rivals = (runs_by_folder or {}).get(Path(out).resolve(), set())
+                owned = lambda name: any(_run_owns(name, p, rivals) for p in prefixes)
             files = (glob.glob(str(Path(out) / "*.csv")) + glob.glob(str(Path(out) / "*.txt"))
                      + glob.glob(str(Path(out) / "*.json")))
-            files = [f for f in files if any(p in Path(f).name for p in patterns)]
-            json_dirs = [d for d in glob.glob(str(Path(out) / "json*")) if Path(d).is_dir()]
+            files = [f for f in files
+                     if any(p in Path(f).name for p in patterns) and owned(Path(f).name)]
+            json_dirs = {Path(d).name: [f for f in Path(d).iterdir()
+                                        if f.is_file() and owned(f.name)]
+                         for d in glob.glob(str(Path(out) / "json*")) if Path(d).is_dir()}
+            json_dirs = {d: fs for d, fs in json_dirs.items() if fs or prefixes is None}
             if not files and not json_dirs:
                 continue
             page_dir.mkdir(parents=True, exist_ok=True)
             for src in files:
                 shutil.copy2(src, page_dir / Path(src).name)
-            for jd in json_dirs:
-                dst = page_dir / Path(jd).name
+            for jd, json_files in json_dirs.items():
+                dst = page_dir / jd
                 if dst.exists():
                     shutil.rmtree(dst)
-                shutil.copytree(jd, dst)
+                if prefixes is None:
+                    shutil.copytree(Path(out) / jd, dst)
+                    continue
+                dst.mkdir()
+                for src in json_files:
+                    shutil.copy2(src, dst / src.name)
 
     def _repoint_dynamixs_results(self, state, results_dir) -> None:
         """Point each page's output_dir (+ methyl viewer paths) at the bundled results."""

@@ -169,6 +169,8 @@ def t1t2_analysis(records, name, staging, t1rho_records=()):
         results = staging / f"{key}_{Path(results_file).name}"
         shutil.copy2(results_file, results)
         session[field][exp] = {'output_dir': str(staging), 'json_folder': str(json_dir),
+                               'json_file': (str(json_dir / Path(json_file).name)
+                                             if json_file else None),
                                'results_file': str(results),
                                'n_fitted': record['summary'].get('n_fitted'),
                                'frequency_mhz': float(record['args']['field_freq'])}
