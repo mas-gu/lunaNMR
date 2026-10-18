@@ -5170,6 +5170,8 @@ class LunaNMRMainWindow(BaseWindow):
         dialog.processing_complete.connect(self._on_series_complete)
 
         dialog.exec()
+        # The series switched the PS2D config to the nucleus it detected
+        self.sync_parameters_to_integrator()
 
         self.update_status("Series integration dialog closed")
 
@@ -6282,8 +6284,14 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     logger.info(f"S/N from-GUI mode: threshold={self.integrator.sn_absolute_threshold:.2e}, "
                                 f"contour_min={self.contour_min_spin.value():.3f} (with 5% safety margin)")
 
-            # Sync PS2D expert parameters from spinboxes to global config
+            # Sync PS2D expert parameters from spinboxes to global config. The config is
+            # process-wide and a series switches it to the nucleus it detected; this
+            # window fits with the nucleus it shows.
             ps2d_config = get_ps2d_config()
+            if ps2d_config.nucleus_type != self.nucleus_type:
+                logger.info(f"PS2D config is {ps2d_config.nucleus_type}, set by another run; "
+                            f"returning it to this window's {self.nucleus_type}")
+                ps2d_config = set_ps2d_config(self.nucleus_type)
             if hasattr(self, 'expert_radF1_spin') and self.expert_radF1_spin is not None:
                 try:
                     ps2d_config.radF1 = float(self.expert_radF1_spin.value())
@@ -6309,6 +6317,14 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     ps2d_config.max_iterations = int(self.expert_max_iter_spin.value())
                 except (ValueError, AttributeError):
                     pass
+            if hasattr(self, 'expert_max_cluster_spin') and self.expert_max_cluster_spin is not None:
+                try:
+                    ps2d_config.max_cluster_size = int(self.expert_max_cluster_spin.value())
+                except (ValueError, AttributeError):
+                    pass
+            if hasattr(self, 'expert_radF1_spin') and self.expert_radF1_spin is not None:
+                # What the panel shows is what every fresh fit starts from, Applied or not
+                mark_ps2d_config_as_base()
 
             # Sync auto-add dummy peaks setting
             if hasattr(self, 'auto_add_dummy_peaks'):
@@ -7018,6 +7034,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         # Show dialog (non-blocking)
         dialog.exec()
+        # The series switched the PS2D config to the nucleus it detected
+        self.sync_parameters_to_integrator()
 
     def _on_series_processing_complete(self, batch_results):
         """Handle series processing completion.

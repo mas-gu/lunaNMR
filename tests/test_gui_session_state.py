@@ -101,6 +101,16 @@ def _wait_for(app, worker, timeout=600):
         app.processEvents()
 
 
+def _run_series(window, data):
+    """Run the series dialog's worker, in this thread, over the 15N spectrum and the 10-peak list."""
+    from lunaNMR.gui.dialogs.series_integration_dialog import ProcessingWorker, SeriesIntegrationDialog
+    window.load_peak_file(data["ten"])
+    dialog = SeriesIntegrationDialog(main_window=window)
+    ProcessingWorker(None, [data["spectrum"]], window.integrator.peak_list.copy(), 'reference',
+                     dialog._get_voigt_params(), series_name='nucleus').run()
+    dialog.deleteLater()
+
+
 def _assignments(peaks):
     return sorted(p.get('assignment') for p in peaks)
 
@@ -188,3 +198,49 @@ class TestThePs2dConfigFollowsTheWindow:
         config = get_ps2d_config()
         assert (config.nucleus_type, config.radF1) == ('15N', PS2DConfig('15N').radF1)
         assert window.expert_nucleus_combo.currentText() == '15N'
+
+    def test_a_series_on_another_nucleus_does_not_change_what_the_window_fits(self, window, data):
+        from lunaNMR.core.ps2d_config import PS2DConfig, get_ps2d_config, restore_base_ps2d_config
+        window._on_nucleus_type_change('13C')
+        _run_series(window, data)
+        assert get_ps2d_config().nucleus_type == '15N'
+
+        window.sync_parameters_to_integrator()
+        restore_base_ps2d_config()
+
+        config = get_ps2d_config()
+        assert (config.nucleus_type, config.radF1) == ('13C', PS2DConfig('13C').radF1)
+
+
+class TestTheExpertPanelIsWhatTheFitUses:
+
+    @pytest.fixture
+    def expert(self, window, monkeypatch):
+        from PySide6.QtWidgets import QDialog
+        monkeypatch.setattr(QDialog, "exec", lambda self: 0)
+        window.on_expert_mode()
+        return window
+
+    def test_a_radius_typed_without_apply_survives_the_fresh_fit_restore(self, expert):
+        from lunaNMR.core.ps2d_config import get_ps2d_config, restore_base_ps2d_config
+        expert.expert_radF1_spin.setValue(0.25)
+
+        expert.sync_parameters_to_integrator()
+        restore_base_ps2d_config()
+
+        assert get_ps2d_config().radF1 == 0.25
+
+    def test_the_applied_13c_settings_come_back_after_a_series_on_15n(self, expert, data):
+        from lunaNMR.core.ps2d_config import get_ps2d_config, restore_base_ps2d_config
+        expert._on_nucleus_type_change('13C')
+        expert.expert_radF1_spin.setValue(0.2)
+        expert.expert_max_cluster_spin.setValue(5)
+        expert._on_ps2d_params_apply()
+        _run_series(expert, data)
+        assert get_ps2d_config().nucleus_type == '15N'
+
+        expert.sync_parameters_to_integrator()
+        restore_base_ps2d_config()
+
+        config = get_ps2d_config()
+        assert (config.nucleus_type, config.radF1, config.max_cluster_size) == ('13C', 0.2, 5)
