@@ -181,9 +181,16 @@ def load_intensity_matrix(csv_path):
     These files (peak_intensity_matrix.csv, peak_volume_matrix.csv,
     peak_intensity_detected_matrix.csv) hold only intensities — no per-point
     positions — so they support intensity Kd but not CSP.
+
+    Every CSV that is neither tidy nor tracking arrives here, so one that cannot be an
+    intensity matrix is refused: with no point columns or no residue rows there is
+    nothing to fit, and a matrix of 0/1 detection flags fits every residue to one Kd.
     """
     df = pd.read_csv(csv_path)
     point_cols = [c for c in df.columns if _to_point(c) is not None]
+    if not point_cols:
+        raise ValueError(f"no titration point columns in {csv_path}: it is not a series "
+                         f"tidy, peak-tracking or intensity-matrix CSV")
     point_cols.sort(key=_to_point)
     points = [_to_point(c) for c in point_cols]
 
@@ -196,6 +203,13 @@ def load_intensity_matrix(csv_path):
         nan = [np.nan] * len(points)
         residues[a] = {'points': list(points), 'ppm_x': list(nan), 'ppm_y': list(nan),
                        'height': vals, 'volume': list(vals)}
+    if not residues:
+        raise ValueError(f"no residue rows (Assignment) in {csv_path}")
+    values = np.array([r['height'] for r in residues.values()], dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size and np.isin(finite, (0.0, 1.0)).all():
+        raise ValueError(f"every value in {csv_path} is 0 or 1: these are detection flags, "
+                         f"not intensities. Use the intensity or volume matrix.")
     return points, residues
 
 

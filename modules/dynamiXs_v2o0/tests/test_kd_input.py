@@ -253,3 +253,36 @@ class TestRepeatAndUnreadableLabels:
         pd.DataFrame(cols).to_csv(csv, index=False)
         with pytest.raises(ValueError, match="2D_sample_1o0b"):
             load_titration_tracking(str(csv))
+
+
+def _series_folder_with(*names):
+    """A point-labelled real series run holding all of `names`."""
+    for tidy, _ in _runs_with_failed_points():
+        if all((tidy.parent / n).exists() for n in names):
+            return tidy.parent
+    return None
+
+
+_MATRIX_FOLDER = _series_folder_with("peak_intensity_matrix.csv", "peak_detection_matrix.csv",
+                                     "processing_summary.csv")
+
+
+@pytest.mark.skipif(_MATRIX_FOLDER is None, reason="data_test not present")
+class TestOnlyAnIntensityMatrixLoadsAsOne:
+    """Any CSV that is neither tidy nor tracking reaches the matrix loader."""
+
+    def test_an_intensity_matrix_loads(self):
+        from kd_input import load_titration
+        points, residues = load_titration(str(_MATRIX_FOLDER / "peak_intensity_matrix.csv"))
+        assert points and residues
+
+    def test_a_detection_flag_matrix_is_refused(self):
+        # Every cell is 0 or 1; fitted as intensities, every residue 'fits' one Kd.
+        from kd_input import load_titration
+        with pytest.raises(ValueError, match="0 or 1"):
+            load_titration(str(_MATRIX_FOLDER / "peak_detection_matrix.csv"))
+
+    def test_a_csv_with_no_point_columns_is_refused(self):
+        from kd_input import load_titration
+        with pytest.raises(ValueError, match="no titration point"):
+            load_titration(str(_MATRIX_FOLDER / "processing_summary.csv"))

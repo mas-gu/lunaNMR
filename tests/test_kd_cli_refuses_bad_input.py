@@ -40,3 +40,19 @@ def test_a_protein_concentration_that_is_not_positive_is_refused(tidy, tmp_path,
     assert code == 1
     assert summary["ok"] is False
     assert "P0" in summary["error"]["message"]
+
+
+def _series_summary():
+    """processing_summary.csv of a real series run: a CSV with no titration points."""
+    found = sorted((TIDY.parents[1]).glob("**/series_results_*/processing_summary.csv"))
+    return found[0] if found else None
+
+
+@pytest.mark.skipif(_series_summary() is None, reason="data_test not present")
+def test_a_csv_that_is_no_titration_is_refused(tmp_path):
+    code, summary = _run("kd", "--input", str(_series_summary()), "--out", str(tmp_path / "out"),
+                         "--p0", "50", "--observable", "intensity", "--conc-units", "absolute")
+    assert code == 1
+    assert summary["ok"] is False
+    assert "no titration point" in summary["error"]["message"]
+    assert not (tmp_path / "out").exists()
