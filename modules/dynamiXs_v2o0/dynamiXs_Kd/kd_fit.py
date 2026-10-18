@@ -720,7 +720,9 @@ def run_kd_analysis_with_params(params, progress_callback=None):
         # load_params accepts this metadata as a params source, so conc_units must say
         # 'absolute' explicitly — inheriting the schema default would be the same value
         # by luck rather than by statement, and re-converting it is the P0-factor bug.
-        'metadata': {'analysis': 'Kd_titration', 'protein_conc': P0, 'alpha': alpha,
+        'metadata': {'analysis': 'Kd_titration',
+                     'input': os.path.basename(str(params['input_csv_file'])),
+                     'protein_conc': P0, 'alpha': alpha,
                      'concentrations': concs, 'conc_units': 'absolute', 'points': points,
                      'intensity_scales': list(scales) if scales else None,
                      'intensity_value': value,

@@ -54,7 +54,7 @@ class TestASuccessIsLabelled:
                        "2,K14,7.53,110.2,90.0,900.0\n0,A17,8.0,120.0,100.0,1000.0\n"
                        "1,A17,8.02,120.1,80.0,800.0\n2,A17,8.05,120.3,50.0,500.0\n")
         p = _run("kd", "--input", str(csv), "--out", str(tmp_path / "o"),
-                 "--p0", "50", "--format", "json")
+                 "--p0", "50", "--conc", "0,25,50", "--format", "json")
         assert p.returncode == 0, p.stderr[-500:]
         payload = json.loads(p.stdout)
         assert payload["ok"] is True

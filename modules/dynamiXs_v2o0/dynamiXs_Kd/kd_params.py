@@ -10,6 +10,9 @@ SIBLING_NAME = "kd_params.json"         # hand-placed next to an input CSV
 
 # Canonical keys (identical to the fit JSON's metadata) with their defaults.
 _DEFAULTS = {
+    # The input CSV these settings were written for (its file name). A stored file is
+    # only ever applied to that input: a folder can hold several titrations.
+    'input': None,
     'points': None,
     'concentrations': None,
     'intensity_scales': None,
@@ -64,7 +67,10 @@ def normalize_params(d):
     d = dict(d or {})
     obs_source = d['observables'] if 'observables' in d else d.get('observable')
     boot = d.get('n_bootstrap', d.get('bootstrap', _DEFAULTS['n_bootstrap']))
+    source = d.get('input') or (os.path.basename(str(d['input_csv_file']))
+                                if d.get('input_csv_file') else None)
     return {
+        'input': source,
         'points': _float_or_none_list(d.get('points')),
         'concentrations': _float_or_none_list(d.get('concentrations')),
         'intensity_scales': _float_or_none_list(d.get('intensity_scales')),
@@ -119,11 +125,29 @@ def _newest(pattern):
     return max(matches, key=os.path.getmtime) if matches else None
 
 
-def find_params_source(csv_path):
+def _mismatch(path, stored, csv_path, points):
+    """Why a stored params file does not describe this input, or None if it does."""
+    recorded = stored.get('points')
+    if recorded is not None and [float(p) for p in recorded] != [float(p) for p in points]:
+        return f"its titration points {recorded} are not this input's {list(points)}"
+    name = os.path.basename(csv_path)
+    if stored.get('input') is not None:
+        return None if stored['input'] == name else f"it was written for {stored['input']}"
+    if os.path.basename(path) != SIBLING_NAME:
+        return "it does not record which input it was written for"
+    return None
+
+
+def find_params_source(csv_path, points=None, rejected=None):
     """Locate a params source near an input titration CSV, or None. Search order:
     a sibling kd_params.json, then the newest *_kd_params.json beside the CSV, then
     inside a sibling 'kd_analysis' output folder (newest *_kd_params.json, else the
     newest *_kd_fit_data.json).
+
+    Given the input's `points`, only a file that describes THIS input is returned: one
+    that loads, whose recorded points match, and that names this input - a hand-placed
+    kd_params.json is the user's own statement for the folder and need not. Each file
+    passed over is appended to `rejected` as {'path', 'reason'}, so the caller can say so.
 
     A run writes its machine-readable output under <out>/data/, so the kd_analysis
     candidates are checked at both depths: the bare paths only ever match output
@@ -140,6 +164,16 @@ def find_params_source(csv_path):
         _newest(os.path.join(analysis, "*_kd_fit_data.json")),
     ]
     for c in candidates:
-        if c and os.path.isfile(c):
+        if not (c and os.path.isfile(c)):
+            continue
+        if points is None:
             return c
+        try:
+            reason = _mismatch(c, load_params(c), csv_path, points)
+        except Exception as exc:
+            reason = f"it could not be read: {exc}"
+        if reason is None:
+            return c
+        if rejected is not None:
+            rejected.append({'path': c, 'reason': reason})
     return None

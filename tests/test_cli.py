@@ -77,7 +77,7 @@ class TestKdSubcommand:
         csv = _write_tidy_csv(tmp_path)
         out = tmp_path / "kdout"
         code = main(["kd", "--input", str(csv), "--out", str(out),
-                     "--p0", "50", "--observable", "csp"])
+                     "--p0", "50", "--conc-units", "absolute", "--observable", "csp"])
         assert code == 0
         json_file = out / "data" / "kd_kd_fit_data.json"
         assert json_file.exists()
@@ -391,7 +391,7 @@ class TestExportKd:
         csv = _write_tidy_csv(tmp_path)
         kdout = tmp_path / "kd"
         assert main(["kd", "--input", str(csv), "--out", str(kdout),
-                     "--p0", "50", "--observable", observable]) == 0
+                     "--p0", "50", "--conc-units", "absolute", "--observable", observable]) == 0
         return kdout / "data" / "kd_kd_fit_data.json"
 
     def test_export_writes_pdf_and_summary_by_default(self, tmp_path):
@@ -738,7 +738,8 @@ class TestOutputFormat:
         from lunaNMR.cli import main
         csv = _write_tidy_csv(tmp_path)
         code = main(["kd", "--input", str(csv), "--out", str(tmp_path / "o"),
-                     "--p0", "50", "--observable", "csp", "--format", "json"])
+                     "--p0", "50", "--conc-units", "absolute", "--observable", "csp",
+                     "--format", "json"])
         assert code == 0
         # Entire stdout must be valid JSON — engine chatter goes to stderr.
         data = json.loads(capsys.readouterr().out)

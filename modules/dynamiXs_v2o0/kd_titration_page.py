@@ -366,7 +366,10 @@ class KdTitrationPage(BasePage):
         input CSV and populate the panel. Values stay editable; absent → manual entry."""
         try:
             from kd_params import find_params_source, load_params
-            src = find_params_source(csv_path)
+            skipped = []
+            src = find_params_source(csv_path, points=points, rejected=skipped)
+            for s in skipped:
+                self._log(f"Not using {os.path.basename(s['path'])}: {s['reason']}")
             if not src:
                 return
             self._apply_params(load_params(src), n_points=len(points))

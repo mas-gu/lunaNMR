@@ -288,15 +288,21 @@ default is what it is, is what you need before changing it.
 
 All five persist per dataset and follow the same precedence as everything else.
 
-**Settings persist per dataset.** `conc_units`, `csp_sigma_multiple`, `kd_outlier_z`,
-`noise_quantile`, `dd_runaway_ratio` and `ref_max_ratio` are written to
-`<input_dir>/<prefix>_kd_params.json` and read back automatically. Precedence: an explicit
-flag beats the persisted value beats the schema default.
+**Settings persist per input.** `--survey` writes its settings - concentrations with
+their `conc_units`, `intensity_scales`, and the five thresholds above - to
+`<input_dir>/<prefix>_kd_params.json`; a fit writes them to `<out>/data/`. A later run
+reads a stored file back ONLY if it was written for the same input CSV and the same
+titration points (a hand-placed `<input_dir>/kd_params.json` need not name its input).
+Every file passed over is listed in the summary's `params_skipped` with the reason, and
+`params_source` names the one used. Precedence: an explicit flag beats the stored value
+beats the schema default.
 
-**⚠ Equivalents are not concentrations.** Titration filenames commonly encode equivalents
-(`..._3o0.ft` = 3.0 eq). Read as absolute they give a confident Kd wrong by the factor
-`--p0`, with `success=True` and no error. Pass `--conc-units equivalents`, or `--conc` with
-explicit values. The default is `absolute`, so this trap is avoidable, **not closed**.
+**Concentrations and their units are one pair.** `--conc` is in the units given beside
+it (`--conc-units`, default `absolute`), never in units a stored file recorded. Without
+`--conc` both come from the stored file. With neither, `--conc-units` alone says the
+spectrum names carry the concentrations (`..._3o0.ft` = 3.0 eq with `equivalents`).
+**With none of the three the run is refused** - point labels or acquisition indices
+fitted as micromolar gave a confident Kd wrong by up to `--p0`.
 
 ## Deep guides
 

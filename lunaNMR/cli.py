@@ -320,33 +320,64 @@ def _sidecar_summary(sidecar):
             'n_value_unparsed': int(sidecar.get('n_value_unparsed') or 0)}
 
 
-_PERSISTED_SETTINGS = ('conc_units', 'csp_sigma_multiple', 'kd_outlier_z',
+_PERSISTED_SETTINGS = ('csp_sigma_multiple', 'kd_outlier_z',
                        'noise_quantile',
                        'dd_runaway_ratio', 'ref_max_ratio')
 
 # The list-valued inputs, mapped schema key -> argparse dest. They round-trip too, so a
-# survey's concentrations do not have to be retyped on the fit, but they differ from the
+# survey's intensity scales do not have to be retyped on the fit, but they differ from the
 # settings above: an unrecorded one is stored as null rather than being absent, so the
-# restore tests the value and not just the key.
-_PERSISTED_INPUTS = {'concentrations': 'conc', 'intensity_scales': 'intensity_scale'}
+# restore tests the value and not just the key. Concentrations are resolved apart from
+# both (_apply_concentrations): they only mean anything together with their units.
+_PERSISTED_INPUTS = {'intensity_scales': 'intensity_scale'}
+
+
+def _apply_concentrations(args, params, stored):
+    """Concentrations and their units, always as one pair from one place.
+
+    Typed on the command line, they are in the units typed beside them (absolute unless
+    --conc-units says otherwise) - never in units a stored file recorded for other
+    numbers, which converted absolute concentrations by P0. Otherwise both come from the
+    stored file. With neither, --conc-units alone declares that the spectrum names carry
+    the concentrations; without even that the run is refused, rather than fitting
+    point labels or acquisition indices as micromolar.
+    """
+    if args.conc is not None:
+        params['concentrations'] = args.conc
+        params['conc_units'] = args.conc_units or 'absolute'
+    elif stored.get('concentrations') is not None:
+        if args.conc_units and args.conc_units != stored['conc_units']:
+            raise ValueError(
+                f"--conc-units {args.conc_units} would re-read the stored concentrations, "
+                f"which are in {stored['conc_units']}. Pass --conc with the values in "
+                f"{args.conc_units}.")
+        params['concentrations'] = stored['concentrations']
+        params['conc_units'] = stored['conc_units']
+    elif args.conc_units:
+        params['conc_units'] = args.conc_units
+    else:
+        raise ValueError(
+            "No concentrations: pass --conc (with --conc-units equivalents if they are "
+            "equivalents), or --conc-units alone if the spectrum names are the "
+            "concentrations. No stored settings for this input were found.")
 
 
 def _apply_thresholds(args, params):
     """Resolve persisted binding params: an explicit flag beats a value persisted beside
-    the input, which beats the schema default.
+    the input, which beats the schema default. Only a file written for THIS input is
+    read (kd_params.find_params_source); the ones passed over are returned with why.
 
-    Concentrations are stored as the caller typed them, next to the conc_units that
-    describe them, so restoring the pair converts equivalents exactly once however the
-    two are mixed between flags and the stored file.
+    Returns (source path or None, [{'path', 'reason'}, ...] of files passed over).
     """
+    from kd_input import load_titration
     from kd_params import find_params_source, load_params
-    stored = {}
-    src = find_params_source(args.input)
-    if src:
-        try:
-            stored = load_params(src)
-        except Exception:
-            src, stored = None, {}
+    points = load_titration(args.input)[0]
+    skipped = []
+    src = find_params_source(args.input, points=points, rejected=skipped)
+    stored = load_params(src) if src else {}
+    for s in skipped:
+        print(f"  warning: not using {s['path']}: {s['reason']}", file=sys.stderr)
+    _apply_concentrations(args, params, stored)
     for key in _PERSISTED_SETTINGS:
         flag = getattr(args, key, None)
         if flag is not None:
@@ -359,7 +390,7 @@ def _apply_thresholds(args, params):
             params[key] = flag
         elif stored.get(key) is not None:
             params[key] = stored[key]
-    return src
+    return src, skipped
 
 
 _DATA_SUBDIR = 'data'   # CSV/JSON companions sit one level under the figures
@@ -420,7 +451,7 @@ def _run_kd_survey(args):
     }
     if args.selection is not None:
         params['selection_file'] = args.selection
-    _apply_thresholds(args, params)
+    params_source, params_skipped = _apply_thresholds(args, params)
 
     with _engine_stdout(args):
         result = run_kd_survey_with_params(params)
@@ -447,7 +478,8 @@ def _run_kd_survey(args):
           {'command': 'kd survey', 'n_total': result['n_total'],
            'n_selected': result['n_selected'], 'counts': counts,
            'residues_file': result['residues_file'],
-           'survey_file': result['survey_file'], 'figures': figures},
+           'survey_file': result['survey_file'], 'figures': figures,
+           'params_source': params_source, 'params_skipped': params_skipped},
           f"Survey complete: {result['n_selected']}/{result['n_total']} residues selected "
           f"({counts['ok']} ok, {counts['check']} to check, {counts['unusable']} unusable)",
           f"  Selection: {result['residues_file']}",
@@ -487,7 +519,7 @@ def _run_kd(args):
     }
     if args.residues is not None:
         params['residues'] = _read_residue_selection(args.residues)
-    params_source = _apply_thresholds(args, params)
+    params_source, params_skipped = _apply_thresholds(args, params)
 
     with _engine_stdout(args):
         result = kd_fit.run_kd_analysis_with_params(params)
@@ -499,7 +531,7 @@ def _run_kd(args):
           {'command': 'kd', 'n_fitted': result['n_fitted'], 'n_total': result['n_total'],
            'quality_warnings': result.get('quality_warnings') or [],
            'conc_units': params.get('conc_units', 'absolute'),
-           'params_source': params_source,
+           'params_source': params_source, 'params_skipped': params_skipped,
            'params_file': result.get('params_file'),
            'json_file': result['json_file'], 'results_file': result['results_file']},
           f"Kd analysis complete: {result['n_fitted']}/{result['n_total']} residues fitted",
