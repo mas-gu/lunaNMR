@@ -130,3 +130,73 @@ def test_a_series_run_on_relative_paths_records_absolute_ones(tmp_path):
     for key in ("data_folder", "output_folder", "csv_path", "peak_list_file"):
         assert Path(meta[key]).is_absolute(), key
     assert Path(meta["data_folder"]) == DNAJA1
+
+
+SERIES_CSVS = ("series_analysis_tidy.csv", "peak_intensity_matrix.csv")
+
+
+def _copy_of_run(run_dir, dest):
+    """A run folder copied elsewhere, with each series CSV marked so a copy taken from
+    the original folder is told apart from one taken from this folder."""
+    import shutil
+    shutil.copytree(run_dir, dest)
+    for name in SERIES_CSVS:
+        path = dest / "series" / "DNAJA1" / name
+        path.write_text(path.read_text() + "\n")
+    return dest
+
+
+def test_a_copied_run_bundles_its_own_csvs_not_the_originals(run_dir, tmp_path):
+    """batch_results.json records where the series first wrote; a copy of the run still
+    names the original folder, which may since hold a different run."""
+    from lunaNMR.cli import main
+    moved = _copy_of_run(run_dir, tmp_path / "moved")
+    out = tmp_path / "B.lunaNMR"
+    assert main(["project", "build", str(moved), "--out", str(out)]) == 0
+    for name in SERIES_CSVS:
+        assert ((out / "series_results" / "DNAJA1" / name).read_text()
+                == (moved / "series" / "DNAJA1" / name).read_text()), name
+
+
+def test_a_moved_run_still_bundles_its_csvs(run_dir, tmp_path):
+    """A moved run's recorded folder is gone; its CSVs sit beside its batch_results.json."""
+    from lunaNMR.cli import main
+    moved = _copy_of_run(run_dir, tmp_path / "moved")
+    batch = moved / "series" / "DNAJA1" / "batch_results.json"
+    data = json.loads(batch.read_text())
+    gone = tmp_path / "gone"
+    data["metadata"]["output_folder"] = str(gone)
+    data["metadata"]["csv_path"] = str(gone / "series_analysis_tidy.csv")
+    batch.write_text(json.dumps(data))
+    out = tmp_path / "B.lunaNMR"
+    assert main(["project", "build", str(moved), "--out", str(out)]) == 0
+    for name in SERIES_CSVS:
+        assert (out / "series_results" / "DNAJA1" / name).exists(), name
+
+
+@pytest.mark.parametrize("folders", [
+    ("600/titration", "titration"),
+    ("a/x", "b/x", "x"),
+    ("a/x", "b/x", "b_x"),
+])
+def test_series_folders_of_one_name_are_all_found(tmp_path, folders):
+    """A series is named after its folder, then after its place under the run; neither
+    may be one another series already holds, or that series leaves the bundle unsaid."""
+    from lunaNMR.utils.project_builder import find_series
+    for folder in folders:
+        (tmp_path / folder).mkdir(parents=True)
+        (tmp_path / folder / "batch_results.json").write_text("{}")
+    found = find_series(tmp_path)
+    assert sorted(p.parent.relative_to(tmp_path).as_posix() for p in found.values()) \
+        == sorted(folders)
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_a_spectrum_that_does_not_exist_is_refused(run_dir, tmp_path, dry_run):
+    """The bundle reopens its spectrum by path; a path to nothing is a bundle that cannot."""
+    from lunaNMR.cli import main
+    out = tmp_path / "C.lunaNMR"
+    assert main(["project", "build", str(run_dir), "--out", str(out),
+                 "--spectrum", str(tmp_path / "nonexistent.ft"),
+                 *(["--dry-run"] if dry_run else [])]) == 1
+    assert not out.exists()

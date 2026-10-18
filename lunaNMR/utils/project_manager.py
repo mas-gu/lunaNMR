@@ -1562,14 +1562,21 @@ class ProjectManager:
         cannot accept a path the real run refuses. Deletion here is immediate and has
         no undo, which is what makes a preview worth having.
 
-        Raises ValueError if a path resolves outside the bundle or is the bundle root.
+        Raises ValueError if the folder is not a bundle (it has no project.json), if a
+        path resolves outside the bundle or is the bundle root, or if it is the
+        manifest: without project.json the bundle can no longer be loaded.
         """
         project_path = Path(project_path).resolve()
+        manifest = project_path / "project.json"
+        if not manifest.is_file():
+            raise ValueError(f"Not a project bundle (no project.json): {project_path}")
         resolved = []
         for rel in rel_paths:
             target = (project_path / rel).resolve()
             if target == project_path or project_path not in target.parents:
                 raise ValueError(f"Refusing to delete path outside bundle: {rel}")
+            if target == manifest:
+                raise ValueError(f"Refusing to delete the project manifest: {rel}")
             exists = target.exists()
             resolved.append((rel, exists, self._path_size(target) if exists else 0))
         return resolved
@@ -1577,8 +1584,8 @@ class ProjectManager:
     def remove_bundle_paths(self, project_path: Path, rel_paths: List[str]) -> int:
         """Delete bundle-relative paths; return bytes freed.
 
-        Raises ValueError if a path resolves outside the bundle or is the bundle
-        root itself (guards against deleting unintended files).
+        Raises ValueError, before deleting anything, on any path
+        `resolve_bundle_paths` refuses (guards against deleting unintended files).
         """
         import shutil
         root = Path(project_path).resolve()

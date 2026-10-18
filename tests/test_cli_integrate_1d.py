@@ -131,3 +131,32 @@ class TestInputHandling:
         assert _run(["integrate-1d", "--spectra", str(tmp_path), "--out", str(out),
                      "--peaks", "5.00", "--dry-run"]) == 0
         assert not out.exists()
+
+
+ONED = REPO_ROOT / "data_example" / "1D"
+
+
+@pytest.mark.skipif(not ONED.exists(), reason="data_example not present")
+class TestAPeakOutsideTheSpectrum:
+    """A position the ppm axis does not reach (a 15N shift, 50 typed for 5.0) measured
+    nothing, yet ran to success, counted as 'read at the expected position'."""
+
+    @pytest.fixture
+    def spectra(self, tmp_path):
+        folder = tmp_path / "spectra"
+        folder.mkdir()
+        for path in sorted(ONED.glob("*.ft1"))[:3]:
+            (folder / path.name).symlink_to(path)
+        return folder
+
+    def test_it_is_refused_naming_the_position(self, spectra, tmp_path, capsys):
+        out = tmp_path / "o"
+        assert _run(["integrate-1d", "--spectra", str(spectra), "--out", str(out),
+                     "--peaks", "8.6796,50,-20", "--format", "json"]) == 1
+        message = json.loads(capsys.readouterr().out)["error"]["message"]
+        assert "50" in message and "-20" in message and "8.6796" not in message
+        assert not out.exists()
+
+    def test_a_position_inside_still_runs(self, spectra, tmp_path):
+        assert _run(["integrate-1d", "--spectra", str(spectra), "--out", str(tmp_path / "o"),
+                     "--peaks", "8.6796"]) == 0

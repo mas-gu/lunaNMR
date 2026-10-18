@@ -1040,6 +1040,9 @@ def _run_project_build(args):
         _emit_error(args, FileExistsError(
             f"{args.out} exists; a build never overwrites a bundle"))
         return 1
+    if args.spectrum and not os.path.exists(args.spectrum):
+        _emit_error(args, FileNotFoundError(f"--spectrum not found: {args.spectrum}"))
+        return 1
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
     if args.dry_run:
         # The whole build, into a folder that is then thrown away: every input is read
@@ -1132,13 +1135,18 @@ def _run_project_remove(args):
               f"  would free {_human_size(sum(s for _, _, s in targets))}")
         return 0
     try:
+        targets = manager.resolve_bundle_paths(args.bundle, args.paths)
         freed = manager.remove_bundle_paths(args.bundle, args.paths)
     except ValueError as exc:
         _emit_error(args, exc)
         return 1
+    removed = [p for p, exists, _ in targets if exists]
+    missing = [p for p, exists, _ in targets if not exists]
     _emit(args, {'command': 'project remove', 'bundle': args.bundle,
-                 'paths': args.paths, 'freed': freed},
-          f"Removed {len(args.paths)} path(s), freed {_human_size(freed)}")
+                 'paths': args.paths, 'removed': removed, 'missing': missing,
+                 'freed': freed},
+          f"Removed {len(removed)} path(s), freed {_human_size(freed)}",
+          *(f"  not present: {rel}" for rel in missing))
     return 0
 
 
@@ -2015,6 +2023,15 @@ def _run_integrate_1d(args):
             peaks = [{'position': p['ppm'], 'assignment': f"peak_{i + 1}"}
                      for i, p in enumerate(found)]
         else:
+            # A position the axis does not reach measures nothing, in every spectrum
+            # that lacks it; the series would still run to success around it.
+            low = max(float(s.ppm_axis.min()) for s in spectra)
+            high = min(float(s.ppm_axis.max()) for s in spectra)
+            outside = [ppm for ppm in args.peaks if not low <= float(ppm) <= high]
+            if outside:
+                raise ValueError(
+                    f"--peaks outside the ppm range every spectrum covers "
+                    f"({high:.4f} to {low:.4f}): {', '.join(f'{p:g}' for p in outside)}")
             peaks = [{'position': float(ppm), 'assignment': f"peak_{i + 1}"}
                      for i, ppm in enumerate(args.peaks)]
         if not peaks:

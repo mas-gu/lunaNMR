@@ -411,6 +411,9 @@ python -m lunaNMR project build <run_dir> --out <bundle.lunaNMR>
 python -m lunaNMR project inventory <bundle.lunaNMR>
 python -m lunaNMR project remove <bundle.lunaNMR> <rel/path> [<rel/path> ...]
 ```
+`remove` refuses a folder with no `project.json`, and refuses `project.json` itself (shown
+`(protected)` by `inventory`); a refused path deletes nothing in that call. The summary
+separates `removed` from `missing` (named paths that were not there).
 
 ### batch
 ```bash
