@@ -43,11 +43,11 @@ class TestXAxisModeDropdown:
 class TestWorkerSeriesMode:
     def test_worker_stores_series_mode(self, app):
         worker = ProcessingWorker(
-            None, [], None, "reference", {},
+            [], None, "reference", {},
             extract_delays=True, series_mode="titration",
         )
         assert worker.series_mode == "titration"
 
     def test_worker_defaults_to_time(self, app):
-        worker = ProcessingWorker(None, [], None, "reference", {})
+        worker = ProcessingWorker([], None, "reference", {})
         assert worker.series_mode == "time"

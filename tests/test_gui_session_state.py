@@ -106,7 +106,7 @@ def _run_series(window, data):
     from lunaNMR.gui.dialogs.series_integration_dialog import ProcessingWorker, SeriesIntegrationDialog
     window.load_peak_file(data["ten"])
     dialog = SeriesIntegrationDialog(main_window=window)
-    ProcessingWorker(None, [data["spectrum"]], window.integrator.peak_list.copy(), 'reference',
+    ProcessingWorker([data["spectrum"]], window.integrator.peak_list.copy(), 'reference',
                      dialog._get_voigt_params(), series_name='nucleus').run()
     dialog.deleteLater()
 

@@ -188,7 +188,7 @@ def test_a_warning_from_the_run_reaches_the_log(app, fitted_peaks, tmp_path):
     from lunaNMR.gui.dialogs.series_integration_dialog import ProcessingWorker
     from lunaNMR.utils.output_manager import OutputManager, log_error, log_warning
     dialog = _dialog(app, _main_window(app, tmp_path, fitted_peaks))
-    worker = ProcessingWorker(None, [], None, "detected", {})
+    worker = ProcessingWorker([], None, "detected", {})
     worker.notice.connect(dialog._on_notice)
     worker.progress.connect(dialog._on_progress)
     OutputManager.set_callback(worker.progress_callback)
