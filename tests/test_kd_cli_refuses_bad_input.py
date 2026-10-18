@@ -1,0 +1,42 @@
+# ABOUTME: `lunaNMR kd` and `export kd` refuse input they cannot fit or render, in the
+# ABOUTME: caller's format, instead of exiting 0 on a result made from nothing.
+
+import contextlib
+import io
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+
+TIDY = Path(__file__).resolve().parents[2] / "data_test" / "data_binding" / "tidy"
+ABSOLUTE = "0,6.25,12.5,25,50,100,150"
+
+pytestmark = pytest.mark.skipif(not TIDY.exists(), reason="data_test not present")
+
+
+@pytest.fixture
+def tidy(tmp_path):
+    dest = tmp_path / "DNAJA1_HSPA8_tidy.csv"
+    shutil.copy(TIDY / "DNAJA1_HSPA8_tidy.csv", dest)
+    return dest
+
+
+def _run(*args):
+    from lunaNMR.cli import main
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = main([*args, "--format", "json"])
+    text = out.getvalue()
+    return code, (json.loads(text) if text.strip() else {})
+
+
+@pytest.mark.parametrize("p0", ["0", "-50", "nan"])
+def test_a_protein_concentration_that_is_not_positive_is_refused(tidy, tmp_path, p0):
+    # P0 = 0 divides fraction_bound by zero, so every CSP fit fails while the intensity
+    # fits still count the residue as fitted; a negative P0 returns a 'reliable' Kd.
+    code, summary = _run("kd", "--input", str(tidy), "--out", str(tmp_path / "out"),
+                         f"--p0={p0}", "--conc", ABSOLUTE)
+    assert code == 1
+    assert summary["ok"] is False
+    assert "P0" in summary["error"]["message"]
