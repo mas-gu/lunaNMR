@@ -975,6 +975,8 @@ _SERIES_PARAMS_WITHOUT_EFFECT = {
     ('processing_options', 'use_global_optimization'): 'the series always runs without it',
     ('gui_params', 'use_parallel_processing'): 'it is set by --parallel',
     ('processing_options', 'use_parallel_processing'): 'it is set by --parallel',
+    ('detection_params', 'noise_threshold'):
+        'series detection runs at its own S/N threshold; nothing it calls reads this',
 }
 
 

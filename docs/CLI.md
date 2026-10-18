@@ -268,7 +268,8 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   path reads is refused as having no effect: `gui_params.use_centroid_refinement`,
   `centroid_noise_multiplier`, `use_ps2d_multi_peak`, `height_threshold`, `distance_factor`,
   `prominence_threshold`, `smoothing_sigma`, `max_peaks_fit`, `max_optimization_iterations`,
-  `fitting_params.min_r_squared`, `processing_options.use_global_optimization`, and
+  `fitting_params.min_r_squared`, `processing_options.use_global_optimization`,
+  `detection_params.noise_threshold` (series detection runs at its own S/N threshold), and
   `use_parallel_processing` in either section (`--parallel` sets it). With `--mode titration`,
   `processing_options.use_original_reference_for_detection: true` is refused too.
 - `"gui_params": {"use_adaptive_optimization": true}` turns on the fitting-window grid

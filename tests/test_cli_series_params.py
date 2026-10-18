@@ -205,11 +205,16 @@ class TestAKnobWithNoEffectIsRefused:
         assert "fix_positions" in listed
         assert "use_centroid_refinement" not in listed
 
-    def test_noise_threshold_is_still_accepted(self, monkeypatch, tmp_path):
+    def test_noise_threshold_is_refused(self, tmp_path, capsys):
+        """It reaches set_threshold_multiplier only, which series detection never reads:
+        detection runs at its own S/N threshold whatever value is given."""
         cfg = tmp_path / "tune.json"
         cfg.write_text(json.dumps({"detection_params": {"noise_threshold": 5.0}}))
-        params = _captured_params(monkeypatch, tmp_path, ["--params", str(cfg)])
-        assert params["detection_params"]["noise_threshold"] == 5.0
+        peaks = _inputs(tmp_path)
+        from lunaNMR.cli import main
+        assert main(["series", "--spectra", str(tmp_path), "--peaks", str(peaks),
+                     "--out", str(tmp_path / "o"), "--params", str(cfg), "--dry-run"]) == 1
+        assert "noise_threshold has no effect" in capsys.readouterr().err
 
 
 class TestTitrationRefusesTheFreeStateAnchor:
