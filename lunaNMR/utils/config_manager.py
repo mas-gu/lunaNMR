@@ -99,11 +99,9 @@ class ConfigurationManager:
             "ml_learning": {
                 "enabled": False,  # Master switch for ML features
                 "use_predictions": False,  # Use ML to predict parameters
-                "collect_training_data": False,  # Learn from processing
                 "use_statistical_fallback": True,  # Use stats when ML unavailable
                 "ml_confidence_threshold": 0.6,  # Min confidence to use ML prediction
                 "stats_confidence_threshold": 0.4,  # Min confidence for stats prediction
-                "min_r2_for_training": 0.80,  # Min R² to collect as training data
                 "show_predictions_in_log": True  # Log ML predictions to output
             }
         }
