@@ -128,3 +128,32 @@ class TestAFileChosenForASlotReplacesTheSeriesThere:
         monkeypatch.setattr(dynamiXs_gui, "open_directory_dialog", lambda *a, **k: str(folder))
         page._auto_load_folder("field1")
         assert "in memory" not in self._run(app, page)
+
+
+METHYL_MATRIX = (Path(__file__).resolve().parents[2] / "data_test" / "methyl" / "sampleNBD"
+                 / "series_results_sampleNBD_20260818_124619" / "peak_intensity_matrix.csv")
+
+
+@pytest.mark.skipif(not METHYL_MATRIX.exists(), reason="data_test not present")
+class TestTheMethylPageReportsTheFit:
+
+    @pytest.fixture(scope="class")
+    def run(self, app, tmp_path_factory):
+        """The real page's fit of the methyl series, and the result the worker returned."""
+        d = _dialog()
+        page = d.methyl_t2_page
+        page.output_dir = str(tmp_path_factory.mktemp("methyl"))
+        page._set_input_file(str(METHYL_MATRIX))
+        results = []
+        page._start_analysis()
+        page.worker.finished.connect(results.append)
+        _wait(app, page)
+        yield page.log_text.toPlainText(), results[0]
+        d.deleteLater()
+
+    def test_the_log_counts_the_unidentifiable_fits(self, run):
+        log, result = run
+        n = result["n_bi_exp_unidentifiable"]
+        assert n > 0
+        assert (f"{result['n_fitted']}/{result['n_total']} residues fitted, "
+                f"{n} of them bi-exp unidentifiable") in log
