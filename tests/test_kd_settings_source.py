@@ -111,3 +111,39 @@ def test_point_labels_may_be_declared_as_the_concentrations(folder):
                         "--out", str(folder / "fit"), "--conc-units", "equivalents")
     assert code == 0
     assert _metadata(summary)["concentrations"] == [0, 6.25, 12.5, 25, 50, 100, 150]
+
+
+def test_a_survey_reports_the_command_it_was_run_as(folder):
+    """`command` is the subcommand path, and a survey is `kd --survey`: the dry-run of
+    the same command line already said 'kd'."""
+    argv = ("--survey", "--input", str(folder / "DNAJA1_HSPA8_tidy.csv"),
+            "--out", str(folder / "s"), "--conc", ABSOLUTE)
+    assert _kd(*argv, "--dry-run")[1]["command"] == "kd"
+    code, summary = _kd(*argv)
+    assert code == 0
+    assert summary["command"] == "kd"
+    assert summary["survey_file"]
+
+
+def test_a_refusal_names_the_stored_file_it_passed_over(folder):
+    """The refusal said no stored settings were found when one was found and skipped,
+    and named it only on stderr: the envelope carries it as the success summary does."""
+    _survey(folder, "DNAJA1_HSPA8_tidy.csv", "DNAJA1", "--conc", ABSOLUTE)
+    code, summary = _kd("--input", str(folder / "ERDJ6_HSPA8_tidy.csv"),
+                        "--out", str(folder / "fit"))
+    assert code == 1
+    error = summary["error"]
+    (skipped,) = error["details"]["params_skipped"]
+    assert Path(skipped["path"]).name == "DNAJA1_kd_params.json"
+    assert "DNAJA1_HSPA8_tidy.csv" in skipped["reason"]
+    assert "were found" not in error["message"]
+    assert "DNAJA1_kd_params.json" in error["message"]
+    assert skipped["reason"] in error["message"]
+
+
+def test_a_refusal_with_nothing_stored_says_so(folder):
+    code, summary = _kd("--input", str(folder / "ERDJ6_HSPA8_tidy.csv"),
+                        "--out", str(folder / "fit"))
+    assert code == 1
+    assert summary["error"]["details"]["params_skipped"] == []
+    assert "No stored settings for this input were found" in summary["error"]["message"]

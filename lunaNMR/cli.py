@@ -190,11 +190,14 @@ def _emit_error(args, exc, internal=False):
     Under --format json the documented usage is `json.loads(proc.stdout)`; every failure
     path wrote to stderr and left stdout empty, so that parse raised on every error and
     the exception said nothing about the cause. Text mode keeps the bare stderr line.
-    `internal` marks an exception no input should cause - a bug, not bad input.
+    `internal` marks an exception no input should cause - a bug, not bad input. An
+    exception carrying a `details` dict reports it as `error.details`.
     """
     import json
     if getattr(args, 'format', 'text') == 'json':
         error = {'type': type(exc).__name__, 'message': str(exc)}
+        if isinstance(getattr(exc, 'details', None), dict):
+            error['details'] = exc.details
         if internal:
             error['internal'] = True
         print(json.dumps({'ok': False, 'schema_version': SCHEMA_VERSION,
@@ -377,7 +380,7 @@ def _sidecar_summary(sidecar):
 _PERSISTED_INPUTS = {'intensity_scales': 'intensity_scale'}
 
 
-def _apply_concentrations(args, params, stored, stated):
+def _apply_concentrations(args, params, stored, stated, skipped=()):
     """Concentrations and their units, always as one pair from one place.
 
     Typed on the command line, they are in the units typed beside them (absolute unless
@@ -386,7 +389,9 @@ def _apply_concentrations(args, params, stored, stated):
     stored file. With neither, the units alone - --conc-units, or a conc_units the stored
     file states (`stated`: the keys it actually records) - declare that the spectrum
     names carry the concentrations; without even that the run is refused, rather than
-    fitting point labels or acquisition indices as micromolar.
+    fitting point labels or acquisition indices as micromolar. The refusal names each
+    stored file passed over (`skipped`) and why, in its message and as
+    `details['params_skipped']`.
     """
     if args.conc is not None:
         params['concentrations'] = args.conc
@@ -404,10 +409,17 @@ def _apply_concentrations(args, params, stored, stated):
     elif 'conc_units' in stated:
         params['conc_units'] = stored['conc_units']
     else:
-        raise ValueError(
+        if skipped:
+            stored_note = "Stored settings were passed over: " + "; ".join(
+                f"{s['path']} ({s['reason']})" for s in skipped) + "."
+        else:
+            stored_note = "No stored settings for this input were found."
+        exc = ValueError(
             "No concentrations: pass --conc (with --conc-units equivalents if they are "
             "equivalents), or --conc-units alone if the spectrum names are the "
-            "concentrations. No stored settings for this input were found.")
+            f"concentrations. {stored_note}")
+        exc.details = {'params_skipped': list(skipped)}
+        raise exc
 
 
 def _apply_thresholds(args, params):
@@ -425,7 +437,8 @@ def _apply_thresholds(args, params):
     stored = load_params(src) if src else {}
     for s in skipped:
         print(f"  warning: not using {s['path']}: {s['reason']}", file=sys.stderr)
-    _apply_concentrations(args, params, stored, recorded_keys(src) if src else set())
+    _apply_concentrations(args, params, stored, recorded_keys(src) if src else set(),
+                          skipped)
     for key in THRESHOLD_KEYS:
         flag = getattr(args, key, None)
         if flag is not None:
@@ -523,7 +536,7 @@ def _run_kd_survey(args):
 
     counts = result['counts']
     _emit(args,
-          {'command': 'kd survey', 'n_total': result['n_total'],
+          {'command': 'kd', 'n_total': result['n_total'],
            'n_selected': result['n_selected'], 'counts': counts,
            'residues_file': result['residues_file'],
            'survey_file': result['survey_file'], 'figures': figures,
@@ -1891,9 +1904,6 @@ def _run_dynamixs_density(args):
     """Reduced spectral density mapping (Farrow 1995) from an R1/R2/hetNOE table."""
     if args.dual and not args.input2:
         raise ValueError("dual-field density needs a second table (--input2)")
-    if args.dual and args.field2_freq is None:
-        raise ValueError("dual-field density needs --field2-freq (the second "
-                         "spectrometer 1H frequency in MHz); there is no safe default")
     inputs = [('input', args.input)] + ([('input2', args.input2)] if args.dual else [])
     if args.dry_run:
         return _dry_run(args, inputs, {'output_dir': args.out})
@@ -1950,6 +1960,15 @@ def _run_dynamixs_density(args):
     return 0
 
 
+def _require_field2_freq(parser, args):
+    """--dual reads a second spectrometer frequency, and there is no conventional one: a
+    default is a guess, and analysing an 800 MHz dataset at 700 surfaces as a tau_c
+    mismatch that the QC table blames on the data rather than on the flag."""
+    if args.dual and args.field2_freq is None:
+        parser.error('--dual needs --field2-freq (the second spectrometer 1H frequency '
+                     'in MHz); there is no safe default for it')
+
+
 def _validate_modelfree(parser, args):
     """R2 comes from a T2 series or from a precomputed table, never both."""
     for field in ('f1', 'f2'):
@@ -1957,12 +1976,7 @@ def _validate_modelfree(parser, args):
             parser.error(f'--{field}-t2 and --{field}-r2-table are alternatives; give one')
     if not (args.f1_t2 or args.f1_r2_table):
         parser.error('one of --f1-t2 or --f1-r2-table is required')
-    # There is no conventional second field, so a default is a guess -- and analysing
-    # an 800 MHz dataset at 700 surfaces as a tau_c mismatch that the QC table blames
-    # on the data rather than on the flag.
-    if args.dual and args.field2_freq is None:
-        parser.error('--dual needs --field2-freq (the second spectrometer 1H frequency '
-                     'in MHz); there is no safe default for it')
+    _require_field2_freq(parser, args)
 
 
 def _run_dynamixs_modelfree(args):
@@ -2327,7 +2341,10 @@ def build_parser():
     kd.add_argument('--prefix', default='kd', help='Output filename prefix (default: kd)')
     kd.add_argument('--p0', type=float, required=True, help='Total protein concentration [P]0')
     kd.add_argument('--conc', type=_float_list, default=None,
-                    help='Comma-separated ligand concentrations (default: CSV point labels)')
+                    help='Comma-separated ligand concentrations, one per titration point. '
+                         'Without it they come from --conc-units declaring that the point '
+                         'labels are the concentrations, or from a params file stored for '
+                         'this input; with none of these the run is refused')
     kd.add_argument('--alpha', type=float, default=0.14,
                     help='CSP N/H scaling factor (default: 0.14)')
     kd.add_argument('--observable', type=_choice_list('csp', 'intensity'),
@@ -2344,9 +2361,10 @@ def build_parser():
                          'vs-sequence figures. Writes no fit JSON and no global Kd')
     kd.add_argument('--conc-units', choices=['absolute', 'equivalents'], default=None,
                     dest='conc_units',
-                    help='Whether concentrations (parsed from spectrum names or given via '
-                         '--conc) are absolute or equivalents of --p0. Equivalents are '
-                         'multiplied by --p0 (default: absolute)')
+                    help='Units of the concentrations: absolute, or equivalents of --p0 '
+                         '(multiplied by --p0). With --conc they default to absolute; given '
+                         'alone, this declares that the point labels are the '
+                         'concentrations, in these units')
     kd.add_argument('--csp-sigma-multiple', type=float, default=None,
                     dest='csp_sigma_multiple',
                     help='Multiples of the trimmed CSP spread at the last titration '
@@ -2514,7 +2532,7 @@ def build_parser():
     density.add_argument('--no-parallel', action='store_true', dest='no_parallel',
                          help='Disable multiprocessing')
     _add_density_flags(density)
-    density.set_defaults(func=_run_dynamixs_density)
+    density.set_defaults(func=_run_dynamixs_density, _validate=_require_field2_freq)
 
     mf = dx_sub.add_parser('modelfree', parents=[common],
                            help='Integrated model-free: T1/T2 fit -> hetNOE -> density -> Lipari-Szabo')
@@ -2656,8 +2674,8 @@ def _add_density_flags(p):
     p.add_argument('--field1-freq', type=float, default=600.0, dest='field1_freq',
                    help='Field-1 1H frequency in MHz (default: 600)')
     p.add_argument('--field2-freq', type=float, default=None, dest='field2_freq',
-                   help='Field-2 1H frequency in MHz. Required with --dual on modelfree; '
-                        'no default, because guessing it reads as a tau_c mismatch')
+                   help='Field-2 1H frequency in MHz. Required with --dual on density and '
+                        'modelfree; no default, because guessing it reads as a tau_c mismatch')
     p.add_argument('--rnh', type=float, default=1.015,
                    help='N-H bond length in Angstrom (default: 1.015)')
     p.add_argument('--csa', type=float, default=-172.0,

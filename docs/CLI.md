@@ -39,7 +39,8 @@ code is `0`. A run that returns `1` after producing its summary — the findings
 dry-run with a missing input — keeps the summary's keys and adds `ok: false` with an `error`
 of type `MissingInput`, `NothingFitted`, `PreflightFailed` or (`batch`) `BatchFailed`. A
 `series` that fits nothing reports `NothingFitted` with no summary keys; any other failure
-names the exception's class (`ValueError`, `FileNotFoundError`, …), and one no input should
+names the exception's class (`ValueError`, `FileNotFoundError`, …), with an `error.details`
+object where the failure has more to say (see `kd`), and one no input should
 cause is marked `error.internal: true`, with its traceback on stderr. Called in-process,
 `lunaNMR.cli.main()` returns these codes — including `0` for `--help`/`--version` — rather
 than raising `SystemExit`.
@@ -147,7 +148,8 @@ cannot target, so it is worth seeing. Refuses a non-empty `--out` unless `--forc
 python -m lunaNMR project build <run_dir> --out <bundle.lunaNMR> [--spectrum <file>] [--peaks <file>]
 ```
 Turns an automated run's output folders into a project the GUI opens. Under `<run_dir>` it
-takes, wherever they sit:
+takes, wherever they sit - symlinked folders included, each folder read once however many
+links reach it, so a link back into the run does not loop:
 
 - every series (`batch_results.json`, written by `series`);
 - every Kd fit (`<prefix>_kd_fit_data.json`, written by `kd`). A Kd fit whose prefix
@@ -424,6 +426,9 @@ J(0)/J(ωN)/J(ωH), S², τc, τe, Rex in `<prefix>_results.csv` (`--dual`: `_ba
 squares from a grid of starts, which carries no uncertainty of its own: their errors are
 NaN unless `--monte-carlo`.
 
+`--dual` needs `--input2` and `--field2-freq`. `--field2-freq` has no default - there is no
+conventional second field - and its absence is a usage error (exit 2), as on `modelfree`.
+
 ### dynamixs modelfree
 Runs the whole chain per field from raw series matrices.
 ```bash
@@ -496,10 +501,16 @@ fit workflow and the pool gates are in [CLI_AGENT.md](CLI_AGENT.md#kd-workflow-s
 (default `absolute`; `equivalents` are multiplied by `--p0`). Without `--conc` they come from
 a params file stored for this same input and titration points (the survey's, beside the
 input, or `kd_analysis/` beside it); a `--conc-units` contradicting it is refused. With
-neither, `--conc-units` alone says the spectrum names are the concentrations. With none of
+neither, `--conc-units` alone says the spectrum names are the concentrations — but only
+labels that name a point: a spectrum `series` could not read a point from is labelled by its
+file stem (`sample_2`, `value: null` in `series_metadata.json`), and a run that would read
+such a label as a concentration is refused, naming the labels, until `--conc` gives them.
+With no `series_metadata.json` beside the input, a label names a point only if it is a
+number (`0.125`, `3`, `1_2` for a repeat). With none of
 these the run — survey included — is refused rather than fitting point labels as µM. The
 summary's `params_source` names the file read and `params_skipped` every file passed over,
-with the reason. Only concentrations, intensity scales and the survey thresholds are restored;
+with the reason; a run refused for want of concentrations names them in its message and,
+under `--format json`, in `error.details.params_skipped`. Only concentrations, intensity scales and the survey thresholds are restored;
 `--p0`, `--alpha`, `--intensity-from` and `--observable` are taken from the command line.
 
 `export kd` writes PDFs in `--out` and its CSV/JSON under `<out>/data/`: `summary.csv` plus,

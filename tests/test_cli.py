@@ -85,6 +85,22 @@ class TestKdSubcommand:
         r1 = next(f for f in data['fits'] if f['residue'] == 'R1')
         assert r1['csp']['Kd'] == pytest.approx(20.0, rel=1e-2)
 
+    def test_kd_help_states_where_concentrations_come_from(self, capsys):
+        """The point labels are not a default: with no --conc, no --conc-units and no
+        stored file for the input, the run is refused."""
+        from lunaNMR.cli import main
+        assert main(["kd", "--help"]) == 0
+        import re
+        options = capsys.readouterr().out.split("options:", 1)[1]
+        # argparse wraps at hyphens: '--conc-\n units'.
+        text = " ".join(re.sub(r"-\s+(?=[a-z])", "-", options).split())
+        assert "default: CSV point labels" not in text
+        assert "(default: absolute)" not in text
+        conc = text[text.index("--conc CONC"):text.index("--alpha ALPHA")]
+        assert "stored" in conc and "--conc-units" in conc and "refused" in conc
+        units = text[text.index("--conc-units {"):text.index("--csp-sigma-multiple CSP")]
+        assert "labels" in units and "absolute" in units
+
     def test_kd_missing_required_flag_errors(self, tmp_path):
         from lunaNMR.cli import main
         # --out and --p0 are required; argparse should exit non-zero.
@@ -806,6 +822,7 @@ class TestADryRunAgreesWithTheRealRun:
         table = tmp_path / "f1.csv"
         table.write_text("Residue,R1,R1err,R2,R2err,hetNOE,hetNOEerr\n1,1.0,0.1,10.0,0.5,0.8,0.02\n")
         argv = ["dynamixs", "density", "--dual", "--input", str(table),
+                "--field2-freq", "800",   # required with --dual; not what this tests
                 "--out", str(tmp_path / "o")]
         assert main(argv + ["--dry-run"]) == main(argv) == 1
 
@@ -814,6 +831,7 @@ class TestADryRunAgreesWithTheRealRun:
         table = tmp_path / "f1.csv"
         table.write_text("Residue,R1,R1err,R2,R2err,hetNOE,hetNOEerr\n1,1.0,0.1,10.0,0.5,0.8,0.02\n")
         main(["dynamixs", "density", "--dual", "--input", str(table),
+              "--field2-freq", "800",   # required with --dual; not what this tests
               "--out", str(tmp_path / "o"), "--dry-run"])
         assert "--input2" in capsys.readouterr().err
 
@@ -896,6 +914,25 @@ class TestDynamixsDensity:
         assert main(["dynamixs", "density", "--input", str(t), "--out", str(out),
                      "--field1-freq", "600", "--dry-run"]) == 0
         assert not out.exists()
+
+    @pytest.mark.parametrize("dry_run", [[], ["--dry-run"]])
+    def test_dual_without_the_second_field_frequency_is_a_usage_error(
+            self, tmp_path, capsys, dry_run):
+        """As on modelfree: a missing flag is a rejected command line (exit 2,
+        UsageError), not bad input found once the run has started (exit 1)."""
+        from lunaNMR.cli import main
+        t1, t2 = tmp_path / "f1.csv", tmp_path / "f2.csv"
+        self._table(t1)
+        self._table(t2)
+        code = main(["dynamixs", "density", "--dual", "--input", str(t1),
+                     "--input2", str(t2), "--out", str(tmp_path / "dens"),
+                     *dry_run, "--format", "json"])
+        captured = capsys.readouterr()
+        assert code == 2
+        error = json.loads(captured.out)["error"]
+        assert error["type"] == "UsageError"
+        assert "--field2-freq" in error["message"]
+        assert not (tmp_path / "dens").exists()
 
 
 class TestDynamixsModelfree:

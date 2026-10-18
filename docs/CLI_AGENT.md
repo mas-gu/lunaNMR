@@ -26,7 +26,7 @@ No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every ana
 | `export kd` | Figures + summary from a kd fit JSON | `--json` `--out` `[--kind curves,ref-bars,kd-bars,global-fit]` `[--prefix]` | PDFs in `--out`, CSV/JSON in `--out/data/`: `[prefix_]summary.csv`, `[prefix_]<obs>_fits.pdf` / per-residue PNGs (curves, per fitted obs), `[prefix_]<obs>_ref_vs_point.pdf` + `.csv` + `.json` (ref→point bars, both obs by default), `[prefix_]<obs>_kd_vs_residue.pdf` (Kd of the residues in the shared fit's pool, titled "N of M residues", + global line, PDF only), `[prefix_]<obs>_global_fit.pdf` + `.csv` + `.json` (per-residue data + shared-Kd curve, R²(global) per panel) |
 | `integrate-1d` | Measure peaks across a 1D series. **Quantify with `area`** (region sum); `fit_area` is diagnostic — it extrapolates tails a neighbour-capped window never sampled, and R²>0.97 does not validate that | `--spectra` `--out` + `--peaks` or `--detect` | `<prefix>_series.csv` (wide), `<prefix>_table.csv` (long) |
 | `peaks shift` | Apply a rigid ppm offset to a peak list (`--auto` measures it against a spectrum) | `--peaks` `--out` + `--dx/--dy` or `--auto --spectrum` | shifted peak list; `--auto` exits 1 and writes nothing when the shifted list does not register (median S/N < 10 or capture < 85%) |
-| `project build` | Assemble a bundle from a run's `series`, `kd` and `dynamixs` outputs (T1/T2 and T1rho fits grouped into one T1/T2 analysis; model-free, methyl T2, hetNOE and spectral density each their own; spectrum and peak list by absolute path; exits 1 when the spectrum it would record does not exist - pass `--spectrum`) | `<run_dir>` `--out` `[--spectrum]` `[--peaks]` | `<bundle.lunaNMR>` |
+| `project build` | Assemble a bundle from a run's `series`, `kd` and `dynamixs` outputs, found anywhere under `<run_dir>` including through symlinked folders (T1/T2 and T1rho fits grouped into one T1/T2 analysis; model-free, methyl T2, hetNOE and spectral density each their own; spectrum and peak list by absolute path; exits 1 when the spectrum it would record does not exist - pass `--spectrum`) | `<run_dir>` `--out` `[--spectrum]` `[--peaks]` | `<bundle.lunaNMR>` |
 | `project inventory` | List a bundle's contents | `<bundle.lunaNMR>` | stdout listing |
 | `project export` | Copy a bundle's contents to a plain folder | `<bundle.lunaNMR>` `--out` | copied tree + manifest |
 | `project remove` | Delete bundle-relative paths | `<bundle> <rel/path>…` | (mutates bundle) |
@@ -159,8 +159,8 @@ python -m lunaNMR <cmd> ... --format json --dry-run
   {"ok": false, "schema_version": 1, "command": "dynamixs t1t2",
    "error": {"type": "FileNotFoundError", "message": "…"}}
   ```
-  **`ok` is `true` exactly when the exit code is `0`.** A run that returns `1` after producing its summary keeps every summary key and adds `ok: false` with an `error` object: `MissingInput` (a dry-run with a missing input; `missing_inputs` lists them), `NothingFitted` (`t1t2`/`methyl-t2` with `n_fitted` 0, `t1rho` with `n_residues` 0), `PreflightFailed` (`diagnose`, or `series --dry-run --deep`, whose findings gate the run), `BatchFailed` (`batch`, beside its own summary keys). Other failures carry only `ok`, `schema_version`, `command` and `error`, with `error.type` the exception's class name (`FileNotFoundError`, `ValueError`, …), `UsageError`, or `NothingFitted` for a `series` with no spectrum fitted. An exception no input should cause - a bug - is reported the same way with `error.internal: true` (exit `1`, traceback on stderr): report it rather than retrying with other input.
-  Every summary carries `ok`, `schema_version` and the full `command` path (`dynamixs t1t2`, not `dynamixs`; `kd --survey` reports `kd survey`) — including dry-runs, which add `dry_run: true`. Keys are only ever added within a `schema_version`, so read the ones you know and ignore the rest. **Non-finite numbers serialise as `null`**, not `NaN`: a run where nothing fitted stays parseable. `batch` keeps it too (see above).
+  **`ok` is `true` exactly when the exit code is `0`.** A run that returns `1` after producing its summary keeps every summary key and adds `ok: false` with an `error` object: `MissingInput` (a dry-run with a missing input; `missing_inputs` lists them), `NothingFitted` (`t1t2`/`methyl-t2` with `n_fitted` 0, `t1rho` with `n_residues` 0), `PreflightFailed` (`diagnose`, or `series --dry-run --deep`, whose findings gate the run), `BatchFailed` (`batch`, beside its own summary keys). Other failures carry only `ok`, `schema_version`, `command` and `error`, with `error.type` the exception's class name (`FileNotFoundError`, `ValueError`, …) and, where the failure has more to say, an `error.details` object (a `kd` refused for want of concentrations: `params_skipped`), `UsageError`, or `NothingFitted` for a `series` with no spectrum fitted. An exception no input should cause - a bug - is reported the same way with `error.internal: true` (exit `1`, traceback on stderr): report it rather than retrying with other input.
+  Every summary carries `ok`, `schema_version` and the full `command` path (`dynamixs t1t2`, not `dynamixs`; flags never join it, so `kd --survey` reports `kd` — tell a survey by its `survey_file`) — including dry-runs, which add `dry_run: true`. Keys are only ever added within a `schema_version`, so read the ones you know and ignore the rest. **Non-finite numbers serialise as `null`**, not `NaN`: a run where nothing fitted stays parseable. `batch` keeps it too (see above).
 - **One call at a time per process.** `cli.main()` holds a process-wide lock (a json run redirects fd 1 and `sys.stdout` for the whole process), so a second in-process call from another thread waits for the first. To run calls concurrently, run each one in its own process — a server should spawn `python -m lunaNMR …` per call.
 - **`--dry-run`** → validates required inputs exist, prints the plan, runs nothing. Exit 1 if any input missing, else 0. `series --dry-run` also validates `--params` and the flag combination; `--deep` adds the `diagnose` checks and exits 1 on a `FAIL`. `project build --dry-run` performs the whole build into a scratch folder.
 - **`--parallel`** → `series` only (two-pass processor, ~2.7×). **`--no-parallel` → `density` only.** `modelfree` also parallelizes internally but hard-codes `use_multiprocessing=True`, so its CPU use cannot be bounded — `modelfree --no-parallel` exits 2 with `unrecognized arguments`.
@@ -245,7 +245,7 @@ python -m lunaNMR <cmd> ... --format json --dry-run
   them. **`--field2-freq` has no default**: it is required with `--dual` on both `modelfree`
   and `density`, because there is no conventional second field, and analysing an 800 MHz
   dataset at 700 surfaces as the τc mismatch the QC table above blames on the data.
-  `modelfree` refuses its absence as a usage error (exit 2), `density` as bad input (exit 1).
+  Both refuse its absence as a usage error (exit 2; `error.type` `UsageError` under json).
 - **You rarely need to state the units at all.** Every relaxation subcommand reads `series_metadata.json` beside its input and takes `value_units` from it, so the flag is for hand-built and DynamiXs-format tables, which have no sidecar. **A flag that contradicts the sidecar is refused**, not preferred — one of the two is wrong and guessing is the 1000× error. So is any flag but `ms` on a matrix whose delay headers state a unit (`..._2o4s`, `..._300ms`): the parser has already read those as ms, and `s` would convert them twice. The flag only means something for bare-number headers. The run summary reports `series_metadata` and the `time_units` it resolved.
 - **model-free CSV columns differ single vs dual.** Dual: `R1_f1`/`R1_f2`, `Rex_f1_err`, `Rex_f1_95CI`, … Single: the bare names `R1`, `Rex_err`, `Rex_95CI` **plus `_f1` aliases of each**, so a reader written against the dual spelling works on both. Shared, never suffixed: `Residue, S2, tc, te, S2_err, te_err, chi2, fit_success`. CSVs written before the aliases existed carry only the bare names, and a `_f1` selection on those returns an **empty selection** rather than raising — which reads as "no exchange anywhere".
 - **`export kd` curves vs ref-bars differ on observable.** `curves` (`<obs>_fits.pdf`) render only fitted observables (follow the JSON / `--observable`); `ref-bars` (`<obs>_ref_vs_point.pdf`) are model-free (raw series) and default to BOTH csp+intensity even for a single-observable fit — `--observable` still restricts. Ref-bars need embedded per-point `series` + ≥2 points.
@@ -303,8 +303,9 @@ their `conc_units`, `intensity_scales`, and the five thresholds above - to
 `<input_dir>/<prefix>_kd_params.json`; a fit writes them to `<out>/data/`. A later run
 reads a stored file back ONLY if it was written for the same input CSV and the same
 titration points (a hand-placed `<input_dir>/kd_params.json` need not name its input).
-Every file passed over is listed in the summary's `params_skipped` with the reason (a
-refused run names them on stderr only), and `params_source` names the one used.
+Every file passed over is listed in the summary's `params_skipped` with the reason, and
+`params_source` names the one used. A run refused for want of concentrations names them
+in its message and, under json, in `error.details.params_skipped`.
 Precedence: an explicit flag beats the stored value beats the schema default. Only the
 concentrations, `intensity_scales` and the five thresholds are restored: `--p0`,
 `--alpha`, `--intensity-from` and `--observable` are recorded but not read back, so pass
@@ -315,7 +316,11 @@ it (`--conc-units`, default `absolute`), never in units a stored file recorded. 
 `--conc` both come from the stored file, and a `--conc-units` that contradicts the stored
 units is refused. With neither, `--conc-units` alone (or a stored file that states only
 `conc_units`, as a survey run without `--conc` writes) says the spectrum names carry the
-concentrations (`..._3o0.ft` = 3.0 eq with `equivalents`). **With none of these the run
+concentrations (`..._3o0.ft` = 3.0 eq with `equivalents`). A label `series` could not
+parse is the file stem (`sample_2`; `value: null` in `series_metadata.json`) and is never
+read as a concentration: such a run is refused, naming the labels, until `--conc` gives
+them. With no `series_metadata.json` beside the input a label counts only if it is a
+number (`0.125`, `3`, `1_2` for a repeat). **With none of these the run
 is refused** (`--survey` too) - point labels or acquisition indices fitted as micromolar
 gave a confident Kd wrong by up to `--p0`.
 
