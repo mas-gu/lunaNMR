@@ -1472,6 +1472,7 @@ class SeriesIntegrationDialog(BaseDialog):
                 # The fitting-window grid search is never run on a series: on real
                 # titrations it chose a window that cuts the peak at half height
                 'use_adaptive_optimization': False,
+                'auto_add_dummy_peaks': getattr(self.main_window, 'auto_add_dummy_peaks', True),
                 # ML training data collection
                 'collect_training_data': self._get_ml_collect_enabled(),
                 # Custom linewidth parameters (only if enabled)

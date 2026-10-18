@@ -240,6 +240,11 @@ class MultiSpectrumProcessor:
             self.integrator.gui_params = self.voigt_params.copy()
             self.integrator.fitting_parameters.update(self.voigt_params)
 
+        # Whether the first spectrum's detection adds the unmatched peaks near listed
+        # ones as dummy_ peaks, which every later spectrum then fits too
+        self.integrator.auto_add_dummy_peaks = self.integrator.gui_params.get(
+            'auto_add_dummy_peaks', True)
+
         # Initialize output folder for retrocompatibility
         self.output_folder = None
 
