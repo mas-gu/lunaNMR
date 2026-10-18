@@ -339,3 +339,43 @@ def test_a_loaded_series_reads_its_bundled_csvs(app, bundle_a, tmp_path):
         assert page._series_intensity_matrix(SERIES) == str(held / "peak_intensity_matrix.csv")
     finally:
         dialog.deleteLater()
+
+
+# ---------- a saved DynamiXs analysis keeps the results it was saved with ----------
+
+METHYL_JSON = "NBD_field1_methylT2_fit_data.json"
+
+
+def _mark_run(folder, run):
+    path = folder / METHYL_JSON
+    data = json.loads(path.read_text())
+    data["run"] = run
+    path.write_text(json.dumps(data))
+
+
+def test_a_later_run_into_the_same_folder_leaves_a_saved_analysis_alone(run_dir, tmp_path):
+    """A page writes every run into its one output folder under the same names; the
+    analysis saved from the first run must not take the second's fits on the next save."""
+    from lunaNMR.utils.project_manager import ProjectManager
+    live = tmp_path / "methyl_out"
+    shutil.copytree(run_dir / "fits" / "NBD", live)
+    _mark_run(live, "first")
+    window = _window()
+    window.dynamixs_analyses = {"first": {"state": {"methyl_t2": {"output_dir": str(live)}},
+                                          "file_refs": {}}}
+    pm = ProjectManager(window)
+    bundle = tmp_path / "P.lunaNMR"
+    assert pm.save_project(bundle)[0]
+
+    _mark_run(live, "second")
+    window.dynamixs_analyses["second"] = {"state": {"methyl_t2": {"output_dir": str(live)}},
+                                          "file_refs": {}}
+    assert pm.save_project(bundle)[0]
+    for name in ("first", "second"):
+        page = bundle / "dynamixs" / "analyses" / name / "results" / "methyl_t2"
+        assert json.loads((page / METHYL_JSON).read_text())["run"] == name
+
+    other = tmp_path / "P2.lunaNMR"
+    assert pm.save_project(other)[0]
+    page = other / "dynamixs" / "analyses" / "first" / "results" / "methyl_t2"
+    assert json.loads((page / METHYL_JSON).read_text())["run"] == "first"

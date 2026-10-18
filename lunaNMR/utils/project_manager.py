@@ -1259,6 +1259,10 @@ class ProjectManager:
                 json.dump(entry.get('file_refs') or {}, f, indent=2,
                           default=self._json_serializer)
             self._copy_dynamixs_results(state, adir / "results")
+            # From now on the analysis is its bundled copy, as after a load: a page writes
+            # every run into one folder under the same names, so a later save copying
+            # from there again would hand this analysis a later run's results.
+            self._repoint_dynamixs_results(state, adir / "results")
 
         for sub in analyses_dir.iterdir():
             if sub.is_dir() and sub.name not in kept:
