@@ -111,3 +111,15 @@ def test_point_labels_may_be_declared_as_the_concentrations(folder):
                         "--out", str(folder / "fit"), "--conc-units", "equivalents")
     assert code == 0
     assert _metadata(summary)["concentrations"] == [0, 6.25, 12.5, 25, 50, 100, 150]
+
+
+def test_a_survey_reports_the_command_it_was_run_as(folder):
+    """`command` is the subcommand path, and a survey is `kd --survey`: the dry-run of
+    the same command line already said 'kd'."""
+    argv = ("--survey", "--input", str(folder / "DNAJA1_HSPA8_tidy.csv"),
+            "--out", str(folder / "s"), "--conc", ABSOLUTE)
+    assert _kd(*argv, "--dry-run")[1]["command"] == "kd"
+    code, summary = _kd(*argv)
+    assert code == 0
+    assert summary["command"] == "kd"
+    assert summary["survey_file"]

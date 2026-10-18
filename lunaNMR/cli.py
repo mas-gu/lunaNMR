@@ -523,7 +523,7 @@ def _run_kd_survey(args):
 
     counts = result['counts']
     _emit(args,
-          {'command': 'kd survey', 'n_total': result['n_total'],
+          {'command': 'kd', 'n_total': result['n_total'],
            'n_selected': result['n_selected'], 'counts': counts,
            'residues_file': result['residues_file'],
            'survey_file': result['survey_file'], 'figures': figures,
