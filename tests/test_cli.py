@@ -85,6 +85,22 @@ class TestKdSubcommand:
         r1 = next(f for f in data['fits'] if f['residue'] == 'R1')
         assert r1['csp']['Kd'] == pytest.approx(20.0, rel=1e-2)
 
+    def test_kd_help_states_where_concentrations_come_from(self, capsys):
+        """The point labels are not a default: with no --conc, no --conc-units and no
+        stored file for the input, the run is refused."""
+        from lunaNMR.cli import main
+        assert main(["kd", "--help"]) == 0
+        import re
+        options = capsys.readouterr().out.split("options:", 1)[1]
+        # argparse wraps at hyphens: '--conc-\n units'.
+        text = " ".join(re.sub(r"-\s+(?=[a-z])", "-", options).split())
+        assert "default: CSV point labels" not in text
+        assert "(default: absolute)" not in text
+        conc = text[text.index("--conc CONC"):text.index("--alpha ALPHA")]
+        assert "stored" in conc and "--conc-units" in conc and "refused" in conc
+        units = text[text.index("--conc-units {"):text.index("--csp-sigma-multiple CSP")]
+        assert "labels" in units and "absolute" in units
+
     def test_kd_missing_required_flag_errors(self, tmp_path):
         from lunaNMR.cli import main
         # --out and --p0 are required; argparse should exit non-zero.

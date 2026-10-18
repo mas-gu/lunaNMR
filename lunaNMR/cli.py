@@ -2328,7 +2328,10 @@ def build_parser():
     kd.add_argument('--prefix', default='kd', help='Output filename prefix (default: kd)')
     kd.add_argument('--p0', type=float, required=True, help='Total protein concentration [P]0')
     kd.add_argument('--conc', type=_float_list, default=None,
-                    help='Comma-separated ligand concentrations (default: CSV point labels)')
+                    help='Comma-separated ligand concentrations, one per titration point. '
+                         'Without it they come from --conc-units declaring that the point '
+                         'labels are the concentrations, or from a params file stored for '
+                         'this input; with none of these the run is refused')
     kd.add_argument('--alpha', type=float, default=0.14,
                     help='CSP N/H scaling factor (default: 0.14)')
     kd.add_argument('--observable', type=_choice_list('csp', 'intensity'),
@@ -2345,9 +2348,10 @@ def build_parser():
                          'vs-sequence figures. Writes no fit JSON and no global Kd')
     kd.add_argument('--conc-units', choices=['absolute', 'equivalents'], default=None,
                     dest='conc_units',
-                    help='Whether concentrations (parsed from spectrum names or given via '
-                         '--conc) are absolute or equivalents of --p0. Equivalents are '
-                         'multiplied by --p0 (default: absolute)')
+                    help='Units of the concentrations: absolute, or equivalents of --p0 '
+                         '(multiplied by --p0). With --conc they default to absolute; given '
+                         'alone, this declares that the point labels are the '
+                         'concentrations, in these units')
     kd.add_argument('--csp-sigma-multiple', type=float, default=None,
                     dest='csp_sigma_multiple',
                     help='Multiples of the trimmed CSP spread at the last titration '
