@@ -172,3 +172,20 @@ def test_a_moved_run_still_bundles_its_csvs(run_dir, tmp_path):
     assert main(["project", "build", str(moved), "--out", str(out)]) == 0
     for name in SERIES_CSVS:
         assert (out / "series_results" / "DNAJA1" / name).exists(), name
+
+
+@pytest.mark.parametrize("folders", [
+    ("600/titration", "titration"),
+    ("a/x", "b/x", "x"),
+    ("a/x", "b/x", "b_x"),
+])
+def test_series_folders_of_one_name_are_all_found(tmp_path, folders):
+    """A series is named after its folder, then after its place under the run; neither
+    may be one another series already holds, or that series leaves the bundle unsaid."""
+    from lunaNMR.utils.project_builder import find_series
+    for folder in folders:
+        (tmp_path / folder).mkdir(parents=True)
+        (tmp_path / folder / "batch_results.json").write_text("{}")
+    found = find_series(tmp_path)
+    assert sorted(p.parent.relative_to(tmp_path).as_posix() for p in found.values()) \
+        == sorted(folders)

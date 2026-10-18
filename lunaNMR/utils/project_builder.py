@@ -39,6 +39,11 @@ def find_series(run_dir):
         name = path.parent.name
         if name in found:   # two series folders of one name: tell them apart by place
             name = '_'.join(path.parent.relative_to(run_dir).parts)
+        # A folder directly under run_dir has no place beyond its name, and a place
+        # can spell another folder's name: number what is still taken.
+        base, n = name, 2
+        while name in found:
+            name, n = f'{base}_{n}', n + 1
         found[name] = path
     return found
 
