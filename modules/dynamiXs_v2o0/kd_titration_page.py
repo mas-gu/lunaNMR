@@ -547,14 +547,29 @@ class KdTitrationPage(BasePage):
             if warnings_:
                 # A dataset the titration cannot answer must not be reported as a plain
                 # success — the number would look ordinary and mean nothing.
-                self._show_result("Fit complete, but the result is not usable: "
-                                  + " ".join(warnings_), WARNING_ORANGE)
+                self._show_result(self._NOT_USABLE + " ".join(warnings_), WARNING_ORANGE)
             else:
                 self._show_result(f"Fitted {n} residues. Open the viewer to inspect.",
                                   SUCCESS_GREEN)
         else:
             self._show_result("No fits succeeded: all residues failed. Check the log.",
                               WARNING_ORANGE)
+
+    _NOT_USABLE = "Fit complete, but the result is not usable: "
+
+    def _state_saved_verdict(self, json_file):
+        """State the quality warnings a reopened fit's JSON stores, as its run stated
+        them; with none, clear the outcome of whichever fit the page showed before."""
+        import json
+        try:
+            meta = json.loads(Path(json_file).read_text()).get('metadata') or {}
+        except Exception:
+            meta = {}
+        warnings_ = meta.get('quality_warnings') or []
+        if warnings_:
+            self._show_result(self._NOT_USABLE + " ".join(warnings_), WARNING_ORANGE)
+        else:
+            self.result_label.hide()
 
     def _show_result(self, text, colour):
         """State the last fit's outcome on the page, in `colour`."""
@@ -606,6 +621,7 @@ class KdTitrationPage(BasePage):
             from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
             self._viewer = open_kd_titration_viewer(parent=self, json_file=path)
             self.last_json_file = path
+            self._state_saved_verdict(path)
             self.viewer_btn.setEnabled(True)
             self.save_to_project_btn.setEnabled(True)
         except Exception as e:
@@ -877,6 +893,7 @@ class KdTitrationPage(BasePage):
         if meta:
             self.restore_session_state(meta)
         self.last_json_file = path
+        self._state_saved_verdict(path)
         self.viewer_btn.setEnabled(True)
         self.save_to_project_btn.setEnabled(True)
         from visualization.kd_titration_fit_viewer import open_kd_titration_viewer
