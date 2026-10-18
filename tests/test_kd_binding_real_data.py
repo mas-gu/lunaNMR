@@ -293,7 +293,7 @@ class TestExclusionIsPointWiseNotResidueWise:
             _points(dnaja1_tidy, res, _usable_intensity)
 
     def test_residues_with_one_bad_point_are_not_wholesale_dropped(self, dnaja1_tidy, tmp_path):
-        """7 residues carry >=1 Failed point; only a residue failing at every point
+        """10 residues carry >=1 Failed point; only a residue failing at every point
         has nothing left to fit."""
         df = pd.read_csv(dnaja1_tidy)
         q = df["quality"].astype(str).str.lower()
@@ -1005,14 +1005,18 @@ class TestConcentrationUnits:
         assert given["metadata"]["concentrations"] == pytest.approx(
             [0.0, 6.25, 12.5, 25.0, 50.0, 100.0, 150.0])
 
-    def test_the_silent_wrong_answer_is_still_reachable_by_default(
+    def test_a_titration_that_states_no_concentrations_is_refused(
             self, dnaja1_tidy, tmp_path):
-        """Documents the hazard the flag exists for: absolute is the default, so a
-        titration named in equivalents still needs one of --conc or --conc-units."""
-        wrong = self._fit_raw(dnaja1_tidy, tmp_path / "wrong", [])
+        """The hazard the flag exists for: a titration named in equivalents, read as
+        absolute, is a Kd wrong by P0. With neither --conc nor --conc-units, nor a
+        stored setting for this input, there is nothing to read the names as."""
+        from lunaNMR.cli import main
+        assert main(["kd", "--input", str(dnaja1_tidy), "--out", str(tmp_path / "wrong"),
+                     "--prefix", "t", "--p0", P0, "--observable", "csp,intensity"]) == 1
         right = self._fit_raw(dnaja1_tidy, tmp_path / "right",
                               ["--conc-units", "equivalents"])
-        assert wrong["metadata"]["concentrations"] != right["metadata"]["concentrations"]
+        assert right["metadata"]["concentrations"] == pytest.approx(
+            [0.0, 6.25, 12.5, 25.0, 50.0, 100.0, 150.0])
 
     def test_a_persisted_conc_units_is_applied(self, own_tidy, tmp_path):
         """A stored setting nobody reads is a preference, not a setting."""
@@ -1090,17 +1094,18 @@ class TestTheSurveyRecordsWhatTheFitNeeds:
         """A threshold the survey used to reject residues, but does not record, makes
         the fit's pool disagree with the selection file the survey just wrote."""
         from kd_params import find_params_source, load_params
-        self._survey(own_tidy, tmp_path / "s", ["--csp-sigma-multiple", "2.0"])
+        self._survey(own_tidy, tmp_path / "s",
+                     ["--conc-units", "equivalents", "--csp-sigma-multiple", "2.0"])
         stored = load_params(find_params_source(str(own_tidy)))
         assert stored["csp_sigma_multiple"] == 2.0
 
 
 # Measured at the last titration point, top 10% trimmed so the binders do not set the
 # threshold meant to identify them. Untrimmed sigma is materially larger.
-DNAJA1_SIGMA_TRIMMED = 0.0135
-DNAJA1_SIGMA_UNTRIMMED = 0.0216
-DNAJA1_SIGNIFICANT = 15
-DNAJA1_MEASURED = 40
+DNAJA1_SIGMA_TRIMMED = 0.0150
+DNAJA1_SIGMA_UNTRIMMED = 0.0236
+DNAJA1_SIGNIFICANT = 16
+DNAJA1_MEASURED = 41
 
 
 class TestCspSignificanceCutoff:
@@ -1419,8 +1424,8 @@ class TestKdOutlierExclusion:
 
     def test_a_spread_based_test_would_have_sheltered_them(self, dnaja1_tidy, tmp_path):
         """Why physics runs before statistics. The implausible values inflate the spread
-        enough to sit inside it: on DNAJA1 mean/2-sigma shelters 23LysH, at 1.6e+04 -
-        8.9e+03 +/- 2.8e+04 spans it - and only the credible window catches it."""
+        enough to sit inside it: on DNAJA1 mean/2-sigma shelters 23LysH, at 1.2e+04 -
+        5.3e+03 +/- 1.7e+04 spans it - and only the credible window catches it."""
         import statistics
         data, _ = _fit(dnaja1_tidy, tmp_path / "kd")
         excluded = set(self._block(data)["excluded"])

@@ -100,6 +100,16 @@ def load_params(path):
     return normalize_params(raw)
 
 
+def recorded_keys(path):
+    """The keys a params source actually states, before load_params fills the defaults
+    in: a hand-placed file that says nothing about conc_units has not declared 'absolute'."""
+    with open(path) as fh:
+        raw = json.load(fh)
+    if isinstance(raw, dict) and isinstance(raw.get('metadata'), dict):
+        raw = raw['metadata']
+    return set(raw) if isinstance(raw, dict) else set()
+
+
 def dump_params_json(path, params):
     """Write normalized params to a JSON file (indent=2, hand-editable)."""
     with open(path, 'w') as fh:

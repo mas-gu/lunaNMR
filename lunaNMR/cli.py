@@ -332,15 +332,16 @@ _PERSISTED_SETTINGS = ('csp_sigma_multiple', 'kd_outlier_z',
 _PERSISTED_INPUTS = {'intensity_scales': 'intensity_scale'}
 
 
-def _apply_concentrations(args, params, stored):
+def _apply_concentrations(args, params, stored, stated):
     """Concentrations and their units, always as one pair from one place.
 
     Typed on the command line, they are in the units typed beside them (absolute unless
     --conc-units says otherwise) - never in units a stored file recorded for other
     numbers, which converted absolute concentrations by P0. Otherwise both come from the
-    stored file. With neither, --conc-units alone declares that the spectrum names carry
-    the concentrations; without even that the run is refused, rather than fitting
-    point labels or acquisition indices as micromolar.
+    stored file. With neither, the units alone - --conc-units, or a conc_units the stored
+    file states (`stated`: the keys it actually records) - declare that the spectrum
+    names carry the concentrations; without even that the run is refused, rather than
+    fitting point labels or acquisition indices as micromolar.
     """
     if args.conc is not None:
         params['concentrations'] = args.conc
@@ -355,6 +356,8 @@ def _apply_concentrations(args, params, stored):
         params['conc_units'] = stored['conc_units']
     elif args.conc_units:
         params['conc_units'] = args.conc_units
+    elif 'conc_units' in stated:
+        params['conc_units'] = stored['conc_units']
     else:
         raise ValueError(
             "No concentrations: pass --conc (with --conc-units equivalents if they are "
@@ -370,14 +373,14 @@ def _apply_thresholds(args, params):
     Returns (source path or None, [{'path', 'reason'}, ...] of files passed over).
     """
     from kd_input import load_titration
-    from kd_params import find_params_source, load_params
+    from kd_params import find_params_source, load_params, recorded_keys
     points = load_titration(args.input)[0]
     skipped = []
     src = find_params_source(args.input, points=points, rejected=skipped)
     stored = load_params(src) if src else {}
     for s in skipped:
         print(f"  warning: not using {s['path']}: {s['reason']}", file=sys.stderr)
-    _apply_concentrations(args, params, stored)
+    _apply_concentrations(args, params, stored, recorded_keys(src) if src else set())
     for key in _PERSISTED_SETTINGS:
         flag = getattr(args, key, None)
         if flag is not None:

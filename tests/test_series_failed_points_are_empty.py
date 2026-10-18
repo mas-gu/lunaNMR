@@ -16,8 +16,13 @@ import pytest
 
 T1 = (Path(__file__).resolve().parents[2] / "data_test" / "data_JA1_relaxation"
       / "600_WT" / "T1")
-GOOD = ("600_T1_A1_WT_0ms.ft", "600_T1_A1_WT_300ms.ft", "600_T1_A1_WT_900ms.ft")
-BROKEN = "600_T1_A1_WT_150ms.ft"
+GOOD = ("0ms", "300ms", "900ms")
+BROKEN = "150ms"
+
+
+def _spectrum(delay):
+    """The T1 spectrum at `delay`, found by its delay rather than by its file name."""
+    return next(T1.glob(f"*_{delay}.ft"))
 
 pytestmark = pytest.mark.skipif(not T1.exists(), reason="data_test not present")
 
@@ -31,13 +36,13 @@ def run(tmp_path_factory):
     root = tmp_path_factory.mktemp("t1bad")
     spectra = root / "spectra"
     spectra.mkdir()
-    for name in GOOD:
-        (spectra / name).symlink_to(T1 / name)
-    (spectra / BROKEN).write_bytes((T1 / BROKEN).read_bytes()[:4096])
+    for delay in GOOD:
+        (spectra / f"T1_{delay}.ft").symlink_to(_spectrum(delay))
+    (spectra / f"T1_{BROKEN}.ft").write_bytes(_spectrum(BROKEN).read_bytes()[:4096])
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         code = main(["series", "--spectra", str(spectra), "--peaks",
-                     str(T1 / "600_T1_assignment.txt"), "--mode", "time",
+                     str(next(T1.glob("*_assignment.txt"))), "--mode", "time",
                      "--peak-source", "reference", "--out", str(root / "out"),
                      "--format", "json"])
     return root / "out", code, json.loads(out.getvalue())
@@ -55,7 +60,7 @@ def test_the_lost_spectrum_is_an_empty_column(run):
 def test_the_run_names_the_spectrum_it_lost(run):
     _, _, summary = run
     payload = summary.get("result", summary)
-    assert payload["failed_spectra"] == [BROKEN]
+    assert payload["failed_spectra"] == [f"T1_{BROKEN}.ft"]
 
 
 def test_a_peak_whose_fit_failed_is_left_empty():
