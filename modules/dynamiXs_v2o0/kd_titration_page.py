@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from constants import (
     FRAME_BG_COLOR, PRIMARY_TEXT, SECONDARY_TEXT,
     SPACING_XS, SPACING_SM, FONT_SIZE_SMALL,
+    SUCCESS_GREEN, WARNING_ORANGE,
 )
 from gui_components import (
     create_primary_button, create_secondary_button, create_label,
@@ -200,6 +201,13 @@ class KdTitrationPage(BasePage):
         self.progress_bar.hide()
         layout.addWidget(self.progress_bar)
 
+        # The outcome of the last fit, stated on the page rather than in a modal box: it
+        # stays visible beside the log, and a modal would block a run nobody can click
+        self.result_label = create_label("")
+        self.result_label.setWordWrap(True)
+        self.result_label.hide()
+        layout.addWidget(self.result_label)
+
         self.log_text = QPlainTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setMaximumBlockCount(500)
@@ -326,6 +334,10 @@ class KdTitrationPage(BasePage):
 
     # ---------- run ----------
 
+    def _conc_units(self):
+        """'equivalents' or 'absolute', as the Concentration units selector says."""
+        return 'equivalents' if self.conc_units_combo.currentIndex() == 1 else 'absolute'
+
     def _parse_concentrations(self):
         if not self.conc_spins:
             return None
@@ -388,8 +400,7 @@ class KdTitrationPage(BasePage):
             'alpha': float(self.alpha_spin.value()),
             'observables': combo_index_to_observables(self.obs_combo.currentIndex()),
             'intensity_value': self.intvalue_combo.currentText(),
-            'conc_units': ('equivalents' if self.conc_units_combo.currentIndex() == 1
-                           else 'absolute'),
+            'conc_units': self._conc_units(),
             'n_bootstrap': int(self.boot_spin.value()),
         }
 
@@ -450,6 +461,7 @@ class KdTitrationPage(BasePage):
             output_dir=self.output_dir,
             output_prefix=self._analysis_base_name(),
             concentrations=concs,
+            conc_units=self._conc_units(),
             intensity_scales=self._parse_intensity_scales(),
             protein_conc=float(self.p0_spin.value()),
             alpha=float(self.alpha_spin.value()),
@@ -460,6 +472,7 @@ class KdTitrationPage(BasePage):
 
         self.progress_bar.setValue(0)
         self.progress_bar.show()
+        self.result_label.hide()
         self.run_btn.setEnabled(False)
         self.viewer_btn.setEnabled(False)
         self._log("Starting Kd fit...")
@@ -495,13 +508,20 @@ class KdTitrationPage(BasePage):
             if warnings_:
                 # A dataset the titration cannot answer must not be reported as a plain
                 # success — the number would look ordinary and mean nothing.
-                show_warning(self, "Fit complete, but the result is not usable",
-                             "\n\n".join(warnings_))
+                self._show_result("Fit complete, but the result is not usable: "
+                                  + " ".join(warnings_), WARNING_ORANGE)
             else:
-                show_info(self, "Fit complete",
-                          f"Fitted {n} residues. Open the viewer to inspect.")
+                self._show_result(f"Fitted {n} residues. Open the viewer to inspect.",
+                                  SUCCESS_GREEN)
         else:
-            show_warning(self, "No fits succeeded", "All residues failed. Check the log.")
+            self._show_result("No fits succeeded: all residues failed. Check the log.",
+                              WARNING_ORANGE)
+
+    def _show_result(self, text, colour):
+        """State the last fit's outcome on the page, in `colour`."""
+        self.result_label.setText(text)
+        self.result_label.setStyleSheet(f"color: {colour}; font-weight: bold;")
+        self.result_label.show()
 
     def _on_error(self, error_msg):
         self.run_btn.setEnabled(True)

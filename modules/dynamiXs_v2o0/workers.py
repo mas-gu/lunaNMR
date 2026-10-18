@@ -331,6 +331,7 @@ class KdTitrationFittingParams:
     output_dir: str = ""
     output_prefix: str = "kd"
     concentrations: Optional[list] = None   # one [L] per titration point (sorted order)
+    conc_units: str = "absolute"            # 'absolute' or 'equivalents' of [P]0
     intensity_scales: Optional[list] = None  # per-point height/volume scale (scan-count correction)
     protein_conc: float = 50.0              # [P]0
     alpha: float = 0.14                     # 15N -> 1H CSP scaling
@@ -376,6 +377,7 @@ class KdTitrationFittingWorker(AnalysisWorker):
                 "output_dir": self.params.output_dir,
                 "output_prefix": self.params.output_prefix,
                 "concentrations": self.params.concentrations,
+                "conc_units": self.params.conc_units,
                 "intensity_scales": self.params.intensity_scales,
                 "protein_conc": self.params.protein_conc,
                 "alpha": self.params.alpha,
