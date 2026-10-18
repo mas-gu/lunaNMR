@@ -2021,6 +2021,15 @@ def _run_integrate_1d(args):
             peaks = [{'position': p['ppm'], 'assignment': f"peak_{i + 1}"}
                      for i, p in enumerate(found)]
         else:
+            # A position the axis does not reach measures nothing, in every spectrum
+            # that lacks it; the series would still run to success around it.
+            low = max(float(s.ppm_axis.min()) for s in spectra)
+            high = min(float(s.ppm_axis.max()) for s in spectra)
+            outside = [ppm for ppm in args.peaks if not low <= float(ppm) <= high]
+            if outside:
+                raise ValueError(
+                    f"--peaks outside the ppm range every spectrum covers "
+                    f"({high:.4f} to {low:.4f}): {', '.join(f'{p:g}' for p in outside)}")
             peaks = [{'position': float(ppm), 'assignment': f"peak_{i + 1}"}
                      for i, ppm in enumerate(args.peaks)]
         if not peaks:
