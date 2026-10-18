@@ -748,8 +748,11 @@ class SeriesIntegrationDialog(BaseDialog):
             # Get files sorted by extracted value with sequence numbers
             files_with_sequence = extractor.sort_files_with_sequence(self.nmr_files)
 
-            # Update nmr_files to be in sorted order
-            self.nmr_files = [f for f, _, _ in files_with_sequence]
+            # Series order: by extracted value, then any file with no value in name
+            # order - kept, as the CLI keeps it, and counted by _update_delay_info
+            placed = {f for f, _, _ in files_with_sequence}
+            without_value = sorted((f for f in self.nmr_files if f not in placed), key=natural_sort_key)
+            self.nmr_files = [f for f, _, _ in files_with_sequence] + without_value
 
             # Populate list with the extracted value
             for filepath, value, sequence in files_with_sequence:
@@ -757,6 +760,10 @@ class SeriesIntegrationDialog(BaseDialog):
                 col_name = extractor.get_column_name(value, sequence)
                 display_text = f"{basename}  →  {col_name}{unit}"
                 item = QListWidgetItem(display_text)
+                item.setData(Qt.UserRole, filepath)
+                self.file_list.addItem(item)
+            for filepath in without_value:
+                item = QListWidgetItem(f"{os.path.basename(filepath)}  →  (no value)")
                 item.setData(Qt.UserRole, filepath)
                 self.file_list.addItem(item)
 
