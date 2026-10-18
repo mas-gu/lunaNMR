@@ -1910,6 +1910,7 @@ def _run_dynamixs_modelfree(args):
            # are in the human report; a summary that carries neither is the black hole.
            'validation': result.get('validation_warnings') or {},
            'residue_counts': result.get('residue_counts') or {},
+           'excluded_residues': result.get('excluded_residues') or {},
            'n_residues': result.get('n_residues'), 'n_successful': result.get('n_successful'),
            'output_files': out_files}),
           f"Model-free complete: {result.get('n_successful')}/{result.get('n_residues')} residues",
