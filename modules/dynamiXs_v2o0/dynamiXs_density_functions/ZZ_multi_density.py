@@ -12,8 +12,6 @@ MULTICORE VERSION: Modified to utilize multiple CPU cores for parallel processin
 #####
 
 import os
-os.environ['OMP_NUM_THREADS'] = str(int(os.cpu_count() * 0.8))
-os.environ['MKL_NUM_THREADS'] = str(int(os.cpu_count() * 0.8))
 
 #####
 

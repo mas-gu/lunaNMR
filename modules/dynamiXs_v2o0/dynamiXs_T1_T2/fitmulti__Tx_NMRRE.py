@@ -16,9 +16,6 @@ Features:
 """
 
 import os
-# Set thread limits before importing numpy/scipy
-os.environ['OMP_NUM_THREADS'] = str(int(os.cpu_count() * 0.8))
-os.environ['MKL_NUM_THREADS'] = str(int(os.cpu_count() * 0.8))
 
 import numpy as np
 import matplotlib

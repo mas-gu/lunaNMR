@@ -14,8 +14,6 @@ cross-correlation effects and dipolar-CSA interference in the relaxation mechani
 #####
 
 import os
-os.environ['OMP_NUM_THREADS'] = str(int(os.cpu_count() * 0.8))
-os.environ['MKL_NUM_THREADS'] = str(int(os.cpu_count() * 0.8))
 
 #####
 

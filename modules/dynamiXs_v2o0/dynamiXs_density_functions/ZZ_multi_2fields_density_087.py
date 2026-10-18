@@ -19,8 +19,6 @@ FIX VERSION: Fixed residue numbering issue by ensuring proper 0-based sequential
 #####
 
 import os
-os.environ['OMP_NUM_THREADS'] = str(int(os.cpu_count() * 0.8))
-os.environ['MKL_NUM_THREADS'] = str(int(os.cpu_count() * 0.8))
 
 #####
 
