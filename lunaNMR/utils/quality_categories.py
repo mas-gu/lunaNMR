@@ -31,7 +31,7 @@ class QualityCategorizer:
     Centralized quality categorization system with multiple threshold sets.
 
     Features:
-    - Multiple predefined threshold sets (scientific, ml_friendly)
+    - Multiple predefined threshold sets (scientific, permissive)
     - Custom threshold support
     - Backward compatibility with existing code
     - Batch analysis with statistics
@@ -45,13 +45,6 @@ class QualityCategorizer:
             fair=0.70,
             name="Scientific",
             description="Traditional scientific quality thresholds (strict)"
-        ),
-        'ml_friendly': QualityThresholds(
-            excellent=0.90,
-            good=0.75,
-            fair=0.60,
-            name="ML-Friendly",
-            description="Relaxed thresholds optimized for ML training diversity"
         ),
         'permissive': QualityThresholds(
             excellent=0.85,
@@ -166,32 +159,6 @@ class QualityCategorizer:
                     'percentage': float(poor / total * 100) if total > 0 else 0.0,
                     'threshold': f"<{self.thresholds.fair:.2f}"
                 }
-            },
-            'ml_suitability': self._assess_ml_suitability(r_squared_values)
-        }
-
-    def _assess_ml_suitability(self, r_squared_values: np.ndarray) -> Dict:
-        """Assess suitability of data for ML training"""
-        suitable = np.sum(r_squared_values >= self.thresholds.fair)  # fair+ quality
-        marginal = np.sum((r_squared_values >= self.thresholds.fair * 0.8) & (r_squared_values < self.thresholds.fair))
-        unsuitable = np.sum(r_squared_values < self.thresholds.fair * 0.8)
-        total = len(r_squared_values)
-
-        return {
-            'suitable_for_training': {
-                'count': int(suitable),
-                'percentage': float(suitable / total * 100) if total > 0 else 0.0,
-                'description': f"R² ≥ {self.thresholds.fair:.2f}"
-            },
-            'marginal_for_training': {
-                'count': int(marginal),
-                'percentage': float(marginal / total * 100) if total > 0 else 0.0,
-                'description': f"R² {self.thresholds.fair*0.8:.2f}-{self.thresholds.fair:.2f}"
-            },
-            'unsuitable_for_training': {
-                'count': int(unsuitable),
-                'percentage': float(unsuitable / total * 100) if total > 0 else 0.0,
-                'description': f"R² < {self.thresholds.fair*0.8:.2f}"
             }
         }
 
@@ -202,7 +169,7 @@ def get_quality_categorizer(mode: str = 'scientific', config: Optional[Dict] = N
     Factory function to create quality categorizer with different modes.
 
     Args:
-        mode: 'scientific', 'ml_friendly', 'permissive', or 'auto'
+        mode: 'scientific', 'permissive', or 'auto'
         config: Optional configuration dict with quality_threshold_mode
 
     Returns:
