@@ -425,6 +425,9 @@ J(0)/J(ωN)/J(ωH), S², τc, τe, Rex in `<prefix>_results.csv` (`--dual`: `_ba
 squares from a grid of starts, which carries no uncertainty of its own: their errors are
 NaN unless `--monte-carlo`.
 
+`--dual` needs `--input2` and `--field2-freq`. `--field2-freq` has no default - there is no
+conventional second field - and its absence is a usage error (exit 2), as on `modelfree`.
+
 ### dynamixs modelfree
 Runs the whole chain per field from raw series matrices.
 ```bash
