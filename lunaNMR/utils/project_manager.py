@@ -1237,13 +1237,15 @@ class ProjectManager:
             out = page_state.get('output_dir')
             if not out or not Path(out).is_dir():
                 continue
+            page_dir = dest / page
+            if Path(out).resolve() == page_dir.resolve():
+                continue    # a reopened analysis saved onto its own bundle: in place
             files = (glob.glob(str(Path(out) / "*.csv")) + glob.glob(str(Path(out) / "*.txt"))
                      + glob.glob(str(Path(out) / "*.json")))
             files = [f for f in files if any(p in Path(f).name for p in patterns)]
             json_dirs = [d for d in glob.glob(str(Path(out) / "json*")) if Path(d).is_dir()]
             if not files and not json_dirs:
                 continue
-            page_dir = dest / page
             page_dir.mkdir(parents=True, exist_ok=True)
             for src in files:
                 shutil.copy2(src, page_dir / Path(src).name)
