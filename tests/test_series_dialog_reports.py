@@ -201,3 +201,27 @@ def test_a_warning_from_the_run_reaches_the_log(app, fitted_peaks, tmp_path):
     assert "Warning: Falling back to per-peak fitting" in log
     assert "✕  Failed to process 2D_x.ft" in log
     dialog.deleteLater()
+
+
+def test_the_dialog_states_the_noise_threshold_does_not_apply(partial_run):
+    """Series detection runs at its own S/N threshold; the CLI refuses the key."""
+    assert "Noise Threshold does not apply to a series" in partial_run[0].log_text.toPlainText()
+
+
+def test_the_noise_threshold_spinner_offers_only_what_the_engine_accepts(app):
+    """set_threshold_multiplier refuses a value below 0.1, and a series then fits nothing."""
+    from PySide6.QtCore import QTimer
+    from lunaNMR.gui.main_window import LunaNMRMainWindow
+
+    def type_a_value_and_close():
+        window.expert_noise_spin.setValue(0.05)
+        window._expert_dialog.reject()
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        window = LunaNMRMainWindow()
+        QTimer.singleShot(0, type_a_value_and_close)
+        window.on_expert_mode()   # the Expert Mode dialog, answered by the timer above
+    assert window.expert_noise_spin.minimum() == 0.1
+    assert window.noise_threshold == 0.1
+    window.close()
+    window.deleteLater()

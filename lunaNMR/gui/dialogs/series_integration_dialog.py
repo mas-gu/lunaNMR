@@ -964,6 +964,7 @@ class SeriesIntegrationDialog(BaseDialog):
         self._log(f"Starting series integration: {len(self.nmr_files)} spectra, {len(reference_peaks)} peaks{delay_msg}")
         self.tracking_statement = self._tracking_statement(peak_source_mode)
         self._log(self.tracking_statement)
+        self._log("Noise Threshold does not apply to a series: series detection runs at its own S/N threshold")
 
         # Create worker and thread
         self.thread = QThread()
