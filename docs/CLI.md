@@ -20,7 +20,9 @@ The CLI imports no Qt: `lunaNMR/__init__.py` is lazy, and matplotlib is forced t
   multiprocessing-spawn workers).
 - `--dry-run` — validate inputs and print the plan without running; exits non-zero if an input
   is missing. Accepted by every subcommand that writes something. `diagnose` takes `--format`
-  only: it is read-only, so a dry-run has nothing to mean. `project` and `batch` take neither.
+  only: it is read-only, so a dry-run has nothing to mean. `project inventory` likewise takes
+  `--format` only; `project export`, `remove` and `build` take both `--format` and `--dry-run`.
+  `batch` takes no `--format`, and its own `--dry-run` lists the files as text.
 
 ### Exit codes
 
@@ -413,7 +415,7 @@ need the embedded per-point `series` + ≥2 points (both present in any `kd`-pro
 ```bash
 python -m lunaNMR project build <run_dir> --out <bundle.lunaNMR>
 python -m lunaNMR project inventory <bundle.lunaNMR>
-python -m lunaNMR project remove <bundle.lunaNMR> <rel/path> [<rel/path> ...]
+python -m lunaNMR project remove <bundle.lunaNMR> <rel/path> [<rel/path> ...] [--dry-run]
 ```
 
 ### batch

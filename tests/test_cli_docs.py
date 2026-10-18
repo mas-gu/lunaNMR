@@ -228,3 +228,33 @@ class TestEveryDocumentedCommandIsReal:
         missing = sorted(name for name in _subcommand_tree()
                          if not re.search(r"\b" + re.escape(name) + r"\b", text))
         assert missing == [], missing
+
+
+class TestTheProjectFlagsAreStatedAsTheParserHasThem:
+    """The docs said `project` took neither --format nor --dry-run, so a tool author
+    parsed its output as text and never learned that `project remove`, which cannot be
+    undone, has a dry run."""
+
+    _DENIAL = re.compile(r"`project`[^.\n]*(take neither|no `--format`)")
+
+    @pytest.mark.parametrize("doc", [DOCS / "CLI.md", CLI_AGENT_DOC], ids=lambda p: p.name)
+    def test_no_doc_denies_them(self, doc):
+        assert not self._DENIAL.search(doc.read_text())
+
+    @pytest.mark.parametrize("action,flags", [
+        ("inventory", ["--format"]),
+        ("export", ["--format", "--dry-run"]),
+        ("remove", ["--format", "--dry-run"]),
+        ("build", ["--format", "--dry-run"]),
+    ])
+    def test_the_parser_accepts_them(self, action, flags):
+        from lunaNMR.cli import build_parser
+        sub = build_parser()._subparsers._group_actions[0].choices["project"]
+        action_parser = sub._subparsers._group_actions[0].choices[action]
+        for flag in flags:
+            assert flag in action_parser._option_string_actions
+
+    @pytest.mark.parametrize("doc", [DOCS / "CLI.md", CLI_AGENT_DOC], ids=lambda p: p.name)
+    def test_the_docs_name_the_dry_run_of_remove(self, doc):
+        assert re.search(r"`project export`, `remove` and `build` take both `--format` and "
+                         r"`--dry-run`", " ".join(doc.read_text().split()))
