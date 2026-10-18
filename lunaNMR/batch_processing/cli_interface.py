@@ -15,8 +15,10 @@ Features:
 """
 
 import argparse
+import contextlib
 import sys
 import logging
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import signal
@@ -42,10 +44,6 @@ class CLIInterface:
         """Initialize the CLI interface."""
         self.logger = logging.getLogger(__name__)
         self.interrupted = False
-
-        # Set up signal handling for graceful shutdown
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
 
     def _signal_handler(self, _signum, frame):
         """Handle interrupt signals for graceful shutdown."""
@@ -454,6 +452,49 @@ Examples:
     def main(self, argv: Optional[List[str]] = None) -> int:
         """
         Main CLI entry point.
+
+        Args:
+            argv: Optional command line arguments (uses sys.argv if None)
+
+        Returns:
+            Exit code (0 for success, 1 for error)
+        """
+        with self._process_state_restored():
+            return self._run(argv)
+
+    @contextlib.contextmanager
+    def _process_state_restored(self):
+        """
+        Install the interrupt handlers for one run, and give the process back the
+        logging handlers, levels and signal handlers it had before the run.
+
+        A host that calls the CLI repeatedly in one process otherwise gains a stdout
+        handler on the root logger per call, and its own SIGTERM becomes sys.exit(0).
+        Signal handlers can only be set from the main thread, so a run on any other
+        thread leaves them to the host.
+        """
+        loggers = [logging.getLogger(), logging.getLogger(f"{__package__}.batch_processor")]
+        saved_loggers = [(lg, list(lg.handlers), lg.level) for lg in loggers]
+        saved_signals = {}
+        if threading.current_thread() is threading.main_thread():
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                saved_signals[signum] = signal.signal(signum, self._signal_handler)
+        try:
+            yield
+        finally:
+            for signum, handler in saved_signals.items():
+                if handler is not None:
+                    signal.signal(signum, handler)
+            for lg, handlers, level in saved_loggers:
+                for handler in list(lg.handlers):
+                    if handler not in handlers:
+                        lg.removeHandler(handler)
+                        handler.close()
+                lg.setLevel(level)
+
+    def _run(self, argv: Optional[List[str]] = None) -> int:
+        """
+        Parse the arguments and run the requested batch command.
 
         Args:
             argv: Optional command line arguments (uses sys.argv if None)

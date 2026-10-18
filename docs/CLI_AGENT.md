@@ -9,7 +9,7 @@ Scannable condensation of `docs/CLI.md` + `cli.py` for an agent. Run from `lunaN
 ```bash
 python -m lunaNMR <subcommand> [flags]   # `lunanmr` only after `pip install -e .`
 ```
-No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every analysis subcommand accepts `--format {text,json}`, and every one that writes something also accepts `--dry-run`. **`diagnose` takes `--format` only** — it is read-only, so a dry-run has nothing to mean. **`project` and `batch` are outside this contract entirely** and take neither.
+No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every analysis subcommand accepts `--format {text,json}`, and every one that writes something also accepts `--dry-run`. **`diagnose` takes `--format` only** — it is read-only, so a dry-run has nothing to mean. **`project inventory` takes `--format` only**; `project export`, `remove` and `build` take both `--format` and `--dry-run` — dry-run `remove` first, it cannot be undone. **`batch` is outside this contract**: no `--format`, and its own `--dry-run` lists the files as text.
 
 ## Subcommands
 | Command | Does | Required inputs | Key outputs |
@@ -158,10 +158,10 @@ python -m lunaNMR <cmd> ... --format json --dry-run
   {"ok": false, "schema_version": 1, "command": "dynamixs t1t2",
    "error": {"type": "FileNotFoundError", "message": "…"}}
   ```
-  Every summary carries `ok`, `schema_version` and the full `command` path (`dynamixs t1t2`, not `dynamixs`) — including dry-runs, which add `dry_run: true`. Keys are only ever added within a `schema_version`, so read the ones you know and ignore the rest. **Non-finite numbers serialise as `null`**, not `NaN`: a run where nothing fitted stays parseable. `project` and `batch` have no `--format` flag and are outside this contract.
+  Every summary carries `ok`, `schema_version` and the full `command` path (`dynamixs t1t2`, not `dynamixs`) — including dry-runs, which add `dry_run: true`. Keys are only ever added within a `schema_version`, so read the ones you know and ignore the rest. **Non-finite numbers serialise as `null`**, not `NaN`: a run where nothing fitted stays parseable. `batch` has no `--format` flag and is outside this contract.
 - **`--dry-run`** → validates required inputs exist, prints the plan, runs nothing. Exit 1 if any input missing, else 0.
 - **`--parallel`** → `series` only (two-pass processor, ~2.7×). **`--no-parallel` → `density` only.** `modelfree` also parallelizes internally but hard-codes `use_multiprocessing=True`, so its CPU use cannot be bounded — `modelfree --no-parallel` exits 2 with `unrecognized arguments`.
-- **Exit codes:** `2` = no subcommand or an unrecognised flag. `1` = bad input (reported as `error: …` on stderr, no traceback), or a dry-run with a missing input. `diagnose` also returns `1` on any `FAIL` finding (`WARN` needs `--strict`), and so does `series --dry-run --deep`; `series`/`t1t2`/`methyl-t2` return `1` when nothing fit and `t1rho` when the R2 table is empty. `hetnoe`/`density`/`modelfree`/`kd`/`export kd` return `0` on any completed run even with residues dropped — check `n_fitted`/`n_successful` against its total, not the exit code. Full table: [`CLI.md`](CLI.md#exit-codes).
+- **Exit codes:** `2` = no subcommand, or a rejected command line (unrecognised flag, bad value, refused flag combination) — under `--format json` an `ok: false` object with `error.type` `UsageError`. `1` = bad input (reported as `error: …` on stderr, no traceback), or a dry-run with a missing input. In-process, `cli.main()` returns the code (`0` for `--help`) and never raises `SystemExit`. `diagnose` also returns `1` on any `FAIL` finding (`WARN` needs `--strict`), and so does `series --dry-run --deep`; `series`/`t1t2`/`methyl-t2` return `1` when nothing fit and `t1rho` when the R2 table is empty. `hetnoe`/`density`/`modelfree`/`kd`/`export kd` return `0` on any completed run even with residues dropped — check `n_fitted`/`n_successful` against its total, not the exit code. Full table: [`CLI.md`](CLI.md#exit-codes).
 
 ## Input file shapes
 - **Peak list** (`series --peaks`): header `Assignment, Position_X, Position_Y[, Height]` (comma or tab; column aliases standardized).
