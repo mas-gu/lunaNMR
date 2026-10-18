@@ -14,9 +14,7 @@ Features:
 """
 
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend for thread safety
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from lmfit import Model
 import pandas as pd
 import os
@@ -500,7 +498,8 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
     n_figures = int(np.ceil(n_datasets / n_plots_per_figure))
     
     for fig_idx in range(n_figures):
-        fig, axes = plt.subplots(5, 4, figsize=(20, 25), sharex=True)
+        fig = Figure(figsize=(20, 25))
+        axes = fig.subplots(5, 4, sharex=True)
         axes = axes.flatten()
         start_idx = fig_idx * n_plots_per_figure
         end_idx = min((fig_idx + 1) * n_plots_per_figure, n_datasets)
@@ -546,13 +545,8 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
         for idx in range(end_idx - start_idx, len(axes)):
             axes[idx].set_visible(False)
         
-        plt.tight_layout()
+        fig.tight_layout()
         fig.savefig(f"{output_prefix}_fit_results_fig{fig_idx + 1}.pdf", format='pdf', dpi=300)
-        # The figure is already saved; showing it only makes sense on an interactive
-        # backend. Under Agg (CLI, tests) plt.show() warns and does nothing.
-        if matplotlib.get_backend().lower() not in ('agg', 'pdf', 'ps', 'svg', 'template'):
-            plt.show()
-        plt.close(fig)
 
 
 def save_results(results_list, output_file, experiment_type="T1"):
