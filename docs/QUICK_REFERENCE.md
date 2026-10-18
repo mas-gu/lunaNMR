@@ -22,7 +22,6 @@ Load Spectrum → Detect Peaks → Fit All Peaks → Export Results
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
 | Search window 1H / X (ppm) | 0.070 / 0.070 | Both dims; keep tight for low-S/N (e.g. saturated hetNOE) |
-| Noise Threshold | 3.0 | S/N multiplier |
 | Centroid window X / Y (ppm) | 0.01 / 0.10 | Max position shift |
 
 ## Fitting Controls

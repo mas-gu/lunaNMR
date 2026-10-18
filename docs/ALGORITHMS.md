@@ -14,7 +14,7 @@ Quality (R²): Excellent ≥0.9, Good 0.8–0.9, Fair 0.5–0.8, Poor 0.2–0.5,
 
 - **Noise**: corner sampling / MAD.
 - **Candidates**: local maxima via `scipy.ndimage.maximum_filter` + prominence/S-N thresholding.
-- **Search window** default **0.070 ppm in both 1H and 15N** (`main_window.search_window_x/y`). Wide 15N windows are harmful on low-S/N spectra (peaks fit to noise → Height 0 → residues dropped).
+- **Search window** default **0.070 ppm in both 1H and the indirect dimension, for 15N and 13C** (`ps2d_config.SEARCH_WINDOW_PPM`: startup, Reset, a nucleus switch and the CLI series). Wide 15N windows are harmful on low-S/N spectra (peaks fit to noise → Height 0 → residues dropped).
 
 ### 1.1 Top-Contour Centroid
 
