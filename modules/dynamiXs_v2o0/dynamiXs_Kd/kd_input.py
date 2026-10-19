@@ -199,6 +199,18 @@ def load_titration_tidy(csv_path):
     return points, residues
 
 
+def _join_repeats(points, values):
+    """Join the repeat acquisitions of a point ('1_2' beside '1'): one value per distinct
+    point, the mean of its finite values (NaN when it has none), as load_titration_tidy
+    joins the rows of a repeat. `points` are the per-label points, in label order."""
+    distinct = sorted(set(points))
+    joined = []
+    for p in distinct:
+        finite = [v for q, v in zip(points, values) if q == p and np.isfinite(v)]
+        joined.append(float(np.mean(finite)) if finite else np.nan)
+    return distinct, joined
+
+
 def load_titration_tracking(csv_path):
     """Load comprehensive_peak_tracking.csv (wide, per-point columns) into the same
     per-residue format as load_titration_tidy.
@@ -211,7 +223,8 @@ def load_titration_tracking(csv_path):
     labels = [c[:-len('_Position_X')] for c in df.columns if c.endswith('_Position_X')]
     _refuse_unread_points(labels)
     labels.sort(key=_to_point)
-    points = [_to_point(lbl) for lbl in labels]
+    label_points = [_to_point(lbl) for lbl in labels]
+    points = sorted(set(label_points))
 
     col_map = (('Position_X', 'ppm_x'), ('Position_Y', 'ppm_y'),
                ('Height', 'height'), ('Volume', 'volume'))
@@ -238,7 +251,7 @@ def load_titration_tracking(csv_path):
                              or (suffix.startswith('Position') and _pinned(lbl, 'Position')))
                 usable = col in df.columns and pd.notna(row[col]) and not is_pinned
                 vals.append(float(row[col]) if usable else np.nan)
-            rec[key] = vals
+            rec[key] = _join_repeats(label_points, vals)[1]
         residues[a] = rec
     return points, residues
 
@@ -260,20 +273,25 @@ def load_intensity_matrix(csv_path):
         raise ValueError(f"no titration point columns in {csv_path}: it is not a series "
                          f"tidy, peak-tracking or intensity-matrix CSV")
     point_cols.sort(key=_to_point)
-    points = [_to_point(c) for c in point_cols]
+    col_points = [_to_point(c) for c in point_cols]
+    points = sorted(set(col_points))
 
     residues = {}
+    cells = []
     for _, row in df.iterrows():
         a = str(row.get('Assignment', '')).strip()
         if not a or a.lower() in ('nan', 'dummy', ''):
             continue
-        vals = [float(row[c]) if pd.notna(row[c]) else np.nan for c in point_cols]
+        raw = [float(row[c]) if pd.notna(row[c]) else np.nan for c in point_cols]
+        cells.extend(raw)
+        vals = _join_repeats(col_points, raw)[1]
         nan = [np.nan] * len(points)
         residues[a] = {'points': list(points), 'ppm_x': list(nan), 'ppm_y': list(nan),
                        'height': vals, 'volume': list(vals)}
     if not residues:
         raise ValueError(f"no residue rows (Assignment) in {csv_path}")
-    values = np.array([r['height'] for r in residues.values()], dtype=float)
+    # The cells as written, before repeats are joined: two flags average to 0.5
+    values = np.array(cells, dtype=float)
     finite = values[np.isfinite(values)]
     if finite.size and np.isin(finite, (0.0, 1.0)).all():
         raise ValueError(f"every value in {csv_path} is 0 or 1: these are detection flags, "

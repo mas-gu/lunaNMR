@@ -309,3 +309,33 @@ def test_numeric_residue_names_read_the_same_from_every_input(tmp_path):
         matrix, index=False)
     for csv in (tidy, tracking, matrix):
         assert set(load_titration(str(csv))[1]) == {"10", "11"}, csv.name
+
+
+_REPEAT_RUN = (_DATA_TEST / "data_JA1_relaxation" / "run_20260825_1405" / "series" / "600_T1")
+
+
+@pytest.mark.skipif(not (_REPEAT_RUN / "comprehensive_peak_tracking.csv").exists(),
+                    reason="data_test not present")
+class TestARepeatJoinsItsPointInEveryInput:
+    """A real series with repeat acquisitions ('0_2', '300_2', '600_2'). The tidy loader
+    joins a repeat to its point; the tracking and matrix loaders kept it as a second point
+    at the same value, so one series gave a different Kd input per file it was read from."""
+
+    def test_the_three_inputs_give_the_same_points(self):
+        from kd_input import load_intensity_matrix, load_titration_tidy, load_titration_tracking
+        tidy_points, _ = load_titration_tidy(str(_REPEAT_RUN / "series_analysis_tidy.csv"))
+        tracking_points, _ = load_titration_tracking(
+            str(_REPEAT_RUN / "comprehensive_peak_tracking.csv"))
+        matrix_points, _ = load_intensity_matrix(str(_REPEAT_RUN / "peak_intensity_matrix.csv"))
+        assert len(set(tidy_points)) == len(tidy_points)
+        assert tracking_points == tidy_points
+        assert matrix_points == tidy_points
+
+    def test_tidy_and_tracking_give_the_same_heights(self):
+        from kd_input import load_titration_tidy, load_titration_tracking
+        _, by_tidy = load_titration_tidy(str(_REPEAT_RUN / "series_analysis_tidy.csv"))
+        _, by_tracking = load_titration_tracking(
+            str(_REPEAT_RUN / "comprehensive_peak_tracking.csv"))
+        for name, rec in by_tidy.items():
+            np.testing.assert_allclose(by_tracking[name]["height"], rec["height"],
+                                       rtol=1e-6, equal_nan=True, err_msg=name)
