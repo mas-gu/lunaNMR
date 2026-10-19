@@ -55,7 +55,6 @@ class DualFieldSpectralDensityAnalysis:
         self.rNH = rNH
         self.csaN = csaN
         
-        # Calculate angular frequencies for both fields
         self.field1_omegaH = self._calculate_omegaH(field1_freq)
         self.field1_omegaN = self._calculate_omegaN(field1_freq)
         self.field2_omegaH = self._calculate_omegaH(field2_freq)
@@ -200,7 +199,6 @@ class DualFieldSpectralDensityAnalysis:
         from random import random, randint
         from math import exp
         
-        # Convert to T1, T2 for both fields
         t1_f1, t2_f1 = 1.0 / r1_f1, 1.0 / r2_f1
         t1_f2, t2_f2 = 1.0 / r1_f2, 1.0 / r2_f2
         
@@ -209,7 +207,6 @@ class DualFieldSpectralDensityAnalysis:
         C1, C2 = self.field1_c_factor, self.field2_c_factor  # Different for each field
         gammaHN = GAMMA_H / GAMMA_N
         
-        # Initialize parameter ensemble
         ensemble = []
         
         # Parameter starting values
@@ -225,7 +222,6 @@ class DualFieldSpectralDensityAnalysis:
                     for rex2 in rex2_start:
                         ensemble.append((None, s2, te, rex1, rex2))
         
-        # Calculate initial scores
         for k, (score, s2, te, rex1, rex2) in enumerate(ensemble):
             # Calculate spectral densities for both fields using 0.87ωH
             # Field 1
@@ -242,7 +238,6 @@ class DualFieldSpectralDensityAnalysis:
             jHmN2 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.field2_omegaH - abs(self.field2_omegaN))
             j02 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, 0.0)
             
-            # Calculate predicted relaxation parameters for both fields
             # Field 1
             r1_calc_f1 = (A1 / 4.0) * (3*jN1 + 6*jHpN1 + jHmN1) + C1 * jN1
             r2_calc_f1 = 0.5 * (A1 / 4.0) * (4*j01 + 3*jN1 + 6*jHpN1 + 6*jH1 + jHmN1) + C1 * (2*j01/3.0 + 0.5*jN1) + rex1
@@ -262,7 +257,6 @@ class DualFieldSpectralDensityAnalysis:
             
             score = d1_f1*d1_f1 + d2_f1*d2_f1 + d1_f2*d1_f2 + d2_f2*d2_f2
             
-            # Add NOE contributions for both fields
             if noe_f1 is not None and not pd.isna(noe_f1):
                 noe_calc_f1 = 1.0 + ((A1 / 4.0) * gammaHN * t1_calc_f1 * (6*jHpN1 - jHmN1))
                 dn_f1 = (noe_calc_f1 - noe_f1) / (0.1 if noe_f1 == 0 else abs(noe_f1))
@@ -275,7 +269,6 @@ class DualFieldSpectralDensityAnalysis:
                 
             ensemble[k] = (score, s2, te, rex1, rex2, t1_calc_f1, t2_calc_f1, t1_calc_f2, t2_calc_f2)
         
-        # Sort and keep best 10
         ensemble.sort()
         ensemble = ensemble[:10]
         ensemble_size = len(ensemble)
@@ -318,7 +311,6 @@ class DualFieldSpectralDensityAnalysis:
             jHmN2 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, self.field2_omegaH - abs(self.field2_omegaN))
             j02 = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, 0.0)
             
-            # Calculate relaxation parameters
             r1_calc_f1 = (A1 / 4.0) * (3*jN1 + 6*jHpN1 + jHmN1) + C1 * jN1
             r2_calc_f1 = 0.5 * (A1 / 4.0) * (4*j01 + 3*jN1 + 6*jHpN1 + 6*jH1 + jHmN1) + C1 * (2*j01/3.0 + 0.5*jN1) + rex1_new
             r1_calc_f2 = (A2 / 4.0) * (3*jN2 + 6*jHpN2 + jHmN2) + C2 * jN2
@@ -334,7 +326,6 @@ class DualFieldSpectralDensityAnalysis:
             
             score = d1_f1*d1_f1 + d2_f1*d2_f1 + d1_f2*d1_f2 + d2_f2*d2_f2
             
-            # Add NOE contributions
             if noe_f1 is not None and not pd.isna(noe_f1):
                 noe_calc_f1 = 1.0 + ((A1 / 4.0) * gammaHN * t1_calc_f1 * (6*jHpN1 - jHmN1))
                 dn_f1 = (noe_calc_f1 - noe_f1) / (0.1 if noe_f1 == 0 else abs(noe_f1))
@@ -353,12 +344,10 @@ class DualFieldSpectralDensityAnalysis:
                 k = randint(0, ensemble_size - 1)
                 ensemble[-1] = ensemble[k]
         
-        # Return best result
         ensemble.sort()
         if len(ensemble) > 0:
             score, s2_best, te_best, rex1_best, rex2_best, t1_calc_f1, t2_calc_f1, t1_calc_f2, t2_calc_f2 = ensemble[0]
             
-            # Calculate errors from ensemble spread
             s2_values = [e[1] for e in ensemble[:10]]
             te_values = [e[2] for e in ensemble[:10]]
             rex1_values = [e[3] for e in ensemble[:10]]
@@ -439,7 +428,6 @@ class DualFieldSpectralDensityAnalysis:
             r2_f2_sample = max(r1_f2_sample * 1.1, np.random.normal(r2_f2, r2_f2_err))
             noe_f2_sample = np.clip(np.random.normal(noe_f2, noe_f2_err), -0.5, 1.0)
             
-            # Fit the synthetic dual-field dataset
             mc_fit = self._fit_dual_field_dataset(r1_f1_sample, r2_f1_sample, noe_f1_sample,
                                                 r1_f2_sample, r2_f2_sample, noe_f2_sample,
                                                 tc_fixed, mc_niter)
@@ -453,19 +441,16 @@ class DualFieldSpectralDensityAnalysis:
         
         print(" done")
         
-        # Calculate errors from Monte Carlo distribution
         n_successful = len(mc_results['S2'])
         if n_successful < 10:
             print(f"    Warning: Only {n_successful}/{n_monte_carlo} dual-field MC fits succeeded")
             return best_fit
         
-        # Update errors with Monte Carlo results
         best_fit['S2_err'] = np.std(mc_results['S2'])
         best_fit['te_err'] = np.std(mc_results['te'])
         best_fit['Rex_field1_err'] = np.std(mc_results['Rex_field1'])
         best_fit['Rex_field2_err'] = np.std(mc_results['Rex_field2'])
         
-        # Add confidence intervals
         best_fit['S2_95CI'] = np.percentile(mc_results['S2'], [2.5, 97.5])
         best_fit['te_95CI'] = np.percentile(mc_results['te'], [2.5, 97.5])
         best_fit['Rex_field1_95CI'] = np.percentile(mc_results['Rex_field1'], [2.5, 97.5])
@@ -491,7 +476,6 @@ class DualFieldSpectralDensityAnalysis:
         --------
         dict : Spectral density values and errors for both fields
         """
-        # Calculate spectral densities for both fields
         j_f1 = self.calculate_spectral_densities(r1_f1, r2_f1, noe_f1, 'field1')
         j_f2 = self.calculate_spectral_densities(r1_f2, r2_f2, noe_f2, 'field2')
         
@@ -599,7 +583,6 @@ class DualFieldSpectralDensityAnalysis:
         --------
         pandas.DataFrame : Dual-field analysis results
         """
-        # Load data from both fields
         try:
             data1 = pd.read_csv(csv_file1)
             data2 = pd.read_csv(csv_file2)
@@ -607,7 +590,6 @@ class DualFieldSpectralDensityAnalysis:
             print(f"Error loading CSV files: {e}")
             return pd.DataFrame()
         
-        # Check required columns
         required_cols = ['R1', 'R1err', 'R2', 'R2err', 'hetNOE', 'hetNOEerr']
         for i, data in enumerate([data1, data2], 1):
             missing_cols = [col for col in required_cols if col not in data.columns]
@@ -616,7 +598,6 @@ class DualFieldSpectralDensityAnalysis:
         
         # Align datasets by residue identifier
         if residue_col in data1.columns and residue_col in data2.columns:
-            # Merge on residue identifier
             merged_data = pd.merge(data1, data2, on=residue_col, suffixes=('_f1', '_f2'))
 
             # Sort numerically by residue ID (extract numeric part for proper ordering)
@@ -630,7 +611,6 @@ class DualFieldSpectralDensityAnalysis:
             merged_data = merged_data.sort_values('_sort_key').drop('_sort_key', axis=1).reset_index(drop=True)
             print(f"Matched {len(merged_data)} residues between the two datasets")
         else:
-            # Merge by index if no residue column
             print("Warning: No residue column found, merging by index position")
             min_len = min(len(data1), len(data2))
             merged_data = pd.concat([
@@ -663,7 +643,6 @@ class DualFieldSpectralDensityAnalysis:
         valid_r1_f2, valid_r2_f2 = [], []
         
         for idx, row in merged_data.iterrows():
-            # Extract data for both fields
             r1_f1, r2_f1 = row['R1_f1'], row['R2_f1']
             r1_f2, r2_f2 = row['R1_f2'], row['R2_f2']
             
@@ -677,7 +656,6 @@ class DualFieldSpectralDensityAnalysis:
             print("ERROR: Not enough valid dual-field R1/R2 data to estimate overall correlation time!")
             return pd.DataFrame()
         
-        # Estimate overall correlation time using dual-field data
         tc_overall = self.estimate_overall_correlation_time(
             np.array(valid_r1_f1), np.array(valid_r2_f1),
             np.array(valid_r1_f2), np.array(valid_r2_f2)
@@ -686,7 +664,6 @@ class DualFieldSpectralDensityAnalysis:
         
         # Second pass: process individual residues
         for idx, row in merged_data.iterrows():
-            # Extract data for both fields
             r1_f1 = row['R1_f1']
             r1_f1_err = row['R1err_f1']
             r2_f1 = row['R2_f1']
@@ -701,10 +678,8 @@ class DualFieldSpectralDensityAnalysis:
             noe_f2 = row['hetNOE_f2']
             noe_f2_err = row['hetNOEerr_f2']
             
-            # Get residue identifier
             residue_id = row[residue_col] if residue_col in merged_data.columns else f"Index_{idx}"
             
-            # Check for NaN values in either field
             all_values = [r1_f1, r1_f1_err, r2_f1, r2_f1_err, noe_f1, noe_f1_err,
                          r1_f2, r1_f2_err, r2_f2, r2_f2_err, noe_f2, noe_f2_err]
             
@@ -713,7 +688,6 @@ class DualFieldSpectralDensityAnalysis:
                 print(f"  Skipping {residue_id}: Contains NaN values in one or both fields")
                 continue
             
-            # Check for invalid values
             invalid_conditions = [
                 r1_f1 <= 0, r2_f1 <= 0, r1_f1_err <= 0, r2_f1_err <= 0, noe_f1 == 0, noe_f1_err <= 0,
                 r1_f2 <= 0, r2_f2 <= 0, r1_f2_err <= 0, r2_f2_err <= 0, noe_f2 == 0, noe_f2_err <= 0
@@ -769,7 +743,6 @@ class DualFieldSpectralDensityAnalysis:
                 **mf_results
             }
             
-            # Add residue info if available
             if residue_col in merged_data.columns:
                 result_row['Residue'] = row[residue_col]
             
@@ -805,7 +778,6 @@ class DualFieldSpectralDensityAnalysis:
         axes = fig.subplots(4, 3)
         fig.suptitle(f'Dual-Field Spectral Density Analysis Results (J(0.87ωH))\n{self.field1_freq} MHz vs {self.field2_freq} MHz', fontsize=16)
         
-        # Filter successful fits
         success_mask = results_df['fit_success'] == True
         good_data = results_df[success_mask]
 
@@ -815,7 +787,6 @@ class DualFieldSpectralDensityAnalysis:
 
         residues = good_data.index if 'Residue' not in good_data.columns else good_data['Residue']
 
-        # Detect missing residues for grey bar plotting
         import re
         def extract_numeric(res_id):
                 match = re.search(r'\d+', str(res_id))
@@ -950,7 +921,6 @@ class DualFieldSpectralDensityAnalysis:
         field_ratio = (self.field2_freq / self.field1_freq)**2
         min_rex = 0.5  # s⁻¹, minimum Rex threshold for meaningful scaling analysis
 
-        # Filter by minimum threshold at both fields
         mask = (good_data['Rex_field1'] > min_rex) & (good_data['Rex_field2'] > min_rex)
         filtered_rex_data = good_data[mask].copy()
 
@@ -963,12 +933,10 @@ class DualFieldSpectralDensityAnalysis:
             final_filtered_data = filtered_rex_data[ratio_mask]
             final_rex_ratio = rex_ratio[ratio_mask]
 
-            # Plot filtered data
             axes[3,1].scatter(np.full(len(final_filtered_data), field_ratio), final_rex_ratio, alpha=0.6)
             axes[3,1].axhline(y=field_ratio, color='red', linestyle='--',
                              label=f'Expected ratio = {field_ratio:.2f}')
 
-            # Add info about filtering
             n_total = len(good_data)
             n_filtered = len(final_filtered_data)
             axes[3,1].text(0.05, 0.95, f'n = {n_filtered}/{n_total}\n(Rex > {min_rex} s⁻¹)',
@@ -991,7 +959,6 @@ class DualFieldSpectralDensityAnalysis:
         axes[3,2].set_ylabel('Count')
         axes[3,2].set_title('Fit Quality Distribution (J(0.87ωH))')
         
-        # Format all subplots
         for i in range(3):  # First 3 rows need residue labels
                 for j in range(3):
                         axes[i,j].set_xlabel('Residue')
@@ -1032,9 +999,7 @@ class DualFieldSpectralDensityAnalysis:
         filename : str
             Output filename
         """
-        # Check if Monte Carlo results are available
         if 'S2_95CI' in results_df.columns:
-            # Format confidence intervals for readability
             results_df['S2_CI'] = results_df['S2_95CI'].apply(
                 lambda x: f"[{x[0]:.3f}, {x[1]:.3f}]" if not pd.isna(x).any() else ""
             )
@@ -1059,7 +1024,6 @@ def main():
     """
     Example usage of the DualFieldSpectralDensityAnalysis class with J(0.87ωH)
     """
-    # Initialize analysis with dual-field experimental parameters
     analyzer = DualFieldSpectralDensityAnalysis(
         field1_freq=700.0,    # First field in MHz
         field2_freq=600.0,    # Second field in MHz  
@@ -1082,16 +1046,13 @@ def main():
             n_monte_carlo=50
         )
         
-        # Check if any data was processed
         if len(results) == 0:
             print("No dual-field data to analyze after filtering!")
             return
         
-        # Display results
         print("\nDual-Field Reduced Spectral Density Analysis Results (J(0.87ωH)):")
         print("=" * 80)
         
-        # Show key results
         if 'Residue' in results.columns:
             display_cols = ['Residue', 'S2', 'tc', 'te', 'Rex_field1', 'Rex_field2', 'chi2']
         else:
@@ -1099,16 +1060,12 @@ def main():
         
         print(results[display_cols].round(4))
         
-        # Save basic results
         results.to_csv('dual_field_rsdm_results_087.csv', index=False)
         
-        # Save detailed results with confidence intervals
         analyzer.save_dual_field_results(results)
         
-        # Generate plots
         analyzer.plot_dual_field_results(results)
         
-        # Print summary statistics
         success_rate = results['fit_success'].mean() * 100
         print(f"\nDual-Field Model-Free Fitting Results (J(0.87ωH)):")
         print(f"  Fit success rate: {success_rate:.1f}%")
@@ -1164,11 +1121,9 @@ def main():
         print("File 2 (e.g., 'data_800MHz.csv') with columns: R1, R1err, R2, R2err, hetNOE, hetNOEerr")
         print("Both files should also include a 'Residue' column for matching")
         
-        # Create example dual-field data
         np.random.seed(42)  # For reproducible example
         n_residues = 15
         
-        # Generate realistic dual-field relaxation data
         # Field 1 (600 MHz) - typically lower Rex values
         example_data1 = pd.DataFrame({
             'Residue': [f'A{i}' for i in range(1, n_residues + 1)],
