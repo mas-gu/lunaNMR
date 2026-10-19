@@ -260,3 +260,45 @@ class TestRefitFitsAsTheSeriesDid:
             viewer._find_peak_obj(idx, '42GlyH'))
         viewer._on_refit_corrected()
         assert "PS2D" not in viewer.edit_status_label.text()
+
+
+METHYL = Path(__file__).resolve().parents[2] / "data_test" / "methyl" / "sampleNBD"
+
+
+@pytest.fixture(scope="module")
+def methyl_series(tmp_path_factory):
+    """A real two-point 13C methyl T2 series, the spectra linked under neutral names."""
+    if not METHYL.exists():
+        pytest.skip("data_test not present")
+    from lunaNMR.cli import main
+    root = tmp_path_factory.mktemp("methyl_series")
+    (root / "spectra").mkdir()
+    for delay in ("3ms", "18ms"):
+        (root / "spectra" / f"T2_{delay}.ft").symlink_to(METHYL / f"001_T2_NBD_{delay}.ft")
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert main(["series", "--spectra", str(root / "spectra"),
+                     "--peaks", str(METHYL / "001_NBDADP_NBD.txt"), "--mode", "time",
+                     "--peak-source", "reference", "--out", str(root / "out")]) == 0
+    return root / "out"
+
+
+class TestARefitOfA13CSeriesUnderA15NWindow:
+    """The main window on a 15N spectrum while a 13C series is refitted in the overlay:
+    the refit must fit with the 13C config the series recorded, not the window's."""
+
+    def test_the_refit_matches_a_refit_under_the_series_own_nucleus(self, app, methyl_series,
+                                                                     open_overlay_viewer):
+        assert _metadata(methyl_series)['ps2d_config']['nucleus_type'] == '13C'
+        heights = {}
+        for nucleus in ('13C', '15N'):
+            viewer = open_overlay_viewer(methyl_series)
+            try:
+                with _global_ps2d_config(nucleus) as config:
+                    before = dict(vars(config))
+                    idx = _spectrum_index(viewer, 'T2_18ms.ft')
+                    _refit_in_place(viewer, idx, '27_cg2_D')
+                    assert dict(vars(config)) == before
+                heights[nucleus] = viewer._find_peak_obj(idx, '27_cg2_D')['height']
+            finally:
+                viewer.deleteLater()
+        assert math.isclose(heights['15N'], heights['13C'], rel_tol=1e-9)
