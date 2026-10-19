@@ -132,15 +132,12 @@ class Ps2dLinewidthEstimator:
         -------
         dict : Estimation results with quality indicator
         """
-        # Detect nucleus if not specified
         if dimension is None:
             dimension = self.detect_nucleus_from_ppm_range(x_data.min(), x_data.max())
 
-        # Map x/y to nucleus type
         nucleus_map = {'x': '1H', 'y': '15N'}
         nucleus_type = nucleus_map.get(dimension, dimension)
 
-        # Get typical width for this nucleus
         typical_width = self.defaults[nucleus_type]['lw_gauss']
 
         # Find isolated peaks (≥ 6× typical width separation from ALL neighbors)
@@ -148,7 +145,6 @@ class Ps2dLinewidthEstimator:
         isolated_peaks = []
 
         for i, pos in enumerate(all_peak_positions):
-            # Find all neighbors within threshold
             neighbors = [p for j, p in enumerate(all_peak_positions)
                         if j != i and abs(p - pos) < min_separation]
 
@@ -268,7 +264,6 @@ class Ps2dLinewidthEstimator:
         if (x_data is not None and y_data is not None and
             all_peak_positions is not None and len(all_peak_positions) > 1):
 
-            # Check cache first
             if dimension not in self.spatial_estimates:
                 self.estimate_from_spatial_analysis(x_data, y_data,
                                                     all_peak_positions, dimension)
