@@ -133,7 +133,6 @@ class KdTitrationFitViewer(QMainWindow):
         self.setCentralWidget(central)
         root = QHBoxLayout(central)
 
-        # Plot
         left = QVBoxLayout()
         self.figure = Figure(figsize=(8, 6))
         self.canvas = FigureCanvasQTAgg(self.figure)
