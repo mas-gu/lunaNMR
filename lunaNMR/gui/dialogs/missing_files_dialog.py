@@ -152,7 +152,6 @@ class MissingFilesDialog(BaseDialog):
         scroll_layout.setSpacing(SPACING_SM)
         scroll_layout.setContentsMargins(0, 0, SPACING_SM, 0)
 
-        # Create a row for each missing file
         for file_info in self.missing_files:
             file_path = file_info.get("path", "")
             file_type = file_info.get("type", "unknown")
@@ -167,7 +166,6 @@ class MissingFilesDialog(BaseDialog):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(SPACING_MD)
 
-        # Skip All button
         skip_all_btn = QPushButton("Skip All")
         skip_all_btn.setStyleSheet(f"""
             QPushButton {{
@@ -187,7 +185,6 @@ class MissingFilesDialog(BaseDialog):
 
         button_layout.addStretch()
 
-        # Cancel button
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
@@ -205,7 +202,6 @@ class MissingFilesDialog(BaseDialog):
         cancel_btn.clicked.connect(self.reject)
         button_layout.addWidget(cancel_btn)
 
-        # Load Anyway button
         load_btn = QPushButton("Load Anyway")
         load_btn.setStyleSheet(f"""
             QPushButton {{
@@ -322,7 +318,6 @@ class MissingFilesDialog(BaseDialog):
         skip_btn.clicked.connect(lambda: self._on_skip_clicked(file_path))
         row_layout.addWidget(skip_btn)
 
-        # Store references for updating later
         self._file_rows[file_path] = {
             "row": row,
             "status_label": status_label,
@@ -383,7 +378,6 @@ class MissingFilesDialog(BaseDialog):
             new_path: New path to use instead
         """
         self.remapped_paths[original_path] = new_path
-        # Remove from skipped if it was there
         self.skipped_files.discard(original_path)
         logger.debug(f"Remapped path: {original_path} -> {new_path}")
 
@@ -394,7 +388,6 @@ class MissingFilesDialog(BaseDialog):
             file_path: Path of file to skip
         """
         self.skipped_files.add(file_path)
-        # Remove from remapped if it was there
         self.remapped_paths.pop(file_path, None)
         logger.debug(f"Skipped file: {file_path}")
 
@@ -418,7 +411,6 @@ class MissingFilesDialog(BaseDialog):
     def _on_skip_all_clicked(self):
         """Handle skip all button click."""
         self.skip_all()
-        # Update all row statuses
         for file_info in self.missing_files:
             file_path = file_info.get("path", "")
             if file_path in self.skipped_files:
