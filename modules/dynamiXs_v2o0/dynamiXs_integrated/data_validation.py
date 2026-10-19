@@ -381,7 +381,6 @@ def filter_invalid_residues(merged_data: Dict[str, Dict],
         R2 = data['R2']
         hetNOE = data['hetNOE']
 
-        # Check for removal criteria
         should_remove = False
 
         if remove_negative and (R1 < 0 or R2 < 0):
