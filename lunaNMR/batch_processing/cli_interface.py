@@ -491,6 +491,11 @@ Examples:
                     if handler not in handlers:
                         lg.removeHandler(handler)
                         handler.close()
+                # A BatchProcessor replaces the batch logger's handlers with its own, so
+                # one the host had before the run is put back as well.
+                for handler in handlers:
+                    if handler not in lg.handlers:
+                        lg.addHandler(handler)
                 lg.setLevel(level)
                 lg.propagate = propagate
 

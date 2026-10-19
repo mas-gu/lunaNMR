@@ -37,6 +37,24 @@ class TestBatchLeavesTheProcessAsItFoundIt:
         assert cli.main(['batch', '--list-presets']) == 0
         assert _process_state() == before
 
+    def test_a_processor_built_before_the_call_keeps_its_handlers(self, tmp_path,
+                                                                   monkeypatch, capsys):
+        """A run replaces the batch logger's handlers with its own; a host that had built a
+        BatchProcessor before calling the CLI lost them for good."""
+        from lunaNMR.batch_processing.batch_processor import BatchProcessor
+        monkeypatch.chdir(tmp_path)
+        BatchProcessor(output_dir=tmp_path / "host")
+        (tmp_path / 'spectra').mkdir()
+        dnaja1 = Path(__file__).resolve().parents[2] / 'data_test' / 'data_binding' / 'DNAJA1_HSPA8'
+        if not dnaja1.exists():
+            pytest.skip('data_test not present')
+        (tmp_path / 'spectra' / '2D_DNAJA1_0o0.ft').symlink_to(dnaja1 / '2D_DNAJA1_0o0.ft')
+        before = _process_state()
+        assert before['batch_handlers']
+        assert cli.main(['batch', str(tmp_path / 'spectra'), '--dry-run',
+                         '--output', str(tmp_path / 'out')]) == 0
+        assert _process_state() == before
+
     def test_a_dry_run_over_a_folder(self, tmp_path, monkeypatch, capsys):
         """The dry run builds a BatchProcessor, which adds its own console handler and a
         log file in the working directory."""
