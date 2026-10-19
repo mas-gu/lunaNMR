@@ -152,10 +152,8 @@ class ProgressDialog(BaseDialog):
         self._is_cancelled = False
         self._is_completed = False
 
-        # Store whether to show details
         self._show_details = show_details
 
-        # Build UI
         self._create_widgets()
 
         # Center on parent or screen
@@ -171,7 +169,6 @@ class ProgressDialog(BaseDialog):
         main_layout.setSpacing(SPACING_MD)
         main_layout.setContentsMargins(SPACING_LG, SPACING_LG, SPACING_LG, SPACING_LG)
 
-        # Create sections
         self._create_progress_section(main_layout)
         self._create_task_section(main_layout)
         self._create_stats_section(main_layout)
@@ -179,10 +176,8 @@ class ProgressDialog(BaseDialog):
         if self._show_details:
             self._create_log_section(main_layout)
 
-        # Add stretch before buttons
         main_layout.addStretch()
 
-        # Create control buttons at bottom
         self._create_button_section(main_layout)
 
         self.setLayout(main_layout)
@@ -202,7 +197,6 @@ class ProgressDialog(BaseDialog):
         progress_layout = QVBoxLayout(progress_frame)
         progress_layout.setContentsMargins(4, 4, 4, 4)
 
-        # Create progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -328,7 +322,6 @@ class ProgressDialog(BaseDialog):
         log_title.setFont(log_title_font)
         log_title.setStyleSheet(f"color: {PRIMARY_TEXT};")
 
-        # Log text area
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setMinimumHeight(150)
@@ -439,14 +432,11 @@ class ProgressDialog(BaseDialog):
             value: Progress value (0-100)
             status: Optional status message
         """
-        # Update progress bar
         self.progress_bar.setValue(value)
 
-        # Update status if provided
         if status:
             self.task_label.setText(status)
 
-        # Update statistics
         self._update_statistics(value)
 
     @Slot(str, bool)
@@ -463,12 +453,10 @@ class ProgressDialog(BaseDialog):
         if not self._show_details:
             return
 
-        # Format with timestamp
         timestamp = datetime.now().strftime('%H:%M:%S')
         icon = "❌" if is_error else "✅"
         log_entry = f"[{timestamp}] {icon} {message}"
 
-        # Append to log
         self.log_text.append(log_entry)
 
         # Scroll to bottom
@@ -493,7 +481,6 @@ class ProgressDialog(BaseDialog):
         """
         self._is_completed = True
 
-        # Update progress to 100%
         self.progress_bar.setValue(100)
         self.task_label.setText(message)
 
@@ -518,7 +505,6 @@ class ProgressDialog(BaseDialog):
         elapsed = datetime.now() - self.start_time
         elapsed_str = str(elapsed).split('.')[0]  # Remove microseconds
 
-        # Calculate ETA
         if progress_value > 0:
             eta_total = elapsed.total_seconds() * (100 / progress_value)
             eta_remaining = eta_total - elapsed.total_seconds()
@@ -526,7 +512,6 @@ class ProgressDialog(BaseDialog):
         else:
             eta_str = "Calculating..."
 
-        # Format statistics
         stats_text = f"⏱️  Elapsed: {elapsed_str} | 🔮 ETA: {eta_str}"
         self.stats_label.setText(stats_text)
 
@@ -534,10 +519,8 @@ class ProgressDialog(BaseDialog):
         """Handle cancel button click."""
         self._is_cancelled = True
 
-        # Emit signal for worker thread
         self.cancelled.emit()
 
-        # Close dialog
         self.reject()
 
     def _on_save_log_clicked(self):
@@ -545,7 +528,6 @@ class ProgressDialog(BaseDialog):
         if not self._show_details:
             return
 
-        # Open file dialog
         filename, _ = QFileDialog.getSaveFileName(
             self,
             "Save Processing Log",
