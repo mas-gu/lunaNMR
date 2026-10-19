@@ -104,22 +104,22 @@ class ConfigManager:
             '15N1H': {
                 'description': 'Optimized settings for 15N-1H HSQC spectra',
                 'processing': {
-                    'sn_thresholds': {'default': 2.5},
-                    'expected_peaks': {'default': 60}
+                    'sn_thresholds': {'15N1H': 2.5, 'default': 2.5},
+                    'expected_peaks': {'15N1H': 60, 'default': 60}
                 }
             },
             '13C1H': {
                 'description': 'Optimized settings for 13C-1H HMQC/HSQC spectra',
                 'processing': {
-                    'sn_thresholds': {'default': 2.0},
-                    'expected_peaks': {'default': 40}
+                    'sn_thresholds': {'13C1H': 2.0, 'default': 2.0},
+                    'expected_peaks': {'13C1H': 40, 'default': 40}
                 }
             },
             '1H': {
                 'description': 'Optimized settings for 1H spectra',
                 'processing': {
-                    'sn_thresholds': {'default': 2.0},
-                    'expected_peaks': {'default': 30}
+                    'sn_thresholds': {'1H': 2.0, 'default': 2.0},
+                    'expected_peaks': {'1H': 30, 'default': 30}
                 }
             },
             'conservative': {
