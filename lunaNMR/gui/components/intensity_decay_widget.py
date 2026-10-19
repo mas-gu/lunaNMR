@@ -52,7 +52,6 @@ def extract_delay_from_spectrum_name(spectrum_name: str) -> Optional[float]:
     if not spectrum_name:
         return None
 
-    # Remove file extension if present
     name = spectrum_name.rsplit('.', 1)[0] if '.' in spectrum_name else spectrum_name
 
     # Try numeric with duplicate suffix FIRST (e.g., "50_2")
@@ -194,7 +193,6 @@ def collect_decay_data(
         if point is None:
             continue
 
-        # Find peak in this spectrum
         fitted_peaks = spec.get('fitted_peaks', [])
         for peak in fitted_peaks:
             peak_assignment = peak.get('assignment', peak.get('Assignment', ''))
@@ -219,7 +217,6 @@ def collect_decay_data(
         if delay_ms is None:
             continue
 
-        # Find peak in this spectrum
         fitted_peaks = spec.get('fitted_peaks', [])
         for peak in fitted_peaks:
             peak_assignment = peak.get('assignment', peak.get('Assignment', ''))
@@ -245,7 +242,6 @@ def collect_decay_data(
         if spec_index is None:
             continue
 
-        # Find peak in this spectrum
         fitted_peaks = spec.get('fitted_peaks', [])
         for peak in fitted_peaks:
             peak_assignment = peak.get('assignment', peak.get('Assignment', ''))
@@ -346,13 +342,11 @@ class IntensityDecayWidget(QWidget):
 
         layout.addLayout(header_layout)
 
-        # Create matplotlib figure
         self.figure = Figure(figsize=(4, 3), dpi=100)
         self.figure.set_facecolor(PANEL_BG_COLOR)
         self.axes = self.figure.add_subplot(111)
         self._style_axes()
 
-        # Create canvas
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.canvas.mpl_connect('button_press_event', self._on_click)
@@ -480,7 +474,6 @@ class IntensityDecayWidget(QWidget):
             self.canvas.draw()
             return
 
-        # Plot all points
         self.axes.scatter(
             self._x_values, self._values,
             s=50, c='#1f77b4', alpha=0.7, zorder=2,
@@ -539,7 +532,6 @@ class IntensityDecayWidget(QWidget):
             x_label = {'titration': 'Titration', 'delay': 'Delay'}.get(self._x_mode, 'Spectrum #')
             self.title_label.setText(f"{self._get_y_axis_label()} vs {x_label}: {self._assignment}")
 
-        # Format y-axis with scientific notation if needed
         self.axes.ticklabel_format(axis='y', style='scientific', scilimits=(0, 3))
 
         # Force y-axis to start at 0
@@ -556,7 +548,6 @@ class IntensityDecayWidget(QWidget):
         if not self._x_values:
             return
 
-        # Find closest point
         click_x = event.xdata
         click_y = event.ydata
 
@@ -592,7 +583,6 @@ class IntensityDecayWidget(QWidget):
         self._assignment = ""
         self._x_mode = 'delay'
         self._spectra = []
-        # Clear exponential fit data
         self._fit_curve_time = None
         self._fit_curve_intensity = None
         self._t_value = None
