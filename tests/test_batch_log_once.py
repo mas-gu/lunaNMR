@@ -35,8 +35,7 @@ def batch_run(tmp_path_factory):
     spectra.mkdir()
     (spectra / SPECTRUM).symlink_to(DNAJA1 / SPECTRUM)
     config = root / "config.json"
-    config.write_text(json.dumps({"processing": {"sn_thresholds": {"15N1H": 1000.0}},
-                                  "optimization": {"enable_auto_optimization": False}}))
+    config.write_text(json.dumps({"processing": {"sn_thresholds": {"15N1H": 1000.0}}}))
     out = root / "out"
     env = dict(os.environ, PYTHONPATH=str(REPO), QT_QPA_PLATFORM="offscreen")
     process = subprocess.run(

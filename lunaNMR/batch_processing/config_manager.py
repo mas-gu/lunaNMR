@@ -46,30 +46,13 @@ class ConfigManager:
                 },
                 'quality_threshold': 0.8,
                 'max_fitting_attempts': 3,
-                'skip_on_error': True,
-                'auto_optimize': False
+                'skip_on_error': True
             },
             'file_handling': {
                 'extensions': ['.ft2', '.ft', '.pipe', '.ucsf', '.nmrpipe'],
                 'recursive_search': False,
                 'pattern_filters': [],
                 'exclude_patterns': ['*backup*', '*temp*']
-            },
-            'optimization': {
-                'enable_auto_optimization': False,
-                'optimization_strategy': 'balanced',  # 'conservative', 'balanced', 'aggressive'
-                'sn_test_range': {
-                    '15N1H': [1.8, 2.0, 2.5, 3.0, 3.5],
-                    '13C1H': [1.5, 1.8, 2.0, 2.5, 3.0],
-                    '1H': [1.5, 1.8, 2.0, 2.5],
-                    'default': [1.8, 2.0, 2.5, 3.0]
-                },
-                'optimal_peak_ranges': {
-                    '15N1H': [30, 80],
-                    '13C1H': [20, 60],
-                    '1H': [15, 40],
-                    'default': [20, 70]
-                }
             },
             'logging': {
                 'level': 'INFO',
@@ -91,9 +74,6 @@ class ConfigManager:
                 'processing': {
                     'sn_thresholds': {'default': 2.5},
                     'expected_peaks': {'default': 60}
-                },
-                'optimization': {
-                    'optimal_peak_ranges': {'default': [30, 80]}
                 }
             },
             '13C1H': {
@@ -101,9 +81,6 @@ class ConfigManager:
                 'processing': {
                     'sn_thresholds': {'default': 2.0},
                     'expected_peaks': {'default': 40}
-                },
-                'optimization': {
-                    'optimal_peak_ranges': {'default': [20, 60]}
                 }
             },
             '1H': {
@@ -111,9 +88,6 @@ class ConfigManager:
                 'processing': {
                     'sn_thresholds': {'default': 2.0},
                     'expected_peaks': {'default': 30}
-                },
-                'optimization': {
-                    'optimal_peak_ranges': {'default': [15, 40]}
                 }
             },
             'conservative': {
@@ -132,9 +106,6 @@ class ConfigManager:
                         'default': 20
                     },
                     'quality_threshold': 0.9
-                },
-                'optimization': {
-                    'optimization_strategy': 'conservative'
                 }
             },
             'aggressive': {
@@ -153,9 +124,6 @@ class ConfigManager:
                         'default': 300
                     },
                     'quality_threshold': 0.6
-                },
-                'optimization': {
-                    'optimization_strategy': 'aggressive'
                 }
             },
             'high_throughput': {
@@ -163,9 +131,6 @@ class ConfigManager:
                 'processing': {
                     'max_fitting_attempts': 1,
                     'skip_on_error': True
-                },
-                'optimization': {
-                    'enable_auto_optimization': False
                 },
                 'logging': {
                     'progress_interval': 10,
@@ -359,15 +324,6 @@ class ConfigManager:
                         if not isinstance(ext, str) or not ext.startswith('.'):
                             errors.append(f"Invalid file extension: {ext}")
 
-        # Validate optimization parameters
-        if 'optimization' in config:
-            opt_config = config['optimization']
-
-            if 'optimization_strategy' in opt_config:
-                valid_strategies = ['conservative', 'balanced', 'aggressive']
-                if opt_config['optimization_strategy'] not in valid_strategies:
-                    errors.append(f"Invalid optimization strategy. Must be one of: {valid_strategies}")
-
         # Validate logging parameters
         if 'logging' in config:
             log_config = config['logging']
@@ -408,7 +364,6 @@ class ConfigManager:
             "_description": {
                 "processing": "Core processing parameters",
                 "file_handling": "File discovery and filtering settings",
-                "optimization": "Automatic parameter optimization settings",
                 "logging": "Logging and progress reporting settings",
                 "output": "Output and result handling settings"
             },
@@ -417,7 +372,6 @@ class ConfigManager:
 
         # Add comments to sections
         example_config["processing"]["_comment"] = "S/N thresholds and peak count expectations by nucleus type"
-        example_config["optimization"]["_comment"] = "Parameters for automatic optimization of processing settings"
         example_config["logging"]["_comment"] = "Logging level and progress reporting settings"
 
         with open(output_path, 'w') as f:

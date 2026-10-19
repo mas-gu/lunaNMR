@@ -131,7 +131,7 @@ def test_batch_fits_each_peak_as_the_gui_does(batch_run, gui_fit, tmp_path):
     processor = BatchProcessor(output_dir=tmp_path)
     result = processor.process_single_spectrum(
         _spectrum_folder(tmp_path) / SPECTRUM,
-        processor.get_optimal_parameters(spectrum_run["nucleus_type"], Path(SPECTRUM))
+        processor.nucleus_parameters(spectrum_run["nucleus_type"])
         | {'sn_threshold': spectrum_run["sn_threshold"],
            'expected_peak_count': spectrum_run["expected_peak_count"]})
 
@@ -150,8 +150,7 @@ def test_a_spectrum_with_nothing_fitted_fails_the_run(tmp_path):
     run - exit 1, BatchFailed naming the spectrum and why."""
     from lunaNMR.cli import main
     config = tmp_path / "config.json"
-    config.write_text(json.dumps({"processing": {"sn_thresholds": {"15N1H": 1000.0}},
-                                  "optimization": {"enable_auto_optimization": False}}))
+    config.write_text(json.dumps({"processing": {"sn_thresholds": {"15N1H": 1000.0}}}))
     stdout = io.StringIO()
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
         code = main(["batch", "--config", str(config), str(_spectrum_folder(tmp_path)),

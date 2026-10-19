@@ -3,8 +3,7 @@
 Command Line Interface for LunaNMR Batch Processing
 
 This module provides a comprehensive CLI interface for batch processing NMR spectra.
-It supports configuration files, preset selection, parameter optimization, and
-detailed progress reporting.
+It supports configuration files, preset selection and detailed progress reporting.
 
 Features:
 - Complete argument parsing and validation
@@ -26,7 +25,6 @@ import signal
 # Import batch processing components
 try:
     from .batch_processor import BatchProcessor
-    from .parameter_optimizer import ParameterOptimizer
     from .config_manager import ConfigManager
     BATCH_COMPONENTS_AVAILABLE = True
 except ImportError:
@@ -37,7 +35,7 @@ class CLIInterface:
     Command-line interface for batch NMR processing.
 
     Provides a user-friendly interface for processing multiple NMR spectra
-    with automatic parameter optimization and flexible configuration options.
+    with flexible configuration options.
     """
 
     def __init__(self):
@@ -80,9 +78,6 @@ Examples:
   # Use custom configuration file
   python -m lunaNMR.batch_processing /path/to/spectra --config config.json
 
-  # Enable parameter optimization
-  python -m lunaNMR.batch_processing /path/to/spectra --optimize
-
   # Generate example configuration files
   python -m lunaNMR.batch_processing --create-examples /path/to/output
             """
@@ -113,12 +108,6 @@ Examples:
             type=str,
             metavar='FILE',
             help='Path to custom JSON configuration file'
-        )
-
-        parser.add_argument(
-            '--optimize',
-            action='store_true',
-            help='Enable automatic parameter optimization for each spectrum'
         )
 
         # Output and logging options
@@ -313,9 +302,6 @@ Examples:
         elif args.strict:
             config['processing']['skip_on_error'] = False
 
-        if args.optimize:
-            config['optimization']['enable_auto_optimization'] = True
-
         # Logging configuration
         config['logging']['level'] = args.log_level
         config['logging']['detailed_logging'] = args.verbose
@@ -391,7 +377,6 @@ Examples:
 
             print("\nConfiguration:")
             print(f"  Nucleus type: {args.nucleus or 'auto-detect'}")
-            print(f"  Optimization: {'enabled' if args.optimize else 'disabled'}")
             print(f"  Error handling: {'skip errors' if config['processing']['skip_on_error'] else 'strict'}")
             print(f"  File extensions: {', '.join(config['file_handling']['extensions'])}")
 
@@ -423,12 +408,6 @@ Examples:
             # Create processor
             processor = BatchProcessor(config, output_dir=args.output)
 
-            # Add parameter optimizer if requested
-            if args.optimize:
-                optimizer = ParameterOptimizer(config.get('optimization', {}))
-                # The processor would use the optimizer internally
-                print("Parameter optimization enabled")
-
             # Progress reporting
             if not args.quiet:
                 print(f"Starting batch processing of: {args.folder}")
@@ -437,8 +416,7 @@ Examples:
             # Process the folder
             results = processor.process_folder(
                 folder_path=args.folder,
-                nucleus_type=args.nucleus,
-                auto_optimize=args.optimize
+                nucleus_type=args.nucleus
             )
 
             self.last_summary = {key: results[key] for key in

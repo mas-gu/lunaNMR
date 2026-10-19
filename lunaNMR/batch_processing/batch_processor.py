@@ -123,7 +123,7 @@ class BatchProcessor:
                 self.config['processing_parameters'].update(config['processing_parameters'])
 
             # Handle other top-level config sections
-            for key in ['file_handling', 'optimization', 'logging', 'output']:
+            for key in ['file_handling', 'logging', 'output']:
                 if key in config:
                     self.config[key] = config[key]
 
@@ -254,16 +254,15 @@ class BatchProcessor:
             self.logger.warning(f"Could not determine nucleus type for {Path(spectrum_file).name}, using default")
         return nucleus
 
-    def get_optimal_parameters(self, nucleus_type: str, spectrum_file: Path) -> Dict[str, Any]:
+    def nucleus_parameters(self, nucleus_type: str) -> Dict[str, Any]:
         """
-        Get optimal parameters for a given nucleus type and spectrum.
+        The configured processing parameters for a nucleus type.
 
         Args:
             nucleus_type: Type of nucleus ('15N1H', '13C1H', etc.)
-            spectrum_file: Path to the spectrum file
 
         Returns:
-            Dictionary with optimal processing parameters
+            Dictionary with the processing parameters of that nucleus type
         """
         # Get base parameters from config
         sn_threshold = self.config['sn_thresholds'].get(nucleus_type,
@@ -579,90 +578,14 @@ class BatchProcessor:
         import fnmatch
         return fnmatch.fnmatch(filename.lower(), pattern.lower())
 
-    def _apply_auto_optimization(self, spectrum_file: Path, nucleus_type: str, base_parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Apply automatic parameter optimization for a specific spectrum.
-
-        Args:
-            spectrum_file: Path to the spectrum file
-            nucleus_type: Detected nucleus type
-            base_parameters: Base parameters to optimize
-
-        Returns:
-            Optimized parameters dictionary
-        """
-        try:
-            # Import ParameterOptimizer
-            from .parameter_optimizer import ParameterOptimizer
-
-            # Create optimizer with config
-            opt_config = self.config.get('optimization', {})
-            optimizer = ParameterOptimizer(opt_config)
-
-            self.logger.info(f"  🎯 Applying auto-optimization for {spectrum_file.name} ({nucleus_type})")
-
-            # Check if we have the necessary spectrum data (should already be loaded)
-            if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
-                # Try to load spectrum data if not available
-                if not self._load_spectrum(spectrum_file):
-                    self.logger.warning("  ⚠️ Could not load spectrum for optimization, using base parameters")
-                    return base_parameters
-
-                # Check again after loading
-                if not hasattr(self.integrator, 'nmr_data') or self.integrator.nmr_data is None:
-                    self.logger.warning("  ⚠️ No spectrum data available for optimization, using base parameters")
-                    return base_parameters
-
-            # Extract spectrum characteristics
-            spectrum_data = self.integrator.nmr_data
-            f1_ppm = getattr(self.integrator, 'ppm_y_axis', None)  # Y-axis is F1 (15N/13C)
-            f2_ppm = getattr(self.integrator, 'ppm_x_axis', None)  # X-axis is F2 (1H)
-
-            if f1_ppm is None or f2_ppm is None:
-                self.logger.warning("  ⚠️ Missing PPM scales for optimization, using base parameters")
-                return base_parameters
-
-            # Perform optimization
-            optimized_params = optimizer.optimize_parameters(
-                self.integrator, spectrum_data, f2_ppm, f1_ppm, nucleus_type
-            )
-
-            # Merge optimized parameters with base parameters
-            updated_parameters = base_parameters.copy()
-
-            # Update S/N threshold if optimized
-            if 'sn_threshold' in optimized_params:
-                updated_parameters['sn_threshold'] = optimized_params['sn_threshold']
-                self.logger.info(f"  📈 Optimized S/N threshold: {optimized_params['sn_threshold']:.2f}")
-
-            # Update expected peak count if optimized
-            if 'expected_peak_count' in optimized_params:
-                updated_parameters['expected_peak_count'] = optimized_params['expected_peak_count']
-                self.logger.info(f"  📊 Optimized expected peaks: {optimized_params['expected_peak_count']}")
-
-            # Log optimization strategy used
-            strategy = opt_config.get('optimization_strategy', 'balanced')
-            self.logger.info(f"  🎛️ Used {strategy} optimization strategy")
-
-            return updated_parameters
-
-        except ImportError:
-            self.logger.warning("  ⚠️ ParameterOptimizer not available, using base parameters")
-            return base_parameters
-        except Exception as e:
-            self.logger.warning(f"  ⚠️ Auto-optimization failed ({e}), using base parameters")
-            return base_parameters
-
     def process_folder(self, folder_path: Union[str, Path],
-                      nucleus_type: Optional[str] = None,
-                      auto_optimize: bool = False) -> Dict[str, Any]:
+                      nucleus_type: Optional[str] = None) -> Dict[str, Any]:
         """
         Process all spectrum files in a folder.
 
         Args:
             folder_path: Path to folder containing spectrum files
             nucleus_type: Optional fixed nucleus type, if None will auto-detect
-            auto_optimize: Whether to use automatic parameter optimization
 
         Returns:
             Dictionary with complete processing results
@@ -694,12 +617,8 @@ class BatchProcessor:
                     self.logger.info(f"Nucleus type of {spectrum_file.name}: {detected_nucleus}"
                                      f"{' (user provided)' if nucleus_type else ''}")
 
-                    # Get optimal parameters
-                    parameters = self.get_optimal_parameters(detected_nucleus, spectrum_file)
-
-                    # Apply auto-optimization if requested
-                    if auto_optimize or self.config.get('optimization', {}).get('enable_auto_optimization', False):
-                        parameters = self._apply_auto_optimization(spectrum_file, detected_nucleus, parameters)
+                    # The configured parameters of its nucleus type
+                    parameters = self.nucleus_parameters(detected_nucleus)
 
                     # Process the spectrum
                     result = self.process_single_spectrum(spectrum_file, parameters)
@@ -802,15 +721,13 @@ if __name__ == "__main__":
     parser.add_argument("folder", help="Path to folder containing NMR spectra")
     parser.add_argument("--nucleus", choices=['15N1H', '13C1H', '1H'],
                        help="Nucleus type (if not specified, will auto-detect)")
-    parser.add_argument("--auto-optimize", action="store_true",
-                       help="Enable automatic parameter optimization")
 
     args = parser.parse_args()
 
     # Create and run batch processor
     processor = BatchProcessor()
     try:
-        results = processor.process_folder(args.folder, args.nucleus, args.auto_optimize)
+        results = processor.process_folder(args.folder, args.nucleus)
         print("\nBatch processing completed successfully!")
         print(f"Processed {results['processed_files']}/{results['total_files']} files")
     except Exception as e:

@@ -6,13 +6,11 @@ analysis. It operates completely independently from the GUI interface.
 
 Features:
 - Batch processing of multiple NMR spectra
-- Automatic parameter optimization
 - Command-line interface for easy usage
 - Robust error handling and progress tracking
 
 Components:
 - BatchProcessor: Core batch processing engine
-- ParameterOptimizer: Automatic parameter tuning
 - CLIInterface: Command-line interface
 - ConfigManager: Configuration file handling
 
@@ -29,7 +27,6 @@ __author__ = "lunaNMR Development Team"
 # Import main components when available
 try:
     from .batch_processor import BatchProcessor
-    from .parameter_optimizer import ParameterOptimizer
     from .config_manager import ConfigManager
     BATCH_PROCESSING_AVAILABLE = True
 except ImportError:
@@ -44,7 +41,6 @@ except ImportError:
 
 __all__ = [
     'BatchProcessor',
-    'ParameterOptimizer',
     'ConfigManager',
     'CLIInterface',
     'BATCH_PROCESSING_AVAILABLE',
