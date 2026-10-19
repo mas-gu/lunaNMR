@@ -1809,7 +1809,6 @@ class SpectralInspector(BaseWindow):
         self._contour_levels = levels
         self._contour_min_level = min_level
         self._contour_increment = increment
-        # Apply to all existing spectra
         for spec in self._all_spectra():
             spec.contour_levels = levels
             spec.contour_min_level = min_level
@@ -2153,7 +2152,6 @@ class SpectrumContourDialog:
         self._spec.contour_increment = self._incr_spin.value()
 
 
-# Group properties dialog
 
 class GroupPropertiesDialog:
     """Dialog showing all spectra in a group with editable properties and propagation."""
