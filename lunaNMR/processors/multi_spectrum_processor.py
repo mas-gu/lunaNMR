@@ -20,7 +20,7 @@ from lunaNMR.core.ps2d_config import get_ps2d_config, restore_base_ps2d_config, 
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
 from lunaNMR.utils.parameter_manager import NMRParameterManager
-from lunaNMR.utils.quality_categories import DETECTION_SIGMA_FLOOR
+from lunaNMR.utils.quality_categories import DETECTION_SIGMA_FLOOR, fit_quality_label
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 from lunaNMR.utils.cancellation import Cancelled, raise_if_stopped
 
@@ -1562,18 +1562,9 @@ class MultiSpectrumProcessor:
                 elif y_fit and 'r_squared' in y_fit:
                     r_squared = float(y_fit['r_squared'])
 
-                # Quality determination with fallbacks
-                quality = 'Failed'
-                if r_squared > 0.90:
-                    quality = 'Excellent'
-                elif r_squared > 0.80:
-                    quality = 'Good'
-                elif r_squared > 0.60:
-                    quality = 'Fair'
-                elif snr > 5.0:
-                    quality = 'Poor'
-                elif 'fitting_quality' in fit_result:
-                    quality = str(fit_result['fitting_quality'])
+                # The label the fitter gave the fit, which alone knows whether the
+                # peak was held as near-noise; one carrying none is labelled here.
+                quality = fit_result.get('fitting_quality') or fit_quality_label(r_squared, snr=snr)
 
                 # Volume extraction - CRITICAL: Use volume from fit_result if available
                 # For PS2D fits, 'volume' is the fitted intensity parameter

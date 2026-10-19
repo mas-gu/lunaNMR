@@ -2442,8 +2442,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
         r2 = result.get('r_squared')
         # Write back every peak in the group (simultaneous fit refined them all),
         # labelled by the rule the series labels a 2D fit's members with.
+        from lunaNMR.utils.quality_categories import fit_quality_label
         for fp in result['peaks']:
-            quality = integ._assign_quality_to_fitted_peak(r2, fp) if r2 is not None else None
+            quality = (fit_quality_label(r2, True, fp.get('near_noise', False), fp.get('detection_sigma'))
+                       if r2 is not None else None)
             self._write_back_fit(spec_idx, fp.get('assignment'), fp, r2, quality)
         return r2
 
