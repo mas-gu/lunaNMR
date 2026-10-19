@@ -88,11 +88,9 @@ class BaseDialog(QDialog):
         """
         super().__init__(parent)
 
-        # Store configuration
         self._title = title
         self._modal = modal
 
-        # Setup dialog properties
         self.setWindowTitle(title)
         self.setModal(modal)
 
@@ -102,11 +100,9 @@ class BaseDialog(QDialog):
         if min_size:
             self.setMinimumSize(QSize(*min_size))
 
-        # Setup icon if provided
         if icon_path:
             self._setup_icon(icon_path)
 
-        # Load stylesheet
         self._load_stylesheet()
 
     def _load_stylesheet(self) -> None:
@@ -116,7 +112,6 @@ class BaseDialog(QDialog):
         without styling.
         """
         try:
-            # Determine stylesheet path relative to this file
             base_dir = Path(__file__).parent.parent  # lunaNMR/gui/
             stylesheet_path = base_dir / "styles" / "main.qss"
 
@@ -127,7 +122,6 @@ class BaseDialog(QDialog):
                 )
                 return
 
-            # Read and apply stylesheet
             with open(stylesheet_path, 'r', encoding='utf-8') as f:
                 stylesheet = f.read()
 
@@ -194,7 +188,6 @@ class BaseDialog(QDialog):
             button_box.accepted.connect(self.accept)
             button_box.rejected.connect(self.reject)
 
-        # Apply primary button style to accept buttons
         accept_button = button_box.button(QDialogButtonBox.Ok)
         if accept_button:
             accept_button.setProperty("class", "primary")
@@ -236,13 +229,11 @@ class BaseDialog(QDialog):
         layout = QHBoxLayout()
         layout.addStretch()
 
-        # Add custom buttons
         for label, callback in buttons:
             button = QPushButton(label)
             button.clicked.connect(callback)
             layout.addWidget(button)
 
-        # Add cancel button if requested
         if add_cancel:
             cancel_button = QPushButton("Cancel")
             cancel_button.clicked.connect(self.reject)
