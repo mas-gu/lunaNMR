@@ -25,7 +25,6 @@ from PySide6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 
-# Import GUI components
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
 from constants import (
@@ -79,7 +78,6 @@ class T1T2ResultsViewer(QMainWindow):
         self.setMinimumSize(1200, 700)
         self.setStyleSheet(f"background-color: {BG_COLOR}; color: {PRIMARY_TEXT};")
 
-        # Store parameters
         self.results_file = results_file
         self.experiment_type = experiment_type
         self.session_results = session_results
@@ -102,10 +100,8 @@ class T1T2ResultsViewer(QMainWindow):
         self._outlier_mask = None
         self._iqr_bounds = None
 
-        # Build UI
         self._create_ui()
 
-        # Load data
         if session_results:
             self._load_session_results(session_results)
         elif results_file and os.path.exists(results_file):
@@ -127,13 +123,11 @@ class T1T2ResultsViewer(QMainWindow):
                 continue
 
             try:
-                # Load file
                 try:
                     df = pd.read_csv(results_file, sep='\t')
                 except:
                     df = pd.read_csv(results_file)
 
-                # Store with metadata
                 self.experiment_data[key] = {
                     'df': df,
                     'frequency_mhz': entry.get('frequency_mhz', 0),
@@ -196,13 +190,11 @@ class T1T2ResultsViewer(QMainWindow):
         title_label.setFont(get_font(18, bold=True))
         layout.addWidget(title_label)
 
-        # Plot area
         plot_frame = QFrame()
         plot_frame.setStyleSheet(f"background-color: {FRAME_BG_COLOR}; border-radius: 8px;")
         plot_layout = QVBoxLayout(plot_frame)
         plot_layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
 
-        # Create matplotlib figure
         self.figure = Figure(figsize=(10, 6), facecolor=PANEL_BG_COLOR)
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -248,7 +240,6 @@ class T1T2ResultsViewer(QMainWindow):
 
         layout.addWidget(file_section)
 
-        # Display options section
         options_section = self._create_section_frame("Display Options:")
         options_layout = options_section.layout()
 
@@ -427,20 +418,16 @@ class T1T2ResultsViewer(QMainWindow):
             self.results_file = file_path
             self.file_label.setText(os.path.basename(file_path))
 
-            # Detect experiment type from columns
             if 'T1' in self.df.columns:
                 self.experiment_type = 'T1'
             elif 'T2' in self.df.columns:
                 self.experiment_type = 'T2'
 
-            # Reset outlier cache
             self._outlier_mask = None
             self._iqr_bounds = None
 
-            # Update statistics
             self._update_statistics()
 
-            # Update plot
             self._update_plot()
 
             show_info(self, "File Loaded",
@@ -478,7 +465,6 @@ class T1T2ResultsViewer(QMainWindow):
         Q3 = np.percentile(valid_values, 75)
         IQR = Q3 - Q1
 
-        # Use 1.5 * IQR rule
         lower_bound = Q1 - 1.5 * IQR
         upper_bound = Q3 + 1.5 * IQR
 
@@ -509,7 +495,6 @@ class T1T2ResultsViewer(QMainWindow):
 
         exp_type = self.experiment_type
 
-        # Find value column - handle variations
         value_col = None
         for col in valid_df.columns:
             if col == exp_type or col.startswith(f"{exp_type} ") or col.startswith(f"{exp_type}("):
@@ -519,7 +504,6 @@ class T1T2ResultsViewer(QMainWindow):
         if value_col and value_col in valid_df.columns:
             values = valid_df[value_col].dropna()
             if len(values) > 0:
-                # Detect outliers
                 outlier_mask, lower_bound, upper_bound = self._detect_outliers(values.values)
                 n_outliers = np.sum(outlier_mask)
 
@@ -558,13 +542,11 @@ class T1T2ResultsViewer(QMainWindow):
             df = data['df']
             exp_type = data['experiment_type']
 
-            # Filter for successful fits
             if 'Success' in df.columns:
                 valid_df = df[df['Success'] == 'Yes']
             else:
                 valid_df = df
 
-            # Find value column
             value_col = None
             for col in valid_df.columns:
                 if col == exp_type or col.startswith(f"{exp_type} ") or col.startswith(f"{exp_type}("):
@@ -649,7 +631,6 @@ class T1T2ResultsViewer(QMainWindow):
 
     def _update_plot(self):
         """Update the plot with current data (single or multi-experiment)."""
-        # Use multi-experiment mode if data available
         if self.experiment_data:
             self._update_plot_multi()
             return
@@ -669,7 +650,6 @@ class T1T2ResultsViewer(QMainWindow):
 
         exp_type = self.experiment_type
 
-        # Filter for successful fits
         if 'Success' in self.df.columns:
             valid_df = self.df[self.df['Success'] == 'Yes'].copy()
         else:
@@ -686,22 +666,17 @@ class T1T2ResultsViewer(QMainWindow):
         residues = self._extract_residue_numbers(valid_df['Residue'].values)
         valid_df['ResNum'] = residues
 
-        # Sort by residue number
         valid_df = valid_df.sort_values('ResNum')
         residues = valid_df['ResNum'].values
 
-        # Get values
         y = valid_df[exp_type].values
 
-        # Detect outliers
         outlier_mask, lower_bound, upper_bound = self._detect_outliers(y)
         self._outlier_mask = outlier_mask
         self._iqr_bounds = (lower_bound, upper_bound)
 
-        # Add grey bars for missing residues
         self._add_missing_residue_bars(ax, residues, y)
 
-        # Get errors if available
         err_col = f"{exp_type}_err"
         has_errors = err_col in valid_df.columns and self.show_errors
         if has_errors:
@@ -725,7 +700,6 @@ class T1T2ResultsViewer(QMainWindow):
                 ax.plot(x_normal, y_normal, 'o', color='#2196F3', markersize=6,
                        label=f'{exp_type} values', zorder=3)
         else:
-            # Plot normal points
             x_normal = residues[normal_mask]
             y_normal = y[normal_mask]
             if has_errors:
@@ -751,7 +725,6 @@ class T1T2ResultsViewer(QMainWindow):
                            label=f'Outliers ({np.sum(outlier_mask)})', zorder=3)
 
         # Set Y-axis limits - always start at 0
-        # Use per-experiment-type settings
         auto_checkbox = self.t1_auto_y_checkbox if exp_type == 'T1' else self.t2_auto_y_checkbox
         ymin_spin = self.t1_ymin_spin if exp_type == 'T1' else self.t2_ymin_spin
         ymax_spin = self.t1_ymax_spin if exp_type == 'T1' else self.t2_ymax_spin
@@ -778,7 +751,6 @@ class T1T2ResultsViewer(QMainWindow):
         ax.set_ylabel(f"{exp_type} (ms)", fontsize=12, fontweight='bold')
         ax.set_title(f"{exp_type} Relaxation Times vs Residue Sequence", fontsize=14, fontweight='bold', pad=20)
 
-        # Format X-axis with ticks every 10 residues
         self._format_xaxis(ax, residues)
 
         # Grid styling like Model-free viewer
@@ -803,7 +775,6 @@ class T1T2ResultsViewer(QMainWindow):
             'field2': '#FF9800',  # Orange
         }
 
-        # Create stacked subplots
         axes = self.figure.subplots(n_experiments, 1, sharex=True)
         if n_experiments == 1:
             axes = [axes]  # Ensure iterable
@@ -842,7 +813,6 @@ class T1T2ResultsViewer(QMainWindow):
             field_name = key.rsplit('_', 1)[0]
             color = colors.get(field_name, '#2196F3')
 
-            # Filter for successful fits
             if 'Success' in df.columns:
                 valid_df = df[df['Success'] == 'Yes'].copy()
             else:
@@ -873,17 +843,13 @@ class T1T2ResultsViewer(QMainWindow):
                        transform=ax.transAxes)
                 continue
 
-            # Get values
             y = valid_df[value_col].values
 
-            # Detect outliers
             outlier_mask, lower_bound, upper_bound = self._detect_outliers(y)
             normal_mask = ~outlier_mask
 
-            # Add grey bars for missing residues
             self._add_missing_residue_bars(ax, residues, y)
 
-            # Get errors - try variations
             err_col = None
             for col in valid_df.columns:
                 if col == f"{exp_type}_err" or col.startswith(f"{exp_type}_err"):
@@ -892,7 +858,6 @@ class T1T2ResultsViewer(QMainWindow):
             has_errors = err_col is not None and self.show_errors
             yerr = valid_df[err_col].values if has_errors else None
 
-            # Plot based on exclude_outliers setting
             if self.exclude_outliers:
                 x_plot = residues[normal_mask]
                 y_plot = y[normal_mask]
@@ -908,7 +873,6 @@ class T1T2ResultsViewer(QMainWindow):
             else:
                 ax.plot(x_plot, y_plot, 'o', color=color, markersize=5, zorder=3)
 
-            # Plot outliers if not excluded
             if not self.exclude_outliers and np.any(outlier_mask):
                 ax.scatter(residues[outlier_mask], y[outlier_mask],
                           c='#9E9E9E', s=15, marker='x', alpha=0.5, zorder=3)
