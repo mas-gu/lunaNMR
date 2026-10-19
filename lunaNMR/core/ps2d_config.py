@@ -291,11 +291,9 @@ class PS2DConfig:
         >>> params['gap_threshold_x']  # Computed property
         0.05
         """
-        # Get base parameters from config dictionary
         result = {k: getattr(self, k)
                   for k in self.NUCLEUS_PARAMS[self.nucleus_type].keys()}
 
-        # Add computed properties
         result['gap_threshold_x'] = self.gap_threshold_x
         result['gap_threshold_y'] = self.gap_threshold_y
 
@@ -485,7 +483,6 @@ if __name__ == "__main__":
     print("PS2D Configuration Module - Test Suite")
     print("=" * 70)
 
-    # Test 1: Default configuration
     print("\n--- Test 1: Default Configuration (15N) ---")
     config_15n = get_ps2d_config()
     print(config_15n)
@@ -493,7 +490,6 @@ if __name__ == "__main__":
     print(f"radF1: {config_15n.radF1}, radF2: {config_15n.radF2}")
     print(f"min_linewidth_f1: {config_15n.min_linewidth_f1}")
 
-    # Test 2: Switch to 13C
     print("\n--- Test 2: Switch to 13C Configuration ---")
     config_13c = set_ps2d_config('13C')
     print(config_13c)
@@ -502,7 +498,6 @@ if __name__ == "__main__":
     print(f"min_linewidth_f1: {config_13c.min_linewidth_f1}")
     print(f"Scaling factor: {config_13c.get_scaling_factor()}")
 
-    # Test 3: Verify scaling relationships
     print("\n--- Test 3: Verify Scaling (15N vs 13C) ---")
     config_15n = PS2DConfig('15N')
     config_13c = PS2DConfig('13C')
@@ -512,14 +507,12 @@ if __name__ == "__main__":
     print(f"overlap_y:  15N={config_15n.overlap_threshold_y:.3f}, 13C={config_13c.overlap_threshold_y:.3f}, ratio={config_13c.overlap_threshold_y/config_15n.overlap_threshold_y:.2f}")
     print(f"min_lw_f1:  15N={config_15n.min_linewidth_f1:.3f}, 13C={config_13c.min_linewidth_f1:.3f}, ratio={config_13c.min_linewidth_f1/config_15n.min_linewidth_f1:.2f}")
 
-    # Test 4: Dictionary export
     print("\n--- Test 4: Dictionary Export ---")
     params_dict = config_13c.to_dict()
     print(f"Exported {len(params_dict)} parameters:")
     for key, value in list(params_dict.items())[:5]:
         print(f"  {key}: {value}")
 
-    # Test 5: Error handling
     print("\n--- Test 5: Error Handling ---")
     try:
         bad_config = PS2DConfig('17O')
