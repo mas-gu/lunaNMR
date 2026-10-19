@@ -12,7 +12,6 @@ Features:
 - Support for multiple nucleus types (1H, 15N, 13C)
 """
 
-import os
 import sys
 import time
 import logging
@@ -40,17 +39,19 @@ class BatchProcessor:
     It operates completely independently from the GUI interface.
     """
 
-    def __init__(self, config: Optional[Dict] = None, log_dir: Union[str, Path, None] = None):
+    def __init__(self, config: Optional[Dict] = None, output_dir: Union[str, Path, None] = None):
         """
         Initialize the batch processor.
 
         Args:
             config: Optional configuration dictionary with processing parameters
-            log_dir: Folder for the batch log (default: the current directory)
+            output_dir: Folder for the batch log and each spectrum's fitting results CSV
+                (default: the current directory)
         """
+        self.output_dir = Path(output_dir) if output_dir else Path.cwd()
         # Set up logging
         self.logger = logging.getLogger(__name__)
-        self._setup_logging(Path(log_dir) if log_dir else Path.cwd())
+        self._setup_logging(self.output_dir)
 
         # Default configuration
         self.config = {
@@ -76,13 +77,9 @@ class BatchProcessor:
             'max_optimization_iterations': 50,         # Parameter optimization iterations
             'baseline_max_iter': 50,                   # Baseline correction iterations
             'convergence_tolerance': 1e-8,             # Fitting convergence tolerance
-            'processing_parameters': {
-                'search_window_x': 0.2,
-                'search_window_y': 3.0,
-                'fitting_window_x': 0.3,
-                'fitting_window_y': 8.0,
-                'use_reference_detection': True
-            }
+            # Search/fitting window overrides; without them a spectrum is fitted with
+            # the windows the GUI's Fit Spectrum uses
+            'processing_parameters': {}
         }
 
         # Default file handling configuration (matching ConfigManager structure)
@@ -146,7 +143,9 @@ class BatchProcessor:
             'total_peaks_fitted': 0,
             'processing_start_time': None,
             'processing_end_time': None,
-            'failed_files_list': []
+            'failed_files_list': [],
+            # One entry per spectrum: what was detected, fitted and written
+            'files': []
         }
 
         # Initialize core integrator
@@ -633,8 +632,14 @@ class BatchProcessor:
         result = {
             'filename': spectrum_file.name,
             'success': False,
+            'nucleus_type': parameters.get('nucleus_type'),
+            'sn_threshold': parameters['sn_threshold'],
+            'expected_peak_count': parameters['expected_peak_count'],
             'peaks_detected': 0,
             'peaks_fitted': 0,
+            'peaks_above_quality_threshold': 0,
+            'results_file': None,
+            'fitted_results': [],
             'processing_time': 0,
             'error': None
         }
@@ -657,12 +662,25 @@ class BatchProcessor:
                     result['peaks_detected'] = len(detected_peaks)
                     self.logger.info(f"  Detected {len(detected_peaks)} peaks")
 
-                    # Step 2: Perform proper Voigt fitting on detected peaks
-                    fitted_count = self._perform_voigt_fitting(detected_peaks, parameters)
-                    result['peaks_fitted'] = fitted_count
+                    # Step 2: Fit the detected peaks, and write their results as the GUI does
+                    fitted_results = self._fit_detected_peaks(detected_peaks)
+                    result['fitted_results'] = fitted_results
+                    if fitted_results:
+                        result['results_file'] = str(self._write_fitting_results(spectrum_file, fitted_results))
 
-                    result['success'] = True
-                    self.logger.info(f"  Successfully processed: {fitted_count} peaks fitted")
+                    fitted = [r for r in fitted_results if r.get('success')]
+                    quality_threshold = parameters.get('quality_threshold', 0.0)
+                    result['peaks_fitted'] = len(fitted)
+                    result['peaks_above_quality_threshold'] = sum(
+                        1 for r in fitted if (r.get('avg_r_squared') or r.get('r_squared') or 0) >= quality_threshold)
+
+                    if fitted:
+                        result['success'] = True
+                        self.logger.info(f"  Fitted {len(fitted)}/{len(detected_peaks)} peaks "
+                                         f"({result['peaks_above_quality_threshold']} with R² >= {quality_threshold})")
+                    else:
+                        result['error'] = f"No peak fitted ({len(detected_peaks)} detected)"
+                        self.logger.warning(f"  No peak fitted in {spectrum_file.name}")
 
                 else:
                     self.logger.warning(f"  No peaks detected in {spectrum_file.name}")
@@ -677,6 +695,17 @@ class BatchProcessor:
 
         result['processing_time'] = time.time() - start_time
         return result
+
+    def _write_fitting_results(self, spectrum_file: Path, fitted_results: List[Dict]) -> Path:
+        """Write the spectrum's fit results into the output folder as the GUI's
+        `<spectrum>_fitting_results.csv`."""
+        from lunaNMR.processors.single_spectrum_processor import write_fitting_results_csv
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = self.output_dir / f"{spectrum_file.stem}_fitting_results.csv"
+        write_fitting_results_csv(fitted_results, output_file)
+        self.logger.info(f"  Saved fitting results: {output_file}")
+        return output_file
 
     def _load_spectrum(self, spectrum_file: Path) -> bool:
         """
@@ -693,449 +722,100 @@ class BatchProcessor:
             # This method loads spectra without requiring peak lists
             if hasattr(self.integrator, 'load_spectrum_only'):
                 success = self.integrator.load_spectrum_only(str(spectrum_file))
-                return success
             elif hasattr(self.integrator, 'load_nmr_file'):
                 # Fallback to load_nmr_file method
                 success = self.integrator.load_nmr_file(str(spectrum_file))
-                return success
             else:
                 self.logger.error("No suitable spectrum loading method available")
                 return False
+            if success:
+                self._apply_fit_all_parameters()
+            return success
 
         except Exception as e:
             self.logger.error(f"Failed to load {spectrum_file.name}: {e}")
             return False
 
-    def _perform_voigt_fitting(self, detected_peaks: List[Dict], parameters: Dict[str, Any]) -> int:
+    def _fit_all_parameter_manager(self, nucleus: str):
         """
-        Perform comprehensive Voigt fitting on detected peaks with parallel processing.
+        The parameters the GUI's Fit Spectrum fits with, for a spectrum of `nucleus`.
 
-        This method implements the complete Voigt fitting pipeline:
-        1. Parallel or sequential Voigt profile fitting
-        2. Progress tracking and detailed logging
-        3. Comprehensive error handling and recovery
-        4. Quality assessment and filtering
+        These are the main window's defaults as its sync_parameters_to_integrator writes
+        them into its parameter manager, and the PS2D configuration of the nucleus it
+        auto-detects on load. A config's `processing_parameters` replace the search and
+        fitting windows, and its `max_iterations` the fit's iteration limit.
+        """
+        from lunaNMR.core.ps2d_config import set_ps2d_config
+        from lunaNMR.utils.parameter_manager import NMRParameterManager
 
-        Args:
-            detected_peaks: List of detected peak dictionaries from S/N detection
-            parameters: Processing parameters including quality thresholds
+        ps2d_config = set_ps2d_config(nucleus)
+        param_manager = NMRParameterManager()
+        param_manager.current_params.update({
+            'search_window_x': ps2d_config.search_window_f2,
+            'search_window_y': ps2d_config.search_window_f1,
+            'centroid_window_x_ppm': 0.01,
+            'centroid_window_y_ppm': 0.1,
+            'centroid_noise_multiplier': 2.0,
+            'fix_linewidths': False,
+            'fix_positions': False,
+            'use_parallel_processing': True,
+            'use_adaptive_optimization': False,
+            'lw_lorentz_1h': None,
+            'lw_gauss_1h': None,
+            'lw_lorentz_15n': None,
+            'lw_gauss_15n': None,
+            'max_iterations': int(self.config.get('max_iterations', 1000)),
+        })
+
+        processing_overrides = self.config.get('processing_parameters', {})
+        for key in ['search_window_x', 'search_window_y', 'fitting_window_x', 'fitting_window_y']:
+            if key in processing_overrides:
+                try:
+                    param_manager.current_params[key] = float(processing_overrides[key])
+                except (TypeError, ValueError):
+                    self.logger.warning(f"Invalid numeric override for {key}: {processing_overrides[key]}")
+        return param_manager
+
+    def _apply_fit_all_parameters(self):
+        """
+        Put the GUI's Fit Spectrum parameters on the integrator for the loaded spectrum.
+
+        The GUI syncs them before it detects as well as before it fits: the detection's
+        centroid windows are among them.
+        """
+        from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
+
+        nucleus = getattr(self.integrator, 'auto_detected_nucleus', None) or '15N'
+        self.fit_processor = SingleSpectrumProcessor(
+            self.integrator, self._fit_all_parameter_manager(nucleus))
+        self.fit_processor.sync_parameters_to_integrator()
+
+    def _fit_detected_peaks(self, detected_peaks: List[Dict]) -> List[Dict]:
+        """
+        Fit the detected peaks as the GUI's Fit Spectrum does after a detection: the
+        detected peaks are the peak list, clustered afresh and fitted by
+        SingleSpectrumProcessor.process_peak_list.
 
         Returns:
-            Number of successfully fitted peaks
+            One fit result per peak, as the GUI's fit returns them
         """
-        if not detected_peaks:
-            self.logger.warning("  No detected peaks provided for Voigt fitting")
-            return 0
+        from lunaNMR.processors.single_spectrum_processor import detected_peak_list
 
-        total_peaks = len(detected_peaks)
-        self.logger.info(f"  🚀 Starting comprehensive Voigt fitting on {total_peaks} detected peaks")
+        peak_list = detected_peak_list(detected_peaks)
+        self.logger.info(f"  Fitting {len(peak_list)} detected peaks")
 
-        try:
-            # Enhanced parameter setup
-            use_parallel = total_peaks >= 10  # Use parallel processing for 10+ peaks
-            quality_threshold = parameters.get('quality_threshold', 0.8)
-            max_attempts = parameters.get('max_attempts', 3)
-            nucleus_type = parameters.get('nucleus_type', 'unknown')
+        # Fit Spectrum clusters the peaks it is given, never the clusters of a fit before
+        if self.integrator.enhanced_fitter is not None:
+            self.integrator.enhanced_fitter.series_params = None
 
-            self.logger.info(f"     Parallel processing: {use_parallel}")
-            self.logger.info(f"     Quality threshold: {quality_threshold}")
-            self.logger.info(f"     Max fitting attempts: {max_attempts}")
-            self.logger.info(f"     Nucleus type: {nucleus_type}")
-
-            # Prepare peak data for fitting
-            fitted_results = []
-            failed_peaks = []
-            processing_start_time = time.time()
-
-            # Use direct enhanced_peak_fitting calls
-            # with fallback to SingleSpectrumProcessor for compatibility
-            try:
-                self.logger.info("     Using direct enhanced_peak_fitting")
-                fitted_results = self._fit_peaks_with_enhanced_peak_fitting(
-                    detected_peaks, parameters, use_parallel
-                )
-            except Exception as e:
-                self.logger.warning(f"     Direct fitting failed ({e}), falling back to SingleSpectrumProcessor")
-                fitted_results = self._fit_peaks_with_single_spectrum_processor(
-                    detected_peaks, parameters, use_parallel
-                )
-
-            # Debug: Check first result structure
-            if fitted_results and len(fitted_results) > 0:
-                first_result = fitted_results[0]
-                if first_result:
-                    self.logger.info(f"     DEBUG: First result keys: {list(first_result.keys())}")
-                    self.logger.info(f"     DEBUG: Success field: {first_result.get('success', 'MISSING')}")
-                    avg_r2 = first_result.get('avg_r_squared', 'MISSING')
-                    r2 = first_result.get('r_squared', 'MISSING')
-                    R2 = first_result.get('R2', 'MISSING')
-                    self.logger.info(f"     DEBUG: R² fields - avg_r_squared: {avg_r2}, r_squared: {r2}, R2: {R2}")
-
-            # Process results and collect statistics
-            processing_time = time.time() - processing_start_time
-
-            if fitted_results:
-                # More robust quality filtering with multiple R² field names
-                successful_fits = []
-                failed_fits = []
-
-                for r in fitted_results:
-                    if r is None:
-                        failed_fits.append(r)
-                        continue
-
-                    # Check for success flag (more permissive)
-                    success = r.get('success', True)  # Default to True if missing
-                    if not success:
-                        failed_fits.append(r)
-                        continue
-
-                    # Check R² with multiple possible field names
-                    r_squared = r.get('avg_r_squared', 0) or r.get('r_squared', 0) or r.get('R2', 0)
-
-                    if r_squared >= quality_threshold:
-                        successful_fits.append(r)
-                    else:
-                        failed_fits.append(r)
-
-                # Store results in integrator
-                self.integrator.fitted_peaks = successful_fits
-
-                success_count = len(successful_fits)
-                failure_count = len(failed_fits)
-                success_rate = (success_count / total_peaks) * 100 if total_peaks > 0 else 0
-
-                self.logger.info(f"  ✅ Voigt fitting completed in {processing_time:.2f}s")
-                self.logger.info(f"     Successful fits: {success_count}/{total_peaks} ({success_rate:.1f}%)")
-                self.logger.info(f"     Failed/low-quality fits: {failure_count}")
-
-                if failure_count > 0:
-                    self.logger.debug(f"     Failed peaks: {[f.get('assignment', 'Unknown') for f in failed_fits if f]}")
-
-                return success_count
-
-            else:
-                self.logger.warning("  ❌ Voigt fitting failed - no results returned")
-                return 0
-
-        except Exception as e:
-            self.logger.error(f"  ❌ Voigt fitting failed with error: {e}")
-            import traceback
-            self.logger.debug(f"     Full traceback: {traceback.format_exc()}")
-            return 0
-
-    def _fit_peaks_with_single_spectrum_processor(self, detected_peaks: List[Dict], parameters: Dict[str, Any], use_parallel: bool) -> List[Dict]:
-        """
-        Use the EXACT same SingleSpectrumProcessor as GUI "Fit All Peaks" and Series Integration.
-
-        This is the identical implementation used by:
-        - GUI main_gui.py._fit_all_peaks_with_new_processor()
-        - Series Integration processors
-        - All parallel processing capabilities
-        """
-        try:
-            import pandas as pd
-
-            # Dynamic import of processor components for maximum compatibility
-            try:
-                from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
-                from lunaNMR.utils.parameter_manager import NMRParameterManager
-                processor_available = True
-            except ImportError as e:
-                self.logger.warning(f"     ⚠️ SingleSpectrumProcessor not available ({e}), using fallback")
-                return self._fit_peaks_fallback_method(detected_peaks, parameters)
-
-            self.logger.info(f"     🚀 Initializing SingleSpectrumProcessor (parallel={use_parallel})")
-
-            # Convert detected peaks to the exact DataFrame format expected by SingleSpectrumProcessor
-            peak_list_data = []
-            for peak in detected_peaks:
-                peak_list_data.append({
-                    'Assignment': peak['assignment'],
-                    'Position_X': peak['ppm_x'],
-                    'Position_Y': peak['ppm_y'],
-                    'X_HZ': 0,  # Placeholder - same as GUI
-                    'Y_HZ': 0   # Placeholder - same as GUI
-                })
-
-            peak_list = pd.DataFrame(peak_list_data)
-
-            # CRITICAL: Store peak list in integrator exactly like GUI does
-            self.integrator.peak_list = peak_list
-
-            # Create parameter manager (same as GUI setup)
-            param_manager = NMRParameterManager()
-
-            # CRITICAL: Sync parameter manager exactly like GUI's update_from_gui_variables
-            # This ensures the SingleSpectrumProcessor has the correct configuration
-            current_params = {
-                'use_parallel_processing': use_parallel,
-                'use_global_optimization': False,  # Standard batch processing
-                'quality_threshold': parameters.get('quality_threshold', 0.6),  # Use batch threshold
-                'max_attempts': parameters.get('max_attempts', 3),
-                'sn_threshold': parameters.get('sn_threshold', 2.2)
-            }
-
-            processing_overrides = self.config.get('processing_parameters', {})
-
-            numeric_overrides = {
-                key: processing_overrides[key]
-                for key in ['search_window_x', 'search_window_y', 'fitting_window_x', 'fitting_window_y']
-                if key in processing_overrides
-            }
-            for key, value in numeric_overrides.items():
-                try:
-                    current_params[key] = float(value)
-                except (TypeError, ValueError):
-                    self.logger.warning(f"Invalid numeric override for {key}: {value}")
-
-            if 'use_reference_detection' in processing_overrides:
-                current_params['use_reference_detection'] = bool(processing_overrides['use_reference_detection'])
-
-            param_manager.current_params.update(current_params)
-
-            # Initialize SingleSpectrumProcessor (EXACT same as GUI)
-            single_spectrum_processor = SingleSpectrumProcessor(self.integrator, param_manager)
-
-            # Set up progress callback (same pattern as GUI)
-            def progress_callback(progress, task, log_msg=None, failed=False):
-                if progress % 10 == 0 or failed:  # Log every 10% or on failure
-                    status = "❌ FAILED" if failed else "✅ Processing"
-                    self.logger.info(f"     {status}: {progress:.1f}% - {task}")
-                    if log_msg:
-                        self.logger.debug(f"       {log_msg}")
-
-            # Set processing options (EXACT same as GUI)
-            processing_options = {
-                'use_parallel': use_parallel,
-                'use_global_optimization': False  # Standard fitting for batch
-            }
-
-            self.logger.info(f"     📋 Processing {len(peak_list)} peaks with options: {processing_options}")
-
-            # Process all peaks using the EXACT same method as GUI
-            fitted_results = single_spectrum_processor.process_peak_list(
-                peak_list,
-                processing_options,
-                progress_callback
-            )
-
-            # Store fitted results in integrator exactly like GUI does
-            if fitted_results:
-                # Get comprehensive summary like GUI
-                summary = single_spectrum_processor.get_processing_summary(fitted_results, len(peak_list))
-
-                # Standardize results exactly like GUI's _complete_new_single_spectrum_fitting
-                standardized_results = []
-                for result in fitted_results:
-                    standardized_result = {
-                        'assignment': result.get('Assignment', result.get('assignment', '')),
-                        'ppm_x': float(result.get('Position_X', result.get('ppm_x', 0))),
-                        'ppm_y': float(result.get('Position_Y', result.get('ppm_y', 0))),
-                        'detected': True,
-                        'fitted': True
-                    }
-                    # Preserve additional fitting data
-                    for key, value in result.items():
-                        if key not in ['Assignment', 'Position_X', 'Position_Y']:
-                            standardized_result[key] = value
-                    standardized_results.append(standardized_result)
-
-                # Store in integrator exactly like GUI
-                self.integrator.fitted_peaks = standardized_results
-                self.logger.info(f"     🔧 Standardized {len(standardized_results)} fitting results for compatibility")
-
-            self.logger.info(f"     ✅ SingleSpectrumProcessor completed: {len(fitted_results)} results")
-            return fitted_results
-
-        except Exception as e:
-            self.logger.error(f"     ❌ SingleSpectrumProcessor failed: {e}")
-            import traceback
-            self.logger.debug(f"     Full traceback: {traceback.format_exc()}")
-            return []
-
-    def _fit_peaks_with_enhanced_peak_fitting(self, detected_peaks: List[Dict], parameters: Dict[str, Any], use_parallel: bool) -> List[Dict]:
-        """
-        Direct enhanced_peak_fitting implementation.
-
-        This method uses the exact same enhanced_peak_fitting calls as GUI individual peak fitting,
-        with optional thread parallelism.
-        """
-
-        total_peaks = len(detected_peaks)
-        fitted_results = []
-
-        self.logger.info(f"     🎯 Direct enhanced_peak_fitting: {total_peaks} peaks")
-        self.logger.info(f"     🔄 Parallel processing: {use_parallel}")
-
-        if use_parallel and total_peaks > 10:
-            # Use multiprocessing for large peak sets
-            fitted_results = self._fit_peaks_parallel_direct(detected_peaks, parameters)
-        else:
-            # Sequential processing for small peak sets or when parallel is disabled
-            fitted_results = self._fit_peaks_sequential_direct(detected_peaks, parameters)
-
-        success_count = len([r for r in fitted_results if r and r.get('success', True)])
-
-        self.logger.info(f"     ✅ Direct fitting completed: {success_count}/{total_peaks} successful")
-
+        processing_options = {
+            'use_parallel': self.fit_processor.parameter_manager.current_params['use_parallel_processing'],
+            'use_global_optimization': False,
+            'use_voigt_fitting': True,
+            'skip_series_params': True
+        }
+        fitted_results, _ = self.fit_processor.process_peak_list(peak_list, processing_options)
         return fitted_results
-
-    def _fit_peaks_sequential_direct(self, detected_peaks: List[Dict], parameters: Dict[str, Any]) -> List[Dict]:
-        """Sequential direct enhanced_peak_fitting calls"""
-        fitted_results = []
-        total_peaks = len(detected_peaks)
-
-        for i, peak in enumerate(detected_peaks):
-            try:
-                # Progress logging every 20%
-                if i % max(1, total_peaks // 5) == 0:
-                    progress = (i / total_peaks) * 100
-                    self.logger.info(f"     📈 Sequential progress: {progress:.0f}% ({i}/{total_peaks})")
-
-                # Direct enhanced_peak_fitting call (same as GUI)
-                result = self.integrator.enhanced_peak_fitting(
-                    peak['ppm_x'],
-                    peak['ppm_y'],
-                    peak['assignment']
-                )
-
-                if result:
-                    # Add batch-specific metadata
-                    result['peak_number'] = i + 1
-                    result['processing_mode'] = 'batch_direct_sequential'
-                    result['success'] = True
-                    fitted_results.append(result)
-
-            except Exception as e:
-                self.logger.debug(f"     ❌ Failed to fit {peak['assignment']}: {e}")
-                continue
-
-        return fitted_results
-
-    def _fit_peaks_parallel_direct(self, detected_peaks: List[Dict], parameters: Dict[str, Any]) -> List[Dict]:
-        """Parallel direct enhanced_peak_fitting using threading"""
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        fitted_results = []
-        total_peaks = len(detected_peaks)
-
-        # Threads, not processes: every worker calls the one self.integrator, which holds the
-        # loaded spectrum. A process pool would have to pickle it, and fit_single_peak is a
-        # nested function, which cannot be pickled.
-        max_workers = min(os.cpu_count() or 4, 8)  # Reasonable limit
-
-        self.logger.info(f"     🚀 Threading parallel: {max_workers} workers")
-
-        def fit_single_peak(peak_data):
-            """Fit a single peak using direct enhanced_peak_fitting"""
-            peak, index = peak_data
-            try:
-                result = self.integrator.enhanced_peak_fitting(
-                    peak['ppm_x'],
-                    peak['ppm_y'],
-                    peak['assignment']
-                )
-
-                if result:
-                    result['peak_number'] = index + 1
-                    result['processing_mode'] = 'batch_direct_parallel'
-                    result['success'] = True
-                    return result
-                return None
-
-            except Exception:
-                return None
-
-        # Process peaks in parallel using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all peaks for processing
-            future_to_peak = {
-                executor.submit(fit_single_peak, (peak, i)): i
-                for i, peak in enumerate(detected_peaks)
-            }
-
-            completed = 0
-            for future in as_completed(future_to_peak):
-                completed += 1
-
-                # Progress logging every 20%
-                if completed % max(1, total_peaks // 5) == 0:
-                    progress = (completed / total_peaks) * 100
-                    self.logger.info(f"     📈 Parallel progress: {progress:.0f}% ({completed}/{total_peaks})")
-
-                try:
-                    result = future.result()
-                    if result:
-                        fitted_results.append(result)
-                except Exception:
-                    continue
-
-        # Sort results by peak number to maintain order
-        fitted_results.sort(key=lambda x: x.get('peak_number', 0))
-
-        return fitted_results
-
-    def _fit_peaks_fallback_method(self, detected_peaks: List[Dict], parameters: Dict[str, Any]) -> List[Dict]:
-        """
-        Fallback method for when SingleSpectrumProcessor is not available.
-        Maintains backward compatibility and essential functionality.
-        """
-        try:
-            import pandas as pd
-
-            self.logger.info("     🔄 Using fallback sequential fitting method")
-
-            # Convert detected peaks to peak list format
-            peak_list_data = []
-            for peak in detected_peaks:
-                peak_list_data.append({
-                    'Assignment': peak['assignment'],
-                    'Position_X': peak['ppm_x'],
-                    'Position_Y': peak['ppm_y'],
-                    'X_HZ': 0,
-                    'Y_HZ': 0
-                })
-
-            # Create temporary peak list for compatibility
-            self.integrator.peak_list = pd.DataFrame(peak_list_data)
-
-            # Switch to fitting mode
-            self.integrator.set_processing_mode('full_detection')
-
-            # Fit peaks sequentially (reliable fallback)
-            fitted_results = []
-            total_peaks = len(detected_peaks)
-
-            for i, peak in enumerate(detected_peaks):
-                try:
-                    # Progress logging
-                    if i % max(1, total_peaks // 10) == 0:
-                        progress = (i / total_peaks) * 100
-                        self.logger.info(f"     Fallback progress: {progress:.1f}% ({i+1}/{total_peaks}) - {peak['assignment']}")
-
-                    # Use enhanced_peak_fitting method
-                    result = self.integrator.enhanced_peak_fitting(
-                        peak['ppm_x'],
-                        peak['ppm_y'],
-                        peak['assignment']
-                    )
-
-                    if result:
-                        fitted_results.append(result)
-                    else:
-                        self.logger.debug(f"     Failed to fit {peak['assignment']}")
-
-                except Exception as e:
-                    self.logger.debug(f"     Error fitting {peak['assignment']}: {e}")
-                    continue
-
-            self.logger.info(f"     ✅ Fallback method completed: {len(fitted_results)} results")
-            return fitted_results
-
-        except Exception as e:
-            self.logger.error(f"     ❌ Fallback method failed: {e}")
-            return []
 
     def find_spectrum_files(self, folder_path: Union[str, Path]) -> List[Path]:
         """
@@ -1418,6 +1098,8 @@ class BatchProcessor:
                         }
 
                     # Update statistics
+                    self.stats['files'].append({key: value for key, value in result.items()
+                                                if key not in ('fitted_results', 'nucleus_detection')})
                     if result['success']:
                         self.stats['processed_files'] += 1
                         self.stats['total_peaks_detected'] += result['peaks_detected']

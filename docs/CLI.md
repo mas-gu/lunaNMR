@@ -556,8 +556,28 @@ separates `removed` from `missing` (named paths that were not there).
 python -m lunaNMR batch <folder> [--preset 1H] [--config ...] [--optimize] ...
 ```
 Flags pass straight through to `batch_processing`.
-Its log, `batch_processing_<timestamp>.log`, is written into `--output` (default: the
-current directory).
+Each spectrum is detected by S/N (the threshold and peak count from the preset or config,
+tuned per spectrum by the optimiser unless the config disables it), and its detected peaks
+are fitted as the GUI's **Fit Spectrum** fits them after a Detect: the same processor
+(`SingleSpectrumProcessor.process_peak_list`), the main window's default parameters, the
+PS2D configuration of the nucleus detected on load, parallel, clusters computed afresh. A
+config's `processing_parameters` replace the search and fitting windows.
+
+Written into `--output` (default: the current directory):
+- `<spectrum stem>_fitting_results.csv` per spectrum — the file Fit Spectrum saves beside
+  its spectrum, same columns and formatting: `Assignment, Position_X, Position_Y, Height,
+  Volume, LW_X, LW_Y, R_Squared, Quality`, one row per detected peak;
+- the log, `batch_processing_<timestamp>.log`.
+
+A spectrum counts as processed when at least one of its peaks fitted, and as failed when
+none did or none was detected. A run that processed no spectrum exits `1` with
+`BatchFailed`, its message naming each spectrum and why. Under `--format json` the summary
+carries `total_files`, `processed_files`, `failed_files`, `total_peaks_detected`,
+`total_peaks_fitted`, and `files`: per spectrum its `filename`, `success`, `nucleus_type`,
+the `sn_threshold` and `expected_peak_count` it was detected with, `peaks_detected`,
+`peaks_fitted`, `peaks_above_quality_threshold` (fitted with R² at or above the config's
+`quality_threshold`; reported, not used to filter), `results_file` (the CSV, or `null`),
+`processing_time` and `error`.
 
 ## End-to-end example: dual-field model-free (600 + 800 MHz)
 
