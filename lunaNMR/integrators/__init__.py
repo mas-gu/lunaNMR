@@ -9,16 +9,10 @@ Date: 2025
 """
 
 try:
-    from .inplace_advanced_nmr_integrator import InplaceAdvancedNMRIntegrator
-except ImportError:
-    pass
-
-try:
-    from .inplace_series_nmr_integrator import InplaceSeriesNMRIntegrator
+    from .inplace_advanced_nmr_integrator import InPlaceAdvancedNMRIntegrator
 except ImportError:
     pass
 
 __all__ = [
-    'InplaceAdvancedNMRIntegrator',
-    'InplaceSeriesNMRIntegrator'
+    'InPlaceAdvancedNMRIntegrator'
 ]

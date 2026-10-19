@@ -80,7 +80,6 @@ except ImportError:
     PS2D_2D_FITTER_AVAILABLE = False
 try:
     from lunaNMR.integrators.inplace_advanced_nmr_integrator import InPlaceAdvancedNMRIntegrator
-    from lunaNMR.integrators.inplace_series_nmr_integrator import InPlaceSeriesNMRIntegrator
     BaseIntegrator = InPlaceAdvancedNMRIntegrator
 except ImportError as e:
     log_warning(f"Import error: {e}")

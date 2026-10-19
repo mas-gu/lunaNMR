@@ -4852,41 +4852,6 @@ class LunaNMRMainWindow(BaseWindow):
 
     # =================== PROCESSING MENU HANDLERS ===================
 
-    def integrate_peaks(self):
-        """Integrate detected peaks (v0o9 lines 3804-3839).
-
-        Performs peak integration after detection using standard mode.
-        """
-        from PySide6.QtWidgets import QMessageBox
-
-        # CRITICAL: Sync GUI parameters BEFORE integration
-        self.sync_parameters_to_integrator()
-
-        # Validate data exists
-        if not hasattr(self.integrator, 'fitted_peaks') or not self.integrator.fitted_peaks:
-            QMessageBox.critical(self, "Error", "Please detect peaks first")
-            return
-
-        try:
-            self.update_status("Integrating peaks (standard mode)...")
-            QApplication.setOverrideCursor(Qt.WaitCursor)
-
-            results = self.integrator.integrate_peaks()
-            if results is not None and len(results) > 0:
-                detected_count = sum(1 for r in results if r.get('Integration_Method') != 'Reference')
-                good_quality = sum(1 for r in results if r.get('Quality') in ['Excellent', 'Good'])
-                self.update_status(f"Integration: {detected_count}/{len(results)} peaks, {good_quality} good quality")
-                self.update_statistics_panel()
-            else:
-                self.update_status("Integration failed")
-
-        except Exception as e:
-            self.update_status(f"Integration error: {str(e)}")
-            QMessageBox.critical(self, "Integration Error", str(e))
-
-        finally:
-            QApplication.restoreOverrideCursor()
-
     def fit_selected_peak(self):
         """Fit Voigt profile to selected peak (v0o9 lines 3841-3917).
 
