@@ -2,7 +2,7 @@
 
 Prominence-based peak detection with top-contour centroid refinement, PS2D simultaneous 2D Voigt fitting (5-stage Levenberg-Marquardt), and hierarchical overlap clustering.
 
-Quality (R²): Excellent >0.9, Good >0.8, Fair >0.6; below that Poor above S/N 5, else Fair ≥0.5, Poor ≥0.2, Failed <0.2 (a near-noise peak Poor). See §4.
+Quality (R²): Excellent >0.9, Good >0.8, Fair >0.6; below that Poor above S/N 5, else Poor ≥0.2, Failed <0.2 (a near-noise peak Poor). See §4.
 
 ---
 
@@ -104,11 +104,10 @@ One rule labels every fit: `fit_quality_label(r_squared, success, near_noise, sn
 | R² > 0.8 | Good |
 | R² > 0.6 | Fair |
 | S/N > 5 | Poor |
-| R² ≥ 0.5 | Fair |
 | R² ≥ 0.2, or a near-noise peak | Poor |
 | otherwise | Failed |
 
-The Kd loaders and the intensity matrices drop a Failed point, so the last two rows decide what is measured. A near-noise peak's R² is ~0 by construction (a held shape against noise) and its near-zero intensity is the measurement, so it is Poor, never Failed. Between R² 0.5 and 0.6 the label is not monotonic in S/N: Poor above S/N 5, Fair below it. Marker colors: lime (Excellent), green (Good), orange (Fair), red (Poor/Failed/unfitted).
+The Kd loaders and the intensity matrices drop a Failed point, so the last two rows decide what is measured. A near-noise peak's R² is ~0 by construction (a held shape against noise) and its near-zero intensity is the measurement, so it is Poor, never Failed. Marker colors: lime (Excellent), green (Good), orange (Fair), red (Poor/Failed/unfitted).
 
 **Acceptance**: PS2D pragmatic `r_squared > 0.2` (or formal convergence / chi² reduction / a near-noise-only cluster); 1D `min_r_squared` default 0.3.
 

@@ -65,7 +65,7 @@ Peak markers are colored by the fit's quality label, assigned once by `fit_quali
 |---------|-----|-------|
 | Excellent | > 0.9 | lime |
 | Good | > 0.8 | green |
-| Fair | > 0.6 (0.5–0.6 when S/N ≤ 5) | orange |
+| Fair | > 0.6 | orange |
 | Poor / Failed / unfitted | below Fair; Failed < 0.2 at S/N ≤ 5, never for a near-noise peak | red |
 
 ---

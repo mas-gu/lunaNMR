@@ -21,13 +21,10 @@ def fit_quality_label(r_squared, success=True, near_noise=False, snr=None):
     - R-squared above 0.9 is Excellent, above 0.8 Good, above 0.6 Fair.
     - Below that, a peak more than MEASURED_SNR above the noise is Poor: it stands
       clear of the noise, so it is a measurement, if not a well-shaped one.
-    - Otherwise R-squared of 0.5 or more is Fair and 0.2 or more Poor.
+    - Otherwise R-squared of 0.2 or more is Poor.
     - Below 0.2, a near-noise peak is Poor, never Failed: its R-squared is ~0 by
       construction - a held shape against noise - and its near-zero intensity is the
       measurement. Anything else below 0.2 is Failed.
-
-    So between 0.5 and 0.6 a peak above MEASURED_SNR is Poor and one below it Fair:
-    the label is not monotonic in S/N there.
 
     :param r_squared: the fit's R-squared (a cluster member's is its cluster's)
     :param success: whether the fit succeeded
@@ -44,8 +41,6 @@ def fit_quality_label(r_squared, success=True, near_noise=False, snr=None):
         return 'Fair'
     if snr is not None and snr > MEASURED_SNR:
         return 'Poor'
-    if r_squared >= 0.5:
-        return 'Fair'
     if r_squared >= 0.2 or near_noise:
         return 'Poor'
     return 'Failed'
