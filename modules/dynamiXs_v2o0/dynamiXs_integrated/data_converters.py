@@ -64,7 +64,6 @@ def convert_relaxation_times_to_rates(t_values: Dict[str, Dict[str, float]],
             # Skip invalid values
             continue
 
-        # Convert time to rate
         R = conversion_factor / T
 
         # Error propagation: dR/dT = -conversion_factor / T²
@@ -116,7 +115,6 @@ def calculate_hetnoe_from_intensities(saturated_data: Dict[str, float],
     """
     noe_values = {}
 
-    # Find common residues
     common_residues = set(saturated_data.keys()) & set(unsaturated_data.keys())
 
     for res_id in common_residues:
@@ -131,7 +129,6 @@ def calculate_hetnoe_from_intensities(saturated_data: Dict[str, float],
             # Can't calculate hetNOE with zero or negative reference intensity
             continue
 
-        # Calculate hetNOE
         noe = I_sat / I_unsat
 
         # Calculate error if provided. `or`, not `and`: requiring both discarded the
@@ -277,7 +274,6 @@ def parse_intensity_csv(csv_file: str) -> Tuple[Dict[str, float], Optional[Dict[
     if len(df.columns) < 2:
         raise ValueError(f"CSV must have at least 2 columns (residue, intensity). Found: {df.columns.tolist()}")
 
-    # First column is residue ID
     residue_col = df.columns[0]
     intensity_col = df.columns[1]
 
@@ -289,7 +285,6 @@ def parse_intensity_csv(csv_file: str) -> Tuple[Dict[str, float], Optional[Dict[
         intensity = float(row[intensity_col])
         intensities[res_id] = intensity
 
-    # Check if error column exists
     if len(df.columns) >= 3:
         error_col = df.columns[2]
         errors = {}
@@ -337,10 +332,8 @@ def create_spectral_density_input_csv(r1_data: Dict[str, Dict[str, float]],
     >>> n_residues = create_spectral_density_input_csv(r1, r2, noe, 'field1_input.csv')
     >>> print(f"Created input file with {n_residues} residues")
     """
-    # Find common residues (intersection)
     common_residues = set(r1_data.keys()) & set(r2_data.keys()) & set(noe_data.keys())
 
-    # Sort numerically (extract numeric part for sorting)
     import re
     def extract_numeric(res_id):
         """Extract numeric part from residue ID for sorting (e.g., '3.LYS' -> 3, '10' -> 10)"""
@@ -352,7 +345,6 @@ def create_spectral_density_input_csv(r1_data: Dict[str, Dict[str, float]],
     if len(common_residues) == 0:
         raise ValueError("No common residues found across R1, R2, and hetNOE datasets")
 
-    # Create DataFrame
     rows = []
     for res_id in common_residues:
         row = {
@@ -380,7 +372,6 @@ def create_spectral_density_input_csv(r1_data: Dict[str, Dict[str, float]],
         }
         df = df.rename(columns=rename_map)
 
-    # Write to CSV
     df.to_csv(output_file, index=False)
 
     return len(common_residues)
@@ -415,7 +406,6 @@ def extract_residue_id(residue_str: str) -> str:
     """
     import re
 
-    # Try to extract number from string
     numbers = re.findall(r'\d+', str(residue_str))
 
     if numbers:
