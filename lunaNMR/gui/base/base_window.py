@@ -70,26 +70,21 @@ class BaseWindow(QMainWindow):
         """
         super().__init__(parent)
 
-        # Store configuration
         self._title = title
         self._status_bar_enabled = enable_status_bar
 
-        # Setup window properties
         self.setWindowTitle(title)
         self.resize(*default_size)
 
         if min_size:
             self.setMinimumSize(QSize(*min_size))
 
-        # Setup icon if provided
         if icon_path:
             self._setup_icon(icon_path)
 
-        # Setup status bar if requested
         if enable_status_bar:
             self._setup_status_bar()
 
-        # Load stylesheet
         self._load_stylesheet()
 
     def _load_stylesheet(self) -> None:
@@ -99,7 +94,6 @@ class BaseWindow(QMainWindow):
         without styling.
         """
         try:
-            # Determine stylesheet path relative to this file
             base_dir = Path(__file__).parent.parent  # lunaNMR/gui/
             stylesheet_path = base_dir / "styles" / "main.qss"
 
@@ -110,7 +104,6 @@ class BaseWindow(QMainWindow):
                 )
                 return
 
-            # Read and apply stylesheet
             with open(stylesheet_path, 'r', encoding='utf-8') as f:
                 stylesheet = f.read()
 
