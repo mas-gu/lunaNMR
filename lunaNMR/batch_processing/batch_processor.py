@@ -206,11 +206,13 @@ class BatchProcessor:
 
         The logger is shared by every processor in the process, so the handlers a previous
         processor added are closed first: otherwise each line is printed once per processor
-        and every earlier log file stays open.
+        and every earlier log file stays open. Its lines are printed and written here
+        only: propagated, the root logger's handlers would print each again.
         """
         # Create logger
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.INFO)
+        logger.propagate = False
         for handler in list(logger.handlers):
             logger.removeHandler(handler)
             handler.close()
