@@ -2319,7 +2319,8 @@ def _run_batch(batch_argv):
     if fmt == 'json':
         error = None
         if code == 2:
-            error = ('UsageError', 'batch rejected its arguments; its report is on stderr')
+            error = ('UsageError', batch.last_error
+                     or 'batch rejected its arguments; its report is on stderr')
         elif code:
             error = ('BatchFailed', batch.last_error
                      or f'batch exited {code}; its report is on stderr')

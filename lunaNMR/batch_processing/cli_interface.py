@@ -25,7 +25,7 @@ import signal
 # Import batch processing components
 try:
     from .batch_processor import BatchProcessor
-    from .config_manager import ConfigManager
+    from .config_manager import ConfigManager, UnreadConfigKeys
     BATCH_COMPONENTS_AVAILABLE = True
 except ImportError:
     BATCH_COMPONENTS_AVAILABLE = False
@@ -536,7 +536,12 @@ Examples:
                 return 0
 
             # Load configuration
-            config = self.load_configuration(args)
+            try:
+                config = self.load_configuration(args)
+            except UnreadConfigKeys as e:
+                self.last_error = str(e)
+                print(f"Error: {e}", file=sys.stderr)
+                return 2
 
             # Handle dry run
             if args.dry_run:

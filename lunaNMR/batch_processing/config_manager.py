@@ -17,6 +17,38 @@ from pathlib import Path
 from typing import Dict, Any, Union
 import logging
 
+
+class UnreadConfigKeys(ValueError):
+    """A configuration file names settings batch does not read."""
+
+
+# Keys BatchProcessor reads beside the default configuration's own
+_READ_PROCESSING_KEYS = {'max_iterations', 'max_iter', 'max_optimization_iterations',
+                         'baseline_max_iter', 'convergence_tolerance'}
+# Sections whose keys are names (nuclei, fit parameters) rather than settings
+_FREE_FORM_SECTIONS = {('processing', 'sn_thresholds'), ('processing', 'expected_peaks'),
+                       ('processing_parameters',)}
+
+
+def unread_config_keys(user_config: Dict[str, Any], schema: Dict[str, Any],
+                       path: tuple = ()) -> list:
+    """The dotted paths of `user_config` that `schema` (the default configuration) does
+    not have, so a removed setting or a typo is named rather than skipped."""
+    unread = []
+    for key, value in user_config.items():
+        here = path + (key,)
+        # Notes, not settings: the files --create-examples writes carry them
+        if here in _FREE_FORM_SECTIONS or key == 'description' or key.startswith('_'):
+            continue
+        known = (key in schema or (path == ('processing',) and key in _READ_PROCESSING_KEYS)
+                 or here in _FREE_FORM_SECTIONS)
+        if not known:
+            unread.append('.'.join(here))
+        elif isinstance(value, dict) and isinstance(schema.get(key), dict):
+            unread.extend(unread_config_keys(value, schema[key], here))
+    return unread
+
+
 class ConfigManager:
     """
     Configuration management for batch processing operations.
@@ -164,6 +196,11 @@ class ConfigManager:
 
             self.logger.info(f"Loaded configuration from: {config_path}")
 
+            unread = unread_config_keys(user_config, self.default_config)
+            if unread:
+                raise UnreadConfigKeys(
+                    f"{config_path} sets {', '.join(unread)}, which batch does not read")
+
             # Merge with defaults
             merged_config = self._merge_configs(self.default_config, user_config)
 
@@ -174,6 +211,8 @@ class ConfigManager:
 
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in configuration file {config_path}: {e}")
+        except UnreadConfigKeys:
+            raise
         except Exception as e:
             raise ValueError(f"Error loading configuration from {config_path}: {e}")
 

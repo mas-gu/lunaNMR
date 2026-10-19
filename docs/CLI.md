@@ -556,7 +556,9 @@ separates `removed` from `missing` (named paths that were not there).
 python -m lunaNMR batch <folder> [--preset 1H] [--config ...] ...
 ```
 Flags pass straight through to `batch_processing`; one it does not know is a usage error
-(exit `2`).
+(exit `2`). So is a `--config` file key batch does not read (a removed setting such as
+`optimization`, or a typo), named in the message; `description` and keys starting with `_`
+are notes and are accepted.
 Each spectrum is detected by S/N (the threshold and peak count from the preset or config
 entry of its nucleus type), and its detected peaks
 are fitted as the GUI's **Fit Spectrum** fits them after a Detect: the same processor

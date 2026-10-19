@@ -75,3 +75,47 @@ def test_a_rejected_command_line_returns_instead_of_raising(tmp_path):
     code, out = _batch("--no-such-flag", "--format", "json")
     assert code == 2
     assert json.loads(out)["error"]["type"] == "UsageError"
+
+
+def _config(tmp_path, content):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(content))
+    return path
+
+
+@pytest.mark.parametrize("content, key", [
+    ({"optimization": {"enable_auto_optimization": True}}, "optimization"),
+    ({"procesing": {"sn_thresholds": {"15N1H": 3.0}}}, "procesing"),
+    ({"processing": {"sn_threshold": 3.0}}, "processing.sn_threshold"),
+])
+def test_a_config_key_batch_does_not_read_is_refused(folder, tmp_path, content, key):
+    """A setting batch would skip without a word - a removed one, or a typo - is a usage
+    error naming it, as series --params refuses its unread keys."""
+    code, out = _batch(str(folder), "--dry-run", "--format", "json", "--output",
+                       str(tmp_path / "out"), "--config", str(_config(tmp_path, content)))
+    envelope = json.loads(out)
+    assert code == 2
+    assert envelope["error"]["type"] == "UsageError"
+    assert key in envelope["error"]["message"]
+
+
+def test_a_config_of_read_keys_is_accepted(folder, tmp_path):
+    content = {"processing": {"sn_thresholds": {"15N1H": 3.0, "default": 2.5},
+                              "expected_peaks": {"15N1H": 40}, "max_iterations": 500},
+               "processing_parameters": {"fitting_window_x": 0.05},
+               "file_handling": {"recursive_search": True}}
+    code, out = _batch(str(folder), "--dry-run", "--format", "json", "--output",
+                       str(tmp_path / "out"), "--config", str(_config(tmp_path, content)))
+    assert code == 0, out
+
+
+def test_every_example_config_batch_writes_is_accepted(tmp_path):
+    """--create-examples writes configs with notes ('description', '_comment') beside the
+    settings; those are not settings batch should refuse."""
+    from lunaNMR.batch_processing.config_manager import ConfigManager
+    code, _ = _batch("--create-examples", str(tmp_path / "examples"))
+    assert code == 0
+    written = sorted((tmp_path / "examples").glob("*.json"))
+    assert written
+    for path in written:
+        ConfigManager().load_config(path)
