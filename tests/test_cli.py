@@ -125,7 +125,7 @@ class TestBatchDelegation:
         (tmp_path / "spectra" / "2D_DNAJA1_0o0.ft").symlink_to(dnaja1 / "2D_DNAJA1_0o0.ft")
         capsys.readouterr()
         assert cli.main(["batch", "--preset", "15N1H", str(tmp_path / "spectra"),
-                         "--dry-run", "--format", "json"]) == 0
+                         "--dry-run", "--format", "json", "--output", str(tmp_path / "out")]) == 0
         assert json.loads(capsys.readouterr().out)["spectra_found"] == 1
 
     def test_a_flag_it_rejects_is_its_own_usage_error(self, capsys):

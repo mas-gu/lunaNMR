@@ -40,14 +40,15 @@ def test_a_dry_run_that_finds_nothing_to_process_fails(folder):
     """An unreadable folder lists as empty: a run would process nothing."""
     os.chmod(folder, 0)
     try:
-        code, _ = _batch(str(folder), "--dry-run")
+        code, _ = _batch(str(folder), "--dry-run", "--output", str(folder.parent / "out"))
     finally:
         os.chmod(folder, 0o755)
     assert code == 1
 
 
 def test_a_dry_run_reports_in_the_envelope(folder):
-    code, out = _batch(str(folder), "--dry-run", "--format", "json")
+    code, out = _batch(str(folder), "--dry-run", "--format", "json",
+                       "--output", str(folder.parent / "out"))
     envelope = json.loads(out)
     assert code == 0
     assert envelope["ok"] is True

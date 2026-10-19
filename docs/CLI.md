@@ -556,6 +556,8 @@ separates `removed` from `missing` (named paths that were not there).
 python -m lunaNMR batch <folder> [--preset 1H] [--config ...] [--optimize] ...
 ```
 Flags pass straight through to `batch_processing`.
+Its log, `batch_processing_<timestamp>.log`, is written into `--output` (default: the
+current directory).
 
 ## End-to-end example: dual-field model-free (600 + 800 MHz)
 

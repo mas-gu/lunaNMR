@@ -380,7 +380,7 @@ Examples:
         print("=== DRY RUN - No actual processing will be performed ===\n")
 
         # Create temporary processor to find files
-        processor = BatchProcessor(config)
+        processor = BatchProcessor(config, log_dir=args.output)
 
         try:
             spectrum_files = processor.find_spectrum_files(args.folder)
@@ -425,7 +425,7 @@ Examples:
         """
         try:
             # Create processor
-            processor = BatchProcessor(config)
+            processor = BatchProcessor(config, log_dir=args.output)
 
             # Add parameter optimizer if requested
             if args.optimize:

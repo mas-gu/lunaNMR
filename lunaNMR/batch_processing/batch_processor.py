@@ -40,16 +40,17 @@ class BatchProcessor:
     It operates completely independently from the GUI interface.
     """
 
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[Dict] = None, log_dir: Union[str, Path, None] = None):
         """
         Initialize the batch processor.
 
         Args:
             config: Optional configuration dictionary with processing parameters
+            log_dir: Folder for the batch log (default: the current directory)
         """
         # Set up logging
         self.logger = logging.getLogger(__name__)
-        self._setup_logging()
+        self._setup_logging(Path(log_dir) if log_dir else Path.cwd())
 
         # Default configuration
         self.config = {
@@ -199,18 +200,27 @@ class BatchProcessor:
             self.integrator = None
             self.logger.error("Core components not available - batch processing disabled")
 
-    def _setup_logging(self):
-        """Set up logging system for batch processing."""
+    def _setup_logging(self, log_dir: Path):
+        """Set up logging system for batch processing, logging to a file in `log_dir`.
+
+        The logger is shared by every processor in the process, so the handlers a previous
+        processor added are closed first: otherwise each line is printed once per processor
+        and every earlier log file stays open.
+        """
         # Create logger
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.INFO)
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            handler.close()
 
         # Create console handler
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
 
         # Create file handler
-        log_file = f"batch_processing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"batch_processing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         file_handler = logging.FileHandler(log_file)
         file_handler.setLevel(logging.DEBUG)
 
