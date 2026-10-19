@@ -47,7 +47,6 @@ class DualFieldSpectralDensityAnalysis:
         self.rNH = rNH
         self.csaN = csaN
         
-        # Calculate angular frequencies for both fields
         self.field1_omegaH = self._calculate_omegaH(field1_freq)
         self.field1_omegaN = self._calculate_omegaN(field1_freq)
         self.field2_omegaH = self._calculate_omegaH(field2_freq)
@@ -147,7 +146,6 @@ class DualFieldSpectralDensityAnalysis:
         --------
         pandas.DataFrame : Dual-field analysis results
         """
-        # Load data from both fields
         try:
             data1 = pd.read_csv(csv_file1)
             data2 = pd.read_csv(csv_file2)
@@ -156,7 +154,6 @@ class DualFieldSpectralDensityAnalysis:
             print(f"Error loading CSV files: {e}")
             return pd.DataFrame()
         
-        # Check required columns
         required_cols = ['R1', 'R1err', 'R2', 'R2err', 'hetNOE', 'hetNOEerr']
         for i, data in enumerate([data1, data2], 1):
             missing_cols = [col for col in required_cols if col not in data.columns]
@@ -165,11 +162,9 @@ class DualFieldSpectralDensityAnalysis:
         
         # Align datasets by residue identifier
         if residue_col in data1.columns and residue_col in data2.columns:
-            # Merge on residue identifier
             merged_data = pd.merge(data1, data2, on=residue_col, suffixes=('_f1', '_f2'))
             print(f"Matched {len(merged_data)} residues between the two datasets")
         else:
-            # Merge by index if no residue column
             print("Warning: No residue column found, merging by index position")
             min_len = min(len(data1), len(data2))
             merged_data = pd.concat([
@@ -185,7 +180,6 @@ class DualFieldSpectralDensityAnalysis:
         
         results = []
         
-        # Process each residue
         total_residues = len(merged_data)
         processed = 0
         
@@ -193,24 +187,20 @@ class DualFieldSpectralDensityAnalysis:
         print(f"Field 1: {self.field1_freq} MHz, Field 2: {self.field2_freq} MHz")
         
         for idx, row in merged_data.iterrows():
-            # Extract data for both fields
             r1_f1, r2_f1, noe_f1 = row['R1_f1'], row['R2_f1'], row['hetNOE_f1']
             r1_f1_err, r2_f1_err, noe_f1_err = row['R1err_f1'], row['R2err_f1'], row['hetNOEerr_f1']
             
             r1_f2, r2_f2, noe_f2 = row['R1_f2'], row['R2_f2'], row['hetNOE_f2']
             r1_f2_err, r2_f2_err, noe_f2_err = row['R1err_f2'], row['R2err_f2'], row['hetNOEerr_f2']
             
-            # Get residue identifier
             residue_id = row[residue_col] if residue_col in merged_data.columns else f"Index_{idx}"
             
-            # Check for valid data
             all_values = [r1_f1, r1_f1_err, r2_f1, r2_f1_err, noe_f1, noe_f1_err,
                          r1_f2, r1_f2_err, r2_f2, r2_f2_err, noe_f2, noe_f2_err]
             
             if any(pd.isna(all_values)) or any(x <= 0 for x in all_values):
                 continue
             
-            # Calculate spectral densities for both fields
             j_f1 = self.calculate_spectral_densities(r1_f1, r2_f1, noe_f1, 'field1')
             j_f2 = self.calculate_spectral_densities(r1_f2, r2_f2, noe_f2, 'field2')
             
@@ -324,7 +314,6 @@ class DualFieldSpectralDensityAnalysis:
         axes[2,2].set_ylabel(f'J(ωH) {self.field2_freq} MHz')
         axes[2,2].set_title('J(ωH) Field Correlation')
         
-        # Format all subplots
         for i in range(3):
             for j in range(3):
                 axes[i,j].grid(True, alpha=0.3)
@@ -367,7 +356,6 @@ def run_spectral_density_analysis_with_params(params):
     dict : Results summary
     """
     
-    # Extract parameters
     input_file1 = params['input_file1']
     input_file2 = params.get('input_file2', None)
     field1_freq = params.get('field1_freq', 600.0)
@@ -386,7 +374,6 @@ def run_spectral_density_analysis_with_params(params):
             if not input_file2:
                 raise ValueError("Dual field analysis requires two input files")
             
-            # Initialize dual-field analyzer
             analyzer = DualFieldSpectralDensityAnalysis(
                 field1_freq=field1_freq,
                 field2_freq=field2_freq,
@@ -411,11 +398,9 @@ def run_spectral_density_analysis_with_params(params):
                     'n_processed': 0
                 }
             
-            # Save results
             results_file = f"{output_prefix}_results.csv"
             analyzer.save_results(results, results_file)
             
-            # Generate plots
             analyzer.plot_dual_field_results(results, save_plots=True, output_prefix=output_prefix)
             
             return {
@@ -444,7 +429,6 @@ def run_spectral_density_analysis_with_params(params):
             print(f"Starting single-field spectral density analysis...")
             print(f"Field: {field1_freq} MHz")
             
-            # Load single field data
             data = pd.read_csv(input_file1)
             required_cols = ['R1', 'R1err', 'R2', 'R2err', 'hetNOE', 'hetNOEerr']
             missing_cols = [col for col in required_cols if col not in data.columns]
@@ -481,7 +465,6 @@ def run_spectral_density_analysis_with_params(params):
                     'n_processed': 0
                 }
             
-            # Save results
             results_file = f"{output_prefix}_results.csv"
             results_df.to_csv(results_file, index=False)
             
