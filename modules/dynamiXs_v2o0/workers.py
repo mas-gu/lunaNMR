@@ -217,13 +217,11 @@ class T1T2FittingWorker(AnalysisWorker):
             self.status.emit("Initializing fitting...")
             self.emit_progress("Loading data...", 5)
 
-            # Import the fitting module
             if self.params.multicore:
                 from dynamiXs_T1_T2 import fitmulti__Tx_NMRRE as fitting_module
             else:
                 from dynamiXs_T1_T2 import fit_Tx_NMRRE as fitting_module
 
-            # Determine input CSV file path
             # Priority: input_df > input_file
             if self.params.input_df is not None:
                 # Write DataFrame to temp file for fitting module
@@ -239,11 +237,9 @@ class T1T2FittingWorker(AnalysisWorker):
 
             self.emit_progress("Starting fit...", 10)
 
-            # Build output file paths
             output_prefix = os.path.join(self.params.output_dir, self.params.results_prefix)
             results_txt_file = f"{output_prefix}_fit_results.txt"
 
-            # Prepare parameters dictionary matching run_analysis_with_params() expected keys
             fit_params = {
                 'input_csv_file': input_csv_file,
                 'output_prefix': output_prefix,
@@ -258,14 +254,12 @@ class T1T2FittingWorker(AnalysisWorker):
                 'n_plots_per_figure': 20,
             }
 
-            # Add JSON export parameters if provided
             if self.params.json_folder:
                 fit_params['json_folder'] = self.params.json_folder
                 fit_params['field_name'] = "_".join(
                     p for p in (self.params.run_prefix, self.params.field_name) if p)
                 fit_params['field_freq'] = self.params.field_freq
 
-            # Create progress callback that emits signals
             def progress_callback(completed, total, residue_name, message):
                 if self._cancelled:
                     return
@@ -273,7 +267,6 @@ class T1T2FittingWorker(AnalysisWorker):
                 fitting_progress = int((completed / total) * 85) + 10
                 self.emit_progress(f"Fitting {residue_name} ({completed}/{total})", fitting_progress)
 
-            # Run the analysis with progress callback
             result = fitting_module.run_analysis_with_params(fit_params, progress_callback=progress_callback)
 
             if not self._cancelled:
@@ -291,7 +284,6 @@ class T1T2FittingWorker(AnalysisWorker):
         except Exception as e:
             self.emit_error(e)
         finally:
-            # Clean up temp file if created
             if temp_csv_path and os.path.exists(temp_csv_path):
                 try:
                     os.remove(temp_csv_path)
@@ -533,11 +525,9 @@ class SpectralDensityWorker(AnalysisWorker):
             self.status.emit("Initializing spectral density analysis...")
             self.emit_progress("Loading data...", 10)
 
-            # Convert physical parameters to proper units
             rNH_meters = self.params.r_nh * 1e-10  # Angstroms to meters
             csaN_units = self.params.csa * 1e-6   # ppm to dimensionless
 
-            # Build output paths
             output_prefix = os.path.join(self.params.output_dir, self.params.results_prefix)
 
             self.emit_progress("Computing spectral densities...", 30)
@@ -552,7 +542,6 @@ class SpectralDensityWorker(AnalysisWorker):
                 else:
                     from dynamiXs_density_functions.ZZ_multi_2fields_density import DualFieldSpectralDensityAnalysis
 
-                # Create analyzer
                 analyzer = DualFieldSpectralDensityAnalysis(
                     field1_freq=self.params.field1_freq,
                     field2_freq=self.params.field2_freq,
@@ -562,7 +551,6 @@ class SpectralDensityWorker(AnalysisWorker):
 
                 self.emit_progress("Running dual-field analysis...", 50)
 
-                # Run analysis
                 results_df = analyzer.analyze_dual_field_csv(
                     csv_file1=self.params.input_file,
                     csv_file2=self.params.input_file2,
@@ -571,7 +559,6 @@ class SpectralDensityWorker(AnalysisWorker):
                     use_multiprocessing=True
                 )
 
-                # Save results
                 self.emit_progress("Saving results...", 80)
                 basic_csv = f"{output_prefix}_basic.csv"
                 detailed_csv = f"{output_prefix}_detailed.csv"
@@ -594,7 +581,6 @@ class SpectralDensityWorker(AnalysisWorker):
                 else:
                     from dynamiXs_density_functions.ZZ_multi_density import ReducedSpectralDensityAnalysis
 
-                # Create analyzer
                 analyzer = ReducedSpectralDensityAnalysis(
                     spectrometer_frequency=self.params.field1_freq,
                     rNH=rNH_meters,
@@ -603,7 +589,6 @@ class SpectralDensityWorker(AnalysisWorker):
 
                 self.emit_progress("Running single-field analysis...", 50)
 
-                # Run analysis
                 results_df = analyzer.analyze_csv(
                     csv_file=self.params.input_file,
                     use_monte_carlo_errors=self.params.monte_carlo,
@@ -611,7 +596,6 @@ class SpectralDensityWorker(AnalysisWorker):
                     use_multiprocessing=True
                 )
 
-                # Save results
                 self.emit_progress("Saving results...", 80)
                 output_csv = f"{output_prefix}_results.csv"
                 plots_pdf = f"{output_prefix}_plots.pdf"
@@ -707,13 +691,11 @@ class IntegratedAnalysisWorker(AnalysisWorker):
         try:
             self.status.emit("Starting integrated analysis...")
 
-            # Import the integrated analysis pipeline
             from dynamiXs_integrated.integrated_analysis import (
                 IntegratedAnalysisPipeline,
                 IntegratedAnalysisParameters
             )
 
-            # Create pipeline parameters and set attributes
             pipeline_params = IntegratedAnalysisParameters()
 
             # Field 1 files and frequency
@@ -755,12 +737,10 @@ class IntegratedAnalysisWorker(AnalysisWorker):
             pipeline_params.output_prefix = self.params.results_prefix
             pipeline_params.json_folder = self.params.json_folder
 
-            # Define progress callback
             def progress_cb(msg, pct=None):
                 if not self._cancelled:
                     self.emit_progress(msg, pct)
 
-            # Create pipeline with progress callback and run
             pipeline = IntegratedAnalysisPipeline(pipeline_params, progress_callback=progress_cb)
             result = pipeline.run_complete_analysis()
 
@@ -807,12 +787,10 @@ class FileLoadWorker(AnalysisWorker):
 
             self.emit_progress(f"Loading {self.file_path}...", 20)
 
-            # Load the file
             df = pd.read_csv(self.file_path)
 
             self.emit_progress("Validating data...", 60)
 
-            # Run validation if provided
             if self.validator:
                 validation_result = self.validator(df)
                 if not validation_result.get('valid', True):
@@ -928,7 +906,6 @@ class SpectraProcessingWorker(AnalysisWorker):
             self.status.emit("Initializing LunaNMR integration...")
             self.emit_progress("Loading LunaNMR modules...", 5)
 
-            # Add lunaNMR to path
             lunaNMR_root = Path(__file__).parent.parent.parent
             if str(lunaNMR_root) not in sys.path:
                 sys.path.insert(0, str(lunaNMR_root))
@@ -936,11 +913,9 @@ class SpectraProcessingWorker(AnalysisWorker):
             from lunaNMR.utils.relaxation_data_bridge import RelaxationDataBridge
             from lunaNMR.utils.delay_extractor import DelayExtractor
 
-            # Initialize bridge
             bridge = RelaxationDataBridge(self.params.peak_list_path)
             extractor = DelayExtractor()
 
-            # Create output directory
             os.makedirs(self.params.output_dir, exist_ok=True)
 
             results = {
@@ -949,7 +924,6 @@ class SpectraProcessingWorker(AnalysisWorker):
                 'errors': []
             }
 
-            # Process each experiment type
             experiments_to_process = list(self.params.experiment_folders.items())
             total_experiments = len(experiments_to_process)
 
@@ -1019,7 +993,6 @@ class SpectraProcessingWorker(AnalysisWorker):
         import os
         import pandas as pd
 
-        # Scan folder for files with delays
         files_with_delays = extractor.scan_folder(folder_path)
 
         if not files_with_delays:
@@ -1076,16 +1049,13 @@ class SpectraProcessingWorker(AnalysisWorker):
 
         output_file = os.path.join(self.params.output_dir, f"{exp_type}_intensities.csv")
 
-        # Check if integration results already exist
         # In production, would check for existing peak integration results
         tidy_file = os.path.join(folder_path, "integration_results.csv")
 
         if os.path.exists(tidy_file):
-            # Convert from tidy format
             import pandas as pd
             df = pd.read_csv(tidy_file)
 
-            # Extract assignment and intensity columns
             with open(output_file, 'w') as f:
                 for _, row in df.iterrows():
                     assignment = str(row.get('assignment', row.get('Assignment', '')))
@@ -1106,7 +1076,6 @@ class SpectraProcessingWorker(AnalysisWorker):
         import os
         import pandas as pd
 
-        # Load intensities
         sat_data = {}
         unsat_data = {}
 
@@ -1122,7 +1091,6 @@ class SpectraProcessingWorker(AnalysisWorker):
                 if len(parts) >= 2:
                     unsat_data[parts[0]] = float(parts[1])
 
-        # Calculate ratios
         output_file = os.path.join(self.params.output_dir, "hetNOE_ratios.csv")
 
         with open(output_file, 'w') as f:
