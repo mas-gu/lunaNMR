@@ -146,9 +146,7 @@ class ProgressDialog(BaseDialog):
 
         # Progress tracking
         self.start_time = datetime.now()
-        self.total_tasks = 0
-        self.completed_tasks = 0
-        self.failed_tasks = 0
+        self._result_text = ""
 
         # State flags
         self._is_cancelled = False
@@ -452,7 +450,7 @@ class ProgressDialog(BaseDialog):
         self._update_statistics(value)
 
     @Slot(str, bool)
-    def add_log_message(self, message: str, is_error: bool = False, count_in_stats: bool = True):
+    def add_log_message(self, message: str, is_error: bool = False):
         """
         Add a message to the log (THREAD-SAFE).
 
@@ -461,8 +459,6 @@ class ProgressDialog(BaseDialog):
         Args:
             message: Log message
             is_error: Whether this is an error message
-            count_in_stats: Whether to count this message in success/failure statistics
-                           Set to False for optimization/calibration steps
         """
         if not self._show_details:
             return
@@ -480,28 +476,10 @@ class ProgressDialog(BaseDialog):
             self.log_text.verticalScrollBar().maximum()
         )
 
-        # Track success/failure only if counting is enabled
-        if count_in_stats:
-            if is_error:
-                self.failed_tasks += 1
-            else:
-                self.completed_tasks += 1
-
-    def reset_statistics(self, reset_timer: bool = False):
-        """
-        Reset success/failure counters.
-
-        Call this before starting the main fitting phase to exclude
-        optimization/calibration steps from the final statistics.
-
-        Args:
-            reset_timer: If True, also reset the elapsed time counter.
-                        Default False to keep cumulative timing from dialog start.
-        """
-        self.completed_tasks = 0
-        self.failed_tasks = 0
-        if reset_timer:
-            self.start_time = datetime.now()
+    def set_result(self, text: str):
+        """The line the dialog ends on: what the run produced (peaks detected, fits that
+        succeeded and failed), set by the caller that knows it."""
+        self._result_text = text
 
     @Slot(str)
     def complete(self, message: str = "Processing completed"):
@@ -523,10 +501,9 @@ class ProgressDialog(BaseDialog):
         total_time = datetime.now() - self.start_time
         total_time_str = str(total_time).split('.')[0]  # Remove microseconds
 
-        final_stats = (
-            f"🏁 Completed in: {total_time_str}\n"
-            f"✅ Successful: {self.completed_tasks} | ❌ Failed: {self.failed_tasks}"
-        )
+        final_stats = f"🏁 Completed in: {total_time_str}"
+        if self._result_text:
+            final_stats += f"\n{self._result_text}"
         self.stats_label.setText(final_stats)
 
         # Enable/disable buttons
@@ -550,10 +527,7 @@ class ProgressDialog(BaseDialog):
             eta_str = "Calculating..."
 
         # Format statistics
-        stats_text = (
-            f"⏱️  Elapsed: {elapsed_str} | 🔮 ETA: {eta_str}\n"
-            f"✅ Completed: {self.completed_tasks} | ❌ Failed: {self.failed_tasks}"
-        )
+        stats_text = f"⏱️  Elapsed: {elapsed_str} | 🔮 ETA: {eta_str}"
         self.stats_label.setText(stats_text)
 
     def _on_cancel_clicked(self):

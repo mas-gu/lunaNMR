@@ -6236,6 +6236,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         """
         try:
             logger.info(f"Detection complete: {len(detected_peaks)} peaks detected")
+            progress_dialog.set_result(f"🔍 Detected: {len(self.integrator.fitted_peaks)} peaks")
 
             # Update peak navigator with detected peaks (if initialized)
             # Note: peak_list remains unchanged (reference positions)
@@ -6277,6 +6278,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             progress_dialog: Progress dialog to close
         """
         logger.error(f"Peak detection failed: {error_message}")
+        progress_dialog.set_result(f"❌ Detection failed: {error_message}")
         self.update_status(f"Detection failed: {error_message}")
 
         from lunaNMR.gui.components import show_error
@@ -6412,31 +6414,11 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         )
 
         # Connect worker signals to dialog and handlers
-        # Track fitting phase for statistics counting
-        # PASS 1 = calibration (learn linewidths) - don't count
-        # OPTIMIZE = grid search - don't count
-        # PASS 1-bis = re-fit isolated with optimal params - don't count (intermediate)
-        # PASS 2 = final multi-peak cluster fitting - COUNT
-        fitting_phase = [None]  # Track current phase: None, 'pass1bis', 'pass2'
-
         def on_fitting_progress(p, t, log):
             """Handle progress update and add to detailed log."""
             progress_dialog.update_progress(p, f"{t}\n{log}" if log else t)
-
-            # Track phase transitions (don't reset timer - keep cumulative)
-            if t:
-                if "PASS 2" in t and fitting_phase[0] != 'pass2':
-                    # Entering PASS 2 - reset counters, start counting
-                    fitting_phase[0] = 'pass2'
-                    progress_dialog.reset_statistics(reset_timer=False)
-                elif "PASS 1-bis" in t and fitting_phase[0] is None:
-                    # Entering PASS 1-bis - track but don't count yet
-                    fitting_phase[0] = 'pass1bis'
-
             if log:
-                # Only count in statistics during PASS 2
-                count_this = (fitting_phase[0] == 'pass2')
-                progress_dialog.add_log_message(log, is_error=False, count_in_stats=count_this)
+                progress_dialog.add_log_message(log, is_error=False)
 
         self.fitting_worker.progress_updated.connect(on_fitting_progress)
         self.fitting_worker.fitting_complete.connect(
@@ -6484,6 +6466,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         """
         try:
             logger.info(f"Fitting complete: {summary['successful_peaks']}/{summary['total_peaks']} successful")
+            progress_dialog.set_result(f"✅ Successful: {summary['successful_peaks']} | "
+                                       f"❌ Failed: {summary['total_peaks'] - summary['successful_peaks']}")
 
             # Store results (v0o9 pattern line 4204)
             if 'fitted_results' in summary and summary['fitted_results']:
@@ -6641,6 +6625,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             progress_dialog: Progress dialog to close
         """
         logger.error(f"Voigt fitting failed: {error_message}")
+        progress_dialog.set_result(f"❌ Fitting failed: {error_message}")
         self.update_status(f"Fitting failed: {error_message}")
 
         from lunaNMR.gui.components import show_error
