@@ -91,8 +91,8 @@ class DeletePeakCommand(QUndoCommand):
     def _refresh_ui(self):
         """Update UI after change."""
         self.main_window.update_spectrum_plot(preserve_zoom=True)
-        if hasattr(self.main_window, 'peak_navigator'):
-            self.main_window.peak_navigator.refresh_peak_list()
+        if hasattr(self.main_window, 'reload_peak_navigator'):
+            self.main_window.reload_peak_navigator()
         if hasattr(self.main_window, 'update_statistics_panel'):
             self.main_window.update_statistics_panel()
 
@@ -156,8 +156,8 @@ class DeleteMultiplePeaksCommand(QUndoCommand):
     def _refresh_ui(self):
         """Update UI after change."""
         self.main_window.update_spectrum_plot(preserve_zoom=True)
-        if hasattr(self.main_window, 'peak_navigator'):
-            self.main_window.peak_navigator.refresh_peak_list()
+        if hasattr(self.main_window, 'reload_peak_navigator'):
+            self.main_window.reload_peak_navigator()
         if hasattr(self.main_window, 'update_statistics_panel'):
             self.main_window.update_statistics_panel()
 
@@ -298,8 +298,8 @@ class AddPeakCommand(QUndoCommand):
     def _refresh_ui(self):
         """Update UI after change."""
         self.main_window.update_spectrum_plot(preserve_zoom=True)
-        if hasattr(self.main_window, 'peak_navigator'):
-            self.main_window.peak_navigator.refresh_peak_list()
+        if hasattr(self.main_window, 'reload_peak_navigator'):
+            self.main_window.reload_peak_navigator()
         if hasattr(self.main_window, 'update_statistics_panel'):
             self.main_window.update_statistics_panel()
 

@@ -7208,9 +7208,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             # Refresh the spectrum plot
             self.update_spectrum_plot(preserve_zoom=True)
 
-            # Refresh the peak navigator list
-            if hasattr(self, 'peak_navigator') and self.peak_navigator is not None:
-                self.peak_navigator.refresh_peak_list()
+            self.reload_peak_navigator()
 
         # Clear selection and update display
         self.clear_multi_selection()
@@ -7345,6 +7343,20 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         logger.info("✅ Peak position updated successfully")
 
+    def reload_peak_navigator(self):
+        """Reload the navigator's reference and detected lists from the integrator.
+
+        The navigator keeps its own copy of both lists, and `refresh_peak_list` only
+        redraws that copy: after an edit (delete, add, move, undo) it must be reloaded, or a
+        deleted peak stays listed.
+        """
+        navigator = getattr(self, 'peak_navigator', None)
+        if navigator is None:
+            return
+        navigator.load_reference_peaks(self.integrator.peak_list)
+        navigator.load_detected_peaks(self.integrator.fitted_peaks or [])
+        navigator.refresh_peak_list()
+
     def delete_selected_peak(self, peak_info):
         """Delete the selected peak from the appropriate peak list (v0o9 line 5761)."""
         assignment = peak_info['assignment']
@@ -7403,9 +7415,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 # Refresh the main plot
                 self.update_spectrum_plot()
 
-                # Update peak navigator
-                if hasattr(self, 'peak_navigator') and self.peak_navigator is not None:
-                    self.peak_navigator.refresh_peak_list()
+                self.reload_peak_navigator()
 
                 # Update statistics
                 self.update_statistics_panel()
@@ -7533,9 +7543,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 # Refresh the main plot
                 self.update_spectrum_plot()
 
-                # Update peak navigator
-                if hasattr(self, 'peak_navigator'):
-                    self.peak_navigator.refresh_peak_list()
+                self.reload_peak_navigator()
 
                 # Update statistics
                 self.update_statistics_panel()
