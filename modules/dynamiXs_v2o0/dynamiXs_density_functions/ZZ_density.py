@@ -42,11 +42,9 @@ class ReducedSpectralDensityAnalysis:
         self.rNH = rNH
         self.csaN = csaN
         
-        # Calculate angular frequencies
         self.omegaH = self._calculate_omegaH()
         self.omegaN = self._calculate_omegaN()
         
-        # Calculate dipolar and CSA constants
         self.d_factor = self._calculate_d_factor()
         self.c_factor = self._calculate_c_factor()
         
@@ -248,7 +246,6 @@ class ReducedSpectralDensityAnalysis:
         from random import random, randint
         from math import exp
         
-        # Convert to T1, T2
         t1 = 1.0 / r1
         t2 = 1.0 / r2
         
@@ -257,7 +254,6 @@ class ReducedSpectralDensityAnalysis:
         C = self.c_factor  
         gammaHN = GAMMA_H / GAMMA_N
         
-        # Initialize parameter ensemble
         ensemble = []
         
         # Parameter starting values
@@ -265,22 +261,18 @@ class ReducedSpectralDensityAnalysis:
         te_start = [x * 1e-12 for x in [0.1, 0.5, 1, 2, 5, 10, 20, 50]]  # 1ps to 1ns
         rex_start = [float(x) for x in range(16)]  # 0 to 15 s-1
         
-        # Create initial ensemble
         for s2 in s2_start:
             for te in te_start:
                 for rex in rex_start:
                     ensemble.append((None, s2, te, rex))
         
-        # Calculate initial scores
         for k, (score, s2, te, rex) in enumerate(ensemble):
-            # Calculate spectral densities
             jH = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.omegaH)
             jN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, abs(self.omegaN))
             jHpN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.omegaH + abs(self.omegaN))
             jHmN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.omegaH - abs(self.omegaN))
             j0 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, 0.0)
             
-            # Calculate predicted relaxation parameters
             r1_calc = (A / 4.0) * (3*jN + 6*jHpN + jHmN) + C * jN
             r2_calc = 0.5 * (A / 4.0) * (4*j0 + 3*jN + 6*jHpN + 6*jH + jHmN) + C * (2*j0/3.0 + 0.5*jN) + rex
             
@@ -292,7 +284,6 @@ class ReducedSpectralDensityAnalysis:
             d2 = (t2_calc - t2) / t2
             score = d1*d1 + d2*d2
             
-            # Add NOE contribution if available
             if noe is not None and not pd.isna(noe):
                 noe_calc = 1.0 + ((A / 4.0) * gammaHN * t1 * (6*jHpN - jHmN))
                 dn = (noe_calc - noe) / (0.1 if noe == 0 else abs(noe))  # Avoid division by zero
@@ -300,7 +291,6 @@ class ReducedSpectralDensityAnalysis:
                 
             ensemble[k] = (score, s2, te, rex, t1_calc, t2_calc)
         
-        # Sort and keep best 10
         ensemble.sort()
         ensemble = ensemble[:10]
         ensemble_size = len(ensemble)
@@ -309,7 +299,6 @@ class ReducedSpectralDensityAnalysis:
         for i in range(niter):
             f = exp(-10.0 * i / float(niter))  # Cooling factor
             
-            # Get worst member
             ensemble.sort()
             if ensemble[0][0] < 1e-10:  # Converged
                 break
@@ -326,7 +315,6 @@ class ReducedSpectralDensityAnalysis:
             d = ((random() - 0.382) * f) + 1.0
             rex_new = max(0.0, min(50.0, rex * d))
             
-            # Calculate new score
             jH = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, self.omegaH)
             jN = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, abs(self.omegaN))
             jHpN = self.calculate_isotropic_spectral_density(s2_new, tc_fixed, te_new, self.omegaH + abs(self.omegaN))
@@ -356,12 +344,10 @@ class ReducedSpectralDensityAnalysis:
                 k = randint(0, ensemble_size - 1)
                 ensemble[-1] = ensemble[k]
         
-        # Return best result
         ensemble.sort()
         if len(ensemble) > 0:
             score, s2_best, te_best, rex_best, t1_calc, t2_calc = ensemble[0]
             
-            # Calculate errors from ensemble spread
             s2_values = [e[1] for e in ensemble[:100]]  # Top 100 results
             te_values = [e[2] for e in ensemble[:10]]
             rex_values = [e[3] for e in ensemble[:100]]
@@ -430,13 +416,11 @@ class ReducedSpectralDensityAnalysis:
             r2_sample = np.random.normal(r2, r2_err) 
             noe_sample = np.random.normal(noe, noe_err)
             
-            # Ensure physical validity
             r1_sample = max(0.1, r1_sample)  # R1 must be positive
             r2_sample = max(r1_sample * 1.1, r2_sample)  # R2 > R1
             # NOE can be negative but typically between -0.5 and 1.0
             noe_sample = np.clip(noe_sample, -0.5, 1.0)
             
-            # Fit the synthetic dataset with reduced iterations
             mc_fit = self._fit_single_dataset(r1_sample, r2_sample, noe_sample, 
                                             tc_fixed, mc_niter)
             
@@ -448,24 +432,20 @@ class ReducedSpectralDensityAnalysis:
         
         print(" done")
         
-        # Calculate errors from Monte Carlo distribution
         n_successful = len(mc_results['S2'])
         if n_successful < 10:  # Need minimum samples for reliable errors
             print(f"    Warning: Only {n_successful}/{n_monte_carlo} MC fits succeeded")
             # Fall back to ensemble-based errors
             return best_fit
         
-        # Update errors with Monte Carlo results
         best_fit['S2_err'] = np.std(mc_results['S2'])
         best_fit['te_err'] = np.std(mc_results['te'])
         best_fit['Rex_err'] = np.std(mc_results['Rex'])
         
-        # Add confidence intervals
         best_fit['S2_95CI'] = np.percentile(mc_results['S2'], [2.5, 97.5])
         best_fit['te_95CI'] = np.percentile(mc_results['te'], [2.5, 97.5])
         best_fit['Rex_95CI'] = np.percentile(mc_results['Rex'], [2.5, 97.5])
         
-        # Add MC success rate
         best_fit['mc_success_rate'] = n_successful / n_monte_carlo
         
         return best_fit
@@ -547,10 +527,8 @@ class ReducedSpectralDensityAnalysis:
         --------
         pandas.DataFrame : Analysis results
         """
-        # Load data
         data = pd.read_csv(csv_file)
         
-        # Check required columns
         required_cols = ['R1', 'R1err', 'R2', 'R2err', 'hetNOE', 'hetNOEerr']
         missing_cols = [col for col in required_cols if col not in data.columns]
         if missing_cols:
@@ -582,13 +560,11 @@ class ReducedSpectralDensityAnalysis:
             print("ERROR: Not enough valid R1/R2 data to estimate overall correlation time!")
             return pd.DataFrame()
         
-        # Estimate overall correlation time
         tc_overall = self.estimate_overall_correlation_time(np.array(valid_r1), np.array(valid_r2))
         print(f"Estimated overall correlation time: {tc_overall*1e9:.1f} ns")
         
         # Second pass: process individual residues
         for idx, row in data.iterrows():
-            # Extract data
             r1 = row['R1']
             r1_err = row['R1err'] 
             r2 = row['R2']
@@ -596,10 +572,8 @@ class ReducedSpectralDensityAnalysis:
             noe = row['hetNOE']
             noe_err = row['hetNOEerr']
             
-            # Get residue identifier for reporting
             residue_id = row[residue_col] if residue_col in data.columns else f"Index_{idx}"
             
-            # Skip if any values are NaN
             if any(pd.isna([r1, r1_err, r2, r2_err, noe, noe_err])):
                 skipped_nan += 1
                 print(f"  Skipping {residue_id}: Contains NaN values")
@@ -633,7 +607,6 @@ class ReducedSpectralDensityAnalysis:
             if warnings:
                 print(f"  Warning for {residue_id}: {', '.join(warnings)}")
                 
-            # Calculate spectral densities with error propagation
             j_results = self.propagate_errors(r1, r1_err, r2, r2_err, noe, noe_err)
             
             # Fit model-free parameters using fixed overall tc
@@ -658,7 +631,6 @@ class ReducedSpectralDensityAnalysis:
                 **mf_results
             }
             
-            # Add residue info if available
             if residue_col in data.columns:
                 result_row['Residue'] = row[residue_col]
                 
@@ -694,7 +666,6 @@ class ReducedSpectralDensityAnalysis:
         axes = fig.subplots(2, 3)
         fig.suptitle('Reduced Spectral Density Analysis Results', fontsize=16)
         
-        # Filter successful fits
         success_mask = results_df['fit_success'] == True
         good_data = results_df[success_mask]
         
@@ -702,7 +673,6 @@ class ReducedSpectralDensityAnalysis:
             print("No successful fits to plot!")
             return
         
-        # Plot spectral densities
         residues = good_data.index if 'Residue' not in good_data.columns else good_data['Residue']
         
         # J(0)
@@ -743,7 +713,6 @@ class ReducedSpectralDensityAnalysis:
         axes[1,2].set_title('Chemical Exchange Rex')
         axes[1,2].set_ylabel('Rex (s⁻¹)')
         
-        # Format all subplots
         for ax in axes.flat:
             ax.set_xlabel('Residue')
             ax.grid(True, alpha=0.3)
@@ -765,9 +734,7 @@ class ReducedSpectralDensityAnalysis:
         filename : str
             Output filename
         """
-        # Check if Monte Carlo results are available
         if 'S2_95CI' in results_df.columns:
-            # Format confidence intervals for readability
             results_df['S2_CI'] = results_df['S2_95CI'].apply(
                 lambda x: f"[{x[0]:.3f}, {x[1]:.3f}]" if not pd.isna(x).any() else ""
             )
@@ -789,7 +756,6 @@ def main():
     """
     Example usage of the ReducedSpectralDensityAnalysis class
     """
-    # Initialize analysis with experimental parameters
     analyzer = ReducedSpectralDensityAnalysis(
         spectrometer_frequency=700.0,  # MHz
         rNH=1.023e-10,                   # meters
@@ -804,16 +770,13 @@ def main():
                                      use_monte_carlo_errors=True,
                                      n_monte_carlo=100)
         
-        # Check if any data was processed
         if len(results) == 0:
             print("No data to analyze after filtering!")
             return
         
-        # Display results
         print("\nReduced Spectral Density Analysis Results:")
         print("=" * 60)
         
-        # Show results with residue info if available
         if 'Residue' in results.columns:
             display_cols = ['Residue', 'J0', 'JwN', 'JwH', 'S2', 'tc', 'te', 'Rex']
         else:
@@ -821,16 +784,12 @@ def main():
         
         print(results[display_cols].round(4))
         
-        # Save basic results
         results.to_csv('ZZ_rsdm_mcmc.csv', index=False)
         
-        # Save detailed results with confidence intervals
         analyzer.save_detailed_results(results)
         
-        # Generate plots
         analyzer.plot_results(results)
         
-        # Print summary statistics
         success_rate = results['fit_success'].mean() * 100
         print(f"\nModel-Free Fitting Results:")
         print(f"  Fit success rate: {success_rate:.1f}%")
@@ -854,7 +813,6 @@ def main():
         print("Please provide a CSV file named 'data_in.csv' with columns:")
         print("R1, R1err, R2, R2err, hetNOE, hetNOEerr, and optionally Residue")
         
-        # Create example data
         example_data = pd.DataFrame({
             'Residue': [f'A{i}' for i in range(1, 11)],
             'R1': np.random.normal(1.5, 0.2, 10),
