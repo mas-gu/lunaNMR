@@ -919,9 +919,7 @@ class Ps2dMultiPeakFitter2D:
             raise ValueError(f'pos_margins has {len(pos_margins)} entries for '
                              f'{n_peaks} peaks')
 
-        # ====================================================================
         # ADAPTIVE LINEWIDTH BOUNDS (PASS1 → PASS2 Learning)
-        # ====================================================================
         # Two-pass fitting strategy:
         #   PASS1: Fit isolated peaks, collect linewidth statistics (median, MAD)
         #   PASS2: Fit clusters using learned bounds from PASS1
@@ -935,7 +933,6 @@ class Ps2dMultiPeakFitter2D:
         #   - Data-driven: adapts to actual spectrum linewidth distribution
         #   - Tighter bounds prevent optimizer wandering into unrealistic values
         #   - Works automatically - no manual parameter tuning needed
-        # ====================================================================
 
         # Linewidth bounds strategy depends on cluster vs isolated peak:
         # - Isolated (n_peaks == 1): Absolute bounds, full optimizer freedom
@@ -957,13 +954,10 @@ class Ps2dMultiPeakFitter2D:
 
         # Maximum bounds: use learned statistics if available, else config defaults
         if spectrum_statistics is not None:
-            # ================================================================
             # LEARNED BOUNDS WITH MINIMUM MAD FLOOR
-            # ================================================================
             # Formula: median + α×MAD, capped by config hard limit
             # - α is sample-size-dependent (7 for n<10, 5 for n≥10)
             # - MAD has minimum floor (5% of typical) to prevent overly tight bounds
-            # ================================================================
 
             # Get sample-size-dependent alpha from statistics (default 5.0)
             alpha = spectrum_statistics.get('alpha', 5.0)
@@ -993,9 +987,7 @@ class Ps2dMultiPeakFitter2D:
             absolute_max_lw_f1 = config.max_linewidth_f1
             absolute_max_lw_f2 = config.max_linewidth_f2
 
-        # ====================================================================
         # LINEWIDTH TOTALS: the cap is on the SUM, and may be tightened per peak
-        # ====================================================================
         # absolute_max_lw_* is derived from statistics taken over TOTALS
         # (collect_linewidth_statistics sums the two components), so it is a cap on the
         # total. It stays the per-component box bound below, so one component may still
@@ -1093,16 +1085,13 @@ class Ps2dMultiPeakFitter2D:
 
         bounds = (np.array(lower_bounds), np.array(upper_bounds))
 
-        # ====================================================================
         # CASCADE MODE: Apply absolute drift limits from reference positions
-        # ====================================================================
         # In cascade mode, peaks can drift from spectrum to spectrum.
         # Without absolute bounds, drift accumulates: N spectra × pos_margin.
         # This clipping enforces ABSOLUTE bounds relative to ORIGINAL reference.
         #
         # Bounds intersection: final_bound = max(per_spectrum_bound, absolute_bound)
         # This clips positions to stay within max_drift of original reference.
-        # ====================================================================
         if reference_positions and peak_assignments:
             drift_clipped_count = 0
             for i in range(n_peaks):
@@ -1164,9 +1153,7 @@ class Ps2dMultiPeakFitter2D:
         self._initial_chi2 = np.sum((y_flat_masked - y_pred_initial_masked)**2)
 
 
-        # ====================================================================
         # STAGE 1: Fix positions, float linewidths + intensities
-        # ====================================================================
         # This stage runs whether or not the linewidths are held. It fits linewidths
         # AND INTENSITIES, and skipping it on fix_linewidths throws the intensity fit
         # away with the linewidth fit - a weak peak then carries its initial intensity
@@ -1271,9 +1258,7 @@ class Ps2dMultiPeakFitter2D:
         params, _ = cap_linewidth_totals(params, n_peaks,
                                          lw_caps_f1, lw_caps_f2)
 
-        # ====================================================================
         # STAGE 2: Float positions (if allowed)
-        # ====================================================================
         if not fix_positions:
 
             # Fix spare parameters + respect fix_linewidths flag + fix weak peak positions
@@ -1310,9 +1295,7 @@ class Ps2dMultiPeakFitter2D:
         params, _ = cap_linewidth_totals(params, n_peaks,
                                          lw_caps_f1, lw_caps_f2)
 
-        # ====================================================================
         # STAGE 4: Final global refinement
-        # ====================================================================
         # Fix spare parameters + respect fix_positions/fix_linewidths flags
         # USER EXPECTATION: fix_positions/fix_linewidths are ABSOLUTE constraints
         # Positions/linewidths must remain unchanged regardless of χ² improvement potential
@@ -1372,9 +1355,7 @@ class Ps2dMultiPeakFitter2D:
 
         total_iterations += info['iterations']
 
-        # ====================================================================
         # L/G RATIO CONSTRAINT: Apply after Stage 4 if enabled
-        # ====================================================================
         # Stage 4 floats the linewidths (unless fix_linewidths), which can undo the
         # L/G constraint Stage 1 applied, so it is re-applied here.
         if self.lg_penalty_weight > 0.0 and not fix_linewidths:
@@ -1424,9 +1405,7 @@ class Ps2dMultiPeakFitter2D:
         params, width_capped = cap_linewidth_totals(params, n_peaks,
                                                     lw_caps_f1, lw_caps_f2)
 
-        # ====================================================================
         # Compute final R² and prepare results
-        # ====================================================================
         y_fit_flat = multi_voigt_profile_2d(f1_grid, f2_grid, params, n_peaks).ravel()
         y_fit_2d = y_fit_flat.reshape(f1_grid.shape)  # Use grid shape instead of intensity.shape
 
@@ -1487,9 +1466,7 @@ class Ps2dMultiPeakFitter2D:
         final_success = (formal_convergence or pragmatic_r2_success or chi2_reduction_success
                          or near_noise_only)
 
-        # ====================================================================
         # FINAL WIDTH CAP: re-derive the intensity, do not freeze it
-        # ====================================================================
         # Narrowing a peak AFTER the last optimisation and leaving `intensity` alone
         # reports a model nothing fitted: intensity IS the volume, so the volume comes
         # back unchanged while the height rises to keep the same area in a narrower

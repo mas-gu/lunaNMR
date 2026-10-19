@@ -147,9 +147,7 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
     # Create figure with 2 subplots
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # =================================================================
     # LEFT PLOT: Rex Field Dependence
-    # =================================================================
     ax_dep = axes[0]
 
     # Scatter plot
@@ -171,9 +169,7 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
     ax_dep.grid(True, alpha=0.3)
     ax_dep.legend()
 
-    # =================================================================
     # RIGHT PLOT: Rex Field Scaling (with Option 3 filtering)
-    # =================================================================
     ax_scale = axes[1]
 
     # Calculate expected field ratio squared

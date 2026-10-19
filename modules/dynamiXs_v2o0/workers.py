@@ -24,9 +24,7 @@ import pandas as pd
 from PySide6.QtCore import QThread, Signal, QObject
 
 
-# =============================================================================
 # BASE WORKER CLASS
-# =============================================================================
 
 class AnalysisWorker(QThread):
     """
@@ -95,9 +93,7 @@ class AnalysisWorker(QThread):
         self.error.emit(error_msg)
 
 
-# =============================================================================
 # GENERIC FUNCTION WORKER
-# =============================================================================
 
 class FunctionWorker(AnalysisWorker):
     """
@@ -160,9 +156,7 @@ class FunctionWorker(AnalysisWorker):
             self.emit_error(e)
 
 
-# =============================================================================
 # T1/T2 FITTING WORKER
-# =============================================================================
 
 @dataclass
 class T1T2FittingParams:
@@ -305,9 +299,7 @@ class T1T2FittingWorker(AnalysisWorker):
                     pass  # Best effort cleanup
 
 
-# =============================================================================
 # METHYL T2 BI-EXP WORKER
-# =============================================================================
 
 @dataclass
 class MethylT2FittingParams:
@@ -496,9 +488,7 @@ class MethylT2FittingWorker(AnalysisWorker):
                     pass
 
 
-# =============================================================================
 # SPECTRAL DENSITY WORKER
-# =============================================================================
 
 @dataclass
 class SpectralDensityParams:
@@ -643,9 +633,7 @@ class SpectralDensityWorker(AnalysisWorker):
             self.emit_error(e)
 
 
-# =============================================================================
 # INTEGRATED ANALYSIS WORKER
-# =============================================================================
 
 @dataclass
 class IntegratedAnalysisParams:
@@ -784,9 +772,7 @@ class IntegratedAnalysisWorker(AnalysisWorker):
             self.emit_error(e)
 
 
-# =============================================================================
 # FILE LOADING WORKER
-# =============================================================================
 
 class FileLoadWorker(AnalysisWorker):
     """
@@ -844,9 +830,7 @@ class FileLoadWorker(AnalysisWorker):
             self.emit_error(e)
 
 
-# =============================================================================
 # BATCH PROCESSING WORKER
-# =============================================================================
 
 class BatchProcessingWorker(AnalysisWorker):
     """
@@ -897,9 +881,7 @@ class BatchProcessingWorker(AnalysisWorker):
             self.emit_error(e)
 
 
-# =============================================================================
 # SPECTRA PROCESSING WORKER (LunaNMR Integration)
-# =============================================================================
 
 @dataclass
 class SpectraProcessingParams:

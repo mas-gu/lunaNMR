@@ -66,9 +66,6 @@ else:
         return func
 
 
-# ============================================================================
-# ============================================================================
-
 SQRT_2 = 1.4142135624  
 SQRT_2PI = np.sqrt(2.0 * np.pi)
 SQRT_8LN2 = np.sqrt(8.0 * np.log(2.0))
@@ -90,9 +87,7 @@ PROGRESS_PRINT_INTERVAL = 200  # Print progress every N iterations (was 50)
 DERIV_STEP_MULTIPLIER = 1.00001
 
 
-# ============================================================================
 # VOIGT PROFILE COMPUTATION
-# ============================================================================
 
 @jit_decorator
 def voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
@@ -380,10 +375,7 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
     return jac
 
 
-# ============================================================================
-# ============================================================================
 # LEVENBERG-MARQUARDT WITH ADDITIVE DAMPING 
-# ============================================================================
 
 class Ps2dStyleLevenbergMarquardt:
     """
@@ -464,9 +456,7 @@ class Ps2dStyleLevenbergMarquardt:
 
         params = np.array(p0, dtype=np.float64)
 
-        # ═══════════════════════════════════════════════════════════════════
         # PARAMETER NORMALIZATION
-        # ═══════════════════════════════════════════════════════════════════
         # Scale all parameters to O(1) for numerical stability.
         # Improves Hessian condition number from ~10¹⁰ to ~10³-10⁴.
         #
@@ -477,7 +467,6 @@ class Ps2dStyleLevenbergMarquardt:
         #
         # All optimization happens in normalized space, then we transform
         # back to physical units at the end.
-        # ═══════════════════════════════════════════════════════════════════
 
         # Compute scales from initial parameter values (avoid division by zero)
         self.scales = np.maximum(np.abs(params), 1e-8)
@@ -631,9 +620,7 @@ class Ps2dStyleLevenbergMarquardt:
         except np.linalg.LinAlgError:
             covariance = np.eye(n_params) * np.inf
 
-        # ═══════════════════════════════════════════════════════════════════
         # DENORMALIZATION: Transform back to physical units
-        # ═══════════════════════════════════════════════════════════════════
         # Parameters: p_physical = p_norm * scales
         params_final = params * self.scales
 

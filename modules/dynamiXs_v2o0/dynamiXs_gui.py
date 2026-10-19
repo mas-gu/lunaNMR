@@ -77,9 +77,7 @@ OBSERVABLES = (('Height', 'height', 'peak_intensity_matrix.csv'),
                ('Volume', 'volume', 'peak_volume_matrix.csv'))
 
 
-# =============================================================================
 # LUNАНMR IMPORT HELPER
-# =============================================================================
 
 def _ensure_lunaNMR_path():
     """Ensure lunaNMR package is importable by adding its root to sys.path."""
@@ -89,9 +87,7 @@ def _ensure_lunaNMR_path():
         sys.path.insert(0, str(lunaNMR_root))
 
 
-# =============================================================================
 # MAIN APPLICATION WINDOW
-# =============================================================================
 
 class DynamiXsMainWindow(QMainWindow):
     """Main application window with navigation between analysis pages."""
@@ -240,9 +236,7 @@ class DynamiXsMainWindow(QMainWindow):
 
         return page
 
-    # -------------------------------------------------------------------------
     # Navigation Methods
-    # -------------------------------------------------------------------------
 
     def show_main_menu(self):
         """Show the main menu page."""
@@ -424,9 +418,7 @@ class DynamiXsMainWindow(QMainWindow):
                     setattr(page, attr, sd_refs[attr])
 
 
-# =============================================================================
 # BASE PAGE CLASS
-# =============================================================================
 
 def resolve_series_csv(batch_results):
     """Path to a series' series_analysis_tidy.csv for the Kd input.
@@ -704,9 +696,7 @@ class BasePage(QWidget):
         return self.save_run_btn
 
 
-# =============================================================================
 # DRAG-DROP WIDGETS FOR SERIES PICKER
-# =============================================================================
 
 class DraggableSeriesList(QListWidget):
     """List widget with drag support for series items."""
@@ -807,9 +797,7 @@ class DropTargetLabel(QLabel):
         event.ignore()
 
 
-# =============================================================================
 # T1/T2 FITTING PAGE
-# =============================================================================
 
 # Residue names are identifiers, read as text: a list named 3.0, 4.0, ... otherwise loads
 # as floats, and the T1rho -> T2 conversion, matching names as strings, fails on them.
@@ -914,9 +902,7 @@ class T1T2FittingPage(BasePage):
             display.setText(os.path.basename(path))
             display.setToolTip(path)
 
-    # =========================================================================
     # SERIES PICKER METHODS
-    # =========================================================================
 
     def _get_fitting_dataframe_from_series(self, series_name: str):
         """Get fitting DataFrame from BatchResults in memory.
@@ -2377,9 +2363,7 @@ class T1T2FittingPage(BasePage):
             self.results_text.appendPlainText(f"Error opening Fit Viewer: {e}")
 
 
-# =============================================================================
 # SPECTRAL DENSITY PAGE
-# =============================================================================
 
 class SpectralDensityPage(BasePage):
     """Spectral density analysis page."""
@@ -2782,9 +2766,7 @@ class SpectralDensityPage(BasePage):
         self._update_analysis_type()
 
 
-# =============================================================================
 # INTEGRATED ANALYSIS PAGE
-# =============================================================================
 
 class IntegratedAnalysisPage(BasePage):
     """Integrated Model Free Analysis - automated workflow from raw data."""
@@ -3170,9 +3152,7 @@ class IntegratedAnalysisPage(BasePage):
         setattr(self, f"{field_name}_file", filename)
         display_label.setText(os.path.basename(filename))
 
-    # =========================================================================
     # SERIES PICKER METHODS
-    # =========================================================================
 
     def _on_series_dropped(self, field_name: str, series_name: str, csv_path: str):
         """Handle a series being dropped on a data field.

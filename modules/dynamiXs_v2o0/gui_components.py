@@ -39,9 +39,7 @@ from constants import (
 )
 
 
-# =============================================================================
 # STYLESHEET LOADING
-# =============================================================================
 
 def load_stylesheet(app: QApplication) -> bool:
     """
@@ -64,9 +62,7 @@ def load_stylesheet(app: QApplication) -> bool:
         return False
 
 
-# =============================================================================
 # FONT UTILITIES
-# =============================================================================
 
 def get_font(size: int = FONT_SIZE_BODY, bold: bool = False) -> QFont:
     """
@@ -98,9 +94,7 @@ def get_monospace_font(size: int = FONT_SIZE_MONOSPACE) -> QFont:
     return QFont("Courier New", size)
 
 
-# =============================================================================
 # CUSTOM COMPONENTS
-# =============================================================================
 
 class CollapsibleGroupBox(QFrame):
     """
@@ -237,9 +231,7 @@ class StyledGroupBox(QGroupBox):
         self.setFont(get_font(FONT_SIZE_SECTION_LABEL, bold=True))
 
 
-# =============================================================================
 # BUTTON FACTORIES
-# =============================================================================
 
 def create_primary_button(
     text: str,
@@ -440,9 +432,7 @@ def create_icon_button(
     return btn
 
 
-# =============================================================================
 # LABEL FACTORIES
-# =============================================================================
 
 def create_label(
     text: str,
@@ -511,9 +501,7 @@ def create_secondary_label(text: str) -> QLabel:
     return create_label(text, "secondary", FONT_SIZE_SMALL)
 
 
-# =============================================================================
 # INPUT FACTORIES
-# =============================================================================
 
 def create_line_edit(
     text: str = "",
@@ -752,9 +740,7 @@ def create_radio_button(
     return radio
 
 
-# =============================================================================
 # LAYOUT UTILITIES
-# =============================================================================
 
 def create_h_layout(
     spacing: int = SPACING_SM,
@@ -836,9 +822,7 @@ def create_scroll_area(widget: QWidget) -> QScrollArea:
     return scroll
 
 
-# =============================================================================
 # DIALOG UTILITIES
-# =============================================================================
 
 def show_info(parent: QWidget, title: str, message: str):
     """Show an information message box."""
@@ -869,9 +853,7 @@ def ask_yes_no(parent: QWidget, title: str, message: str) -> bool:
     return result == QMessageBox.Yes
 
 
-# =============================================================================
 # NAMING A SAVED ANALYSIS
-# =============================================================================
 
 def unique_name(base: str, existing) -> str:
     """`base`, or the first of base_2, base_3, ... not already in `existing`."""
@@ -985,9 +967,7 @@ def open_directory_dialog(
     return QFileDialog.getExistingDirectory(parent, title, directory)
 
 
-# =============================================================================
 # SPECTRA INPUT WIDGET (LunaNMR Integration)
-# =============================================================================
 
 class SpectraInputWidget(QFrame):
     """
@@ -1485,9 +1465,7 @@ class SpectraInputWidget(QFrame):
         if experiment_type in delays_dict:
             del delays_dict[experiment_type]
 
-    # -------------------------------------------------------------------------
     # Public API
-    # -------------------------------------------------------------------------
 
     def get_peak_list_path(self) -> str:
         """Get the selected peak list path."""

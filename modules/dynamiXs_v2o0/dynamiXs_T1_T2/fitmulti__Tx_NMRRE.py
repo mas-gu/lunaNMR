@@ -405,9 +405,7 @@ def main():
     Main function with configurable file handling and multiprocessing
     """
 
-    # ========================
     # CONFIGURATION SECTION
-    # ========================
 
     # Input file configuration
     input_csv_file = "T2_data_700.csv"  # Input CSV file path
@@ -433,9 +431,7 @@ def main():
     # Multiprocessing configuration
     n_processes = None  # Use None for automatic detection (80% of cores)
 
-    # ========================
     # END CONFIGURATION
-    # ========================
 
     # Validate input file exists
     if not os.path.exists(input_csv_file):

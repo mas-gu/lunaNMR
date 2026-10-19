@@ -99,9 +99,7 @@ _SPIN_STYLE = f"""
 """
 
 
-# ---------------------------------------------------------------------------
 # Data Model
-# ---------------------------------------------------------------------------
 
 @dataclass
 class InspectorPeak:
@@ -220,9 +218,7 @@ _ROLE_ID = Qt.UserRole        # stores group_id / spectrum_id
 _ROLE_TYPE = Qt.UserRole + 1  # stores ITEM_GROUP / ITEM_SPECTRUM / ITEM_PEAKLIST
 
 
-# ---------------------------------------------------------------------------
 # Spectrum row widget (used as a tree item widget)
-# ---------------------------------------------------------------------------
 
 class SpectrumRowWidget(QWidget):
     """Compact row for one spectrum: visibility checkbox, color swatch, name, peak-list button."""
@@ -279,9 +275,7 @@ class SpectrumRowWidget(QWidget):
             self.color_changed.emit(self._spectrum_id, self._current_color)
 
 
-# ---------------------------------------------------------------------------
 # Drag-aware tree widget
-# ---------------------------------------------------------------------------
 
 class _LibraryTree(QTreeWidget):
     """QTreeWidget that emits spectrum_moved when a spectrum is dropped onto a different group."""
@@ -327,9 +321,7 @@ class _LibraryTree(QTreeWidget):
         event.accept()
 
 
-# ---------------------------------------------------------------------------
 # Spectrum Library Panel
-# ---------------------------------------------------------------------------
 
 class SpectrumLibraryPanel(QWidget):
     """Left panel: groups/spectra tree with load controls and contour settings."""
@@ -595,9 +587,7 @@ class SpectrumLibraryPanel(QWidget):
         layout.addLayout(btn_row)
         return group
 
-    # ------------------------------------------------------------------
     # Public API — called by SpectralInspector
-    # ------------------------------------------------------------------
 
     def add_group(self, group: InspectorGroup) -> QTreeWidgetItem:
         """Add a group node to the tree and return it."""
@@ -684,9 +674,7 @@ class SpectrumLibraryPanel(QWidget):
                     group_item.removeChild(child)
                     return
 
-    # ------------------------------------------------------------------
     # Slot handlers
-    # ------------------------------------------------------------------
 
     def _on_selection_changed(self, current, previous):
         if current is None:
@@ -831,9 +819,7 @@ class SpectrumLibraryPanel(QWidget):
         self._shift_n_spin.setValue(0.0)
 
 
-# ---------------------------------------------------------------------------
 # Peak list file parsing
-# ---------------------------------------------------------------------------
 
 def _parse_peak_list_file(file_path: str) -> List[dict]:
     """Parse a peak list file and return a list of dicts.
@@ -856,9 +842,7 @@ def _parse_peak_list_file(file_path: str) -> List[dict]:
         return df.to_dict('records')
 
 
-# ---------------------------------------------------------------------------
 # Inspector Canvas
-# ---------------------------------------------------------------------------
 
 class InspectorCanvas(QWidget):
     """Overlay canvas: draws N spectra as contour plots with optional peak markers."""
@@ -912,9 +896,7 @@ class InspectorCanvas(QWidget):
 
         self._show_empty_state()
 
-    # ------------------------------------------------------------------
     # Public API
-    # ------------------------------------------------------------------
 
     def set_active_spectrum(self, spectrum_id: Optional[str]):
         """Set which spectrum receives new peaks from Shift+click."""
@@ -930,9 +912,7 @@ class InspectorCanvas(QWidget):
         self._has_plotted = False
         self.update_plot(self._current_spectra)
 
-    # ------------------------------------------------------------------
     # Zoom box (middle-drag) — reshape the view to any x/y aspect
-    # ------------------------------------------------------------------
 
     def _clear_rubberband(self):
         if self._rubberband is not None:
@@ -972,9 +952,7 @@ class InspectorCanvas(QWidget):
         self._has_plotted = True
         self._plot.canvas.draw_idle()
 
-    # ------------------------------------------------------------------
     # 1D traces (cross-sections) — follow the cursor, drawn in each spectrum's color
-    # ------------------------------------------------------------------
 
     def set_traces(self, horizontal=None, vertical=None):
         """Turn the horizontal and/or vertical cross-section traces on or off."""
@@ -1096,9 +1074,7 @@ class InspectorCanvas(QWidget):
             line.set_visible(False)
         self._plot.canvas.draw_idle()
 
-    # ------------------------------------------------------------------
     # PDF export
-    # ------------------------------------------------------------------
 
     def export_pdf(self, file_path: str):
         """Save the current view to a vector PDF with editable (TrueType) text.
@@ -1254,9 +1230,7 @@ class InspectorCanvas(QWidget):
             current *= increment
         return levels
 
-    # ------------------------------------------------------------------
     # Peak interaction callbacks (wired to NMRNavigationHandler)
-    # ------------------------------------------------------------------
 
     def _on_nav_peak_select(self, x: float, y: float):
         """Middle-click: select the nearest peak within threshold."""
@@ -1302,9 +1276,7 @@ class InspectorCanvas(QWidget):
         self._plot.axes.autoscale()
         self._plot.refresh()
 
-    # ------------------------------------------------------------------
     # Selection highlight
-    # ------------------------------------------------------------------
 
     def _draw_selection_highlight(self):
         """Draw a dashed ellipse around the selected peak."""
@@ -1334,9 +1306,7 @@ class InspectorCanvas(QWidget):
                 pass
             self._highlight = None
 
-    # ------------------------------------------------------------------
     # Peak lookup
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _find_nearest_peak_in_spectra(
@@ -1366,9 +1336,7 @@ class InspectorCanvas(QWidget):
                     best = (peak, spec.spectrum_id)
         return best
 
-    # ------------------------------------------------------------------
     # Private helpers
-    # ------------------------------------------------------------------
 
     def _show_empty_state(self):
         self._plot.axes.text(
@@ -1380,9 +1348,7 @@ class InspectorCanvas(QWidget):
         )
 
 
-# ---------------------------------------------------------------------------
 # Spectral Inspector Window
-# ---------------------------------------------------------------------------
 
 class SpectralInspector(BaseWindow):
     """Standalone window for visual inspection and comparison of NMR spectra.
@@ -1420,9 +1386,7 @@ class SpectralInspector(BaseWindow):
         self._build_ui()
         self.update_status('Spectral Inspector ready — load spectra to begin')
 
-    # ------------------------------------------------------------------
     # UI construction
-    # ------------------------------------------------------------------
 
     def _build_ui(self):
         """Assemble the top-level layout: toolbar + left panel + canvas."""
@@ -1486,9 +1450,7 @@ class SpectralInspector(BaseWindow):
         self._top_toolbar = tb
         self.addToolBar(Qt.TopToolBarArea, tb)
 
-    # ------------------------------------------------------------------
     # Data model helpers
-    # ------------------------------------------------------------------
 
     def _next_color(self) -> str:
         """Return the next color from the palette, cycling as needed."""
@@ -1508,9 +1470,7 @@ class SpectralInspector(BaseWindow):
         """Return flat list of all spectra across all groups."""
         return [s for g in self.groups for s in g.spectra]
 
-    # ------------------------------------------------------------------
     # State serialization (project persistence + session close/reopen)
-    # ------------------------------------------------------------------
 
     STATE_SCHEMA = 1
 
@@ -1762,9 +1722,7 @@ class SpectralInspector(BaseWindow):
             logger.error(f"Error loading {file_path}: {e}")
             return None
 
-    # ------------------------------------------------------------------
     # Slot handlers (connected to SpectrumLibraryPanel signals)
-    # ------------------------------------------------------------------
 
     def _refresh_canvas(self):
         """Redraw the overlay canvas."""
@@ -2067,9 +2025,7 @@ class SpectralInspector(BaseWindow):
         self._refresh_canvas()
         self.update_status(f'Reset shift for {spec.display_name} ({count} peaks restored)')
 
-    # ------------------------------------------------------------------
     # Toolbar button management
-    # ------------------------------------------------------------------
 
     def _add_toolbar_spectrum_button(self, spec: InspectorSpectrum):
         """Add a visibility toggle button for this spectrum to the top toolbar."""
@@ -2143,9 +2099,7 @@ class SpectralInspector(BaseWindow):
         dlg.exec()
         self._refresh_canvas()
 
-# ---------------------------------------------------------------------------
 # Per-spectrum contour settings dialog
-# ---------------------------------------------------------------------------
 
 class SpectrumContourDialog:
     """Small dialog to edit contour display settings for one spectrum."""
@@ -2199,9 +2153,7 @@ class SpectrumContourDialog:
         self._spec.contour_increment = self._incr_spin.value()
 
 
-# ---------------------------------------------------------------------------
 # Group properties dialog
-# ---------------------------------------------------------------------------
 
 class GroupPropertiesDialog:
     """Dialog showing all spectra in a group with editable properties and propagation."""
@@ -2349,9 +2301,7 @@ class GroupPropertiesDialog:
             )
 
 
-# ---------------------------------------------------------------------------
 # Contour settings propagation dialog
-# ---------------------------------------------------------------------------
 
 # Contour fields that can be propagated, in display order
 _PROPAGATE_FIELDS = (

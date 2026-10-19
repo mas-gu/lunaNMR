@@ -8,9 +8,7 @@ import numpy as np
 from typing import Dict, List, Tuple
 
 
-# ============================================================================
 # MATHEMATICAL CONSTANTS 
-# ============================================================================
 
 SQRT_2 = 1.4142135624                    # √2
 SQRT_2PI = np.sqrt(2.0 * np.pi)         # √(2π)
@@ -30,9 +28,6 @@ CONV_TOL = 1e-6
 NPAR_VOIGT_1D = 4  # pos, lw_lor, lw_gauss, intensity (per peak) - NO baseline
 NFIX_1D = 3        # pos, lw_lor, lw_gauss (fixed shape parameters)
 
-
-# ============================================================================
-# ============================================================================
 
 class Ps2dLinewidthEstimator:
     """
@@ -292,8 +287,6 @@ class Ps2dLinewidthEstimator:
         return defaults['lw_lorentz'], defaults['lw_gauss']
 
 
-# ============================================================================
-# ============================================================================
 # This global instance enables linewidth learning: fitted peaks become templates
 _global_linewidth_estimator = Ps2dLinewidthEstimator()
 

@@ -54,9 +54,7 @@ class KdTitrationDialog(BaseDialog):
         """BasePage back-button target: this module has one page, so close it."""
         self.close()
 
-    # -------------------------------------------------------------------------
     # State management (for project save/load)
-    # -------------------------------------------------------------------------
 
     def ensure_current_saved(self):
         """Auto-capture the fit currently on screen into the project's saved Kd fits

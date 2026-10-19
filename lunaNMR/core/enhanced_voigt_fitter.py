@@ -177,9 +177,7 @@ class EnhancedVoigtFitter:
         # RETURN DUMMY VALUE - NOT USED ANYMORE
         return 1.0  # No multiplier needed - PS2D uses fixed radF1/radF2
 
-    # =====================================
     # AUTOMATED FITTING METHODS (Priority 1 & 2)
-    # =====================================
 
     def fit_with_consensus(self, x_data, y_data, nucleus_type='default', use_simplified=True):
         """

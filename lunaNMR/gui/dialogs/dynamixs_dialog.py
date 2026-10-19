@@ -252,9 +252,7 @@ class DynamiXsDialog(BaseDialog):
 
         return page
 
-    # -------------------------------------------------------------------------
     # Navigation Methods (same interface as DynamiXsMainWindow)
-    # -------------------------------------------------------------------------
 
     def show_main_menu(self):
         """Show the main menu page."""
@@ -413,9 +411,7 @@ class DynamiXsDialog(BaseDialog):
             if self.dir_label:
                 self.dir_label.setText(f"Working Directory: {self.current_dir}")
 
-    # -------------------------------------------------------------------------
     # State Management (for project save/load)
-    # -------------------------------------------------------------------------
 
     def get_state(self) -> Dict[str, Any]:
         """Collect state from all pages for project save.
@@ -511,9 +507,7 @@ class DynamiXsDialog(BaseDialog):
         if 'hetnoe' in refs:
             self.hetnoe_page.set_file_refs(refs['hetnoe'])
 
-    # -------------------------------------------------------------------------
     # Named analyses (project save/reopen, parity with the Kd module)
-    # -------------------------------------------------------------------------
 
     _ANALYSIS_TYPE_LABELS = {
         't1t2': 'T1T2', 'methyl_t2': 'methylT2',
@@ -648,9 +642,7 @@ class DynamiXsDialog(BaseDialog):
             if page_key:
                 self._run_names[page_key] = name
 
-    # -------------------------------------------------------------------------
     # Methyl T2 Page State Helpers
-    # -------------------------------------------------------------------------
 
     def _get_methyl_t2_state(self) -> Dict[str, Any]:
         """Extract state from Methyl T2 fitting page using session state API."""
@@ -681,9 +673,7 @@ class DynamiXsDialog(BaseDialog):
             if hasattr(page, 'file_drop'):
                 page.file_drop.setText(os.path.basename(refs['input_file']))
 
-    # -------------------------------------------------------------------------
     # T1/T2 Page State Helpers
-    # -------------------------------------------------------------------------
 
     def _get_t1t2_state(self) -> Dict[str, Any]:
         """Extract state from T1/T2 fitting page using session state API."""
@@ -763,9 +753,7 @@ class DynamiXsDialog(BaseDialog):
             if hasattr(page, 'peak_list_display'):
                 page.peak_list_display.setText(os.path.basename(refs['peak_list_file']))
 
-    # -------------------------------------------------------------------------
     # Spectral Density Page State Helpers
-    # -------------------------------------------------------------------------
 
     def _get_spectral_state(self) -> Dict[str, Any]:
         """Extract state from Spectral Density page using session state API."""
@@ -807,9 +795,7 @@ class DynamiXsDialog(BaseDialog):
                 import os
                 page.file2_display.setText(os.path.basename(refs['input_file2']))
 
-    # -------------------------------------------------------------------------
     # Integrated Analysis Page State Helpers
-    # -------------------------------------------------------------------------
 
     def _get_integrated_state(self) -> Dict[str, Any]:
         """Extract state from Integrated Analysis page using session state API."""
@@ -892,9 +878,7 @@ class DynamiXsDialog(BaseDialog):
             if hasattr(page, 'field2_noe_unsat_display'):
                 page.field2_noe_unsat_display.setText(os.path.basename(refs['field2_noe_unsat']))
 
-    # -------------------------------------------------------------------------
     # Result Files Management
-    # -------------------------------------------------------------------------
 
     def get_output_directories(self) -> Dict[str, str]:
         """Get output directories that may contain result files.
@@ -965,9 +949,7 @@ class DynamiXsDialog(BaseDialog):
             if hasattr(self.integrated_page, 'outdir_display'):
                 self.integrated_page.outdir_display.setText(os.path.basename(output_dir))
 
-    # -------------------------------------------------------------------------
     # Dialog Event Handlers
-    # -------------------------------------------------------------------------
 
     def closeEvent(self, event):
         """Save state when dialog closes."""
@@ -976,9 +958,7 @@ class DynamiXsDialog(BaseDialog):
             self.main_window.dynamixs_file_refs = self.get_file_refs()
         super().closeEvent(event)
 
-    # -------------------------------------------------------------------------
     # Inspect Peak Integration (FitViewer → MultiSpectrumViewer)
-    # -------------------------------------------------------------------------
 
     def connect_fit_viewer_signals(self, fit_viewer):
         """Connect FitViewer's inspect_peak_requested signal to handler.

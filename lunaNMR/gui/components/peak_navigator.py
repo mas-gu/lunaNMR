@@ -328,9 +328,7 @@ class PeakNavigator(QWidget):
 
         return btn
 
-    # ============================================================================
     # Event Handlers
-    # ============================================================================
 
     def _on_peak_type_changed(self, text: str):
         """Handle peak type dropdown selection change."""
@@ -678,9 +676,7 @@ class PeakNavigator(QWidget):
                 f"Failed to export peaks:\n{str(e)}"
             )
 
-    # ============================================================================
     # Public API
-    # ============================================================================
 
     def load_reference_peaks(self, peak_data: Any):
         """Load reference peaks data.
@@ -941,9 +937,7 @@ class PeakNavigator(QWidget):
         # Refresh display
         self.refresh_peak_list()
 
-    # ============================================================================
     # Helper Methods
-    # ============================================================================
 
     def _get_current_peak_list(self) -> List[List[Any]]:
         """Get currently active peak list."""

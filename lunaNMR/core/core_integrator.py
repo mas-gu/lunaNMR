@@ -2105,13 +2105,10 @@ class VoigtIntegrator(BaseIntegrator):
                              getattr(self, 'noise_level', None),
                              reach=(reach_f1 / f1_step, reach_f2 / f2_step))
 
-            # ====================================================================
             # HEAVY OVERLAP AND TOO-CLOSE DETECTION (DECOUPLED)
-            # ====================================================================
             # Two independent concepts:
             # 1. HEAVY OVERLAP: 1D cross-sections contaminated → use typical linewidths
             # 2. TOO CLOSE: Spectral ambiguity → apply L/G and intensity constraints
-            # ====================================================================
             config = get_ps2d_config()
             heavily_overlapping = False  # Flag for linewidth estimation strategy
             tooclose = False             # Flag for L/G and intensity constraints
@@ -2140,12 +2137,9 @@ class VoigtIntegrator(BaseIntegrator):
                 if heavily_overlapping and tooclose:
                     break
 
-            # ====================================================================
             # REFERENCE LINEWIDTH REUSE (Per-Peak)
-            # ====================================================================
             # If reference linewidths provided (from spectrum 1), use them directly
             # instead of re-estimating. This ensures consistent linewidths across series.
-            # ====================================================================
             use_reference_linewidths = False
             if reference_linewidths:
                 # Get assignment for this peak
@@ -2177,13 +2171,10 @@ class VoigtIntegrator(BaseIntegrator):
                     use_reference_linewidths = True  # Still skip normal estimation
                     log_info(f"Peak {peak_assignment}: using median statistics fallback")
 
-            # ====================================================================
             # LINEWIDTH ESTIMATION FOR CLUSTER PEAKS
-            # ====================================================================
             # For ALL peaks in multi-peak clusters (PASS 2), use learned statistics
             # from isolated peaks (PASS 1) when available. This avoids contamination
             # from neighbor peaks in 1D cross-section measurements.
-            # ====================================================================
             if use_reference_linewidths:
                 pass  # Already set linewidths from reference above
             elif hasattr(self, 'spectrum_statistics') and self.spectrum_statistics:
@@ -2209,9 +2200,7 @@ class VoigtIntegrator(BaseIntegrator):
                 fwhm_f1 = self._estimate_fwhm_from_slice(f1_cross, region['f1_ppm'], y_ppm)
                 fwhm_f2 = self._estimate_fwhm_from_slice(f2_cross, region['f2_ppm'], x_ppm)
 
-            # ====================================================================
             # CONVERT FWHM TO VOIGT COMPONENTS
-            # ====================================================================
             # Skip if we already have reference linewidths set directly
             if not use_reference_linewidths:
                 # The measured FWHM is split across the two components rather than
@@ -2464,9 +2453,7 @@ class VoigtIntegrator(BaseIntegrator):
         """
         log_progress(f"Fitting Voigt profiles for peak {assignment} at ({peak_x_ppm:.3f}, {peak_y_ppm:.1f}) ppm")
 
-        # ====================================================================
         # 2D SIMULTANEOUS FITTING: Always use 2D fitting for all peaks
-        # ====================================================================
         # All peaks are fitted using 2D simultaneous multi-peak Voigt fitting.
         # Isolated peaks are treated as single-peak groups.
         if PS2D_2D_FITTER_AVAILABLE and all_peaks_context is not None:

@@ -3,9 +3,7 @@
 # ABOUTME: and usable_points: which points of a series carry a measurement of an observable.
 import math
 
-# ---------------------------------------------------------------------------
 # The quality label of a fit
-# ---------------------------------------------------------------------------
 # A fit this far above the noise is a measurement whatever its R-squared says.
 MEASURED_SNR = 5.0
 
@@ -46,9 +44,7 @@ def fit_quality_label(r_squared, success=True, near_noise=False, snr=None):
     return 'Failed'
 
 
-# ---------------------------------------------------------------------------
 # Which points of a series carry a measurement
-# ---------------------------------------------------------------------------
 # Below this many sigma a peak is not detected. The same floor holdPositionsAtNoise
 # uses; 3 sigma is the usual bar for calling a signal present at all.
 DETECTION_SIGMA_FLOOR = 3.0

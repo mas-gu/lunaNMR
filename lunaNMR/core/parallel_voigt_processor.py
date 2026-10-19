@@ -741,12 +741,9 @@ class ParallelVoigtProcessor:
                 lw_f1_total = lw_lor_f1 + lw_gau_f1
                 lw_f2_total = lw_lor_f2 + lw_gau_f2
 
-                # ================================================================
                 # NUCLEUS-ADAPTIVE SANITY CHECKS
-                # ================================================================
                 # Use config thresholds instead of hardcoded values
                 # This ensures 13C peaks (min 0.025 ppm) are not rejected
-                # ================================================================
                 from lunaNMR.core.ps2d_config import get_ps2d_config
                 config = get_ps2d_config()
 
@@ -762,14 +759,11 @@ class ParallelVoigtProcessor:
                     if lw_gau_f2 > min_gau_f2:
                         linewidth_stats['lg_f2'].append(lw_lor_f2 / lw_gau_f2)
 
-        # ================================================================
         # SAMPLE SIZE CHECK AND ADAPTIVE ALPHA
-        # ================================================================
         # MAD reliability depends on sample size:
         #   n < 3:  Unreliable, return None (fall back to config)
         #   n < 10: Use conservative alpha=7 (wider bounds)
         #   n >= 10: Use standard alpha=5
-        # ================================================================
         MIN_SAMPLES = 3
         RELIABLE_SAMPLES = 10
 

@@ -401,9 +401,7 @@ class ProjectManager:
         """
         self.main_window = main_window
 
-    # =========================================================================
     # SAVE OPERATIONS
-    # =========================================================================
 
     def save_project(self, project_path: Path,
                      embed_region_data: bool = False) -> Tuple[bool, Dict[str, Any]]:
@@ -697,9 +695,7 @@ class ProjectManager:
                 arrays_to_save[key] = np.asarray(value)
         np.savez_compressed(filepath, **arrays_to_save)
 
-    # =========================================================================
     # LOAD OPERATIONS
-    # =========================================================================
 
     def load_project(self, project_path: Path) -> Tuple[bool, List[str], Dict[str, Any]]:
         """Load project state from bundle directory.
@@ -985,9 +981,7 @@ class ProjectManager:
             if isinstance(result, dict):
                 rebuild_fit_arrays(result, integrator)
 
-    # =========================================================================
     # UTILITY METHODS
-    # =========================================================================
 
     def _collect_gui_params(self) -> Dict[str, Any]:
         """Extract all GUI parameters from main_window as dict."""
@@ -1057,9 +1051,7 @@ class ProjectManager:
         # A session with batch_results but no saved_series
         return getattr(self.main_window, 'batch_results', None) is not None
 
-    # =========================================================================
     # SERIES RESULTS SAVE/LOAD
-    # =========================================================================
 
     def _save_series_results(self, bundle_path: Path, embed_region_data: bool = False) -> bool:
         """Save series integration results (multiple series) to JSON.
@@ -1271,9 +1263,7 @@ class ProjectManager:
                 deserialized[key] = value
         return deserialized
 
-    # =========================================================================
     # DYNAMIXS STATE SAVE/LOAD
-    # =========================================================================
 
     def _save_dynamixs_state(self, bundle_path: Path) -> bool:
         """Save the named DynamiXs analyses into the bundle (new layout).
@@ -1459,9 +1449,7 @@ class ProjectManager:
         analyses = getattr(self.main_window, 'dynamixs_analyses', None) or {}
         return {'analyses': sorted(analyses)} if analyses else {}
 
-    # =========================================================================
     # KD / TITRATION STATE SAVE/LOAD
-    # =========================================================================
 
     def _save_kd_state(self, bundle_path: Path) -> bool:
         """Save the named Kd analyses into the bundle.
@@ -1546,9 +1534,7 @@ class ProjectManager:
         logger.info(f"Loaded {len(loaded)} Kd analysis(es) from {analyses_dir}")
         return True
 
-    # =========================================================================
     # BUNDLE INVENTORY (project browser)
-    # =========================================================================
 
     def _path_size(self, path: Path) -> int:
         """Total size in bytes of a file or directory (recursive)."""

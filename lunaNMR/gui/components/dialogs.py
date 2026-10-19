@@ -21,9 +21,7 @@ from lunaNMR.gui.styles.design_system import (
 logger = logging.getLogger(__name__)
 
 
-# ============================================================================
 # SIMPLE MESSAGE DIALOGS (QMessageBox wrappers)
-# ============================================================================
 
 def show_question(
     parent=None,
@@ -226,9 +224,7 @@ def show_info(
     msg_box.exec()
 
 
-# ============================================================================
 # CUSTOM DIALOGS (BaseDialog subclasses)
-# ============================================================================
 
 class ConfirmationDialog(BaseDialog):
     """Custom confirmation dialog with optional checkbox.
@@ -449,9 +445,7 @@ class InputDialog(BaseDialog):
         return self._input.text()
 
 
-# ============================================================================
 # CONVENIENCE FUNCTIONS
-# ============================================================================
 
 def ask_yes_no(
     parent=None,

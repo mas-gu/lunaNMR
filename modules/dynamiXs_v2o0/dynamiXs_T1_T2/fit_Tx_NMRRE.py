@@ -696,9 +696,7 @@ def main():
     Main function with configurable file handling
     """
     
-    # ========================
     # CONFIGURATION SECTION
-    # ========================
     
     # Input file configuration
     input_csv_file = "T1_data_600.csv"  # Input CSV file path
@@ -721,9 +719,7 @@ def main():
     # Plot configuration
     n_plots_per_figure = 20  # Number of plots per PDF page
 
-    # ========================
     # END CONFIGURATION
-    # ========================
 
     # Validate input file exists
     if not os.path.exists(input_csv_file):

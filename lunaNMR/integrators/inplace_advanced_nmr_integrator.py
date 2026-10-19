@@ -9,9 +9,7 @@ ppm axes, nucleus detection and noise estimate from this class, and its default
 attributes.
 """
 
-# ========================================================================
 # DEFAULTS OF THE INTEGRATOR'S ATTRIBUTES
-# ========================================================================
 
 # Reference-based detection parameters
 USE_REFERENCE_DETECTION = True                      # Enable reference-based peak detection
