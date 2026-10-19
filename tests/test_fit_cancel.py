@@ -112,9 +112,13 @@ def test_a_stopped_spectrum_fit_raises_instead_of_reporting_a_failure(integrator
 
 def test_a_stop_while_the_pool_starts_lands_at_once(integrator):
     """Starting the pool waits on a spawned process importing lunaNMR, seconds on a busy
-    machine; a stop set as the first pass is handed out does not wait for it."""
+    machine; a stop set as the first pass is handed out does not wait for it. The bound is
+    relative to a whole pool fit under the same load, which includes that start."""
     from lunaNMR.utils.cancellation import Cancelled
     from lunaNMR.utils.output_manager import OutputManager
+    start = time.monotonic()
+    _fit(integrator, in_process=False)
+    bound = max(0.5, 0.2 * (time.monotonic() - start))
     stop = threading.Event()
     set_at = []
 
@@ -130,7 +134,7 @@ def test_a_stop_while_the_pool_starts_lands_at_once(integrator):
     finally:
         OutputManager.set_callback(None)
 
-    assert time.monotonic() - set_at[0] < 0.5
+    assert time.monotonic() - set_at[0] < bound
 
 
 @MODES

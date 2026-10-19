@@ -2260,17 +2260,21 @@ class MultiSpectrumViewerDialog(BaseDialog):
     _PICK_REACH_F1 = 0.75
 
     def _find_nearest_overlay_peak(self, spec_idx: int, x_ppm: float, y_ppm: float):
-        """Nearest fitted peak in a spectrum, in linewidths of the PS2D config its series
-        recorded (an indirect ppm does not count as a 1H ppm), or None if out of reach."""
-        from lunaNMR.core.ps2d_config import (applied_ps2d_config, distance_in_linewidths,
-                                              linewidths_reaching)
+        """Nearest fitted peak in a spectrum, or None if none is in reach. In reach is
+        within the _PICK_REACH ppm ellipse of the click; among those, the nearest in
+        linewidths of the PS2D config its series recorded is taken, so an indirect ppm does
+        not count as a 1H ppm."""
+        from lunaNMR.core.ps2d_config import applied_ps2d_config, distance_in_linewidths
         fitted_peaks = self._get_fitted_peaks(spec_idx)
         best = None
+        best_d = float('inf')
         with applied_ps2d_config(self._recorded_fit_settings(spec_idx)[0]):
-            best_d = linewidths_reaching(self._PICK_REACH_F2, self._PICK_REACH_F1)
             for i, peak in enumerate(fitted_peaks):
                 cx, cy = self._peak_center(peak)
                 if cx is None:
+                    continue
+                if (((cx - x_ppm) / self._PICK_REACH_F2) ** 2
+                        + ((cy - y_ppm) / self._PICK_REACH_F1) ** 2) >= 1.0:
                     continue
                 d = distance_in_linewidths(cx - x_ppm, cy - y_ppm)
                 if d < best_d:

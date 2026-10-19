@@ -69,10 +69,12 @@ class TestTheMainWindow:
         x, y = _listed(window, '36AspH')
         assert _middle_click(window, x + dx, y + dy) == '36AspH'
 
-    @pytest.mark.parametrize("dx", [0.16, -0.16])
-    def test_a_click_beyond_the_reach_selects_nothing(self, window, dx):
+    @pytest.mark.parametrize("dx, dy", [(0.16, 0.0), (-0.16, 0.0), (0.0, 0.5), (0.0, -0.5)])
+    def test_a_click_beyond_the_reach_selects_nothing(self, window, dx, dy):
+        """The reach stays the 0.15 ppm it was in both dimensions: in 15N linewidths it
+        would be 1.5 ppm, and a Ctrl+click delete in empty space would find a peak."""
         x, y = _listed(window, '36AspH')
-        assert _middle_click(window, x + dx, y) is None
+        assert _middle_click(window, x + dx, y + dy) is None
 
 
 @pytest.fixture
@@ -106,3 +108,8 @@ class TestTheOverlayViewer:
     def test_a_click_that_reached_a_peak_in_ppm_still_does(self, overlay):
         x, y = _fitted(overlay, '278_cg2_D')
         assert _overlay_middle_click(overlay, x - 0.07, y) == '278_cg2_D'
+
+    def test_a_click_beyond_the_ppm_reach_selects_nothing(self, overlay):
+        """0.075 ppm 1H / 0.75 ppm indirect, whatever the nucleus."""
+        x, y = _fitted(overlay, '278_cg2_D')
+        assert _overlay_middle_click(overlay, x - 0.15, y) is None
