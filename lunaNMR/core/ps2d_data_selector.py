@@ -21,7 +21,6 @@ fixed elliptical window selection.
 import numpy as np
 from typing import Dict
 
-# Import centralized configuration
 from .ps2d_config import get_ps2d_config
 
 
@@ -50,7 +49,6 @@ class Ps2dDataSelector:
         # F2 = direct dimension (horizontal) = 1H in HSQC
         # F3 = 3rd dimension (for 3D spectra)
 
-        # Use centralized configuration
         if config is None:
             config = get_ps2d_config()
 
@@ -115,7 +113,6 @@ class Ps2dDataSelector:
         radius_squared = ((x_data - peak_pos) / radius_ppm) ** 2
         mask = radius_squared <= 1.0
 
-        # Select data inside ellipse
         x_selected = x_data[mask]
         y_selected = y_data[mask]
 
@@ -220,7 +217,6 @@ def select_data_2d_for_overlap_group(f1_data: np.ndarray,
         'radF2_used': radF2 value used
     """
 
-    # Use centralized configuration if radF1/radF2 not specified
     if radF1 is None or radF2 is None:
         if config is None:
             config = get_ps2d_config()
@@ -238,7 +234,6 @@ def select_data_2d_for_overlap_group(f1_data: np.ndarray,
             radF1 = radF1 * scale_factor
             radF2 = radF2 * scale_factor
 
-    # Flatten inputs if needed
     f1_flat = f1_data.ravel()
     f2_flat = f2_data.ravel()
     intensity_flat = intensity.ravel()
@@ -252,7 +247,6 @@ def select_data_2d_for_overlap_group(f1_data: np.ndarray,
         point_f1 = f1_flat[i]
         point_f2 = f2_flat[i]
 
-        # Check against all peaks in overlap group
         for peak_f1, peak_f2 in peak_positions:
             # Elliptical boundary test
             radius_squared = ((point_f1 - peak_f1) / radF1) ** 2 + \
@@ -263,7 +257,6 @@ def select_data_2d_for_overlap_group(f1_data: np.ndarray,
                 mask[i] = True
                 break  # CRITICAL: "break" prevents duplicate counting (line 1017)
 
-    # Extract selected data
     f1_selected = f1_flat[mask]
     f2_selected = f2_flat[mask]
     intensity_selected = intensity_flat[mask]
