@@ -22,7 +22,6 @@ from datetime import datetime
 # Import lunaNMR core components (READ-ONLY usage)
 try:
     from ..core.core_integrator import EnhancedVoigtIntegrator
-    from ..core.enhanced_voigt_fitter import EnhancedVoigtFitter
     CORE_AVAILABLE = True
 except ImportError:
     CORE_AVAILABLE = False
@@ -685,33 +684,6 @@ class BatchProcessor:
         self.logger.info(f"\nSuccess rate: {success_rate:.1f}%")
         self.logger.info("="*60)
 
-    def _get_nucleus_parameters(self, nucleus_type: str) -> Dict[str, Any]:
-        """
-        Get processing parameters for a specific nucleus type.
-
-        Args:
-            nucleus_type: Type of nucleus ('15N1H', '13C1H', etc.)
-
-        Returns:
-            Dictionary with nucleus-specific parameters
-        """
-        # Get S/N threshold for this nucleus type
-        sn_thresholds = self.config.get('sn_thresholds', {})
-        sn_threshold = sn_thresholds.get(nucleus_type, sn_thresholds.get('default', 2.2))
-
-        # Get expected peak count for this nucleus type
-        expected_peaks = self.config.get('expected_peaks', {})
-        expected_peak_count = expected_peaks.get(nucleus_type, expected_peaks.get('default', 50))
-
-        return {
-            'nucleus_type': nucleus_type,
-            'sn_threshold': float(sn_threshold),
-            'expected_peak_count': int(expected_peak_count),
-            'quality_threshold': float(self.config.get('quality_threshold', 0.8)),
-            'max_attempts': int(self.config.get('max_fitting_attempts', 3)),
-            'max_iterations': int(self.config.get('max_iterations', 1000)),
-            'convergence_tolerance': float(self.config.get('convergence_tolerance', 1e-8))
-        }
 
 if __name__ == "__main__":
     # Basic command-line usage
