@@ -39,8 +39,8 @@ def test_the_log_goes_to_output(tmp_path, elsewhere):
 
 def test_two_processors_leave_one_file_handler(tmp_path, elsewhere):
     from lunaNMR.batch_processing.batch_processor import BatchProcessor
-    BatchProcessor(log_dir=tmp_path / "a")
-    BatchProcessor(log_dir=tmp_path / "b")
+    BatchProcessor(output_dir=tmp_path / "a")
+    BatchProcessor(output_dir=tmp_path / "b")
     logger = logging.getLogger("lunaNMR.batch_processing.batch_processor")
     files = [h for h in logger.handlers if isinstance(h, logging.FileHandler)]
     assert len(files) == 1

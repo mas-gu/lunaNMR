@@ -380,7 +380,7 @@ Examples:
         print("=== DRY RUN - No actual processing will be performed ===\n")
 
         # Create temporary processor to find files
-        processor = BatchProcessor(config, log_dir=args.output)
+        processor = BatchProcessor(config, output_dir=args.output)
 
         try:
             spectrum_files = processor.find_spectrum_files(args.folder)
@@ -425,7 +425,7 @@ Examples:
         """
         try:
             # Create processor
-            processor = BatchProcessor(config, log_dir=args.output)
+            processor = BatchProcessor(config, output_dir=args.output)
 
             # Add parameter optimizer if requested
             if args.optimize:
@@ -446,8 +446,13 @@ Examples:
             )
 
             self.last_summary = {key: results[key] for key in
-                                 ('total_files', 'processed_files', 'failed_files')
+                                 ('total_files', 'processed_files', 'failed_files',
+                                  'total_peaks_detected', 'total_peaks_fitted', 'files')
                                  if key in results}
+            if not results['processed_files']:
+                # A run that fitted no spectrum failed, whatever it detected
+                self.last_error = "no spectrum fitted: " + "; ".join(
+                    f"{failed['filename']}: {failed['error']}" for failed in results['failed_files_list'])
 
             # Report final results
             if not args.quiet:
