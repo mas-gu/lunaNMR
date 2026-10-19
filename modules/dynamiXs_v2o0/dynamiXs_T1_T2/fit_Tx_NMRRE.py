@@ -150,10 +150,8 @@ def bootstrap_errors(x, y, model, params, n_bootstrap=1000, fit_baseline=None):
         resampled_indices = np.random.randint(0, n, size=n)
         resampled_residuals = residuals[resampled_indices]
 
-        # Create synthetic data
         y_synthetic = y_fit + resampled_residuals
 
-        # Ensure positive values
         y_synthetic = np.maximum(y_synthetic, 1e-10)
 
         # Refit (unweighted)
@@ -176,7 +174,6 @@ def bootstrap_errors(x, y, model, params, n_bootstrap=1000, fit_baseline=None):
         except Exception:
             continue
 
-    # Return standard deviation of bootstrap distribution
     if len(a_values) < 10:
         # Not enough successful fits, fall back to covariance estimate
         a_err = result.params['A'].stderr if result.params['A'].stderr else np.nan
@@ -409,7 +406,6 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
         x_max = float(np.max(x))
         initial_t2 = x_max / 2.0 if x_max > 0 else 1.0
 
-    # Create model and parameters
     model = Model(exp_decay)
     if not fit_baseline:
         initial_C = 0.0
@@ -517,7 +513,6 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
             t2_err = result['t2_err']
             
             c = result.get('C', 0.0)
-            # Generate fit curve
             x_fit = np.linspace(0, max(x)*1.2, 50)
             y_fit = a * np.exp(-x_fit / t2) + c
             
@@ -525,7 +520,6 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
             ax.plot(x, y, 'ko', lw=2, ms=8, label="Data")
             ax.plot(x_fit, y_fit, 'r-', linewidth=2, label="Fit")
             
-            # Add fitting results text
             textstr = f"{experiment_type} = {t2:.2f} ± {t2_err:.2f} {time_units}"
             ax.text(0.05, 0.95, textstr, transform=ax.transAxes,
                     fontsize=10, verticalalignment='top', horizontalalignment='left',
@@ -541,7 +535,6 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
             if y_measured.size:
                 ax.set_ylim(y_measured.min()*0.9, y_measured.max()*1.1)
         
-        # Hide unused subplots
         for idx in range(end_idx - start_idx, len(axes)):
             axes[idx].set_visible(False)
         
@@ -682,7 +675,6 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
         'fits': fits_data
     }
 
-    # Ensure output directory exists
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     with open(output_file, 'w') as f:
@@ -716,12 +708,10 @@ def main():
     n_bootstrap = 1000  # Number of bootstrap iterations for error estimation
     error_method = 'analytical'  # 'analytical' (fast) or 'bootstrap' (robust)
 
-    # Plot configuration
     n_plots_per_figure = 20  # Number of plots per PDF page
 
     # END CONFIGURATION
 
-    # Validate input file exists
     if not os.path.exists(input_csv_file):
         raise FileNotFoundError(f"Input file not found: {input_csv_file}")
 
@@ -765,7 +755,6 @@ def main():
         dropped_columns.extend(_dropped)
         y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()[:, _keep]  # Values to fit (rows 2+, columns 2+)
 
-    # Filter out dummy residues (case-insensitive)
     valid_mask = np.array([not str(name).lower().startswith('dummy') for name in residue_names])
     n_dummies = np.sum(~valid_mask)
     if n_dummies > 0:
@@ -776,7 +765,6 @@ def main():
     print(f"Loaded {len(residue_names)} residues with {len(x)} time points")
     print(f"Time range: {x.min():.3f} to {x.max():.3f} {time_units}")
 
-    # Fit all residues
     print("Starting fitting process...")
     results_list = []
 
@@ -790,12 +778,10 @@ def main():
 
     print(f"Completed fitting for {len(results_list)} residues")
     
-    # Create plots
     print("Generating plots...")
     create_plots(results_list, output_prefix, n_plots_per_figure, 
                  experiment_type, time_units, signal_units)
     
-    # Save results
     print(f"Saving results to {results_txt_file}...")
     save_results(results_list, results_txt_file, experiment_type)
     
@@ -851,10 +837,8 @@ def run_analysis_with_params(params, progress_callback=None):
     n_bootstrap = params.get('n_bootstrap', 1000)
     error_method = params.get('error_method', 'analytical')
 
-    # Plot configuration
     n_plots_per_figure = params.get('n_plots_per_figure', 20)
 
-    # Validate input file exists
     if not os.path.exists(input_csv_file):
         raise FileNotFoundError(f"Input file not found: {input_csv_file}")
 
@@ -898,7 +882,6 @@ def run_analysis_with_params(params, progress_callback=None):
         dropped_columns.extend(_dropped)
         y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()[:, _keep]  # Values to fit (rows 2+, columns 2+)
 
-    # Filter out dummy residues (case-insensitive)
     valid_mask = np.array([not str(name).lower().startswith('dummy') for name in residue_names])
     n_dummies = np.sum(~valid_mask)
     if n_dummies > 0:
@@ -909,7 +892,6 @@ def run_analysis_with_params(params, progress_callback=None):
     print(f"Loaded {len(residue_names)} residues with {len(x)} time points")
     print(f"Time range: {x.min():.3f} to {x.max():.3f} {time_units}")
 
-    # Fit all residues
     print("Starting fitting process...")
     results_list = []
     total_residues = len(residue_names)
@@ -931,20 +913,16 @@ def run_analysis_with_params(params, progress_callback=None):
 
     print(f"Completed fitting for {len(results_list)} residues")
     
-    # Create plots
     print("Generating plots...")
     create_plots(results_list, output_prefix, n_plots_per_figure, 
                  experiment_type, time_units, signal_units)
     
-    # Save results
     print(f"Saving results to {results_txt_file}...")
     save_results(results_list, results_txt_file, experiment_type)
 
-    # Save JSON data for interactive visualization
     json_folder = params.get('json_folder')
     json_file = None
     if json_folder:
-        # Create json folder if it doesn't exist
         os.makedirs(json_folder, exist_ok=True)
 
         # Construct JSON filename: field{N}_{T1|T2}_fit_data.json
@@ -987,7 +965,6 @@ def run_analysis_with_params(params, progress_callback=None):
 
     print("Analysis completed successfully!")
 
-    # Return results summary
     return {
         'n_fitted': len(reliable),
         'dropped_columns': dropped_columns,
