@@ -59,7 +59,6 @@ def _serialize_spectrum_result(result: dict) -> dict:
         if isinstance(value, np.ndarray):
             serialized[key] = value.tolist()
         elif isinstance(value, list):
-            # Handle integration_results list
             serialized[key] = [
                 _serialize_integration_result(r) if isinstance(r, dict) else r
                 for r in value
@@ -432,10 +431,8 @@ class ProjectManager:
             except ImportError:
                 process_events = lambda: None  # No-op if not in GUI context
 
-            # Create bundle directory
             project_path.mkdir(parents=True, exist_ok=True)
 
-            # Save components and track what was saved
             self._save_manifest(project_path)
             summary['saved_items'].append('Project manifest')
             process_events()
@@ -458,7 +455,6 @@ class ProjectManager:
                 summary['saved_items'].append('Series results')
             process_events()
 
-            # Save DynamiXs state and get detailed summary
             dynamixs_summary = self._save_dynamixs_state_with_summary(project_path)
             if dynamixs_summary:
                 summary['dynamixs'] = dynamixs_summary
@@ -596,7 +592,6 @@ class ProjectManager:
 
         integrator = getattr(self.main_window, 'integrator', None)
 
-        # Serialize each fit result
         serialized_results = []
         for idx, fit_result in enumerate(fit_results):
             if not isinstance(fit_result, dict):
@@ -650,7 +645,6 @@ class ProjectManager:
                 serialized[key] = value.tolist()
 
             elif isinstance(value, (np.integer, np.floating)):
-                # Convert numpy scalars
                 serialized[key] = float(value) if isinstance(value, np.floating) else int(value)
 
             elif hasattr(value, '_mock_name'):
@@ -717,7 +711,6 @@ class ProjectManager:
         self._skipped = summary['skipped']   # what a loader found but could not read
 
         try:
-            # Load and validate manifest
             manifest = self._load_manifest(project_path)
             if manifest is None:
                 return False, ["project.json not found or invalid"], summary
@@ -725,10 +718,8 @@ class ProjectManager:
             summary['loaded_items'].append('Project manifest')
             self._clear_session()
 
-            # Check file references
             missing_files = self._validate_file_references(manifest)
 
-            # Load components and track what was loaded
             self._load_gui_state(project_path)
             summary['loaded_items'].append('GUI state')
 
@@ -747,7 +738,6 @@ class ProjectManager:
             # intensity yet. The save dialog starts from it, so a re-save keeps it.
             self.main_window.region_data_embedded = self._holds_region_data()
 
-            # Load DynamiXs state and get summary
             dynamixs_summary = self._load_dynamixs_state_with_summary(project_path)
             if dynamixs_summary:
                 summary['dynamixs'] = dynamixs_summary
@@ -806,7 +796,6 @@ class ProjectManager:
         with open(manifest_path, 'r') as f:
             manifest = json.load(f)
 
-        # Check schema version
         schema_version = manifest.get('schema_version', '1.0')
         if schema_version != self.SCHEMA_VERSION:
             logger.warning(f"Project uses schema version {schema_version}, "
@@ -837,7 +826,6 @@ class ProjectManager:
         project_path = Path(project_path)
         missing_files = []
 
-        # Load manifest
         manifest = self._load_manifest(project_path)
         if manifest is None:
             return missing_files
@@ -919,13 +907,11 @@ class ProjectManager:
         with open(fits_path, 'r') as f:
             serialized_results = json.load(f)
 
-        # Deserialize each fit result
         fit_results = []
         for serialized in serialized_results:
             fit_result = self._deserialize_fit_result(serialized, fit_dir)
             fit_results.append(fit_result)
 
-        # Store in main_window
         self.main_window.last_fitting_results = fit_results
 
         logger.info(f"Loaded {len(fit_results)} fit results from {fit_dir}")
@@ -937,7 +923,6 @@ class ProjectManager:
 
         for key, value in serialized.items():
             if key == 'region_2d' and isinstance(value, str) and value.endswith('.npz'):
-                # Load embedded region intensity from npz
                 npz_path = fit_dir / value
                 if npz_path.exists():
                     result[key] = self._load_region_2d(npz_path)
@@ -995,7 +980,6 @@ class ProjectManager:
                     continue
                 params[param_name] = value
 
-        # Handle tuple params separately (saved_xlim, saved_ylim)
         for tuple_param in ['saved_xlim', 'saved_ylim']:
             if hasattr(self.main_window, tuple_param):
                 value = getattr(self.main_window, tuple_param)
@@ -1011,7 +995,6 @@ class ProjectManager:
         """Apply dict of parameters to main_window GUI."""
         for param_name, value in params.items():
             if param_name in self.GUI_PARAMS or param_name in ['saved_xlim', 'saved_ylim']:
-                # Convert lists back to tuples for xlim/ylim
                 if param_name in ['saved_xlim', 'saved_ylim'] and value is not None:
                     value = tuple(value)
 
@@ -1044,7 +1027,6 @@ class ProjectManager:
 
     def _has_series_results(self) -> bool:
         """Check if main_window has series integration results."""
-        # Check for multiple saved series
         saved_series = getattr(self.main_window, 'saved_series', None)
         if saved_series and len(saved_series) > 0:
             return True
@@ -1072,7 +1054,6 @@ class ProjectManager:
         import shutil
         series_dir = bundle_path / "series_results"
 
-        # Get all saved series
         saved_series = getattr(self.main_window, 'saved_series', {}) or {}
 
         # batch_results without saved_series is saved as the "default" series
@@ -1086,16 +1067,13 @@ class ProjectManager:
             return False  # Nothing to save
         series_dir.mkdir(exist_ok=True)
 
-        # Save manifest listing all series
         manifest = {
             'series_count': len(saved_series),
             'series_list': []
         }
 
-        # Save each series
         for series_name, batch_results in saved_series.items():
             process_events()  # Keep GUI responsive
-            # Create subdirectory for this series
             series_subdir = series_dir / series_name
             series_subdir.mkdir(exist_ok=True)
 
@@ -1108,7 +1086,6 @@ class ProjectManager:
             # a moved/renamed source run folder still resolves for Kd/titration input.
             self._copy_series_csvs(batch_results, series_subdir)
 
-            # Add to manifest
             spectrum_count = len(batch_results.results) if hasattr(batch_results, 'results') else 0
             manifest['series_list'].append({
                 'name': series_name,
@@ -1161,7 +1138,6 @@ class ProjectManager:
         if not series_dir.exists():
             return False  # No series results to load
 
-        # Initialize saved_series dict
         self.main_window.saved_series = {}
 
         # Check for manifest (new format with multiple series)
@@ -1170,7 +1146,6 @@ class ProjectManager:
             with open(manifest_file, 'r') as f:
                 manifest = json.load(f)
 
-            # Load each series from its subdirectory
             for series_info in manifest.get('series_list', []):
                 series_name = series_info.get('name', 'unnamed')
                 series_subdir = series_dir / series_name
@@ -1189,7 +1164,6 @@ class ProjectManager:
                 batch_results.metadata['series_name'] = series_name
                 batch_results.bundled_folder = str(series_subdir)
 
-                # Add to saved_series
                 self.main_window.saved_series[series_name] = batch_results
                 logger.info(f"Loaded series '{series_name}': {len(batch_results.results)} spectra")
 
@@ -1210,7 +1184,6 @@ class ProjectManager:
                 batch_results = batch_results_from_dict(data, self._deserialize_spectrum_result)
                 batch_results.bundled_folder = str(series_dir)
 
-                # Store in both places
                 self.main_window.batch_results = batch_results
                 self.main_window.saved_series['default'] = batch_results
 
