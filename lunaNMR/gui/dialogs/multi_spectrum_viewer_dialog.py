@@ -148,7 +148,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.spectra = []  # List of spectrum info dicts
         self.visible_spectra = set()  # Names of visible spectra
 
-        # Default color palette
         self.default_colors = [
             '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
             '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
@@ -184,13 +183,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
         self.reference_y_min = None  # F1 (15N) ppm range
         self.reference_y_max = None
 
-        # Initialize spectra data
         self._initialize_spectra()
 
-        # Build peak-spectrum mapping for Peak Mode
         self._build_peak_spectrum_map()
 
-        # Build UI
         self.setup_ui()
 
         # Center on parent
@@ -212,14 +208,11 @@ class MultiSpectrumViewerDialog(BaseDialog):
             extract_titration_from_spectrum_name,
         )
 
-        # First pass: collect all spectrum data
         unsorted_spectra = []
         for idx, result in enumerate(self.all_results):
             spectrum_name = result.get('spectrum_name', f'spectrum_{idx+1:03d}')
             file_path = result.get('spectrum_file', '')
 
-            # Extract fitted peaks from result_data
-            # v0.9 multi_spectrum_viewer.py:117-125 - check integration_results first
             fitted_peaks = result.get('integration_results', [])
             if not fitted_peaks:
                 fitted_peaks = result.get('fitted_peaks', [])
@@ -285,7 +278,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 if not assignment:
                     continue
 
-                # Track which spectra have this peak
                 if assignment not in self.peak_spectrum_map:
                     self.peak_spectrum_map[assignment] = []
                 self.peak_spectrum_map[assignment].append(spec_idx)
@@ -294,7 +286,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 if assignment not in reference_peaks:
                     reference_peaks[assignment] = peak
 
-        # Build master_peak_list from reference peaks
         # Use first spectrum's order if possible
         if self.spectra and self.spectra[0].get('fitted_peaks'):
             first_spectrum_peaks = self.spectra[0]['fitted_peaks']
@@ -353,7 +344,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
             logger.warning(f"Cannot select assignment '{assignment}': no peaks loaded")
             return
 
-        # Find matching peak index
         target_idx = None
         assignment_clean = str(assignment).strip()
 
@@ -365,7 +355,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         search_resnum = extract_residue_number(assignment_clean)
 
-        # First try exact match
         for idx, peak in enumerate(self.master_peak_list):
             peak_assignment = peak.get('assignment', '')
             if peak_assignment == assignment_clean:
@@ -400,7 +389,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         if target_idx is None:
             logger.warning(f"Assignment '{assignment}' not found in master_peak_list")
-            # Log available assignments for debugging
             available = [p.get('assignment', '') for p in self.master_peak_list[:10]]
             logger.debug(f"Available assignments (first 10): {available}")
             return
@@ -408,11 +396,9 @@ class MultiSpectrumViewerDialog(BaseDialog):
         # Switch to 3D Voigt Analysis tab (index 2)
         self.plot_tabs.setCurrentIndex(2)
 
-        # Enable Peak Mode
         self.voigt_3d_mode_toggle_btn.setChecked(True)
         self._toggle_voigt_3d_navigation_mode()
 
-        # Select the peak in the peak table
         self.voigt_3d_peak_mode_peak_table.select_peak(target_idx)
 
         logger.debug(f"Selected initial assignment '{assignment}' (index {target_idx}) in Peak Mode")
@@ -442,11 +428,9 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         spec = self.spectra[spec_idx]
 
-        # First check cached fitted_peaks
         if spec.get('fitted_peaks'):
             return spec['fitted_peaks']
 
-        # Fall back to result_data extraction
         result_data = spec.get('result_data', {})
         fitted_peaks = result_data.get('integration_results', [])
         if not fitted_peaks:
@@ -485,7 +469,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Create tab widget
         self.plot_tabs = QTabWidget()
 
         # Tab 1: Overlay View
@@ -552,7 +535,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         scroll_layout.setSpacing(2)
         scroll_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Add spectrum items with visibility toggles
         self.spectrum_items = {}
         for spec in self.spectra:
             item = SpectrumListItem(
@@ -771,7 +753,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         right_panel.setLayout(right_layout)
         layout.addWidget(right_panel, stretch=2)
 
-        # Track selected spectrum for overlay peak display
         self.overlay_selected_spectrum_idx = 0
         self.overlay_show_peaks = True
 
@@ -800,7 +781,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         plot_group.setStyleSheet(self._get_group_style())
         plot_layout = QVBoxLayout()
 
-        # Create VoigtAnalysisPlotter
         self.voigt_2d_plotter = VoigtAnalysisPlotter(parent=plot_group, toolbar=True)
         plot_layout.addWidget(self.voigt_2d_plotter)
         plot_group.setLayout(plot_layout)
@@ -943,7 +923,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         right_panel.setLayout(right_layout)
         layout.addWidget(right_panel, stretch=3)
 
-        # Initialize with placeholder
         self.voigt_2d_plotter.show_placeholder("Select spectrum and peak to view Voigt analysis")
 
         tab.setLayout(layout)
@@ -995,7 +974,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         layer_layout.setContentsMargins(6, 2, 6, 2)
         layer_layout.setSpacing(10)
 
-        # Initialize control state variables
         self.show_exp_3d = True
         self.show_fit_3d = True
         self.show_individual_3d = False
@@ -1076,7 +1054,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         plot_group.setStyleSheet(self._get_group_style())
         plot_layout = QVBoxLayout()
 
-        # Create VoigtAnalysisPlotter for 3D
         self.voigt_3d_plotter = VoigtAnalysisPlotter(parent=plot_group, toolbar=True)
         plot_layout.addWidget(self.voigt_3d_plotter)
 
@@ -1252,7 +1229,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         right_panel.setLayout(right_layout)
         layout.addWidget(right_panel, stretch=3)
 
-        # Initialize with placeholder
         self.voigt_3d_plotter.show_placeholder("Select spectrum and peak to view 3D Voigt analysis")
 
         tab.setLayout(layout)
@@ -1271,7 +1247,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
         layout.setSpacing(0)
 
-        # Create text editor for peak parameters
         self.peak_params_text = QTextEdit()
         self.peak_params_text.setReadOnly(True)
         self.peak_params_text.setFont(QFont("Courier", 9))
@@ -1309,7 +1284,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         if not hasattr(self, 'peak_params_text') or self.peak_params_text is None:
             return
 
-        # Extract result data
         assignment = voigt_result.get('assignment', 'Unknown')
         quality = voigt_result.get('fitting_quality', 'Unknown')
         method = voigt_result.get('method', '')
@@ -1319,7 +1293,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         # Color palette matching visualization
         colors = ['red', 'orange', 'purple', 'brown', 'pink', 'olive', 'cyan', 'magenta']
 
-        # Build text content
         lines = []
 
         # Header
@@ -1344,7 +1317,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 color = colors[i % len(colors)]
                 peak_assignment = peak.get('assignment', f'Peak {i+1}')
 
-                # Extract parameters
                 pos_f2 = peak.get('pos_f2', peak.get('center_x', 0.0))
                 pos_f1 = peak.get('pos_f1', peak.get('center_y', 0.0))
                 volume = peak.get('volume', peak.get('intensity', 0.0))
@@ -1367,7 +1339,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 lines.append(f"{peak_assignment} ({color}):")
                 lines.append("-" * 50)
 
-                # Position
                 lines.append(f"  Position (F2, F1):     ({pos_f2:.4f}, {pos_f1:.2f}) ppm")
 
                 # Intensity
@@ -1384,7 +1355,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         else:
             lines.append("No peak details available.")
 
-        # Update text widget
         self.peak_params_text.setPlainText("\n".join(lines))
         logger.debug(f"Updated Peak Parameters tab for {assignment}")
 
@@ -1511,7 +1481,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         layout.addStretch()
 
-        # Update plot button
         update_btn = QPushButton("Update Plot")
         update_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1559,7 +1528,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         layout = QHBoxLayout()
         layout.addStretch()
 
-        # Close button
         close_btn = QPushButton("Close")
         close_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         close_btn.setStyleSheet(f"""
@@ -1649,11 +1617,9 @@ class MultiSpectrumViewerDialog(BaseDialog):
         ylim = self.plot_widget.axes.get_ylim()
         has_valid_zoom = (xlim[0] != 0.0 or xlim[1] != 1.0) and (ylim[0] != 0.0 or ylim[1] != 1.0)
 
-        # Clear current plot
         self.plot_widget.clear()
 
         if visible_count == 0:
-            # Show placeholder message
             self.plot_widget.axes.set_title("Select spectra to display overlay")
             self.plot_widget.axes.text(
                 0.5, 0.5,
@@ -1665,27 +1631,22 @@ class MultiSpectrumViewerDialog(BaseDialog):
             self.plot_widget.refresh()
             return
 
-        # Get contour parameters
         num_levels = self.levels_spin.value()
         min_level = self.min_spin.value()
 
-        # Track if any spectra were successfully plotted
         plotted_count = 0
         legend_labels = []
         legend_colors = []
 
-        # Plot each visible spectrum
         for spec in self.spectra:
             if spec['name'] not in self.visible_spectra:
                 continue
 
-            # Load spectrum data if not already loaded
             if not spec['loaded']:
                 if not self._load_spectrum_data(spec):
                     logger.warning(f"Failed to load spectrum: {spec['name']}")
                     continue
 
-            # Get data and axes from integrator
             integrator = spec.get('integrator')
             if integrator is None:
                 continue
@@ -1699,7 +1660,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                     logger.warning(f"Missing data for {spec['name']}")
                     continue
 
-                # Calculate contour levels
                 data_abs = np.abs(data)
                 max_intensity = np.max(data_abs)
                 min_intensity = min_level * max_intensity
@@ -1726,7 +1686,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 continue
 
         if plotted_count > 0:
-            # Configure axes for NMR convention
             self.plot_widget.axes.set_xlabel('¹H (ppm)', fontsize=10)
             self.plot_widget.axes.set_ylabel('¹⁵N/¹³C (ppm)', fontsize=10)
 
@@ -1743,7 +1702,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 fontsize=11
             )
 
-            # Add legend
             if legend_labels:
                 import matplotlib.pyplot as plt
                 legend_handles = [
@@ -1781,7 +1739,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
             return False
 
         try:
-            # Create integrator and load data
             from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
 
             integrator = EnhancedVoigtIntegrator()
@@ -1791,7 +1748,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 logger.warning(f"Failed to load NMR file: {file_path}")
                 return False
 
-            # Verify data loaded correctly
             if integrator.nmr_data is None:
                 logger.warning(f"NMR data is None after loading: {file_path}")
                 return False
@@ -1800,7 +1756,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 logger.warning(f"Missing PPM axes after loading: {file_path}")
                 return False
 
-            # Store in spectrum info
             spec['integrator'] = integrator
             spec['data'] = integrator.nmr_data
             spec['loaded'] = True
@@ -1846,7 +1801,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         spec_idx = item.data(Qt.UserRole)
         self.selected_spectrum_index = spec_idx
 
-        # Load peaks into the table
         fitted_peaks = self._get_fitted_peaks(spec_idx)
         self.voigt_peak_table.load_peaks(fitted_peaks)
 
@@ -1865,7 +1819,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         spec_idx = item.data(Qt.UserRole)
         self.selected_spectrum_index = spec_idx
 
-        # Load peaks into the table
         fitted_peaks = self._get_fitted_peaks(spec_idx)
         self.voigt_3d_peak_table.load_peaks(fitted_peaks)
 
@@ -1909,7 +1862,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         try:
             if stored_result and self.voigt_2d_plotter:
                 self.voigt_2d_plotter.plot_voigt_analysis(stored_result)
-                # Also update Peak Parameters tab
                 self.update_peak_parameters(stored_result)
                 logger.debug(f"Plotted Voigt analysis for {assignment}")
             else:
@@ -1948,7 +1900,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         try:
             if stored_result and self.voigt_3d_plotter:
                 self.voigt_3d_plotter.plot_voigt_analysis_3d(stored_result)
-                # Also update Peak Parameters tab
                 self.update_peak_parameters(stored_result)
                 logger.debug(f"Plotted 3D Voigt analysis for {assignment}")
             else:
@@ -2000,7 +1951,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         result_data = spec.get('result_data', {})
 
-        # Check integration_results first (v0.9 pattern)
         integration_results = result_data.get('integration_results', [])
         if integration_results:
             for result in integration_results:
@@ -2012,7 +1962,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                     logger.debug(f"Found integration_results Voigt result for {assignment}: R²={r_squared:.3f}")
                     return result
 
-        # Check fitted_results (detailed Voigt analysis)
         fitted_results = result_data.get('fitted_results', [])
         if fitted_results:
             for result in fitted_results:
@@ -2033,7 +1982,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                         logger.debug(f"Found integrator Voigt result for {assignment}")
                         return result
 
-        # Also check fitted_peaks in result_data
         fitted_peaks = result_data.get('fitted_peaks', [])
         for result in fitted_peaks:
             result_assignment = result.get('assignment') or result.get('Assignment')
@@ -2126,7 +2074,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
         peak = fitted_peaks[peak_idx]
 
-        # Get peak position
         pos_x = (peak.get('center_x') or peak.get('peak_x') or peak.get('ppm_x') or
                 peak.get('pos_f2') or peak.get('position_x') or 0)
         pos_y = (peak.get('center_y') or peak.get('peak_y') or peak.get('ppm_y') or
@@ -2836,20 +2783,16 @@ class MultiSpectrumViewerDialog(BaseDialog):
     def _toggle_voigt_navigation_mode(self):
         """Toggle between Spectrum Mode and Peak Mode for Voigt Analysis tab."""
         if self.voigt_mode_toggle_btn.isChecked():
-            # Switch to Peak Mode
             self.navigation_mode = 'peak'
             self.voigt_mode_toggle_btn.setText("Peak Mode")
             self.voigt_mode_stack.setCurrentIndex(1)
-            # Reset to first peak
             if self.master_peak_list:
                 self.voigt_peak_mode_peak_table.select_peak(0)
             logger.debug("Voigt tab: Switched to Peak Mode")
         else:
-            # Switch to Spectrum Mode
             self.navigation_mode = 'spectrum'
             self.voigt_mode_toggle_btn.setText("Spectrum Mode")
             self.voigt_mode_stack.setCurrentIndex(0)
-            # Reset to first spectrum
             if self.voigt_spectrum_list.count() > 0:
                 self.voigt_spectrum_list.setCurrentRow(0)
                 item = self.voigt_spectrum_list.item(0)
@@ -2869,7 +2812,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         # Get list of spectra that have this peak
         spectra_with_peak = self.peak_spectrum_map.get(assignment, [])
 
-        # Update spectrum navigator list with grayed-out items
         self._update_voigt_peak_mode_spectrum_list(spectra_with_peak)
 
         logger.debug(f"Voigt Peak Mode: Selected peak {assignment}, found in {len(spectra_with_peak)} spectra")
@@ -2896,12 +2838,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
             self.voigt_peak_mode_spectrum_list.addItem(item)
 
-        # Update navigation button states
         has_multiple = len(self._voigt_peak_mode_available_spectra) > 1
         self.voigt_peak_mode_prev_btn.setEnabled(has_multiple)
         self.voigt_peak_mode_next_btn.setEnabled(has_multiple)
 
-        # Select first available spectrum and plot
         if self._voigt_peak_mode_available_spectra:
             first_idx = self._voigt_peak_mode_available_spectra[0]
             self.voigt_peak_mode_spectrum_list.setCurrentRow(first_idx)
@@ -2954,7 +2894,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 self.selected_peak_index = i
                 break
 
-        # Plot the Voigt analysis
         self._plot_voigt_analysis()
         logger.debug(f"Voigt Peak Mode: Selected spectrum {spec_idx} for peak {assignment}")
 
@@ -2999,24 +2938,19 @@ class MultiSpectrumViewerDialog(BaseDialog):
     def _toggle_voigt_3d_navigation_mode(self):
         """Toggle between Spectrum Mode and Peak Mode for 3D Voigt Analysis tab."""
         if self.voigt_3d_mode_toggle_btn.isChecked():
-            # Switch to Peak Mode
             self.navigation_mode = 'peak'
             self.voigt_3d_mode_toggle_btn.setText("Peak Mode")
             self.voigt_3d_mode_stack.setCurrentIndex(1)
-            # Show intensity decay widget and adjust splitter
             if hasattr(self, 'intensity_decay_widget'):
                 self.intensity_decay_widget.setVisible(True)
                 self._plot_splitter_3d.setSizes([600, 400])  # 60/40 split
-            # Reset to first peak
             if self.master_peak_list:
                 self.voigt_3d_peak_mode_peak_table.select_peak(0)
             logger.debug("3D Voigt tab: Switched to Peak Mode")
         else:
-            # Switch to Spectrum Mode
             self.navigation_mode = 'spectrum'
             self.voigt_3d_mode_toggle_btn.setText("Spectrum Mode")
             self.voigt_3d_mode_stack.setCurrentIndex(0)
-            # Hide intensity decay widget
             if hasattr(self, 'intensity_decay_widget'):
                 self.intensity_decay_widget.setVisible(False)
                 self._plot_splitter_3d.setSizes([1000, 0])  # Full width for 3D plot
@@ -3029,7 +2963,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
             self.reference_y_max = None
             self.voigt_3d_plotter.clear_fixed_z_limits()
             self.voigt_3d_plotter.clear_fixed_xy_limits()
-            # Reset to first spectrum
             if self.voigt_3d_spectrum_list.count() > 0:
                 self.voigt_3d_spectrum_list.setCurrentRow(0)
                 item = self.voigt_3d_spectrum_list.item(0)
@@ -3074,7 +3007,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 else:
                     self.intensity_decay_widget.clear_exponential_fit()
 
-        # Update spectrum navigator list with grayed-out items
         self._update_voigt_3d_peak_mode_spectrum_list(spectra_with_peak)
 
         logger.debug(f"3D Voigt Peak Mode: Selected peak {assignment}, found in {len(spectra_with_peak)} spectra")
@@ -3101,12 +3033,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
 
             self.voigt_3d_peak_mode_spectrum_list.addItem(item)
 
-        # Update navigation button states
         has_multiple = len(self._voigt_3d_peak_mode_available_spectra) > 1
         self.voigt_3d_peak_mode_prev_btn.setEnabled(has_multiple)
         self.voigt_3d_peak_mode_next_btn.setEnabled(has_multiple)
 
-        # Select first available spectrum and plot
         if self._voigt_3d_peak_mode_available_spectra:
             first_idx = self._voigt_3d_peak_mode_available_spectra[0]
             # Capture reference z-scale from first spectrum
@@ -3196,7 +3126,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 matched_peak = p
                 break
 
-        # Update intensity decay widget highlight
         if hasattr(self, 'intensity_decay_widget'):
             self.intensity_decay_widget.set_highlight(spec_idx)
 
@@ -3227,7 +3156,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         else:
             self.voigt_3d_plotter.clear_fixed_xy_limits()
 
-        # Plot the 3D Voigt analysis
         self._plot_voigt_analysis_3d()
         logger.debug(f"3D Voigt Peak Mode: Selected spectrum {spec_idx} for peak {assignment}")
 
@@ -3278,7 +3206,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         if spec_idx not in self._voigt_3d_peak_mode_available_spectra:
             return
 
-        # Update spectrum list selection
         self.voigt_3d_peak_mode_spectrum_list.setCurrentRow(spec_idx)
         # Navigate to spectrum
         self._select_voigt_3d_spectrum_for_peak_mode(spec_idx)
