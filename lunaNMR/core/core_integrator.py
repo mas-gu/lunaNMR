@@ -3462,7 +3462,7 @@ class VoigtIntegrator(BaseIntegrator):
         """Detect peaks whose magnitude exceeds signal_threshold. A negative peak (saturated
         hetNOE, edited HSQC, folded) is found as a positive one is, and keeps its sign.
         A set stop event raises Cancelled before the next candidate peak."""
-        from scipy.ndimage import maximum_filter, minimum_filter, label
+        from scipy.ndimage import maximum_filter, minimum_filter, label, find_objects
 
         raise_if_stopped(stop)
 
@@ -3507,14 +3507,19 @@ class VoigtIntegrator(BaseIntegrator):
 
         # Find connected components (individual peaks)
         labeled_peaks, num_peaks = label(peak_candidates)
+        # Each peak's bounding box, so a candidate's region is found without a pass over
+        # the whole spectrum
+        peak_boxes = find_objects(labeled_peaks)
+
+        noise_level = self._estimate_noise_level_advanced()
 
         detected_peaks = []
 
-        for peak_id in range(1, num_peaks + 1):
+        for peak_id, (rows, cols) in enumerate(peak_boxes, start=1):
             raise_if_stopped(stop)
             # Get peak region
-            peak_region = labeled_peaks == peak_id
-            peak_indices = np.where(peak_region)
+            box_y, box_x = np.where(labeled_peaks[rows, cols] == peak_id)
+            peak_indices = (box_y + rows.start, box_x + cols.start)
 
             if len(peak_indices[0]) == 0:
                 continue
@@ -3559,7 +3564,6 @@ class VoigtIntegrator(BaseIntegrator):
             intensity = self.nmr_data[y_idx, x_idx]
 
             # Calculate S/N ratio
-            noise_level = self._estimate_noise_level_advanced()
             snr = abs(intensity) / noise_level if noise_level > 0 else 0
 
             # Apply minimum separation filter
