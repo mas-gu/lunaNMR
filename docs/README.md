@@ -59,14 +59,14 @@ The primary fitting engine for overlapping peaks — not optional.
 See [ALGORITHMS.md](ALGORITHMS.md) for detection, clustering, and fitting details.
 
 ### Quality Color Coding
-Peak markers are colored by the fit's quality label, assigned from R²:
+Peak markers are colored by the fit's quality label, assigned once by `fit_quality_label` (`utils/quality_categories.py`) from R², S/N and whether the peak was held as near-noise:
 
 | Quality | R² | Color |
 |---------|-----|-------|
-| Excellent | ≥ 0.9 | lime |
-| Good | ≥ 0.8 | green |
-| Fair | ≥ 0.5 | orange |
-| Poor / Failed / unfitted | < 0.5 (Failed < 0.2) | red |
+| Excellent | > 0.9 | lime |
+| Good | > 0.8 | green |
+| Fair | > 0.6 (0.5–0.6 when S/N ≤ 5) | orange |
+| Poor / Failed / unfitted | below Fair; Failed < 0.2 at S/N ≤ 5, never for a near-noise peak | red |
 
 ---
 

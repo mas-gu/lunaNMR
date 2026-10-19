@@ -2,7 +2,7 @@
 
 Prominence-based peak detection with top-contour centroid refinement, PS2D simultaneous 2D Voigt fitting (5-stage Levenberg-Marquardt), and hierarchical overlap clustering.
 
-Quality (R²): Excellent ≥0.9, Good 0.8–0.9, Fair 0.5–0.8, Poor 0.2–0.5, Failed <0.2.
+Quality (R²): Excellent >0.9, Good >0.8, Fair >0.6; below that Poor above S/N 5, else Fair ≥0.5, Poor ≥0.2, Failed <0.2 (a near-noise peak Poor). See §4.
 
 ---
 
@@ -95,7 +95,20 @@ Without a noise level every peak is treated as positive. Mixed-sign clusters are
 
 ## 4. Quality Assessment
 
-`_assign_quality_from_r2` (`core_integrator.py`, applied to PS2D and 1D results alike): Excellent ≥0.9, Good ≥0.8, Fair ≥0.5, Poor ≥0.2, else Failed. Marker colors: lime (Excellent), green (Good), orange (Fair), red (Poor/Failed/unfitted).
+One rule labels every fit: `fit_quality_label(r_squared, success, near_noise, snr)` (`utils/quality_categories.py`). The fitters call it (the 2D path for an isolated peak or a cluster member, the parallel worker, the 1D cross-section path, the overlay refit); the series output, the results browser and the markers show the label the fit carries and never recompute it. For a cluster member, R² is the cluster's and S/N its own `detection_sigma`.
+
+| Condition (in order) | Label |
+|---|---|
+| fit did not succeed, or no R² | Failed |
+| R² > 0.9 | Excellent |
+| R² > 0.8 | Good |
+| R² > 0.6 | Fair |
+| S/N > 5 | Poor |
+| R² ≥ 0.5 | Fair |
+| R² ≥ 0.2, or a near-noise peak | Poor |
+| otherwise | Failed |
+
+The Kd loaders and the intensity matrices drop a Failed point, so the last two rows decide what is measured. A near-noise peak's R² is ~0 by construction (a held shape against noise) and its near-zero intensity is the measurement, so it is Poor, never Failed. Between R² 0.5 and 0.6 the label is not monotonic in S/N: Poor above S/N 5, Fair below it. Marker colors: lime (Excellent), green (Good), orange (Fair), red (Poor/Failed/unfitted).
 
 **Acceptance**: PS2D pragmatic `r_squared > 0.2` (or formal convergence / chi² reduction / a near-noise-only cluster); 1D `min_r_squared` default 0.3.
 

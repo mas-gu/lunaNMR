@@ -368,14 +368,16 @@ half-scan reference) matters.</p></div>
 
 <section id="quality">
 <h2>Quality-based color coding</h2>
-<p>Peak markers in the spectrum viewers are colored by the fit's quality label (assigned from R²). Extraction checks multiple keys:
+<p>Peak markers in the spectrum viewers are colored by the fit's quality label, assigned once by
+<code>fit_quality_label</code> (<code>utils/quality_categories.py</code>) from R², S/N and whether the peak was held as
+near-noise; the series output and the browsers show that label and never recompute it. Extraction checks multiple keys:
 <code>quality</code>, <code>Quality</code>, <code>fitting_quality</code>.</p>
 <table>
 <tr><th>Category</th><th>R²</th><th>Color</th></tr>
-<tr><td>Excellent</td><td>≥ 0.9</td><td><span class="dot" style="background:#32cd32"></span>lime</td></tr>
-<tr><td>Good</td><td>≥ 0.8</td><td><span class="dot" style="background:#34c759"></span>green</td></tr>
-<tr><td>Fair</td><td>≥ 0.5</td><td><span class="dot" style="background:#ffa500"></span>orange</td></tr>
-<tr><td>Poor / Failed / Unknown</td><td>&lt; 0.5 / unfitted</td><td><span class="dot" style="background:#ff4040"></span>red</td></tr>
+<tr><td>Excellent</td><td>&gt; 0.9</td><td><span class="dot" style="background:#32cd32"></span>lime</td></tr>
+<tr><td>Good</td><td>&gt; 0.8</td><td><span class="dot" style="background:#34c759"></span>green</td></tr>
+<tr><td>Fair</td><td>&gt; 0.6 (0.5–0.6 when S/N ≤ 5)</td><td><span class="dot" style="background:#ffa500"></span>orange</td></tr>
+<tr><td>Poor / Failed / Unknown</td><td>below Fair / unfitted. Failed: R² &lt; 0.2 at S/N ≤ 5, never a near-noise peak</td><td><span class="dot" style="background:#ff4040"></span>red</td></tr>
 </table>
 <p class="muted">Note: in the overlay viewer, per-spectrum peak lists are colored by <em>spectrum</em> (to tell
 lists apart), while single-spectrum views use the quality colors above.</p>
