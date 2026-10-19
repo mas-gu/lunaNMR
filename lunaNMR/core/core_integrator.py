@@ -2815,92 +2815,85 @@ class VoigtIntegrator(BaseIntegrator):
         rad_f2 = ps2d_config.radF2  # 1H
         rad_f1 = ps2d_config.radF1  # indirect (15N/13C)
 
-        matched_peaks = []
-        used_peaks = set()  # Track which detected peaks have been used
-
+        # Every reference-candidate pair inside the search box, at its distance in
+        # linewidths: the distance in each dimension over that nucleus's PS2D radius, so
+        # an indirect ppm does not count as a 1H ppm
+        candidate_x = np.array([p['x_ppm'] for p in all_detected_peaks], dtype=float)
+        candidate_y = np.array([p['y_ppm'] for p in all_detected_peaks], dtype=float)
+        references = []
+        pairs = []
         for idx, peak_row in self.peak_list.iterrows():
             raise_if_stopped(stop)
             try:
                 ref_x_ppm = float(peak_row['Position_X'])
                 ref_y_ppm = float(peak_row['Position_Y'])
                 assignment = peak_row.get('Assignment', f'Peak_{idx+1}')
-
-                # Find the detected peak within the search window closest in linewidths:
-                # the distance in each dimension over that nucleus's PS2D radius, so an
-                # indirect ppm does not count as a 1H ppm
-                best_match = None
-                elliptical_distance = float('inf')
-
-                best_x_dist = 0.0
-                best_y_dist = 0.0
-
-                for i, detected_peak in enumerate(all_detected_peaks):
-                    if i in used_peaks:  # Skip already used peaks
-                        continue
-
-                    # Calculate distance from reference
-                    x_distance = abs(detected_peak['x_ppm'] - ref_x_ppm)
-                    y_distance = abs(detected_peak['y_ppm'] - ref_y_ppm)
-
-                    # Check if within search window
-                    if x_distance <= search_window_x_ppm and y_distance <= search_window_y_ppm:
-                        scaled_distance = np.sqrt((x_distance / rad_f2)**2 + (y_distance / rad_f1)**2)
-                        if scaled_distance < elliptical_distance:
-                            elliptical_distance = scaled_distance
-                            best_x_dist = x_distance
-                            best_y_dist = y_distance
-                            best_match = (i, detected_peak)
-
-                if best_match is not None:
-                    # Use the matched detected peak
-                    peak_idx, detected_peak = best_match
-                    used_peaks.add(peak_idx)
-                    best_distance = np.sqrt(best_x_dist**2 + best_y_dist**2)
-
-                    matched_peak = {
-                        'assignment': assignment,
-                        'ppm_x': detected_peak['x_ppm'],
-                        'ppm_y': detected_peak['y_ppm'],
-                        'x_point': detected_peak['indices'][0],
-                        'y_point': detected_peak['indices'][1],
-                        'intensity': detected_peak['intensity'],
-                        'snr': detected_peak['snr'],
-                        'detected': True,
-                        'detection_quality': 'Matched',
-                        'distance_from_reference': best_distance,
-                        'distance_from_reference_x': best_x_dist,
-                        'distance_from_reference_y': best_y_dist,
-                        'distance_from_reference_elliptical': elliptical_distance
-                    }
-
-                    #if best_distance > 0.001:
-                    #    print(f"   {assignment}: matched to peak {best_distance:.4f} ppm away")
-
-                else:
-                    # No match found, use reference position
-                    ref_x_idx = np.argmin(np.abs(self.ppm_x_axis - ref_x_ppm))
-                    ref_y_idx = np.argmin(np.abs(self.ppm_y_axis - ref_y_ppm))
-                    ref_intensity = self.nmr_data[ref_y_idx, ref_x_idx]
-                    ref_snr = np.abs(ref_intensity) / self.noise_level if self.noise_level > 0 else 0
-
-                    matched_peak = {
-                        'assignment': assignment,
-                        'ppm_x': ref_x_ppm,
-                        'ppm_y': ref_y_ppm,
-                        'x_point': ref_x_idx,
-                        'y_point': ref_y_idx,
-                        'intensity': ref_intensity,
-                        'snr': ref_snr,
-                        'detected': False,
-                        'reference_retained': True,
-                        'detection_quality': 'Reference'
-                    }
-
-                matched_peaks.append(matched_peak)
-
             except (ValueError, KeyError) as e:
                 log_warning(f"Skipping peak {idx+1}: {e}")
                 continue
+            x_distance = np.abs(candidate_x - ref_x_ppm)
+            y_distance = np.abs(candidate_y - ref_y_ppm)
+            inside = np.flatnonzero((x_distance <= search_window_x_ppm) & (y_distance <= search_window_y_ppm))
+            scaled_distance = np.sqrt((x_distance[inside] / rad_f2)**2 + (y_distance[inside] / rad_f1)**2)
+            pairs.extend(zip(scaled_distance.tolist(), [len(references)] * len(inside), inside.tolist()))
+            references.append((assignment, ref_x_ppm, ref_y_ppm))
+
+        # The nearest pairs are settled first, across all references: a maximum goes to
+        # the reference closest to it, not to whichever comes first in the list, and a
+        # reference that loses it looks again among what is left
+        pairs.sort()
+        claims = {}
+        used_peaks = set()  # Detected peaks taken by a reference
+        for _, reference, candidate in pairs:
+            if reference in claims or candidate in used_peaks:
+                continue
+            claims[reference] = candidate
+            used_peaks.add(candidate)
+
+        matched_peaks = []
+        for reference, (assignment, ref_x_ppm, ref_y_ppm) in enumerate(references):
+            if reference in claims:
+                detected_peak = all_detected_peaks[claims[reference]]
+                best_x_dist = abs(detected_peak['x_ppm'] - ref_x_ppm)
+                best_y_dist = abs(detected_peak['y_ppm'] - ref_y_ppm)
+
+                matched_peak = {
+                    'assignment': assignment,
+                    'ppm_x': detected_peak['x_ppm'],
+                    'ppm_y': detected_peak['y_ppm'],
+                    'x_point': detected_peak['indices'][0],
+                    'y_point': detected_peak['indices'][1],
+                    'intensity': detected_peak['intensity'],
+                    'snr': detected_peak['snr'],
+                    'detected': True,
+                    'detection_quality': 'Matched',
+                    'distance_from_reference': np.sqrt(best_x_dist**2 + best_y_dist**2),
+                    'distance_from_reference_x': best_x_dist,
+                    'distance_from_reference_y': best_y_dist,
+                    'distance_from_reference_elliptical': np.sqrt((best_x_dist / rad_f2)**2 + (best_y_dist / rad_f1)**2)
+                }
+
+            else:
+                # No match found, use reference position
+                ref_x_idx = np.argmin(np.abs(self.ppm_x_axis - ref_x_ppm))
+                ref_y_idx = np.argmin(np.abs(self.ppm_y_axis - ref_y_ppm))
+                ref_intensity = self.nmr_data[ref_y_idx, ref_x_idx]
+                ref_snr = np.abs(ref_intensity) / self.noise_level if self.noise_level > 0 else 0
+
+                matched_peak = {
+                    'assignment': assignment,
+                    'ppm_x': ref_x_ppm,
+                    'ppm_y': ref_y_ppm,
+                    'x_point': ref_x_idx,
+                    'y_point': ref_y_idx,
+                    'intensity': ref_intensity,
+                    'snr': ref_snr,
+                    'detected': False,
+                    'reference_retained': True,
+                    'detection_quality': 'Reference'
+                }
+
+            matched_peaks.append(matched_peak)
 
         # Step 3: Auto-add dummy peaks (unmatched peaks near user peaks)
         dummy_peaks_added = 0
