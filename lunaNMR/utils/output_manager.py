@@ -76,7 +76,6 @@ class OutputManager:
         callback = cls.get_callback()
 
         if callback is not None:
-            # Route to GUI callback
             callback(progress, task or message, message, failed)
         else:
             # Fallback to print for CLI usage
