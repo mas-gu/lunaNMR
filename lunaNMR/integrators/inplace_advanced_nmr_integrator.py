@@ -96,7 +96,6 @@ class InPlaceAdvancedNMRIntegrator:
 
     def load_data(self, peak_list_file, nmr_file):
         """Load peak list and NMR data"""
-        # Load peak list
         try:
             self.peak_list = pd.read_csv(peak_list_file, skipinitialspace=True)
             self.peak_list.columns = self.peak_list.columns.str.strip()
@@ -105,9 +104,7 @@ class InPlaceAdvancedNMRIntegrator:
             print(f"Error loading peak list: {e}")
             return False
 
-        # Load NMR data
         try:
-            # Detect format and load accordingly
             file_format = self._detect_nmr_format(nmr_file)
 
             if file_format == 'bruker_pdata':
@@ -122,10 +119,8 @@ class InPlaceAdvancedNMRIntegrator:
                 self._nmr_format = 'pipe'
                 print(f"Loaded NMR data: {self.nmr_data.shape} from {nmr_file}")
 
-            # Calculate PPM axes
             self._calculate_ppm_axes()
 
-            # Estimate noise level
             self._estimate_noise_level()
 
             return True
@@ -149,7 +144,6 @@ class InPlaceAdvancedNMRIntegrator:
                 uc_f2 = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=1)  # F2 dimension (1H)
                 uc_f1 = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=0)  # F1 dimension (15N/13C)
 
-            # Get the full PPM scales
             f2_ppm_scale = uc_f2.ppm_scale()
             f1_ppm_scale = uc_f1.ppm_scale()
 
@@ -188,11 +182,9 @@ class InPlaceAdvancedNMRIntegrator:
             return None
 
         try:
-            # Get spectral ranges
             x_min, x_max = float(min(self.ppm_x_axis)), float(max(self.ppm_x_axis))
             y_min, y_max = float(min(self.ppm_y_axis)), float(max(self.ppm_y_axis))
 
-            # Calculate center points for weighted detection
             x_center = (x_min + x_max) / 2.0
             y_center = (y_min + y_max) / 2.0
 
@@ -222,23 +214,19 @@ class InPlaceAdvancedNMRIntegrator:
     def _estimate_noise_level(self):
         """Estimate noise level in the spectrum using custom or default regions"""
         if self.use_custom_noise_regions and self.noise_regions_ppm:
-            # Use custom noise regions
             noise_values = []
 
             for region in self.noise_regions_ppm:
                 x_min_ppm, x_max_ppm, y_min_ppm, y_max_ppm = region
 
-                # Convert ppm to indices
                 x_min_idx = np.argmin(np.abs(self.ppm_x_axis - x_max_ppm))  # Note: reversed for NMR
                 x_max_idx = np.argmin(np.abs(self.ppm_x_axis - x_min_ppm))
                 y_min_idx = np.argmin(np.abs(self.ppm_y_axis - y_max_ppm))  # Note: reversed for NMR
                 y_max_idx = np.argmin(np.abs(self.ppm_y_axis - y_min_ppm))
 
-                # Ensure proper ordering
                 x_min_idx, x_max_idx = min(x_min_idx, x_max_idx), max(x_min_idx, x_max_idx)
                 y_min_idx, y_max_idx = min(y_min_idx, y_max_idx), max(y_min_idx, y_max_idx)
 
-                # Extract region data
                 region_data = self.nmr_data[y_min_idx:y_max_idx, x_min_idx:x_max_idx]
                 noise_values.extend(region_data.flatten())
 
@@ -251,7 +239,6 @@ class InPlaceAdvancedNMRIntegrator:
                 print("Warning: No valid custom noise regions found, falling back to corner method")
                 self._estimate_noise_level_corners()
         else:
-            # Use default corner method
             self._estimate_noise_level_corners()
 
         self.threshold = self.noise_level * self.threshold_multiplier
@@ -260,7 +247,6 @@ class InPlaceAdvancedNMRIntegrator:
 
     def _estimate_noise_level_corners(self):
         """Estimate noise level using left corner regions (fallback method)"""
-        # Use left corner regions to estimate noise
         corner_size = min(50, self.nmr_data.shape[0]//10, self.nmr_data.shape[1]//10)
 
         corners = [
