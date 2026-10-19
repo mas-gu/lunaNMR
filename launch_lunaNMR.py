@@ -48,7 +48,6 @@ def setup_paths():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(current_dir)
 
-    # Add directories to Python path
     sys.path.insert(0, current_dir)
     sys.path.insert(0, parent_dir)
 
@@ -76,10 +75,8 @@ def main():
     # The terminal the app is started from shows lunaNMR's INFO records
     logging.basicConfig(level=logging.INFO)
 
-    # Setup paths
     current_dir, parent_dir = setup_paths()
 
-    # Check dependencies
     missing = check_dependencies()
     if missing:
         error_msg = f"Missing required modules: {', '.join(missing)}\n\nPlease install with:\npip install {' '.join(missing)}"
@@ -94,7 +91,6 @@ def main():
 
         return False
 
-    # Launch LunaNMR
     try:
         print("Launching LunaNMR...")
         success = launch_lunaNMR()
