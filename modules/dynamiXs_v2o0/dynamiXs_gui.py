@@ -31,7 +31,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer, QMimeData
 from PySide6.QtGui import QFont, QDragEnterEvent, QDropEvent
 
-# Import design constants
 from constants import (
     BG_COLOR, PANEL_BG_COLOR, FRAME_BG_COLOR,
     PRIMARY_TEXT, SECONDARY_TEXT,
@@ -41,7 +40,6 @@ from constants import (
     WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT
 )
 
-# Import GUI components
 from gui_components import (
     load_stylesheet, get_font, get_monospace_font,
     CollapsibleGroupBox, StyledGroupBox,
@@ -56,7 +54,6 @@ from gui_components import (
     open_file_dialog, open_files_dialog, save_file_dialog, open_directory_dialog
 )
 
-# Import workers for background tasks
 from workers import (
     T1T2FittingWorker, T1T2FittingParams,
     SpectralDensityWorker, SpectralDensityParams,
@@ -99,13 +96,11 @@ class DynamiXsMainWindow(QMainWindow):
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.resize(900, 700)
 
-        # Get the dynamiXs directory path
         self.dynamixs_path = Path(__file__).parent
 
         # Current working directory for file operations
         self.current_dir = os.getcwd()
 
-        # Create central widget and stacked layout
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
@@ -116,10 +111,8 @@ class DynamiXsMainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.main_layout.addWidget(self.stack)
 
-        # Create pages
         self._create_pages()
 
-        # Show main menu
         self.show_main_menu()
 
     def _create_pages(self):
@@ -363,13 +356,11 @@ class DynamiXsMainWindow(QMainWindow):
             state: State dict from get_state()
             file_refs: File refs dict from get_file_refs()
         """
-        # Restore T1/T2 Fitting page
         if hasattr(self, 't1t2_page') and 't1t2' in state:
             page = self.t1t2_page
             t1t2_state = state['t1t2']
             t1t2_refs = file_refs.get('t1t2', {})
 
-            # Restore session results
             if 'session_results' in t1t2_state:
                 page.session_results = t1t2_state['session_results']
             if 'fitted_experiments' in t1t2_state:
@@ -381,23 +372,19 @@ class DynamiXsMainWindow(QMainWindow):
             if 'source_series_map' in t1t2_state:
                 page.source_series_map = t1t2_state['source_series_map']
 
-            # Restore frequencies
             if hasattr(page, 'field1_freq_spin') and 'field1_freq' in t1t2_state:
                 page.field1_freq_spin.setValue(t1t2_state['field1_freq'])
             if hasattr(page, 'field2_freq_spin') and 'field2_freq' in t1t2_state:
                 page.field2_freq_spin.setValue(t1t2_state['field2_freq'])
 
-            # Restore file references and update displays
             for attr in ['field1_t1_file', 'field1_t2_file', 'field1_t1rho_file',
                         'field2_t1_file', 'field2_t2_file', 'field2_t1rho_file',
                         'peak_list_file']:
                 if attr in t1t2_refs and t1t2_refs[attr]:
                     setattr(page, attr, t1t2_refs[attr])
 
-            # Update displays for field data
             page._update_field_displays()
 
-        # Restore Spectral Density page
         if hasattr(self, 'spectral_page') and 'spectral_density' in state:
             page = self.spectral_page
             sd_state = state['spectral_density']
@@ -410,7 +397,6 @@ class DynamiXsMainWindow(QMainWindow):
             if 'source_series_map' in sd_state:
                 page.source_series_map = sd_state['source_series_map']
 
-            # Restore file references
             for attr in ['field1_t1_file', 'field1_t2_file', 'field1_noe_sat_file',
                         'field1_noe_unsat_file', 'field2_t1_file', 'field2_t2_file',
                         'field2_noe_sat_file', 'field2_noe_unsat_file']:
@@ -827,7 +813,6 @@ class T1T2FittingPage(BasePage):
             },
             'field2': None  # Enabled when user activates dual-field
         }
-        # Track which experiments have been successfully fitted
         self.fitted_experiments = set()  # e.g., {"field1_t1", "field1_t2", "field2_t1"}
 
     def _init_file_vars(self):
@@ -924,7 +909,6 @@ class T1T2FittingPage(BasePage):
         if not lunaNMR_main:
             return None
 
-        # Get saved_series from lunaNMR main window
         saved_series = getattr(lunaNMR_main, 'saved_series', {}) or {}
 
         if series_name not in saved_series:
@@ -932,7 +916,6 @@ class T1T2FittingPage(BasePage):
 
         batch_results = saved_series[series_name]
 
-        # Check if BatchResults has the to_fitting_dataframe method
         if not hasattr(batch_results, 'to_fitting_dataframe'):
             return None
 
@@ -953,7 +936,6 @@ class T1T2FittingPage(BasePage):
             series_name: Name of the dropped series
             csv_path: Path to series_analysis_tidy.csv
         """
-        # Set the file path
         if csv_path:
             setattr(self, f"{field_name}_file", csv_path)
         else:
@@ -966,7 +948,6 @@ class T1T2FittingPage(BasePage):
                 "Please use the Browse button to select the CSV file manually."
             )
 
-        # Update the display
         display = getattr(self, f"{field_name}_display", None)
         if display:
             if csv_path:
@@ -981,7 +962,6 @@ class T1T2FittingPage(BasePage):
             self.source_series_map = {}
         self.source_series_map[field_name] = series_name
 
-        # Log to results area
         if hasattr(self, 'results_text'):
             self.results_text.appendPlainText(
                 f"Assigned series '{series_name}' to {field_name.replace('_', ' ').title()}"
@@ -1020,14 +1000,12 @@ class T1T2FittingPage(BasePage):
                 display.setText(f"📊 {series_name}")
                 display.setToolTip(f"Series: {series_name}\nFile: {file_path or 'In memory'}")
             elif file_path:
-                # Show filename only
                 display.setText(os.path.basename(file_path))
                 display.setToolTip(file_path)
             else:
                 display.setText("No file selected")
                 display.setToolTip("")
 
-        # Update output directory display
         if hasattr(self, 'outdir_display') and self.output_dir:
             self.outdir_display.setText(os.path.basename(self.output_dir))
             self.outdir_display.setToolTip(self.output_dir)
@@ -1045,7 +1023,6 @@ class T1T2FittingPage(BasePage):
 
         if self.field2_enabled:
             self.enable_field2_btn.setText("Disable")
-            # Initialize field2 session structure
             if self.session_results.get('field2') is None:
                 self.session_results['field2'] = {
                     'frequency_mhz': self.field2_freq_spin.value(),
@@ -1070,7 +1047,6 @@ class T1T2FittingPage(BasePage):
             if btn:
                 btn.setEnabled(self.field2_enabled)
 
-        # Update analysis dropdown to show/hide field2 options
         self._update_analysis_options()
 
     def _auto_load_folder(self, field: str):
@@ -1098,7 +1074,6 @@ class T1T2FittingPage(BasePage):
                     found_files[exp] = matches[0]
                     break
 
-        # Update file displays
         for exp, filepath in found_files.items():
             self._assign_data_file(f"{field}_{exp}", filepath)
 
@@ -1115,7 +1090,6 @@ class T1T2FittingPage(BasePage):
         """Update analysis dropdown based on field2 enabled state."""
         current_selection = self.analysis_combo.currentText()
 
-        # Clear and rebuild options
         self.analysis_combo.clear()
 
         # Field 1 options (always available)
@@ -1136,7 +1110,6 @@ class T1T2FittingPage(BasePage):
                 "Both Fields - All",
             ])
 
-        # Try to restore previous selection
         index = self.analysis_combo.findText(current_selection)
         if index >= 0:
             self.analysis_combo.setCurrentIndex(index)
@@ -1146,7 +1119,6 @@ class T1T2FittingPage(BasePage):
         if not hasattr(self, 'prefix_edit'):
             return
 
-        # Extract experiment type from selection
         if "T1ρ" in selection:
             prefix = "T1rho"
         elif "T2" in selection:
@@ -1314,7 +1286,6 @@ class T1T2FittingPage(BasePage):
         peak_list_layout.addWidget(peak_list_browse_btn)
         t1rho_conv_content.addWidget(peak_list_row)
 
-        # Calculate button
         calc_btn_row = QFrame()
         calc_btn_layout = create_h_layout(SPACING_SM)
         calc_btn_row.setLayout(calc_btn_layout)
@@ -1479,7 +1450,6 @@ class T1T2FittingPage(BasePage):
 
         scroll_layout.addWidget(advanced_group)
 
-        # Start button
         start_btn = create_primary_button("Start Analysis", clicked=self._start_analysis, width=200)
         scroll_layout.addWidget(start_btn, alignment=Qt.AlignCenter)
 
@@ -1518,7 +1488,6 @@ class T1T2FittingPage(BasePage):
 
         scroll_layout.addWidget(results_group)
 
-        # Finalize scroll area
         scroll.setWidget(scroll_content)
         self.page_layout.addWidget(scroll, stretch=1)
 
@@ -1554,7 +1523,6 @@ class T1T2FittingPage(BasePage):
                 "All fit results and JSON files will be saved there."
             )
 
-            # Open directory selection dialog
             initial_dir = self.main_window.current_dir
             folder = open_directory_dialog(self, "Select Output Directory", initial_dir)
             if folder:
@@ -1566,11 +1534,9 @@ class T1T2FittingPage(BasePage):
 
         self.results_text.clear()
 
-        # Parse selected analysis from dropdown
         selection = self.analysis_combo.currentText()
         self.results_text.appendPlainText(f"Starting analysis: {selection}")
 
-        # Parse field and experiment type from selection
         if selection.startswith("Field 1"):
             field_name = "field1"
             field_freq = self.field1_freq_spin.value()
@@ -1578,12 +1544,10 @@ class T1T2FittingPage(BasePage):
             field_name = "field2"
             field_freq = self.field2_freq_spin.value()
 
-        # Handle "All" option
         if "All" in selection:
             self._run_all_analyses(field_name)
             return
 
-        # Determine experiment type and get data source
         if "T1ρ" in selection:
             exp_type = "T1rho"
             data_field_key = f"{field_name}_t1rho"
@@ -1603,7 +1567,6 @@ class T1T2FittingPage(BasePage):
         source_series_map = getattr(self, 'source_series_map', {})
         if data_field_key in source_series_map:
             series_name = source_series_map[data_field_key]
-            # Try to get BatchResults from lunaNMR's saved_series
             input_df = self._get_fitting_dataframe_from_series(series_name)
             if input_df is not None:
                 self.results_text.appendPlainText(f"Using data from series '{series_name}' in memory")
@@ -1621,14 +1584,11 @@ class T1T2FittingPage(BasePage):
         if time_units is None:
             return
 
-        # Use the required output directory
         output_dir = self.output_dir
 
-        # Build JSON folder path
         json_folder_name = self.json_display.text() if hasattr(self, 'json_display') else "json"
         json_folder = os.path.join(output_dir, json_folder_name)
 
-        # Determine error method from dropdown
         error_method = "bootstrap" if self.error_method_combo.currentIndex() == 1 else "analytical"
 
         # Every file of the run starts with its prefix, the CLI's <prefix>_<field> naming:
@@ -1656,12 +1616,10 @@ class T1T2FittingPage(BasePage):
             series_name=series_name or ""
         )
 
-        # Show progress bar and reset
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat(f"%p% - Fitting {exp_type} for {field_name}...")
         self.progress_bar.show()
 
-        # Create and start worker
         self.worker = T1T2FittingWorker(params)
         self.worker.progress.connect(self._on_progress)
         self.worker.progress_value.connect(self._on_progress_value)
@@ -1689,7 +1647,6 @@ class T1T2FittingPage(BasePage):
         """Run all analyses (T1, T2) for the specified field."""
         self.results_text.appendPlainText(f"Running all analyses for {field_name}...")
 
-        # Get available files for this field
         t1_file = getattr(self, f"{field_name}_t1_file", None)
         t2_file = getattr(self, f"{field_name}_t2_file", None)
 
@@ -1863,13 +1820,11 @@ class T1T2FittingPage(BasePage):
             err_cols = ['R1rho_err', 'R1ρ_err', 'R1rho_error', 'r1rho_err']
             time_err_cols = ['T1rho_err', 'T1ρ_err', 't1rho_err']
 
-        # Normalize residue column
         for col in residue_cols:
             if col in df.columns:
                 df = df.rename(columns={col: 'residue'})
                 break
 
-        # Check for rate data first
         found_rate = False
         for col in rate_cols:
             if col in df.columns:
@@ -1891,7 +1846,6 @@ class T1T2FittingPage(BasePage):
                     found_rate = True
                     break
 
-        # Check if we found the required data
         if not found_rate:
             available_cols = list(df.columns)
             if rate_type == 'R1':
@@ -1912,11 +1866,9 @@ class T1T2FittingPage(BasePage):
                     df = df.rename(columns={col: f'{rate_type}_err'})
                     break
 
-        # Add default error if not present
         if f'{rate_type}_err' not in df.columns:
             df[f'{rate_type}_err'] = 0.0
 
-        # Handle NaN/inf from division
         df = df.replace([np.inf, -np.inf], np.nan)
         df = df.dropna(subset=[rate_type])
 
@@ -1939,7 +1891,6 @@ class T1T2FittingPage(BasePage):
                 # SPARKY format: typically space/tab delimited with header
                 # Format: Assignment w1 w2 [other columns...]
                 df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, delim_whitespace=True, comment='#')
-                # Normalize SPARKY column names
                 col_map = {
                     'Assignment': 'residue',
                     'w1': 'N_ppm',
@@ -1974,7 +1925,6 @@ class T1T2FittingPage(BasePage):
             # Strip whitespace from column names
             df.columns = df.columns.str.strip()
 
-            # Normalize common column name variations
             col_map = {
                 # Residue/Assignment columns
                 'Assignment': 'residue',
@@ -2022,11 +1972,9 @@ class T1T2FittingPage(BasePage):
             return
         self.progress_bar.setFormat("Complete!")
 
-        # Store results in session (persistent across fits)
         field_name = results.get('field_name', 'field1')
         exp_type = results.get('experiment_type', 'T1').lower()  # t1, t2, or t1rho
 
-        # Create result entry
         result_entry = {
             'output_dir': results.get('output_dir'),
             'json_folder': results.get('json_folder'),
@@ -2037,7 +1985,6 @@ class T1T2FittingPage(BasePage):
             'frequency_mhz': results.get('field_freq', 600.0)
         }
 
-        # Store in session_results
         if field_name not in self.session_results or self.session_results[field_name] is None:
             self.session_results[field_name] = {
                 'frequency_mhz': result_entry['frequency_mhz'],
@@ -2049,11 +1996,9 @@ class T1T2FittingPage(BasePage):
         self.session_results[field_name][exp_type] = result_entry
         self.session_results[field_name]['frequency_mhz'] = result_entry['frequency_mhz']
 
-        # Track fitted experiments
         session_key = f"{field_name}_{exp_type}"
         self.fitted_experiments.add(session_key)
 
-        # Update status indicators (if they exist)
         self._update_status_indicators()
 
         self.results_text.appendPlainText(f"\nSession updated: {session_key} stored")
@@ -2101,7 +2046,6 @@ class T1T2FittingPage(BasePage):
 
     def _update_status_indicators(self):
         """Update visual status indicators for fitted experiments."""
-        # Map experiment keys to indicator widgets
         indicator_map = {
             'field1_t1': getattr(self, 'field1_t1_indicator', None),
             'field1_t2': getattr(self, 'field1_t2_indicator', None),
@@ -2203,32 +2147,25 @@ class T1T2FittingPage(BasePage):
         if not state:
             return
 
-        # Restore session results
         self.session_results = state.get('session_results', self.session_results)
         self.fitted_experiments = set(state.get('fitted_experiments', []))
 
-        # Restore Field 1 files
         self.field1_t1_file = state.get('field1_t1_file')
         self.field1_t2_file = state.get('field1_t2_file')
         self.field1_t1rho_file = state.get('field1_t1rho_file')
 
-        # Restore Field 2 settings
         self.field2_t1_file = state.get('field2_t1_file')
         self.field2_t2_file = state.get('field2_t2_file')
         self.field2_t1rho_file = state.get('field2_t1rho_file')
 
-        # Restore source series mapping (for memory-based data)
         self.source_series_map = state.get('source_series_map', {})
 
-        # Enable Field 2 if it was enabled
         if state.get('field2_enabled', False) and not self.field2_enabled:
             self._toggle_field2()
 
-        # Restore UI settings
         self.field1_freq_spin.setValue(state.get('field1_freq', 600.0))
         self.field2_freq_spin.setValue(state.get('field2_freq', 700.0))
 
-        # Restore analysis selection
         analysis_text = state.get('analysis_selection', '')
         if analysis_text:
             idx = self.analysis_combo.findText(analysis_text)
@@ -2240,7 +2177,6 @@ class T1T2FittingPage(BasePage):
         if self.output_dir:
             self.outdir_display.setText(os.path.basename(self.output_dir))
 
-        # Restore T1rho parameters
         self.field1_theta_spin.setValue(state.get('theta_angle', 45.0))
         self.field1_omega1_spin.setValue(state.get('omega1', 2000.0))
         self.field1_carrier_spin.setValue(state.get('field1_carrier', 0.0))
@@ -2251,7 +2187,6 @@ class T1T2FittingPage(BasePage):
         if self.peak_list_file:
             self.peak_list_display.setText(os.path.basename(self.peak_list_file))
 
-        # Restore advanced parameters
         self.amp_spin.setValue(state.get('initial_amplitude', 5.0))
         self.time_spin.setValue(state.get('initial_decay', 100.0))
         self.error_method_combo.setCurrentIndex(state.get('error_method', 0))
@@ -2259,7 +2194,6 @@ class T1T2FittingPage(BasePage):
         self.units_combo.setCurrentText(state.get('delay_units', TIME_UNITS_DEFAULT))
         self._set_observable(state.get('fit_on'))
 
-        # Update status indicators
         self._update_status_indicators()
 
         # Update field displays (handles both series and file paths)
@@ -2282,7 +2216,6 @@ class T1T2FittingPage(BasePage):
         try:
             from visualization.t1t2_results_viewer import T1T2ResultsViewer
 
-            # Build session_results dict for the viewer
             # Contains all fitted experiments with their result files
             viewer_session = {}
             for field_name, field_data in self.session_results.items():
@@ -2387,7 +2320,6 @@ class SpectralDensityPage(BasePage):
 
     def _setup_content(self):
         """Setup the page content."""
-        # Create scroll area for content
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -2554,7 +2486,6 @@ class SpectralDensityPage(BasePage):
         prefix_layout.addWidget(self.prefix_edit)
         scroll_layout.addWidget(prefix_frame)
 
-        # Start button
         start_btn = create_primary_button("Start Analysis", clicked=self._start_analysis, width=200)
         scroll_layout.addWidget(start_btn, alignment=Qt.AlignCenter)
         scroll_layout.addWidget(self._make_save_run_button(), alignment=Qt.AlignCenter)
@@ -2613,7 +2544,6 @@ class SpectralDensityPage(BasePage):
             show_error(self, "Error", "Please select at least one input file.")
             return
 
-        # Check for dual-field requirements
         is_dual = self.dual_field_radio.isChecked()
         if is_dual and not self.input_file2:
             show_error(self, "Error", "Dual-field analysis requires two input files.\nPlease select File 2.")
@@ -2622,11 +2552,9 @@ class SpectralDensityPage(BasePage):
         self.results_text.clear()
         self.results_text.appendPlainText("Starting analysis...")
 
-        # Store output settings for session tracking
         self.output_dir = self.main_window.current_dir
         results_prefix = self.prefix_edit.text()
 
-        # Create parameters
         params = SpectralDensityParams(
             input_file=self.input_file1,
             input_file2=self.input_file2 if self.input_file2 else "",
@@ -2642,7 +2570,6 @@ class SpectralDensityPage(BasePage):
             n_samples=self.mc_spin.value()
         )
 
-        # Create and start worker
         self.worker = SpectralDensityWorker(params)
         self.worker.progress.connect(self._on_progress)
         self.worker.finished.connect(self._on_finished)
@@ -2659,7 +2586,6 @@ class SpectralDensityPage(BasePage):
         """Handle analysis completion."""
         self.results_text.appendPlainText("\nAnalysis completed successfully!")
 
-        # Store session results for project save/load
         results_prefix = self.prefix_edit.text()
         results_file = os.path.join(self.output_dir, f"{results_prefix}_spectral_density_basic.csv")
 
@@ -2720,21 +2646,17 @@ class SpectralDensityPage(BasePage):
         if not state:
             return
 
-        # Restore session results
         self.session_results = state.get('session_results', self.session_results)
 
-        # Restore input files
         self.input_file1 = state.get('input_file1')
         self.input_file2 = state.get('input_file2')
         self.output_dir = state.get('output_dir')
 
-        # Update file displays
         if self.input_file1:
             self.file1_display.setText(os.path.basename(self.input_file1))
         if self.input_file2:
             self.file2_display.setText(os.path.basename(self.input_file2))
 
-        # Restore analysis type
         mode = state.get('mode', 'single_field')
         if mode == 'dual_field':
             self.dual_field_radio.setChecked(True)
@@ -2747,22 +2669,17 @@ class SpectralDensityPage(BasePage):
         else:
             self.jwh_radio.setChecked(True)
 
-        # Restore field frequencies
         self.field1_spin.setValue(state.get('field1_freq', 600.0))
         self.field2_spin.setValue(state.get('field2_freq', 700.0))
 
-        # Restore physical parameters
         self.rnh_spin.setValue(state.get('rnh_angstrom', 1.015))
         self.csa_spin.setValue(state.get('csa_ppm', -160.0))
 
-        # Restore analysis options
         self.mc_check.setChecked(state.get('monte_carlo', False))
         self.mc_spin.setValue(state.get('n_samples', 50))
 
-        # Restore output prefix
         self.prefix_edit.setText(state.get('prefix', 'spectral_density_analysis'))
 
-        # Update UI based on analysis type
         self._update_analysis_type()
 
 
@@ -3251,7 +3168,6 @@ class IntegratedAnalysisPage(BasePage):
             elif 'SAT' in name or 'SATURATED' in name:
                 noe_sat_file = f
 
-        # Set files and update displays
         files_found = []
         if t1_file:
             setattr(self, f"{field_prefix}_t1_file", t1_file)
@@ -3271,7 +3187,6 @@ class IntegratedAnalysisPage(BasePage):
             files_found.append("hetNOE Unsat")
 
         if files_found:
-            # Change button to green
             btn = self.field1_auto_btn if field_prefix == "field1" else self.field2_auto_btn
             btn.setStyleSheet(f"background-color: {SUCCESS_GREEN};")
             self.progress_text.appendPlainText(f"Loaded {', '.join(files_found)} from {folder_path}")
@@ -3295,7 +3210,6 @@ class IntegratedAnalysisPage(BasePage):
 
     def _reset_form(self):
         """Reset the form to default values."""
-        # Reset file variables
         for prefix in ['field1', 'field2']:
             for suffix in ['t1', 't2', 'noe_sat', 'noe_unsat']:
                 setattr(self, f"{prefix}_{suffix}_file", None)
@@ -3303,11 +3217,9 @@ class IntegratedAnalysisPage(BasePage):
                 if display:
                     display.setText("No file selected")
 
-        # Reset button styles
         self.field1_auto_btn.setStyleSheet("")
         self.field2_auto_btn.setStyleSheet("")
 
-        # Clear progress log
         self.progress_text.clear()
         self.progress_text.appendPlainText("Form reset.")
 
@@ -3315,7 +3227,6 @@ class IntegratedAnalysisPage(BasePage):
         """Start the integrated analysis."""
         if self._analysis_running(self.progress_text.appendPlainText):
             return
-        # Validate required files
         if not all([self.field1_t1_file, self.field1_t2_file,
                    self.field1_noe_sat_file, self.field1_noe_unsat_file]):
             show_error(self, "Missing Files", "Please load all Field 1 data files.")
@@ -3329,7 +3240,6 @@ class IntegratedAnalysisPage(BasePage):
                 "Please select an output directory before running analysis.\n"
                 "All fit results and JSON files will be saved there."
             )
-            # Open directory selection dialog
             initial_dir = self.main_window.current_dir
             folder = open_directory_dialog(self, "Select Output Directory", initial_dir)
             if folder:
@@ -3339,7 +3249,6 @@ class IntegratedAnalysisPage(BasePage):
                 # User cancelled - abort
                 return
 
-        # Get selected method
         method = "dual_087"
         for radio, value in self.method_radios:
             if radio.isChecked():
@@ -3360,15 +3269,12 @@ class IntegratedAnalysisPage(BasePage):
         self.progress_text.clear()
         self.progress_text.appendPlainText("Starting integrated analysis...")
 
-        # Start timer
         self._analysis_start_time = time.time()
         self.elapsed_time_label.setText("00:00")
         self._elapsed_timer.start(1000)  # Update every second
 
-        # Get error method from combo box
         error_method = "bootstrap" if self.mf_error_method_combo.currentIndex() == 1 else "analytical"
 
-        # Create parameters
         params = IntegratedAnalysisParams(
             field1_t1_file=self.field1_t1_file,
             field1_t2_file=self.field1_t2_file,
@@ -3396,7 +3302,6 @@ class IntegratedAnalysisPage(BasePage):
             time_units=time_units
         )
 
-        # Create and start worker
         self.worker = IntegratedAnalysisWorker(params)
         self.worker.progress.connect(self._on_progress)
         self.worker.finished.connect(self._on_finished)
@@ -3411,7 +3316,6 @@ class IntegratedAnalysisPage(BasePage):
     @Slot(object)
     def _on_finished(self, results: dict):
         """Handle analysis completion."""
-        # Stop timer and calculate final elapsed time
         self._elapsed_timer.stop()
         if self._analysis_start_time:
             elapsed = time.time() - self._analysis_start_time
@@ -3430,7 +3334,6 @@ class IntegratedAnalysisPage(BasePage):
         for line in self._fit_report(results):
             self.progress_text.appendPlainText(line)
 
-        # Store session results for project save/load
         results_prefix = self.prefix_edit.text()
         json_folder = os.path.join(self.output_dir, self.json_display.text())
         results_file = os.path.join(self.output_dir, f"{results_prefix}_spectral_density_detailed.csv")
@@ -3495,11 +3398,9 @@ class IntegratedAnalysisPage(BasePage):
         try:
             from visualization.results_viewer import ResultsViewer
 
-            # Build results file path
             prefix = self.prefix_edit.text() if hasattr(self, 'prefix_edit') else "analysis"
             results_file = os.path.join(self.output_dir, f"{prefix}_spectral_density_detailed.csv")
 
-            # Get field frequencies
             field1_freq = self.field1_freq_spin.value() if hasattr(self, 'field1_freq_spin') else 600.0
             field2_freq = self.field2_freq_spin.value() if hasattr(self, 'field2_freq_spin') else None
             is_dual_field = hasattr(self, 'field2_enabled') and self.field2_enabled
@@ -3557,7 +3458,6 @@ class IntegratedAnalysisPage(BasePage):
 
         Returns serializable dict with all UI settings and session results.
         """
-        # Get selected analysis method
         analysis_method = "dual_087"
         for radio, value in self.method_radios:
             if radio.isChecked():
@@ -3619,16 +3519,13 @@ class IntegratedAnalysisPage(BasePage):
         if not state:
             return
 
-        # Restore session results
         self.session_results = state.get('session_results', self.session_results)
 
-        # Restore Field 1 files
         self.field1_t1_file = state.get('field1_t1_file')
         self.field1_t2_file = state.get('field1_t2_file')
         self.field1_noe_sat_file = state.get('field1_noe_sat_file')
         self.field1_noe_unsat_file = state.get('field1_noe_unsat_file')
 
-        # Update Field 1 displays
         if self.field1_t1_file:
             self.field1_t1_display.setText(os.path.basename(self.field1_t1_file))
         if self.field1_t2_file:
@@ -3638,18 +3535,15 @@ class IntegratedAnalysisPage(BasePage):
         if self.field1_noe_unsat_file:
             self.field1_noe_unsat_display.setText(os.path.basename(self.field1_noe_unsat_file))
 
-        # Restore Field 2 files
         self.field2_t1_file = state.get('field2_t1_file')
         self.field2_t2_file = state.get('field2_t2_file')
         self.field2_noe_sat_file = state.get('field2_noe_sat_file')
         self.field2_noe_unsat_file = state.get('field2_noe_unsat_file')
 
-        # Enable Field 2 if it was enabled
         if state.get('enable_dual_field', False):
             if not self.field2_freq_spin.isEnabled():
                 self._toggle_field2()
 
-        # Update Field 2 displays
         if self.field2_t1_file:
             self.field2_t1_display.setText(os.path.basename(self.field2_t1_file))
         if self.field2_t2_file:
@@ -3659,22 +3553,18 @@ class IntegratedAnalysisPage(BasePage):
         if self.field2_noe_unsat_file:
             self.field2_noe_unsat_display.setText(os.path.basename(self.field2_noe_unsat_file))
 
-        # Restore field frequencies
         self.field1_freq_spin.setValue(state.get('field1_freq', 600.0))
         self.field2_freq_spin.setValue(state.get('field2_freq', 700.0))
 
-        # Restore analysis method
         analysis_method = state.get('analysis_method', 'dual_087')
         for radio, value in self.method_radios:
             if value == analysis_method:
                 radio.setChecked(True)
                 break
 
-        # Restore physical parameters
         self.rnh_spin.setValue(state.get('rnh_angstrom', 1.015))
         self.csa_spin.setValue(state.get('csa_ppm', -160.0))
 
-        # Restore fitting parameters
         self.init_amp_spin.setValue(state.get('initial_amplitude', 5.0))
         self.init_t1_spin.setValue(state.get('t1_initial_time', 800.0))
         self.init_t2_spin.setValue(state.get('t2_initial_time', 100.0))
@@ -3691,7 +3581,6 @@ class IntegratedAnalysisPage(BasePage):
         self._set_observable(state.get('fit_on'))
         self.observable_combo.blockSignals(False)
 
-        # Restore output configuration
         self.output_dir = state.get('output_dir', self.output_dir)
         self.outdir_display.setText(os.path.basename(self.output_dir))
         self.prefix_edit.setText(state.get('prefix', 'integrated_analysis'))
