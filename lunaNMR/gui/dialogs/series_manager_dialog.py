@@ -74,7 +74,6 @@ class SeriesManagerDialog(BaseDialog):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(SPACING_SM)
 
-        # Rename button
         self.rename_btn = QPushButton("Rename")
         self.rename_btn.setEnabled(False)
         self.rename_btn.setStyleSheet(f"""
@@ -96,7 +95,6 @@ class SeriesManagerDialog(BaseDialog):
         self.rename_btn.clicked.connect(self._rename_series)
         button_layout.addWidget(self.rename_btn)
 
-        # Delete button
         self.delete_btn = QPushButton("Delete")
         self.delete_btn.setEnabled(False)
         self.delete_btn.setStyleSheet(f"""
@@ -120,7 +118,6 @@ class SeriesManagerDialog(BaseDialog):
 
         button_layout.addStretch()
 
-        # Close button
         close_btn = QPushButton("Close")
         close_btn.setStyleSheet(f"""
             QPushButton {{
@@ -168,7 +165,6 @@ class SeriesManagerDialog(BaseDialog):
         has_selection = len(self.series_list.selectedItems()) > 0
         selected_item = self.series_list.currentItem()
 
-        # Check if it's a real selectable item
         if selected_item and selected_item.data(Qt.UserRole) is None:
             has_selection = False
 
@@ -202,12 +198,10 @@ class SeriesManagerDialog(BaseDialog):
 
         new_name = new_name.strip()
 
-        # Validate name
         invalid_chars = '<>:"/\\|?*'
         for char in invalid_chars:
             new_name = new_name.replace(char, '_')
 
-        # Check for duplicate
         if new_name != old_name and new_name in saved_series:
             QMessageBox.warning(
                 self,
@@ -216,7 +210,6 @@ class SeriesManagerDialog(BaseDialog):
             )
             return
 
-        # Perform rename
         batch = saved_series.pop(old_name)
         if hasattr(batch, 'metadata'):
             batch.metadata['series_name'] = new_name
