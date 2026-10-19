@@ -202,15 +202,12 @@ def validate_styles():
     Raises:
         ValueError: If any validation fails
     """
-    # Validate design system constants
     validate_design_system()
 
-    # Check that main stylesheet exists
     main_stylesheet = get_styles_dir() / "main.qss"
     if not main_stylesheet.exists():
         raise FileNotFoundError(f"Main stylesheet not found at {main_stylesheet}")
 
-    # Try to load the stylesheet
     try:
         load_stylesheet()
     except Exception as e:
@@ -303,7 +300,6 @@ __all__ = [
 
 
 if __name__ == "__main__":
-    # Run validation when module is executed directly
     try:
         validate_styles()
         print("✓ All styles validated successfully")
