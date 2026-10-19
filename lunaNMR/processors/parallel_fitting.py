@@ -33,7 +33,6 @@ class ParallelPeakFitter:
         """
         self.integrator = integrator
         if max_workers is None:
-            # Use 75% of available cores
             self.max_workers = max(1, int(cpu_count() * 0.75))
         else:
             self.max_workers = max_workers
@@ -69,7 +68,6 @@ class ParallelPeakFitter:
         # This avoids redundant serialization of large nmr_data arrays
         shared_integrator_data = self._serialize_integrator_data()
 
-        # Prepare peak data for parallel processing
         peak_tasks = []
         for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
             peak_number = i + 1
@@ -88,7 +86,6 @@ class ParallelPeakFitter:
 
         start_time = time.time()
 
-        # Create multiprocessing pool and fit peaks
         results = []
         successful_fits = 0
         failed_fits = 0
@@ -107,7 +104,6 @@ class ParallelPeakFitter:
                     async_result = pool.apply_async(_fit_single_peak_worker, (task,))
                     async_results.append((task['peak_number'], task['assignment'], async_result))
 
-                # Collect results as they complete
                 for peak_number, assignment, async_result in async_results:
                     try:
                         result = async_result.get(timeout=120)  # Increased timeout to 120s
@@ -133,7 +129,6 @@ class ParallelPeakFitter:
                         failed_fits += 1
 
         except Exception:
-            # Fallback to sequential processing
             return self._fit_peaks_sequential_fallback(peak_list, all_peaks_context, progress_callback)
 
         return results
@@ -147,7 +142,6 @@ class ParallelPeakFitter:
             'gui_params': getattr(self.integrator, 'gui_params', None)
         }
 
-        # Add optional attributes if they exist
         if hasattr(self.integrator, 'nmr_dict'):
             integrator_data['nmr_dict'] = self.integrator.nmr_dict
         if hasattr(self.integrator, 'peak_list'):
@@ -210,20 +204,16 @@ def _fit_single_peak_worker(task_data):
         if current_dir not in sys.path:
             sys.path.insert(0, current_dir)
 
-        # Import the integrator class
         from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
 
-        # Create integrator instance
         integrator = EnhancedVoigtIntegrator()
 
-        # Restore integrator state
         integrator_data = task_data['integrator_data']
         integrator.nmr_data = integrator_data['nmr_data']
         integrator.ppm_x_axis = integrator_data['ppm_x_axis']
         integrator.ppm_y_axis = integrator_data['ppm_y_axis']
         integrator.gui_params = integrator_data['gui_params']
 
-        # Restore other essential attributes
         if 'nmr_dict' in integrator_data:
             integrator.nmr_dict = integrator_data['nmr_dict']
         if 'peak_list' in integrator_data:
@@ -231,7 +221,6 @@ def _fit_single_peak_worker(task_data):
         if 'enhanced_fitter' in integrator_data:
             integrator.enhanced_fitter = integrator_data['enhanced_fitter']
 
-        # Initialize enhanced fitter if not available
         if not hasattr(integrator, 'enhanced_fitter') or integrator.enhanced_fitter is None:
             try:
                 from lunaNMR.core.enhanced_voigt_fitter import EnhancedVoigtFitter
