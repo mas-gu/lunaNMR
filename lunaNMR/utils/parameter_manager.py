@@ -21,7 +21,6 @@ class NMRParameterManager:
     def __init__(self):
         """Initialize with default parameters"""
 
-        # Initialize simplified parameter manager for automated fitting
         try:
             from .simplified_parameter_manager import SimplifiedParameterManager, ParameterAdapter
             self.simplified_manager = SimplifiedParameterManager()
@@ -32,7 +31,6 @@ class NMRParameterManager:
             self.parameter_adapter = None
             self.use_simplified_mode = False
 
-        # Define all default parameters with validation ranges
         self.parameter_definitions = {
             # Detection Parameters
             'search_window_x': {'default': SEARCH_WINDOW_PPM, 'min': 0.001, 'max': 1.0, 'type': float},  # F2/1H
@@ -82,7 +80,6 @@ class NMRParameterManager:
             'use_ps2d_linewidth_reuse': {'default': False, 'type': bool}  
         }
 
-        # Initialize current parameters with defaults
         self.current_params = {}
         for param_name, definition in self.parameter_definitions.items():
             self.current_params[param_name] = definition['default']
@@ -158,7 +155,6 @@ class NMRParameterManager:
                         # Unknown type - skip
                         continue
 
-                    # Validate the parameter
                     validated_value = self._validate_parameter(param_name, value)
                     self.current_params[param_name] = validated_value
                     updated_params[param_name] = validated_value
@@ -268,7 +264,6 @@ class NMRParameterManager:
                     if not isinstance(current_value, expected_type):
                         errors.append(f"{param_name}: expected {expected_type.__name__}, got {type(current_value).__name__}")
 
-                # Check range for numeric types
                 if expected_type in [int, float] or (isinstance(expected_type, tuple) and float in expected_type):
                     if current_value is not None:  # Skip range check for None values
                         if 'min' in definition and current_value < definition['min']:
