@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 import signal
 
-# Import batch processing components
 try:
     from .batch_processor import BatchProcessor
     from .config_manager import ConfigManager, UnreadConfigKeys
@@ -202,7 +201,6 @@ Examples:
         Returns:
             True if arguments are valid, False otherwise
         """
-        # Check for conflicting options
         if args.quiet and args.verbose:
             print("Error: --quiet and --verbose options are mutually exclusive")
             return False
@@ -215,17 +213,14 @@ Examples:
             print("Error: --preset and --config options are mutually exclusive")
             return False
 
-        # Check for required folder argument
         if not args.create_examples and not args.list_presets and not args.folder:
             print("Error: folder argument is required unless using --create-examples or --list-presets")
             return False
 
-        # Check folder exists
         if args.folder and not Path(args.folder).exists():
             print(f"Error: Folder '{args.folder}' does not exist")
             return False
 
-        # Check config file exists
         if args.config and not Path(args.config).exists():
             print(f"Error: Configuration file '{args.config}' does not exist")
             return False
@@ -239,7 +234,6 @@ Examples:
         Args:
             args: Parsed command line arguments
         """
-        # Determine log level
         if args.quiet:
             console_level = logging.ERROR
         elif args.verbose:
@@ -279,7 +273,6 @@ Examples:
         """
         config_manager = ConfigManager()
 
-        # Start with default configuration
         if args.preset:
             config = config_manager.get_preset_config(args.preset)
             print(f"Using preset configuration: {args.preset}")
@@ -290,7 +283,6 @@ Examples:
             config = config_manager.default_config.copy()
             print("Using default configuration")
 
-        # Override with command line arguments
         if args.extensions:
             config['file_handling']['extensions'] = args.extensions
 
@@ -320,10 +312,8 @@ Examples:
 
         print(f"Creating example configuration files in: {output_path}")
 
-        # Create preset configuration files
         created_files = config_manager.create_preset_config_files(output_path)
 
-        # Create main example configuration
         example_file = output_path / "example_config.json"
         config_manager.create_example_config(example_file)
         created_files.append(example_file)
@@ -361,7 +351,6 @@ Examples:
         """
         print("=== DRY RUN - No actual processing will be performed ===\n")
 
-        # Create temporary processor to find files
         processor = BatchProcessor(config, output_dir=args.output)
 
         try:
@@ -405,7 +394,6 @@ Examples:
             True if processing was successful, False otherwise
         """
         try:
-            # Create processor
             processor = BatchProcessor(config, output_dir=args.output)
 
             # Progress reporting
@@ -413,7 +401,6 @@ Examples:
                 print(f"Starting batch processing of: {args.folder}")
                 print(f"Target nucleus type: {args.nucleus or 'auto-detect'}")
 
-            # Process the folder
             results = processor.process_folder(
                 folder_path=args.folder,
                 nucleus_type=args.nucleus
@@ -514,19 +501,15 @@ Examples:
             print("Please ensure lunaNMR core components are properly installed")
             return 1
 
-        # Parse arguments
         parser = self.create_parser()
         args = parser.parse_args(argv)
 
-        # Validate arguments
         if not self.validate_arguments(args):
             return 1
 
-        # Set up logging
         self.setup_logging(args)
 
         try:
-            # Handle utility commands
             if args.create_examples:
                 self.create_example_files(args.create_examples)
                 return 0
@@ -535,7 +518,6 @@ Examples:
                 self.list_presets()
                 return 0
 
-            # Load configuration
             try:
                 config = self.load_configuration(args)
             except UnreadConfigKeys as e:
@@ -543,11 +525,9 @@ Examples:
                 print(f"Error: {e}", file=sys.stderr)
                 return 2
 
-            # Handle dry run
             if args.dry_run:
                 return 0 if self.perform_dry_run(args, config) else 1
 
-            # Run batch processing
             success = self.run_batch_processing(args, config)
             return 0 if success else 1
 
