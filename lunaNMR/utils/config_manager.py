@@ -26,10 +26,8 @@ class ConfigurationManager:
         self.config_file = os.path.join(self.config_folder, "config.json")
         self.recent_files_file = os.path.join(self.config_folder, "recent_files.json")
 
-        # Ensure config folder exists
         os.makedirs(self.config_folder, exist_ok=True)
 
-        # Default configuration
         self.default_config = {
             "version": "1.0.0",
             "last_updated": None,
@@ -93,7 +91,6 @@ class ConfigurationManager:
             }
         }
 
-        # Load existing configuration
         self.config = self.load_config()
 
     def _get_config_folder(self):
@@ -178,7 +175,6 @@ class ConfigurationManager:
                 config_section[key] = {}
             config_section = config_section[key]
 
-        # Set the value
         config_section[keys[-1]] = value
 
     def reset_to_defaults(self, section=None):
@@ -205,7 +201,6 @@ class ConfigurationManager:
             with open(file_path, 'r', encoding='utf-8') as f:
                 imported_config = json.load(f)
 
-            # Merge with current config
             self.config = self._merge_configs(self.config, imported_config)
             return True
 
@@ -244,11 +239,9 @@ class ConfigurationManager:
 
         file_path = os.path.abspath(file_path)
 
-        # Remove if already exists
         if file_path in recent[key]:
             recent[key].remove(file_path)
 
-        # Add to beginning
         recent[key].insert(0, file_path)
 
         # Limit size
