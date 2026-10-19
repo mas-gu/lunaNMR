@@ -45,7 +45,7 @@ class TestTuningKnobsAreReachable:
         cfg = tmp_path / "tune.json"
         cfg.write_text(json.dumps({"detection_params": {"search_window_x": 0.05}}))
         params = _effective_params(tmp_path, ["--params", str(cfg)], capsys)
-        assert params["detection_params"]["search_window_y"] == 0.070
+        assert params["detection_params"]["search_window_y"] is None  # the nucleus decides
         assert params["fitting_params"]["min_r_squared"] == 0.5
 
     def test_several_sections_at_once(self, tmp_path, capsys):

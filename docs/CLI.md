@@ -620,6 +620,8 @@ python -m lunaNMR dynamixs modelfree --dual \
   --field1-freq 600 --field2-freq 800 --out RUN/modelfree_out
 ```
 
-**Gotcha — the peak-detection window.** The default 1H/15N search window is **0.070 ppm** in
-both dimensions. A wide 15N window ruins the low-S/N saturated hetNOE spectrum (peaks fit to
-noise → Height 0 → NOE≈0 → residues dropped in model-free). Keep it tight.
+**Gotcha — the peak-detection window.** The default search window is **0.070 ppm in 1H and
+0.3 ppm in 15N** (0.11 in 13C) on a single spectrum and a series' first spectrum; later
+spectra of a series search only ±0.070 around each listed position. Matching is competitive,
+nearest in linewidths first. Don't widen it further for the low-S/N saturated hetNOE
+spectrum: a wider box fits peaks to noise → Height 0 → NOE≈0 → residues dropped.

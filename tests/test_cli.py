@@ -254,9 +254,10 @@ class TestSeriesHelpers:
         assert set(p) >= {'detection_params', 'gui_params', 'fitting_params', 'processing_options'}
         assert p['gui_params']['use_ps2d_multi_peak'] is True
         assert p['fitting_params']['min_r_squared'] == 0.5
-        # 1H/15N search window starting value is 0.070 ppm in both dimensions.
+        # 1H search window starts at 0.070 ppm; the indirect one is left to the nucleus
+        # of spectrum 1 (None until the integrator resolves it).
         assert p['detection_params']['search_window_x'] == 0.070
-        assert p['detection_params']['search_window_y'] == 0.070
+        assert p['detection_params']['search_window_y'] is None
 
     def test_discover_spectra_natural_sort(self, tmp_path):
         from lunaNMR.cli import _discover_spectra

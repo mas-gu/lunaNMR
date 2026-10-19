@@ -193,8 +193,9 @@ log area; in CLI mode they fall back to <code>print()</code>. Thread-local callb
 (<code>core/enhanced_peak_picker.py</code>, <code>core_integrator._detect_peaks_by_threshold</code>), kept
 <strong>per sign</strong>: maxima above +threshold and minima below −threshold, so a negative peak beside a
 positive lobe survives. Positions are refined to the top-contour centroid. Detection supports manual region
-restriction; the search window is 0.070 ppm in both dimensions for ¹⁵N and ¹³C
-(<code>ps2d_config.SEARCH_WINDOW_PPM</code>). Cancel stops a detection before its next peak.</p>
+restriction. The search window is 0.070 ppm in ¹H and the nucleus's own in the indirect dimension
+(0.3 ppm ¹⁵N, 0.11 ppm ¹³C); on later spectra of a series a peak searches only ±0.070 ppm around its
+listed position, so a decayed peak cannot take a neighbour. Cancel stops a detection before its next peak.</p>
 </section>
 
 <section id="voigt">

@@ -120,7 +120,7 @@ number is trustworthy is the user's call, not yours.
 
 Stop only if you genuinely cannot produce output at all:
 
-- A peak list is mis-registered against its own spectra (shift > 50% of the 0.070 ppm window).
+- A peak list is mis-registered against its own spectra (shift > 50% of the search window in either dimension).
 - Any stage yields fewer than 30 usable residues.
 - A CLI command fails twice for the same reason.
 

@@ -21,7 +21,7 @@ Load Data → Detect → Fit Spectrum → File ▸ Export Results
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
-| Search window 1H / X (ppm) | 0.070 / 0.070 | Both dims, 15N and 13C (`ps2d_config.SEARCH_WINDOW_PPM`); keep tight for low-S/N (e.g. saturated hetNOE) |
+| Search window 1H / X (ppm) | 0.070 / 0.3 (15N), 0.11 (13C) | Per nucleus (`ps2d_config`); later series spectra search ±0.070 around each listed position; keep tight for low-S/N (e.g. saturated hetNOE) |
 | Centroid window X / Y (ppm) | 0.01 / 0.10 | Max position shift |
 
 ## Fitting Controls
