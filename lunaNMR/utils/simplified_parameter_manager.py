@@ -128,10 +128,8 @@ class SimplifiedParameterManager:
         float : Adaptive quality threshold (R²)
         """
 
-        # Estimate SNR
         snr = self._estimate_snr(spectrum_data)
 
-        # Get nucleus-specific baseline threshold
         nucleus_params = self.nucleus_parameters.get(nucleus_type, self.nucleus_parameters['default'])
         base_snr = nucleus_params['snr_threshold']
 
@@ -155,7 +153,6 @@ class SimplifiedParameterManager:
         target_factor = self.simplified_params.quality_target / 0.85  # normalize to 0.85 default
         adaptive_threshold *= target_factor
 
-        # Ensure reasonable bounds
         adaptive_threshold = np.clip(adaptive_threshold, 0.3, 0.99)
 
         return adaptive_threshold
@@ -191,10 +188,8 @@ class SimplifiedParameterManager:
             # Fallback: simple standard deviation
             noise_level = np.std(spectrum_data)
 
-        # Signal estimation
         signal_level = np.max(spectrum_data) - np.median(spectrum_data)
 
-        # Calculate SNR
         snr = signal_level / max(noise_level, 1e-10)  # Avoid division by zero
 
         return max(snr, 0.1)  # Minimum SNR to avoid issues
@@ -216,15 +211,12 @@ class SimplifiedParameterManager:
         dict : Complete parameter set
         """
 
-        # Check cache validity
         cache_key = f"{nucleus_type}_{hash(str(spectrum_info))}"
         if self._cache_valid and cache_key in self._derived_params_cache:
             return self._derived_params_cache[cache_key].copy()
 
-        # Get nucleus-specific parameters
         nucleus_params = self.nucleus_parameters.get(nucleus_type, self.nucleus_parameters['default'])
 
-        # Calculate adaptive windows based on simplified parameters
         base_window = nucleus_params['window_base']
         scale = self.simplified_params.window_scale
 
@@ -271,7 +263,6 @@ class SimplifiedParameterManager:
             'centroid_noise_multiplier': 2.0
         }
 
-        # Apply spectrum-specific adaptations if available
         if spectrum_info and 'snr' in spectrum_info:
             snr = spectrum_info['snr']
             # Adapt thresholds based on actual SNR
@@ -304,27 +295,21 @@ class SimplifiedParameterManager:
 
         errors = []
 
-        # Check sensitivity range
         if not (0.0 <= self.simplified_params.sensitivity <= 1.0):
             errors.append("Sensitivity must be between 0.0 and 1.0")
 
-        # Check window scale range
         if not (0.1 <= self.simplified_params.window_scale <= 10.0):
             errors.append("Window scale must be between 0.1 and 10.0")
 
-        # Check quality target range
         if not (0.3 <= self.simplified_params.quality_target <= 1.0):
             errors.append("Quality target must be between 0.3 and 1.0")
 
-        # Check max_peaks_fit range
         if not (1 <= self.simplified_params.max_peaks_fit <= 20):
             errors.append("Max peaks fit must be between 1 and 20")
 
-        # Check max_iterations range
         if not (100 <= self.simplified_params.max_iterations <= 5000):
             errors.append("Max iterations must be between 100 and 5000")
 
-        # Check method validity
         valid_noise_methods = ['auto', 'percentile', 'robust']
         if self.simplified_params.noise_estimation_method not in valid_noise_methods:
             errors.append(f"Noise method must be one of {valid_noise_methods}")
