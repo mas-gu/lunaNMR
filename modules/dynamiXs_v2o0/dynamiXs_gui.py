@@ -65,6 +65,7 @@ from workers import (
 from dynamiXs_T1_T2.delay_units import (
     TIME_UNITS_DEFAULT, resolve_time_units, series_sidecar
 )
+from dynamiXs_T1_T2.series_inputs import tidy_table_refusal
 
 # The delay units a page can state for its series, and the factor turning ms into each:
 # the initial-guess fields are in ms, the fitters work in the series' own units.
@@ -670,6 +671,14 @@ class BasePage(QWidget):
                 widget.appendPlainText(str(msg))
                 return
 
+    def _refuses_tidy_table(self, path) -> bool:
+        """Whether `path` is a series' tidy table, which the fitters cannot read as a
+        relaxation matrix; the refusal, naming the matrix to use, goes to the page's log."""
+        refusal = tidy_table_refusal(path, self._observable_matrix_name())
+        if refusal:
+            self._page_log(refusal)
+        return bool(refusal)
+
     # ---------- saving the run to the project ----------
 
     def _make_save_run_button(self):
@@ -880,7 +889,7 @@ class T1T2FittingPage(BasePage):
             directory=self.main_window.current_dir,
             filter="CSV files (*.csv);;All files (*.*)"
         )
-        if filename:
+        if filename and not self._refuses_tidy_table(filename):
             self._assign_data_file(field_name, filename)
 
     def _assign_data_file(self, field_name: str, path: str):
@@ -3139,9 +3148,13 @@ class IntegratedAnalysisPage(BasePage):
             directory=self.main_window.current_dir,
             filter="CSV files (*.csv);;All files (*.*)"
         )
-        if filename:
-            setattr(self, f"{field_name}_file", filename)
-            display_label.setText(os.path.basename(filename))
+        if not filename:
+            return
+        # A T1 or T2 slot reads a relaxation matrix; a hetNOE slot reads one plane's file
+        if 'noe' not in field_name and self._refuses_tidy_table(filename):
+            return
+        setattr(self, f"{field_name}_file", filename)
+        display_label.setText(os.path.basename(filename))
 
     # =========================================================================
     # SERIES PICKER METHODS

@@ -1969,8 +1969,32 @@ def _require_field2_freq(parser, args):
                      'in MHz); there is no safe default for it')
 
 
+def _refuse_tidy_tables(parser, args, flags):
+    """A series' tidy table given where a relaxation matrix is read: the fitter would
+    parse a residue name as an intensity. The refusal names the matrix beside it."""
+    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
+    from series_inputs import tidy_table_refusal
+    for flag in flags:
+        path = getattr(args, flag.lstrip('-').replace('-', '_'))
+        refusal = tidy_table_refusal(path) if path else None
+        if refusal:
+            parser.error(f"{flag}: {refusal}")
+
+
+def _validate_relaxation_matrix(parser, args):
+    """t1t2 and methyl-t2 read one relaxation matrix."""
+    _refuse_tidy_tables(parser, args, ('--input',))
+
+
+def _validate_t1rho(parser, args):
+    """t1rho reads the T1rho and the T1 matrices."""
+    _refuse_tidy_tables(parser, args, ('--input', '--t1'))
+
+
 def _validate_modelfree(parser, args):
-    """R2 comes from a T2 series or from a precomputed table, never both."""
+    """R2 comes from a T2 series or from a precomputed table, never both; every T1/T2
+    series is a relaxation matrix."""
+    _refuse_tidy_tables(parser, args, ('--f1-t1', '--f1-t2', '--f2-t1', '--f2-t2'))
     for field in ('f1', 'f2'):
         if getattr(args, f'{field}_t2') and getattr(args, f'{field}_r2_table'):
             parser.error(f'--{field}-t2 and --{field}-r2-table are alternatives; give one')
@@ -2474,12 +2498,12 @@ def build_parser():
     _add_relaxation_flags(t1t2)
     t1t2.add_argument('--exp', choices=['T1', 'T2'], required=True, help='Experiment type')
     t1t2.add_argument('--no-json', action='store_true', help='Skip writing the JSON fit data')
-    t1t2.set_defaults(func=_run_dynamixs_t1t2)
+    t1t2.set_defaults(func=_run_dynamixs_t1t2, _validate=_validate_relaxation_matrix)
 
     methyl = dx_sub.add_parser('methyl-t2', parents=[common],
                                help='Bi-exponential (Tugarinov-Kay) methyl T2 fit')
     _add_relaxation_flags(methyl)
-    methyl.set_defaults(func=_run_dynamixs_methyl)
+    methyl.set_defaults(func=_run_dynamixs_methyl, _validate=_validate_relaxation_matrix)
 
     hetnoe = dx_sub.add_parser('hetnoe', parents=[common],
                                help='Heteronuclear NOE = I_sat / I_unsat per residue')
@@ -2512,7 +2536,7 @@ def build_parser():
     t1rho.add_argument('--error-method', choices=['analytical', 'bootstrap'], default='analytical',
                        dest='error_method')
     t1rho.add_argument('--bootstrap', type=int, default=1000)
-    t1rho.set_defaults(func=_run_dynamixs_t1rho)
+    t1rho.set_defaults(func=_run_dynamixs_t1rho, _validate=_validate_t1rho)
 
     density = dx_sub.add_parser('density', parents=[common],
                                 help='Reduced spectral density mapping from an R1/R2/hetNOE table')
