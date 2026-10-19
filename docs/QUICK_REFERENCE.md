@@ -55,12 +55,12 @@ Full clustering/fitting algorithm: [ALGORITHMS.md](ALGORITHMS.md).
 
 | Color | R² | Category |
 |-------|-----|----------|
-| 🟩 Lime | ≥ 0.9 | Excellent |
-| 🟢 Green | ≥ 0.8 | Good |
-| 🟠 Orange | ≥ 0.5 | Fair |
-| 🔴 Red | < 0.5 | Poor / Failed / unfitted |
+| 🟩 Lime | > 0.9 | Excellent |
+| 🟢 Green | > 0.8 | Good |
+| 🟠 Orange | > 0.6 (0.5–0.6 at S/N ≤ 5) | Fair |
+| 🔴 Red | below Fair | Poor / Failed / unfitted |
 
-Marker colors follow the result `quality` field (`_assign_quality_from_r2`, `core_integrator.py`). The standalone 1D Voigt fitter uses a stricter internal scale (0.95/0.85/0.70) that does not drive marker color.
+Failed is R² < 0.2 at S/N ≤ 5, or a fit that did not succeed; a near-noise peak is Poor, never Failed. Marker colors follow the label the fit carries, given by the one rule every fitter and the series use: `fit_quality_label` (`utils/quality_categories.py`); full table in [ALGORITHMS.md §4](ALGORITHMS.md).
 
 ---
 

@@ -1,197 +1,56 @@
 #!/usr/bin/env python3
-# ABOUTME: R-squared quality categories (scientific, permissive or custom thresholds) for fits,
+# ABOUTME: fit_quality_label, the one rule a fitted peak's quality label is given by,
 # ABOUTME: and usable_points: which points of a series carry a measurement of an observable.
-"""
-Quality Categorization System for LunaNMR
-==========================================
+import math
 
-Centralized system for R² quality thresholds with support for:
-- Scientific quality categories (strict, traditional)
-- Permissive quality categories (relaxed, for maximum data inclusion)
-- Full retrocompatibility with existing code
-- Configurable thresholds via JSON config
+# ---------------------------------------------------------------------------
+# The quality label of a fit
+# ---------------------------------------------------------------------------
+# A fit this far above the noise is a measurement whatever its R-squared says.
+MEASURED_SNR = 5.0
 
-Author: LunaNMR Team
-Version: 1.0
-"""
 
-import numpy as np
-from typing import Dict, List, Union, Optional
-from dataclasses import dataclass
+def fit_quality_label(r_squared, success=True, near_noise=False, snr=None):
+    """Quality label of one fitted peak: Excellent, Good, Fair, Poor or Failed.
 
-@dataclass
-class QualityThresholds:
-    """Quality threshold configuration"""
-    excellent: float
-    good: float
-    fair: float
-    name: str
-    description: str
+    The one rule every fitter, the series output and the overlay refit label a fit
+    with. The Kd loaders and the intensity matrices drop a Failed point, so where this
+    rule puts Failed decides what is measured.
 
-class QualityCategorizer:
+    - A fit that did not succeed, or has no R-squared, is Failed.
+    - R-squared above 0.9 is Excellent, above 0.8 Good, above 0.6 Fair.
+    - Below that, a peak more than MEASURED_SNR above the noise is Poor: it stands
+      clear of the noise, so it is a measurement, if not a well-shaped one.
+    - Otherwise R-squared of 0.5 or more is Fair and 0.2 or more Poor.
+    - Below 0.2, a near-noise peak is Poor, never Failed: its R-squared is ~0 by
+      construction - a held shape against noise - and its near-zero intensity is the
+      measurement. Anything else below 0.2 is Failed.
+
+    So between 0.5 and 0.6 a peak above MEASURED_SNR is Poor and one below it Fair:
+    the label is not monotonic in S/N there.
+
+    :param r_squared: the fit's R-squared (a cluster member's is its cluster's)
+    :param success: whether the fit succeeded
+    :param near_noise: whether the fit held this peak's shape as near-noise
+    :param snr: |height| / noise of the fitted peak, or None when not known
     """
-    Centralized quality categorization system with multiple threshold sets.
-
-    Features:
-    - Multiple predefined threshold sets (scientific, permissive)
-    - Custom threshold support
-    - Backward compatibility with existing code
-    - Batch analysis with statistics
-    """
-
-    # Predefined threshold sets
-    THRESHOLD_SETS = {
-        'scientific': QualityThresholds(
-            excellent=0.95,
-            good=0.85,
-            fair=0.70,
-            name="Scientific",
-            description="Traditional scientific quality thresholds (strict)"
-        ),
-        'permissive': QualityThresholds(
-            excellent=0.85,
-            good=0.70,
-            fair=0.55,
-            name="Permissive",
-            description="Very relaxed thresholds for maximum data inclusion"
-        )
-    }
-
-    def __init__(self, threshold_set: str = 'scientific', custom_thresholds: Optional[Dict] = None):
-        """
-        Initialize quality categorizer.
-
-        Args:
-            threshold_set: Name of predefined threshold set or 'custom'
-            custom_thresholds: Dict with 'excellent', 'good', 'fair' keys (if threshold_set='custom')
-        """
-        if threshold_set == 'custom' and custom_thresholds:
-            self.thresholds = QualityThresholds(
-                excellent=custom_thresholds['excellent'],
-                good=custom_thresholds['good'],
-                fair=custom_thresholds['fair'],
-                name="Custom",
-                description="User-defined custom thresholds"
-            )
-        elif threshold_set in self.THRESHOLD_SETS:
-            self.thresholds = self.THRESHOLD_SETS[threshold_set]
-        else:
-            # Fallback to scientific for backward compatibility
-            self.thresholds = self.THRESHOLD_SETS['scientific']
-
-        self.threshold_set_name = threshold_set
-
-    def categorize_r_squared(self, r_squared: float) -> str:
-        """
-        Categorize a single R² value.
-
-        Args:
-            r_squared: R² value to categorize
-
-        Returns:
-            Category string: 'excellent', 'good', 'fair', or 'poor'
-        """
-        if r_squared >= self.thresholds.excellent:
-            return 'excellent'
-        elif r_squared >= self.thresholds.good:
-            return 'good'
-        elif r_squared >= self.thresholds.fair:
-            return 'fair'
-        else:
-            return 'poor'
-
-    def categorize_batch(self, r_squared_values: Union[List[float], np.ndarray]) -> Dict:
-        """
-        Categorize a batch of R² values with full statistics.
-
-        Args:
-            r_squared_values: Array or list of R² values
-
-        Returns:
-            Dict with categories, counts, percentages, and statistics
-        """
-        r_squared_values = np.array(r_squared_values)
-
-        # Calculate category counts
-        excellent_mask = r_squared_values >= self.thresholds.excellent
-        good_mask = (r_squared_values >= self.thresholds.good) & (r_squared_values < self.thresholds.excellent)
-        fair_mask = (r_squared_values >= self.thresholds.fair) & (r_squared_values < self.thresholds.good)
-        poor_mask = r_squared_values < self.thresholds.fair
-
-        excellent = np.sum(excellent_mask)
-        good = np.sum(good_mask)
-        fair = np.sum(fair_mask)
-        poor = np.sum(poor_mask)
-        total = len(r_squared_values)
-
-        return {
-            'threshold_set': self.threshold_set_name,
-            'threshold_info': {
-                'excellent': f"≥{self.thresholds.excellent:.2f}",
-                'good': f"{self.thresholds.good:.2f}-{self.thresholds.excellent:.2f}",
-                'fair': f"{self.thresholds.fair:.2f}-{self.thresholds.good:.2f}",
-                'poor': f"<{self.thresholds.fair:.2f}"
-            },
-            'statistics': {
-                'total_samples': total,
-                'average_r_squared': float(np.mean(r_squared_values)),
-                'median_r_squared': float(np.median(r_squared_values)),
-                'std_r_squared': float(np.std(r_squared_values)),
-                'min_r_squared': float(np.min(r_squared_values)),
-                'max_r_squared': float(np.max(r_squared_values))
-            },
-            'categories': {
-                'excellent': {
-                    'count': int(excellent),
-                    'percentage': float(excellent / total * 100) if total > 0 else 0.0,
-                    'threshold': f"≥{self.thresholds.excellent:.2f}"
-                },
-                'good': {
-                    'count': int(good),
-                    'percentage': float(good / total * 100) if total > 0 else 0.0,
-                    'threshold': f"{self.thresholds.good:.2f}-{self.thresholds.excellent:.2f}"
-                },
-                'fair': {
-                    'count': int(fair),
-                    'percentage': float(fair / total * 100) if total > 0 else 0.0,
-                    'threshold': f"{self.thresholds.fair:.2f}-{self.thresholds.good:.2f}"
-                },
-                'poor': {
-                    'count': int(poor),
-                    'percentage': float(poor / total * 100) if total > 0 else 0.0,
-                    'threshold': f"<{self.thresholds.fair:.2f}"
-                }
-            }
-        }
+    if not success or r_squared is None or not math.isfinite(r_squared):
+        return 'Failed'
+    if r_squared > 0.9:
+        return 'Excellent'
+    if r_squared > 0.8:
+        return 'Good'
+    if r_squared > 0.6:
+        return 'Fair'
+    if snr is not None and snr > MEASURED_SNR:
+        return 'Poor'
+    if r_squared >= 0.5:
+        return 'Fair'
+    if r_squared >= 0.2 or near_noise:
+        return 'Poor'
+    return 'Failed'
 
 
-# Convenience functions for backward compatibility
-def get_quality_categorizer(mode: str = 'scientific', config: Optional[Dict] = None) -> QualityCategorizer:
-    """
-    Factory function to create quality categorizer with different modes.
-
-    Args:
-        mode: 'scientific', 'permissive', or 'auto'
-        config: Optional configuration dict with quality_threshold_mode
-
-    Returns:
-        QualityCategorizer instance
-    """
-    # Check config for mode override
-    if config and 'quality_threshold_mode' in config:
-        mode = config['quality_threshold_mode']
-
-    if mode == 'auto':
-        mode = 'scientific'
-
-    return QualityCategorizer(threshold_set=mode)
-
-def categorize_quality_legacy(r_squared: float) -> str:
-    """Legacy function for backward compatibility (uses scientific thresholds)"""
-    categorizer = QualityCategorizer('scientific')
-    return categorizer.categorize_r_squared(r_squared)
-
-# Export key functions for easy importing
 # ---------------------------------------------------------------------------
 # Which points of a series carry a measurement
 # ---------------------------------------------------------------------------
@@ -257,10 +116,7 @@ def usable_points(frame, observable):
 
 
 __all__ = [
+    'fit_quality_label',
     'usable_points',
     'DETECTION_SIGMA_FLOOR',
-    'QualityCategorizer',
-    'QualityThresholds',
-    'get_quality_categorizer',
-    'categorize_quality_legacy'
 ]

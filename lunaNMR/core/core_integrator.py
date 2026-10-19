@@ -26,6 +26,7 @@ from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
 from lunaNMR.core.ps2d_config import get_ps2d_config
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 from lunaNMR.utils.cancellation import raise_if_stopped
+from lunaNMR.utils.quality_categories import fit_quality_label
 
 # Import enhanced Voigt fitter
 try:
@@ -2660,7 +2661,9 @@ class VoigtIntegrator(BaseIntegrator):
                         detected_intensity = peak_dict.get('intensity')
                         break
 
-                quality = self._assign_quality_to_fitted_peak(result_2d['r_squared'], target_peak)
+                quality = fit_quality_label(result_2d['r_squared'], True,
+                                            target_peak.get('near_noise', False),
+                                            target_peak.get('detection_sigma'))
 
                 # Extract 2D region data for proper 2D contour visualization
                 region_2d = self.extract_2d_region_for_overlap_group(overlap_group)
@@ -2859,8 +2862,7 @@ class VoigtIntegrator(BaseIntegrator):
         y_r_squared = y_params.get('quality_metrics', {}).get('r_squared_local', y_params['r_squared'])
         avg_r_squared = (x_r_squared + y_r_squared) / 2
 
-        # Assign quality using centralized method (updated thresholds 2025-10-14)
-        quality = self._assign_quality_from_r2(avg_r_squared)
+        quality = fit_quality_label(avg_r_squared)
 
         # Extract detected intensity from all_peaks_context by matching position
         detected_intensity = None
@@ -4388,40 +4390,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
         if total > 0:
             current_avg = self.statistics['average_quality']
             self.statistics['average_quality'] = ((current_avg * (total - 1)) + quality) / total
-
-    def _assign_quality_from_r2(self, r_squared):
-        """
-        Assign quality label based on R² value
-
-        Updated thresholds (2025-10-14):
-        - Excellent: R² >= 0.9
-        - Good: 0.8 <= R² < 0.9
-        - Fair: 0.5 <= R² < 0.8
-        - Poor: 0.2 <= R² < 0.5
-        - Failed: R² < 0.2
-        """
-        if r_squared >= 0.9:
-            return "Excellent"
-        elif r_squared >= 0.8:
-            return "Good"
-        elif r_squared >= 0.5:
-            return "Fair"
-        elif r_squared >= 0.2:
-            return "Poor"
-        else:
-            return "Failed"
-
-    def _assign_quality_to_fitted_peak(self, r_squared, fitted_peak):
-        """Quality label of one peak of a 2D fit, from the fit's R-squared.
-
-        A near-noise peak's R-squared is ~0 by construction - a held shape against
-        noise - so it cannot say the fit failed; the fit was solved. Labelled Failed,
-        its measured near-zero intensity was dropped as one.
-        """
-        quality = self._assign_quality_from_r2(r_squared)
-        if quality == 'Failed' and fitted_peak.get('near_noise'):
-            quality = 'Poor'
-        return quality
 
     def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown", linewidth_constraints=None, all_peaks_context=None):
         """

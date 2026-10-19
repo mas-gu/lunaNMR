@@ -25,23 +25,7 @@ from scipy.signal import find_peaks, peak_widths
 
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 
-# Import quality categorizer (with fallback for backward compatibility)
-try:
-    from ..utils.quality_categories import categorize_quality_legacy
-    QUALITY_CATEGORIZER_AVAILABLE = True
-except ImportError:
-    QUALITY_CATEGORIZER_AVAILABLE = False
-    # Fallback function for backward compatibility
-    def categorize_quality_legacy(r_squared: float) -> str:
-        """Legacy quality categorization"""
-        if r_squared >= 0.95:
-            return 'excellent'
-        elif r_squared >= 0.85:
-            return 'good'
-        elif r_squared >= 0.70:
-            return 'fair'  # was 'marginal'
-        else:
-            return 'poor'
+from lunaNMR.utils.quality_categories import fit_quality_label
 
 # Import overlap resolution modules (optional dependency for backward compatibility)
 #try:
@@ -1346,16 +1330,7 @@ class EnhancedVoigtFitter:
             )
 
             # Overall quality classification based on LOCAL R-squared
-            if r_squared_local >= 0.95 and quality_metrics['parameters_physical']:
-                quality_class = "Excellent"
-            elif r_squared_local >= 0.85 and quality_metrics['parameters_physical']:
-                quality_class = "Good"
-            elif r_squared_local >= 0.7:
-                quality_class = "Fair"
-            else:
-                quality_class = "Poor"
-
-            quality_metrics['quality_class'] = quality_class
+            quality_metrics['quality_class'] = fit_quality_label(r_squared_local)
 
             return quality_metrics
 
@@ -1370,7 +1345,7 @@ class EnhancedVoigtFitter:
                 'r_squared': r_squared_global,           # Use global instead of 0
                 'r_squared_local': r_squared_global,     # Use global as fallback
                 'r_squared_global': r_squared_global,    # This was calculated successfully
-                'quality_class': 'Good' if r_squared_global >= 0.8 else 'Fair' if r_squared_global >=  0.7 else 'Poor'
+                'quality_class': fit_quality_label(r_squared_global)
         }
 
     def assess_fit_quality_comprehensive(self, x_data, y_data, fit_result, nucleus_type=None):
@@ -1469,27 +1444,6 @@ class EnhancedVoigtFitter:
                 quality_metrics['n_peaks_fitted'] = fit_result['n_peaks_fitted']
                 quality_metrics['multi_peak_assessment'] = True
 
-                # Adjust quality class for multi-peak complexity
-                original_r2 = quality_metrics.get('r_squared', 0)
-                n_peaks = fit_result['n_peaks_fitted']
-
-                # Multi-peak penalty: more peaks require higher R² for same quality class
-                if n_peaks > 2:
-                    r2_threshold_adjustment = 0.05 * (n_peaks - 2)
-                    adjusted_r2 = original_r2 - r2_threshold_adjustment
-
-                    # Reclassify based on adjusted R²
-                    if adjusted_r2 >= 0.95:
-                        quality_metrics['quality_class'] = "Excellent"
-                    elif adjusted_r2 >= 0.85:
-                        quality_metrics['quality_class'] = "Good"
-                    elif adjusted_r2 >= 0.7:
-                        quality_metrics['quality_class'] = "Fair"
-                    else:
-                        quality_metrics['quality_class'] = "Poor"
-
-                    quality_metrics['multi_peak_penalty'] = r2_threshold_adjustment
-
             # Add fit success indicator
             quality_metrics['fit_success'] = fit_result.get('success', False)
             quality_metrics['fit_method'] = fit_result.get('method', 'unknown')
@@ -1504,7 +1458,7 @@ class EnhancedVoigtFitter:
                 'r_squared': r_squared_fallback,
                 'r_squared_local': r_squared_fallback,
                 'r_squared_global': r_squared_fallback,
-                'quality_class': 'Poor',
+                'quality_class': fit_quality_label(r_squared_fallback),
                 'fit_success': False,
                 'assessment_error': str(e)
             }
@@ -3316,7 +3270,7 @@ def generate_optimization_report(self, peak_assignment="Unknown"):
         report['summary']['standard_fitting'] = {
             'r_squared': standard.get('r_squared', 0),
             'success': standard.get('success', False),
-            'quality_class': categorize_quality_legacy(standard.get('r_squared', 0))
+            'quality_class': fit_quality_label(standard.get('r_squared', 0), standard.get('success', False))
         }
 
     # Baseline optimization summary

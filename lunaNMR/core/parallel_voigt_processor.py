@@ -33,6 +33,7 @@ import os
 
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 from lunaNMR.utils.cancellation import Cancelled, raise_if_stopped, result_unless_stopped
+from lunaNMR.utils.quality_categories import fit_quality_label
 
 # Adaptive optimization imports
 from lunaNMR.core.adaptive_optimizer import (
@@ -1559,9 +1560,9 @@ def _parallel_cluster_worker(cluster_task):
                         best_match = None
 
                     if best_match:
-                        # Labelled as an isolated peak with this R-squared would be
-                        member_quality = worker_integrator._assign_quality_to_fitted_peak(
-                            group_result['r_squared'], best_match)
+                        member_quality = fit_quality_label(
+                            group_result['r_squared'], True, best_match.get('near_noise', False),
+                            best_match.get('detection_sigma'))
 
                         # Get detected_intensity from original cluster_dicts (before fitting)
                         orig_detected_intensity = cluster_dicts[i].get('intensity') if i < len(cluster_dicts) else None
