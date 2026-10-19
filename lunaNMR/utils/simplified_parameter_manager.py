@@ -7,9 +7,6 @@ Simplified Parameter Manager for Automated NMR Fitting
 This module implements the Priority 1 improvements by reducing parameter complexity
 from 25+ parameters to 3-5 core parameters with natural parameter space and
 adaptive quality thresholds.
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import numpy as np

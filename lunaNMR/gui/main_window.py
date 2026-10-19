@@ -24,9 +24,6 @@ State Management:
     - File paths: current_nmr_file, current_peak_file
     - Selection state: selected_peak_info
     - Workflow mode: peak_list vs sn_threshold
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import logging

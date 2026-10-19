@@ -7,9 +7,6 @@ the NMR relaxation analysis pipeline:
 - T1/T2 times → R1/R2 rates with error propagation
 - hetNOE calculation from saturated/unsaturated intensities
 - Data format transformations for spectral density analysis
-
-Author: DynamiXs Development Team
-Date: 2025-01-23
 """
 
 import numpy as np

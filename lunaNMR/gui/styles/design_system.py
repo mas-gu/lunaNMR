@@ -21,9 +21,6 @@ Usage:
     from lunaNMR.gui.styles.design_system import (
         BG_COLOR, PRIMARY_BUTTON_BG, SPACING_MD
     )
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 # ============================================================================

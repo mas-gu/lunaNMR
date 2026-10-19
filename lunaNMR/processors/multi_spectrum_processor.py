@@ -1,9 +1,6 @@
 """
 Independent Multi-Spectrum Processor for NMR Series Analysis
 Combines complete GUI decoupling with retrocompatibility features
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import os

@@ -3,9 +3,6 @@
 """
 Centralized Parameter Management for NMR Processing
 Handles all parameter validation, conversion, and synchronization
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 from typing import Dict, Any, List

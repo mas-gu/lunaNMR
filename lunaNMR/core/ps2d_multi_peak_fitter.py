@@ -1,9 +1,6 @@
 """
 PS2D-Style Multi-Peak Voigt Fitter for LunaNMR
 ==============================================
-
-Date: 2025-10-04
-Version: 1.0 - Guillaume Mas
 """
 
 import numpy as np

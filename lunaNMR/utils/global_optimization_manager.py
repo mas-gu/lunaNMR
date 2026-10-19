@@ -4,9 +4,6 @@ Global NMR Peak Optimization Manager
 This module implements a sophisticated two-phase optimization system for NMR peak fitting:
 1. Phase 1 (Survey): Complete first-pass fitting to extract linewidth statistics
 2. Phase 2 (Refinement): Iterative improvement of failed peaks using constraints
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import numpy as np

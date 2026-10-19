@@ -9,9 +9,6 @@ Classes:
 - ConfigurationManager: Main configuration management
 - UserPreferences: User interface preferences
 - ProcessingParameters: NMR processing parameters
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import os

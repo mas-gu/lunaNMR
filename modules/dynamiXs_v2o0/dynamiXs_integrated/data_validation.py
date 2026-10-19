@@ -4,9 +4,6 @@ Data Validation and Quality Control for Integrated Analysis
 
 This module provides functions to validate NMR relaxation data and perform
 quality control checks before spectral density analysis.
-
-Author: DynamiXs Development Team
-Date: 2025-01-23
 """
 
 import numpy as np

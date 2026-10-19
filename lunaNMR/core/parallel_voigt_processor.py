@@ -16,9 +16,6 @@ Key Features:
 - Quality assessment parallelization
 - Shared memory for efficient data transfer
 - Maintains 100% compatibility with existing interfaces
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import contextlib

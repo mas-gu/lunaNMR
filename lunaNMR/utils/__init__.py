@@ -3,9 +3,6 @@ Utility Classes and Managers for LunaNMR
 
 This module contains utility classes for configuration management,
 file handling, parameter management, and optimization.
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 try:

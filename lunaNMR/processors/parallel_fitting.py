@@ -11,9 +11,6 @@ Key Features:
 - Progress tracking with limited output
 - Uses 75% of available CPU cores
 - Fault tolerance and error handling
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import multiprocessing as mp

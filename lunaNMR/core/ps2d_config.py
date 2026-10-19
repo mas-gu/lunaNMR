@@ -9,10 +9,6 @@ PS2D Configuration Management
 
 This module provides centralized configuration for all PS2D 2D fitting parameters.
 Eliminates scattered constants across multiple files and makes nucleus switching trivial.
-
-Date: 2025-10-10
-Version: 1.0 - CENTRALIZED_CONFIG
-Author: Claude Code (architectural refactoring)
 """
 
 from contextlib import contextmanager

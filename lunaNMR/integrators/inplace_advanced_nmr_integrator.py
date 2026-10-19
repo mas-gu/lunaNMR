@@ -7,9 +7,6 @@ Spectrum loading for the NMR integrators
 The live integrator (core_integrator.EnhancedVoigtIntegrator) inherits its loading,
 ppm axes, nucleus detection and noise estimate from this class, and its default
 attributes.
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 # ========================================================================

@@ -17,9 +17,6 @@ Key Features:
 - Interactive zoom and pan via matplotlib toolbar
 - Crosshair and peak highlighting
 - Configurable colorbar display
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import numpy as np

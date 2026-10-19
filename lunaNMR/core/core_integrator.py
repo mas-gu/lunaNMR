@@ -11,9 +11,6 @@ enhanced integration capabilities.
 Classes:
 - VoigtIntegrator: Basic Voigt fitting integrator
 - EnhancedVoigtIntegrator: Advanced integrator with enhanced features
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import numpy as np

@@ -13,9 +13,6 @@ Key improvements:
 - Multi-step fitting strategy (coarse → fine)
 - Comprehensive parameter validation and uncertainty analysis
 - Proper bounds handling for all fitting scenarios
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import numpy as np

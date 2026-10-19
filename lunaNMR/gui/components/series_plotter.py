@@ -12,9 +12,6 @@ with features including:
 - Professional legend with peak assignments
 - Grid lines for readability
 - Proper axis formatting
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 from typing import Optional, Dict

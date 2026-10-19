@@ -7,9 +7,6 @@ in a Qt/PySide6 application.
 
 Run this script to see a demo window with styled widgets:
     python3 example_usage.py
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import sys

@@ -28,9 +28,6 @@ Usage:
     # Or use convenience methods
     plot_widget.clear()
     plot_widget.refresh()
-
-Author: Guillaume Mas
-Date: 2025-01-24
 """
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QSizePolicy

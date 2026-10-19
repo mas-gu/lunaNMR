@@ -9,9 +9,6 @@ Classes:
 - NMRFileManager: Core file operations for NMR data
 - DataValidator: Validation of NMR data files
 - FileMetadata: File metadata collection and analysis
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import os

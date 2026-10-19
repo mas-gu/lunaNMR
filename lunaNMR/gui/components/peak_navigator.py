@@ -17,9 +17,6 @@ Features:
     - Peak editing capabilities (add, edit, delete, save)
     - Quality indicators (good fit, warning, failed)
     - Signal-based event handling for integration with main GUI
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 from typing import Optional, List, Dict, Any

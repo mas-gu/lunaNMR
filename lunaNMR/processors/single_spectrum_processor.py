@@ -1,9 +1,6 @@
 """
 Single Spectrum Peak Processor
 Handles batch fitting of peaks in a single NMR spectrum independently
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 from typing import List, Dict, Any, Optional, Tuple

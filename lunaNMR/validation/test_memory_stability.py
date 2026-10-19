@@ -4,9 +4,6 @@ Memory Stability Test for Parallel Voigt Processing
 
 This script tests the memory management fixes in ParallelVoigtProcessor
 to ensure no memory leaks occur during parallel processing operations.
-
-Author: Claude Code
-Date: 2025-09-19
 """
 
 import sys

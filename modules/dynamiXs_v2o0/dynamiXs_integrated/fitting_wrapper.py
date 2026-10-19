@@ -4,9 +4,6 @@ Fitting Wrapper for T1/T2 Exponential Decay Analysis
 
 This module provides a high-level wrapper around the existing fit_Tx_NMRRE.py
 scripts to enable programmatic fitting without command-line interaction.
-
-Author: DynamiXs Development Team
-Date: 2025-01-23
 """
 
 import sys

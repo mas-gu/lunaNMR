@@ -9,9 +9,6 @@ PS2D-Style High-Performance Voigt Fitter for LunaNMR
 3. Additive Levenberg-Marquardt damping - better convergence
 4. Exact Faddeeva-based Voigt profiles - matches  math
 5. Analytical derivatives for intensity - zero numerical error
-
-Date: 2025-10-03
-Version: 1.0 - 
 """
 
 import functools

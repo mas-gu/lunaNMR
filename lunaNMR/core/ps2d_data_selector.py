@@ -16,10 +16,6 @@ fixed elliptical window selection.
 
 - radF1 = 0.6 ppm (indirect dimension, 15N/13C)
 - radF2 = 0.06 ppm (direct dimension, 1H)
-
-Date: 2025-10-04
-Version: 1.0 - EXACT_PS2D_CLONE
-Version: 2.0 - CENTRALIZED_CONFIG (2025-10-10)
 """
 
 import numpy as np

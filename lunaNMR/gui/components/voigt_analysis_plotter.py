@@ -23,9 +23,6 @@ Port Details:
 - TkAgg → FigureCanvasQTAgg
 - 2×2 axes grid using MatplotlibMultiAxesWidget
 - All features from original implementation preserved
-
-Author: Guillaume Mas
-Date: 2025-01-24
 """
 
 from PySide6.QtCore import Signal

@@ -3,9 +3,6 @@ Core Processing Engines for LunaNMR
 
 This module contains the core processing engines including
 integrators, fitters, and peak pickers.
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 try:

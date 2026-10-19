@@ -23,9 +23,6 @@ Traditional 1D cross-section fitting fails because:
 - Y cross-sections contaminated by 1H overlap → wrong intensity
 
 2D simultaneous fitting resolves both peaks correctly by using full 2D lineshape.
-
-Date: 2025-10-06
-Version: 1.0 
 """
 
 import numpy as np

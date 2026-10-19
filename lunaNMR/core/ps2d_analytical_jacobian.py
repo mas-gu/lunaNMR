@@ -33,9 +33,6 @@ Parameter Layout (NPAR_VOIGT = 8):
     [6] intensity   - Peak intensity
     [7] baseline    - Unused (spare)
 
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import numpy as np

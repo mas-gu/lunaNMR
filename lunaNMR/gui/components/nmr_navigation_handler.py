@@ -21,9 +21,6 @@ Features:
 NMR Axis Convention:
 - X-axis (1H): High ppm on LEFT, low ppm on RIGHT (inverted)
 - Y-axis (15N): High ppm at BOTTOM, low ppm at TOP (inverted)
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 from typing import Tuple, Optional, Callable

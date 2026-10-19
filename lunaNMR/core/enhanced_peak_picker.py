@@ -14,9 +14,6 @@ Key features:
 - Overlapping peak detection and separation
 - Peak validation based on NMR-specific criteria
 - Integration with enhanced Voigt fitting
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import numpy as np

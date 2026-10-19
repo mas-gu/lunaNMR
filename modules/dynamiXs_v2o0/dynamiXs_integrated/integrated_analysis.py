@@ -9,9 +9,6 @@ model-free parameters, automating:
 3. Data format conversion (times → rates)
 4. Dataset merging and validation
 5. Spectral density analysis
-
-Author: DynamiXs Development Team
-Date: 2025-01-23
 """
 
 import importlib

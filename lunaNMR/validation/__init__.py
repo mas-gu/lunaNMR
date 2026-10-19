@@ -3,9 +3,6 @@ Validation and Testing Tools for LunaNMR
 
 This module contains validation tools for checking installation
 and system requirements.
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 try:

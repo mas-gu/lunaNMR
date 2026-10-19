@@ -4,9 +4,6 @@ Memory Monitoring Utilities for Parallel Processing
 
 This module provides tools to monitor memory usage and verify
 proper cleanup of shared memory blocks during parallel processing.
-
-Author: Claude Code
-Date: 2025-09-19
 """
 
 import psutil

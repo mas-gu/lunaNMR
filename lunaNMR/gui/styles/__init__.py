@@ -17,9 +17,6 @@ Usage:
     # Load and apply stylesheet
     app = QApplication(sys.argv)
     app.setStyleSheet(load_stylesheet())
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import os
