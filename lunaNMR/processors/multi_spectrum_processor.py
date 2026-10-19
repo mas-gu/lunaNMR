@@ -1020,7 +1020,7 @@ class MultiSpectrumProcessor:
             'territories': self.integrator.titration_pos_margins,
             'linewidth_caps': getattr(self.integrator, 'titration_lw_margins', None)}
 
-        # This calls _sync_parameters_to_integrator() internally, ensuring proper parameter flow
+        # This calls sync_parameters_to_integrator() internally, ensuring proper parameter flow
         # CRITICAL: Use integrator.peak_list which now contains DETECTED positions (not reference_peaks)
         fitted_results, learned_statistics = single_processor.process_peak_list(
             self.integrator.peak_list,

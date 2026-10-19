@@ -16,6 +16,119 @@ from lunaNMR.utils.cancellation import Cancelled
 # Below this many peaks, distributing the work costs more than it saves.
 MIN_PEAKS_FOR_PARALLEL = 3
 
+
+def detected_peak_list(detected_peaks: List[Dict]) -> pd.DataFrame:
+    """The peak list Fit Spectrum fits after a detection: one row per detected peak, at
+    the position the detection found."""
+    return pd.DataFrame([{
+        'Assignment': peak.get('assignment', 'Unknown'),
+        'Position_X': peak.get('ppm_x', 0.0),
+        'Position_Y': peak.get('ppm_y', 0.0),
+        'Height': peak.get('intensity', 0.0),
+        'SNR': peak.get('snr', 0.0),
+        'Detected': peak.get('detected', False)
+    } for peak in detected_peaks])
+
+
+def write_fitting_results_csv(fitted_results: List[Dict], output_file) -> None:
+    """Write a spectrum's fit results as its `_fitting_results.csv`.
+
+    Columns match the series output: Assignment, Position_X, Position_Y, Height, Volume,
+    LW_X, LW_Y, R_Squared, Quality. Positions and linewidths have 3 decimals, R_Squared 2,
+    Height and Volume are in scientific notation.
+    """
+    rows = []
+    for i, result in enumerate(fitted_results):
+        # Extract values with fallbacks for different key naming conventions
+        assignment = result.get('assignment', result.get('Assignment', f'Peak_{i+1}'))
+
+        # Position: try multiple key names
+        pos_x = (result.get('pos_f2') or result.get('ppm_x') or
+                result.get('center_x') or result.get('Position_X') or
+                result.get('peak_x') or 0.0)
+        pos_y = (result.get('pos_f1') or result.get('ppm_y') or
+                result.get('center_y') or result.get('Position_Y') or
+                result.get('peak_y') or 0.0)
+
+        # Height and Volume
+        height = result.get('height', result.get('Height', result.get('amplitude', 0.0)))
+        volume = result.get('volume', result.get('Volume', result.get('intensity', 0.0)))
+
+        # Linewidths - sum of Gaussian and Lorentzian FWHM components
+        # NOTE: sigma/gamma in x_fit/y_fit are ALREADY FWHM values (not true sigma/gamma)
+        # So we just add them directly (matching Peak Parameters display)
+        lw_x = 0.0
+        lw_y = 0.0
+
+        # Try to get from x_fit/y_fit dicts first
+        x_fit = result.get('x_fit', {})
+        y_fit = result.get('y_fit', {})
+
+        if x_fit:
+            x_sigma = x_fit.get('sigma', 0)  # Actually Gaussian FWHM
+            x_gamma = x_fit.get('gamma', 0)  # Actually Lorentzian FWHM
+            if x_sigma or x_gamma:
+                lw_x = x_sigma + x_gamma  # Simple sum of FWHM components
+
+        if y_fit:
+            y_sigma = y_fit.get('sigma', 0)  # Actually Gaussian FWHM
+            y_gamma = y_fit.get('gamma', 0)  # Actually Lorentzian FWHM
+            if y_sigma or y_gamma:
+                lw_y = y_sigma + y_gamma  # Simple sum of FWHM components
+
+        # Fallback to direct lw_x/lw_y if x_fit/y_fit not available
+        if lw_x == 0.0:
+            lw_x = result.get('lw_x', 0.0)
+        if lw_y == 0.0:
+            lw_y = result.get('lw_y', 0.0)
+
+        # Final fallback: compute from sigma_x/gamma_x (also FWHM values)
+        if lw_x == 0.0:
+            sigma_x = result.get('sigma_x', 0)  # Gaussian FWHM
+            gamma_x = result.get('gamma_x', 0)  # Lorentzian FWHM
+            if sigma_x or gamma_x:
+                lw_x = sigma_x + gamma_x
+
+        if lw_y == 0.0:
+            sigma_y = result.get('sigma_y', 0)  # Gaussian FWHM
+            gamma_y = result.get('gamma_y', 0)  # Lorentzian FWHM
+            if sigma_y or gamma_y:
+                lw_y = sigma_y + gamma_y
+
+        # R-squared
+        r_squared = (result.get('r_squared') or result.get('R_Squared') or
+                    result.get('avg_r_squared') or 0.0)
+
+        # Quality
+        quality = (result.get('quality') or result.get('Quality') or
+                  result.get('fitting_quality') or 'Unknown')
+
+        rows.append({
+            'Assignment': assignment,
+            'Position_X': float(pos_x) if pos_x else 0.0,
+            'Position_Y': float(pos_y) if pos_y else 0.0,
+            'Height': float(height) if height else 0.0,
+            'Volume': float(volume) if volume else 0.0,
+            'LW_X': float(lw_x) if lw_x else 0.0,
+            'LW_Y': float(lw_y) if lw_y else 0.0,
+            'R_Squared': float(r_squared) if r_squared else 0.0,
+            'Quality': quality
+        })
+
+    df = pd.DataFrame(rows)
+
+    # Format columns with specific decimal places (matching series integration)
+    df_formatted = df.copy()
+    df_formatted['Position_X'] = df['Position_X'].apply(lambda x: f'{x:.3f}')
+    df_formatted['Position_Y'] = df['Position_Y'].apply(lambda x: f'{x:.3f}')
+    df_formatted['Height'] = df['Height'].apply(lambda x: f'{x:.2e}')
+    df_formatted['Volume'] = df['Volume'].apply(lambda x: f'{x:.2e}')
+    df_formatted['LW_X'] = df['LW_X'].apply(lambda x: f'{x:.3f}')
+    df_formatted['LW_Y'] = df['LW_Y'].apply(lambda x: f'{x:.3f}')
+    df_formatted['R_Squared'] = df['R_Squared'].apply(lambda x: f'{x:.2f}')
+
+    df_formatted.to_csv(output_file, index=False)
+
 class SingleSpectrumProcessor:
     """
     Processes peaks in a single NMR spectrum
@@ -102,7 +215,7 @@ class SingleSpectrumProcessor:
                 restore_base_ps2d_config()
 
             # Update integrator parameters from parameter manager
-            self._sync_parameters_to_integrator()
+            self.sync_parameters_to_integrator()
 
             # Override adaptive optimization if skip_adaptive is requested
             if processing_options and processing_options.get('skip_adaptive', False):
@@ -130,7 +243,7 @@ class SingleSpectrumProcessor:
         finally:
             self.processing_active = False
 
-    def _sync_parameters_to_integrator(self):
+    def sync_parameters_to_integrator(self):
         """Sync parameters from parameter manager to integrator"""
 
         params = self.parameter_manager.get_integrator_parameters()
