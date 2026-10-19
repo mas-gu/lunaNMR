@@ -2810,6 +2810,11 @@ class VoigtIntegrator(BaseIntegrator):
 
         #print(f"   Step 2: Matching to reference peaks (search windows: X=±{search_window_x_ppm:.3f}, Y=±{search_window_y_ppm:.3f} ppm)")
 
+        # Linewidth scale of each dimension: the PS2D radii of the spectrum's nucleus
+        ps2d_config = get_ps2d_config()
+        rad_f2 = ps2d_config.radF2  # 1H
+        rad_f1 = ps2d_config.radF1  # indirect (15N/13C)
+
         matched_peaks = []
         used_peaks = set()  # Track which detected peaks have been used
 
@@ -2820,13 +2825,11 @@ class VoigtIntegrator(BaseIntegrator):
                 ref_y_ppm = float(peak_row['Position_Y'])
                 assignment = peak_row.get('Assignment', f'Peak_{idx+1}')
 
-                # Find closest detected peak within search window
+                # Find the detected peak within the search window closest in linewidths:
+                # the distance in each dimension over that nucleus's PS2D radius, so an
+                # indirect ppm does not count as a 1H ppm
                 best_match = None
-                best_distance = float('inf')
-
-                # Elliptical normalization radii (standard PS2D values)
-                rad_f2 = 0.04  # 1H radius (ppm)
-                rad_f1 = 0.4   # 15N radius (ppm)
+                elliptical_distance = float('inf')
 
                 best_x_dist = 0.0
                 best_y_dist = 0.0
@@ -2841,9 +2844,9 @@ class VoigtIntegrator(BaseIntegrator):
 
                     # Check if within search window
                     if x_distance <= search_window_x_ppm and y_distance <= search_window_y_ppm:
-                        total_distance = np.sqrt(x_distance**2 + y_distance**2)
-                        if total_distance < best_distance:
-                            best_distance = total_distance
+                        scaled_distance = np.sqrt((x_distance / rad_f2)**2 + (y_distance / rad_f1)**2)
+                        if scaled_distance < elliptical_distance:
+                            elliptical_distance = scaled_distance
                             best_x_dist = x_distance
                             best_y_dist = y_distance
                             best_match = (i, detected_peak)
@@ -2852,9 +2855,7 @@ class VoigtIntegrator(BaseIntegrator):
                     # Use the matched detected peak
                     peak_idx, detected_peak = best_match
                     used_peaks.add(peak_idx)
-
-                    # Calculate elliptical distance (normalized by typical linewidth radii)
-                    elliptical_distance = np.sqrt((best_x_dist / rad_f2)**2 + (best_y_dist / rad_f1)**2)
+                    best_distance = np.sqrt(best_x_dist**2 + best_y_dist**2)
 
                     matched_peak = {
                         'assignment': assignment,
