@@ -26,8 +26,6 @@ from typing import Dict, Tuple
 try:
     import numba
     NUMBA_AVAILABLE = True
-    NUMBA_VERSION = numba.__version__
-    #print(f"✅ Numba {NUMBA_VERSION} loaded - 3-5× faster 2D fitting enabled", file=sys.stderr)
 except ImportError:
     NUMBA_AVAILABLE = False
 

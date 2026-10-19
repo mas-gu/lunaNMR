@@ -18,7 +18,6 @@ Date: 2025
 
 import numpy as np
 import pandas as pd
-import sys
 from typing import List, Dict, Tuple, Any
 from scipy.special import wofz  # Faddeeva function for Voigt profiles
 from scipy.optimize import curve_fit
@@ -494,7 +493,6 @@ class VoigtIntegrator(BaseIntegrator):
         """
         self.search_window_x = x_ppm
         self.search_window_y = get_ps2d_config().search_window_f1 if y_ppm is None else y_ppm
-        #print(f"🔍 Search windows set: X=±{x_ppm:.3f} ppm, Y=±{y_ppm:.3f} ppm")
 
     def ensure_peak_ids(self):
         """Ensure all peaks have stable peak_id values.
@@ -566,9 +564,6 @@ class VoigtIntegrator(BaseIntegrator):
             # CRITICAL: Call enhanced_fitter's configure_overlap_resolution method
             # This sets the overlap_detection_enabled flag that triggers routing to OverlapResolverEngine
             self.enhanced_fitter.configure_overlap_resolution(enable=enable, config=config)
-
-            status = "enabled" if enable else "disabled"
-            #print(f"   ✅ Overlap resolution {status} at integrator level")
         else:
             log_warning("Enhanced fitter not available - cannot configure overlap resolution")
 
@@ -633,8 +628,6 @@ class VoigtIntegrator(BaseIntegrator):
         self.ppm_y_axis = ppm_y_axis
 
         log_info(f"Loaded NMR data directly: {data_2d.shape}")
-        #print(f"   X-axis: {ppm_x_axis[0]:.2f} to {ppm_x_axis[-1]:.2f} ppm")
-        #print(f"   Y-axis: {ppm_y_axis[0]:.1f} to {ppm_y_axis[-1]:.1f} ppm")
 
         # Set dummy nmr_dict for compatibility
         self.nmr_dict = {'dummy': 'for_testing'}
@@ -1919,8 +1912,6 @@ class VoigtIntegrator(BaseIntegrator):
         """
         from scipy.special import wofz
 
-        #print(f"   📊 Reconstructing 2D surface from {len(fitted_peaks)} peaks")
-
         # Estimate baseline from edges of region (where there are no peaks)
         intensity = region_2d['intensity']
         edge_pixels = np.concatenate([
@@ -1931,7 +1922,6 @@ class VoigtIntegrator(BaseIntegrator):
         ])
         # Use median of edges to avoid outliers
         baseline = np.median(edge_pixels)
-        #print(f"      Baseline estimated from edges: {baseline:.2e}")
 
         # Initialize fitted_surface with zeros (baseline removed per user request 2025-11-19)
         fitted_surface = np.zeros_like(region_2d['intensity'], dtype=np.float64)
@@ -1985,7 +1975,6 @@ class VoigtIntegrator(BaseIntegrator):
             # The EXTREMUM, signed: np.max of a negative peak's surface is the least
             # negative point of its tail - measured 1000x too small on a -48 sigma peak.
             peak_max = float(peak_surface.flat[np.argmax(np.abs(peak_surface))])
-            #print(f"      Peak {i+1}: PS2D intensity={fitted_intensity:.2e}, reconstructed max={peak_max:.2e}")
 
             # CRITICAL FIX: Override the height field with reconstructed max
             # The calculate_peak_height formula doesn't match actual peak height
@@ -1999,7 +1988,6 @@ class VoigtIntegrator(BaseIntegrator):
             # Add to total surface
             fitted_surface += peak_surface
 
-        #print(f"   ✅ Fitted surface: min={np.min(fitted_surface):.2e}, max={np.max(fitted_surface):.2e}")
         return fitted_surface, individual_surfaces, baseline
 
     def _growth_margins_for(self, peak_assignments):
@@ -2085,10 +2073,6 @@ class VoigtIntegrator(BaseIntegrator):
             return None
 
         log_info(f"2D multi-peak fitting for {assignment}: {len(overlap_group)} peaks")
-        for i, peak_dict in enumerate(overlap_group):
-            x = peak_dict.get('x_ppm') or peak_dict.get('pos_x')
-            y = peak_dict.get('y_ppm') or peak_dict.get('pos_y')
-            #print(f"      Peak {i+1}: ({x:.4f}, {y:.4f}) ppm")
 
         # Extract 2D region
         region = self.extract_2d_region_for_overlap_group(overlap_group)
@@ -2096,12 +2080,7 @@ class VoigtIntegrator(BaseIntegrator):
             log_error("Failed to extract 2D region")
             return None
 
-        # Get nucleus type for logging
         config = get_ps2d_config()
-        #print(f"   📦 Extracted region: {region['intensity'].shape}")
-        #print(f"      F1 ({config.nucleus_type}): {region['f1_ppm'].min():.3f} - {region['f1_ppm'].max():.3f} ppm")
-        #print(f"      F2 (1H): {region['f2_ppm'].min():.3f} - {region['f2_ppm'].max():.3f} ppm")
-
         # How far each peak's position may move in this fit, in ppm (F1, F2) - the same
         # margins fit_multi_peak_2d applies - so its sign is judged over what it can reach
         territories = self._territory_margins_for(peak_assignments)
@@ -2318,13 +2297,6 @@ class VoigtIntegrator(BaseIntegrator):
                 'near_noise': sign == 0  # Shape held, intensity of either sign
             })
 
-        # Log initial intensity estimates
-        #print(f"   📊 Initial intensity estimates:")
-        for i, (peak_dict, initial_peak) in enumerate(zip(overlap_group, initial_peaks)):
-            detected = peak_dict.get('intensity')
-            source = "peak picker" if (detected is not None and detected > 0) else "re-measured"
-            #print(f"      Peak {i+1}: {initial_peak['intensity']:.2e} (source: {source})")
-
         # Estimate fitting time and warn user for large clusters
         n_peaks = len(overlap_group)
         n_points = region['intensity'].size
@@ -2333,8 +2305,6 @@ class VoigtIntegrator(BaseIntegrator):
 
         if estimated_time_sec > 20:
             log_info(f"Estimated fitting time: ~{estimated_time_sec:.0f} seconds ({estimated_time_sec/60:.1f} minutes)")
-
-        #print(f"   🔧 Starting 5-stage Levenberg-Marquardt optimization...")
 
         # CRITICAL: Normalize data to [0,1] range for numerical stability
         # Without this, χ² values explode to 1e15 and damping fails
@@ -2377,9 +2347,6 @@ class VoigtIntegrator(BaseIntegrator):
             # Store original height for intensity ratio constraint
             peak['original_height'] = height
 
-        #print(f"   📊 Data normalization: max = {max_intensity:.2e}")
-        sys.stdout.flush()
-
         # Apply elliptical mask (PS2D approach: union of elliptical windows)
         # Convert overlap_group from dict to (f1, f2) format: (y_ppm, x_ppm)
         peak_positions_f1f2 = [
@@ -2399,10 +2366,6 @@ class VoigtIntegrator(BaseIntegrator):
 
         # Reshape mask back to 2D grid
         data_mask = mask_result['mask'].reshape(region['intensity'].shape)
-
-        #print(f"   🎯 Elliptical masking: {mask_result['n_points_selected']}/{region['intensity'].size} points selected")
-        #print(f"      (radF1={radF1} ppm, radF2={radF2} ppm)")
-        sys.stdout.flush()
 
         # Fit using 2D multi-peak fitter
         # Constraint parameters controlled by ps2d_2d_fitter.py constructor defaults
@@ -2521,11 +2484,6 @@ class VoigtIntegrator(BaseIntegrator):
             )
 
             # Always use 2D fitting (both isolated and overlapping peaks)
-            #if len(overlap_group) > 1:
-            #    print(f"   🔍 Overlap group: {len(overlap_group)} peaks within elliptical window")
-            #else:
-            #    print(f"   🔍 Isolated peak: single-peak 2D fitting")
-            #print(f"   🎯 Routing to 2D simultaneous fitting...")
 
             # Extract assignments from all_peaks_context by matching positions
             peak_assignments = []
@@ -2814,8 +2772,6 @@ class VoigtIntegrator(BaseIntegrator):
         # Step 2: Match each reference peak to closest detected peak
         search_window_x_ppm = self.search_window_x  # From GUI: 1H/15N (ppm) first value
         search_window_y_ppm = self.search_window_y  # From GUI: 1H/15N (ppm) second value
-
-        #print(f"   Step 2: Matching to reference peaks (search windows: X=±{search_window_x_ppm:.3f}, Y=±{search_window_y_ppm:.3f} ppm)")
 
         # Every reference-candidate pair inside the search box, at its distance in
         # linewidths of the spectrum's nucleus: the distance in each dimension over that
@@ -3537,10 +3493,6 @@ class VoigtIntegrator(BaseIntegrator):
             # Apply top contour centroid (always enabled)
             gui_params = getattr(self, 'gui_params', {})
 
-            # Get pixel position first
-            pixel_x_ppm = self.ppm_x_axis[x_idx]
-            pixel_y_ppm = self.ppm_y_axis[y_idx]
-
             # Calculate top contour centroid using GUI parameters
             max_shift_x = gui_params.get('centroid_window_x_ppm', 0.01)
             max_shift_y = gui_params.get('centroid_window_y_ppm', 0.06)
@@ -3551,15 +3503,6 @@ class VoigtIntegrator(BaseIntegrator):
                 max_shift_x=max_shift_x,
                 max_shift_y=max_shift_y
             )
-
-            # Calculate shift distance
-            shift_x = centroid_x_ppm - pixel_x_ppm
-            shift_y = centroid_y_ppm - pixel_y_ppm
-            shift_distance = np.sqrt(shift_x**2 + shift_y**2)
-
-            # Only print if significant shift (>0.001 ppm)
-            #if shift_distance > 0.001:
-            #    print(f"   Centroid shift: Δ={shift_distance:.4f} ppm from pixel max")
 
             x_ppm = centroid_x_ppm
             y_ppm = centroid_y_ppm

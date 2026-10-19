@@ -1453,7 +1453,6 @@ class MultiSpectrumProcessor:
                 'Peak_Number': fit_result.get('peak_number', i + 1)
             }
 
-            #success = fit_result.get('success', False)
             # Check multiple success indicators - be more permissive
             success = (fit_result.get('success', False) or
                       fit_result.get('fitted', False) or

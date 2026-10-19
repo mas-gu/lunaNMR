@@ -304,8 +304,6 @@ class SingleSpectrumProcessor:
         if (hasattr(self.integrator, 'enhanced_fitter') and
             hasattr(self.integrator.enhanced_fitter, 'enhanced_peak_fitting_parallel')):
 
-            #print("✨ Using enhanced parallel Voigt fitting")
-
             # Define progress callback for parallel processing
             def parallel_progress_callback(progress, status, current_item):
                 if self.progress_callback and self.processing_active:

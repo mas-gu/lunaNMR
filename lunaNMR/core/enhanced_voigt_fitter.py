@@ -27,14 +27,6 @@ from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, lo
 
 from lunaNMR.utils.quality_categories import fit_quality_label
 
-# Import overlap resolution modules (optional dependency for backward compatibility)
-#try:
-#    from .overlap_resolver_engine import OverlapResolverEngine
-#    from ..utils.overlap_config import OverlapResolutionConfig
-#    OVERLAP_RESOLUTION_AVAILABLE = True
-#except ImportError:
-#    OVERLAP_RESOLUTION_AVAILABLE = False
-#    # Silently continue without overlap resolution - will print warning if user tries to enable it
 
 class EnhancedVoigtFitter:
     """Enhanced Voigt profile fitter with robust parameter estimation"""
@@ -107,12 +99,6 @@ class EnhancedVoigtFitter:
         # Consensus fitting engine was removed (Phase 2 cleanup - orphaned overlap subsystem)
         # Kept flag for backward compatibility with any code checking this attribute
         self.use_automated_fitting = False
-
-        # NEW: Overlap resolution components (lazy initialization for backward compatibility)
-#        self.overlap_resolver = None  # Will be initialized on first use if needed
-#       self.overlap_detection_enabled = False  # Default OFF for backward compatibility
-#        self.overlap_detection_threshold = 0.5  # Minimum distance (ppm) to consider overlap
-#        self.overlap_config = None  # Will use defaults if not set
 
     def set_gui_parameters(self, gui_fitting_params):
         """
@@ -1334,10 +1320,6 @@ class EnhancedVoigtFitter:
 
             return quality_metrics
 
-#        except Exception as e:
-#            print(f"Quality assessment failed: {e}")
-#            return {'r_squared': 0, 'r_squared_local': 0, 'r_squared_global': 0, 'quality_class': 'Failed'}
-        # IMPROVED:
         except Exception as e:
             log_warning(f"Local quality assessment failed, using global metrics: {e}")
             # Fallback: use global R² when local assessment fails

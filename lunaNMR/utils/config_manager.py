@@ -18,7 +18,6 @@ import os
 import json
 from pathlib import Path
 from datetime import datetime
-#import tkinter as tk
 from lunaNMR.utils.output_manager import log_info, log_warning, log_error
 
 class ConfigurationManager:

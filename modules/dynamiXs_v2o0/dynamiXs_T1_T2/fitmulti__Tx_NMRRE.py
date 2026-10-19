@@ -432,10 +432,6 @@ def main():
 
     # Multiprocessing configuration
     n_processes = None  # Use None for automatic detection (80% of cores)
-    # n_processes = 4  # Or specify a specific number of processes
-
-    # Optional: Time scaling factor (uncomment if needed)
-    # time_scaling_factor = 1000  # Multiply time values by this factor
 
     # ========================
     # END CONFIGURATION

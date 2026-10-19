@@ -1749,12 +1749,6 @@ def _initialize_worker_fitter(shared_context):
         except ImportError:
             pass  # Could not synchronize PS2D config
 
-    # DEBUG: Verify gui_params were set
-    #if worker_integrator.gui_params:
-    #    print(f"✅ Worker: gui_params set on integrator (use_ps2d_multi_peak={worker_integrator.gui_params.get('use_ps2d_multi_peak', 'N/A')})")
-    #else:
-    #    print(f"❌ Worker: gui_params is None or empty!")
-
     # 6. Restore enhanced fitter parameters
     if worker_integrator.enhanced_fitter:
         worker_fitter = worker_integrator.enhanced_fitter

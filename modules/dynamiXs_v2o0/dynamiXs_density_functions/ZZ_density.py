@@ -804,11 +804,6 @@ def main():
                                      use_monte_carlo_errors=True,
                                      n_monte_carlo=100)
         
-        # Option 2: Use original ensemble-based errors (backward compatible)
-        # print("Running analysis with ensemble-based errors only...")
-        # results = analyzer.analyze_csv('data_in.csv', 
-        #                              use_monte_carlo_errors=False)
-        
         # Check if any data was processed
         if len(results) == 0:
             print("No data to analyze after filtering!")

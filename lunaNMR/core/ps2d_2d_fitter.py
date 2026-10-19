@@ -824,12 +824,6 @@ class Ps2dMultiPeakFitter2D:
 
         n_peaks = len(initial_peaks)
 
-        #if self.verbose:
-        #    print("=" * 70)
-        #    print(f"PS2D 2D Multi-Peak Fitting: {n_peaks} peaks")
-        #    print("=" * 70)
-        #    sys.stdout.flush()
-
         # Convert initial peaks to flat parameter array
         # Layout: [pos_f1, lw_lor_f1, lw_gau_f1, pos_f2, lw_lor_f2, lw_gau_f2, intensity, spare] × n_peaks
         params = []
@@ -1156,26 +1150,9 @@ class Ps2dMultiPeakFitter2D:
                         bounds[0][f2_idx] = new_lower_f2
                         bounds[1][f2_idx] = new_upper_f2
 
-        # Log position constraints for diagnostics (showing last peak's margins as example)
-        #if self.verbose:
-        #    print(f"   🔒 Position constraints (adaptive, ~1.5× FWHM):")
-        #    print(f"      Example: F1 = ±{pos_f1_margin:.3f} ppm, F2 = ±{pos_f2_margin:.4f} ppm")
-        #    sys.stdout.flush()
-
         # Validate and clip initial parameters
         params = np.clip(params, bounds[0], bounds[1])
         params, _ = cap_linewidth_totals(params, n_peaks, lw_caps_f1, lw_caps_f2)
-
-        # DIAGNOSTIC: Log initial intensity values before any fitting
-        #if self.verbose:
-        #    print(f"\n   📊 Initial intensity estimates (normalized, before fitting):")
-        #    for i in range(n_peaks):
-        #        offset = i * NPAR_VOIGT
-        #        intensity = params[offset + 6]
-        #        lower = bounds[0][offset + 6]
-        #        upper = bounds[1][offset + 6]
-        #        print(f"      Peak {i+1}: {intensity:.6e} (bounds: [{lower:.6e}, {upper:.6e}])")
-        #    sys.stdout.flush()
 
         total_iterations = 0
 
@@ -1214,22 +1191,6 @@ class Ps2dMultiPeakFitter2D:
         # to the fixed set instead, which is what the flag has always meant to a user
         # ticking "hold the linewidths" and what fixed_params already exists to express.
         if True:
-            #if self.verbose:
-            #    print("\nStage 1: Linewidth + intensity fit (positions fixed)")
-            #    if self.lg_penalty_weight > 0.0 and has_tooclose:
-            #        print(f"   🔗 L/G ratio constraint enabled (λ={self.lg_penalty_weight:.0f})")
-            #        print(f"      Peaks too close: enforcing similar L/G character")
-            #    elif self.lg_penalty_weight > 0.0 and not has_tooclose:
-            #        print(f"   ℹ️  L/G ratio constraint DISABLED for this cluster")
-            #        print(f"      Peaks sufficiently separated: independent L/G ratios allowed")
-            #    if self.constrain_intensity_ratios and has_tooclose and len(initial_intensity_ratios) == n_peaks:
-            #        print(f"   🔗 Intensity ratio penalty enabled (λ={self.intensity_ratio_penalty_weight:.0f})")
-            #        print(f"      Peaks too close: applying ratio constraint")
-            #    elif self.constrain_intensity_ratios and not has_tooclose:
-            #        print(f"   ℹ️  Intensity ratio penalty DISABLED for this cluster")
-            #        print(f"      Peaks sufficiently separated: independent intensities allowed")
-            #    sys.stdout.flush()
-
             # Positions always; linewidths too when the caller holds them. Intensity
             # is the one thing this stage must always be free to fit.
             fixed_stage1 = {}

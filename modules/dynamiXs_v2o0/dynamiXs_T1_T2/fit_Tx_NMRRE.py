@@ -721,9 +721,6 @@ def main():
     # Plot configuration
     n_plots_per_figure = 20  # Number of plots per PDF page
 
-    # Optional: Time scaling factor (uncomment if needed)
-    # time_scaling_factor = 1000  # Multiply time values by this factor
-
     # ========================
     # END CONFIGURATION
     # ========================

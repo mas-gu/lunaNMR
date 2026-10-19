@@ -8,7 +8,6 @@ Author: Guillaume Mas
 Date: 2025
 """
 
-#import tkinter as tk
 from typing import Dict, Any, List
 from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM, get_ps2d_config
 from lunaNMR.utils.output_manager import log_info, log_warning
