@@ -6236,7 +6236,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         """
         try:
             logger.info(f"Detection complete: {len(detected_peaks)} peaks detected")
-            progress_dialog.set_result(f"🔍 Detected: {len(self.integrator.fitted_peaks)} peaks")
+            if progress_dialog is not None:
+                progress_dialog.set_result(f"🔍 Detected: {len(self.integrator.fitted_peaks)} peaks")
 
             # Update peak navigator with detected peaks (if initialized)
             # Note: peak_list remains unchanged (reference positions)
@@ -6278,7 +6279,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             progress_dialog: Progress dialog to close
         """
         logger.error(f"Peak detection failed: {error_message}")
-        progress_dialog.set_result(f"❌ Detection failed: {error_message}")
+        if progress_dialog is not None:
+            progress_dialog.set_result(f"❌ Detection failed: {error_message}")
         self.update_status(f"Detection failed: {error_message}")
 
         from lunaNMR.gui.components import show_error
@@ -6466,8 +6468,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         """
         try:
             logger.info(f"Fitting complete: {summary['successful_peaks']}/{summary['total_peaks']} successful")
-            progress_dialog.set_result(f"✅ Successful: {summary['successful_peaks']} | "
-                                       f"❌ Failed: {summary['total_peaks'] - summary['successful_peaks']}")
+            if progress_dialog is not None:
+                progress_dialog.set_result(f"✅ Successful: {summary['successful_peaks']} | "
+                                           f"❌ Failed: {summary['total_peaks'] - summary['successful_peaks']}")
 
             # Store results (v0o9 pattern line 4204)
             if 'fitted_results' in summary and summary['fitted_results']:
@@ -6625,7 +6628,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             progress_dialog: Progress dialog to close
         """
         logger.error(f"Voigt fitting failed: {error_message}")
-        progress_dialog.set_result(f"❌ Fitting failed: {error_message}")
+        if progress_dialog is not None:
+            progress_dialog.set_result(f"❌ Fitting failed: {error_message}")
         self.update_status(f"Fitting failed: {error_message}")
 
         from lunaNMR.gui.components import show_error
