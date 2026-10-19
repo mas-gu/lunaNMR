@@ -68,14 +68,12 @@ class RelaxationDataBridge:
         Returns:
             Formatted residue ID (e.g., "142" or "142.ALA")
         """
-        # Extract numeric part
         numbers = re.findall(r'\d+', str(assignment))
         residue_num = numbers[0] if numbers else str(assignment)
 
         if not include_aa:
             return residue_num
 
-        # Look up amino acid if available
         aa = self.assignment_to_aa.get(str(assignment), None)
         if aa:
             return f"{residue_num}.{aa}"
@@ -179,32 +177,26 @@ class RelaxationDataBridge:
         Returns:
             Dict with conversion statistics
         """
-        # Load tidy data
         tidy_df = pd.read_csv(tidy_csv_path)
 
         if tidy_df.empty:
             raise ValueError("No data found in tidy CSV")
 
-        # Validate required columns
         required_cols = ['spectrum_name', 'assignment', intensity_column]
         missing = [c for c in required_cols if c not in tidy_df.columns]
         if missing:
             raise ValueError(f"Missing required columns: {missing}")
 
-        # Extract delays from spectrum names
         delays = self.extract_delays_from_tidy(tidy_df)
 
         if not delays:
             raise ValueError("Could not extract delays from spectrum names")
 
-        # Get unique assignments (residues)
         unique_assignments = tidy_df['assignment'].unique()
 
-        # Sort delays
         sorted_spectra = sorted(delays.keys(), key=lambda x: delays[x])
         sorted_delays = [delays[s] for s in sorted_spectra]
 
-        # Build output matrix
         # First row: empty + delays
         # Subsequent rows: residue + intensities
 
@@ -229,17 +221,14 @@ class RelaxationDataBridge:
 
             rows.append(row)
 
-        # Create dataframe header
         # If spectrum_name is already a column name (e.g., "50", "50_2"), use directly
         # Otherwise, convert delay value to column name
         header_items = []
         for spectrum_name in sorted_spectra:
             name_str = str(spectrum_name)
-            # Check if already a pre-extracted column name
             if self._parse_column_name_delay(name_str) is not None:
                 header_items.append(name_str)
             else:
-                # Convert delay value to column name
                 delay = delays[spectrum_name]
                 if delay == int(delay):
                     header_items.append(str(int(delay)))
@@ -248,11 +237,8 @@ class RelaxationDataBridge:
 
         header = [''] + header_items
 
-        # Write output
         with open(output_csv_path, 'w') as f:
-            # Write header
             f.write(','.join(header) + '\n')
-            # Write data rows
             for row in rows:
                 formatted = [str(v) if pd.notna(v) else '' for v in row]
                 f.write(','.join(formatted) + '\n')
@@ -294,7 +280,6 @@ class RelaxationDataBridge:
         sat_df = pd.read_csv(sat_tidy_csv)
         unsat_df = pd.read_csv(unsat_tidy_csv)
 
-        # Extract intensities per residue
         sat_intensities = {}
         unsat_intensities = {}
 
@@ -308,16 +293,13 @@ class RelaxationDataBridge:
             residue = self.format_residue_id(assignment)
             unsat_intensities[residue] = row[intensity_column]
 
-        # Find common residues
         common = set(sat_intensities.keys()) & set(unsat_intensities.keys())
         common_sorted = sorted(common, key=self._extract_number)
 
-        # Write saturated
         with open(output_sat_csv, 'w') as f:
             for residue in common_sorted:
                 f.write(f"{residue},{sat_intensities[residue]}\n")
 
-        # Write unsaturated
         with open(output_unsat_csv, 'w') as f:
             for residue in common_sorted:
                 f.write(f"{residue},{unsat_intensities[residue]}\n")
@@ -368,7 +350,6 @@ class RelaxationDataBridge:
             'snr_threshold': 3.0,
             'baseline_correction': True,
             'output_format': 'tidy',
-            # Default fitting parameters
             'fitting_window_x': 0.04,
             'fitting_window_y': 0.4,
             'max_iterations': 100,
@@ -411,12 +392,10 @@ class RelaxationDataBridge:
         if not files_with_delays:
             raise ValueError(f"No spectra with delays found in {spectra_folder}")
 
-        # Sort by delay
         files_with_delays.sort(key=lambda x: x[1])
         spectrum_files = [f for f, _ in files_with_delays]
         delays_ms = np.array([d for _, d in files_with_delays])
 
-        # Step 2: Load and prepare peak list
         peak_df = pd.read_csv(peak_list)
 
         # Normalize peak list columns to what MultiSpectrumProcessor expects
@@ -436,12 +415,10 @@ class RelaxationDataBridge:
         # Step 3: Run LunaNMR series integration (Fit Series in cascade mode)
         from lunaNMR.processors.multi_spectrum_processor import MultiSpectrumProcessor
 
-        # Create output folder for series results
         output_folder = os.path.dirname(output_csv)
         if not output_folder:
             output_folder = os.getcwd()
 
-        # Build default parameters for MultiSpectrumProcessor
         voigt_params = self.build_series_params(
             use_voigt=True,
             parallel=True,
@@ -449,7 +426,6 @@ class RelaxationDataBridge:
             fix_linewidths=False
         )
 
-        # Process spectra using Fit Series
         processor = MultiSpectrumProcessor(voigt_params)
         batch_results = processor.process_nmr_series(
             nmr_files=spectrum_files,
@@ -465,7 +441,6 @@ class RelaxationDataBridge:
 
         tidy_df = pd.read_csv(tidy_file)
 
-        # Validate we have data
         if tidy_df.empty:
             raise ValueError("No peak intensities could be extracted from spectra")
 
@@ -473,7 +448,6 @@ class RelaxationDataBridge:
             raise ValueError(f"Missing 'assignment' column in results. Available columns: {list(tidy_df.columns)}")
 
         # Step 3: Fit exponential decay for each residue
-        # Group by assignment
         residue_results = []
 
         def exp_decay(t, I0, R):
@@ -486,7 +460,6 @@ class RelaxationDataBridge:
             mask = tidy_df['assignment'] == assignment
             residue_data = tidy_df[mask].copy()
 
-            # Get intensities sorted by delay
             intensities = []
             for f, d in files_with_delays:
                 fname = os.path.basename(f)
@@ -498,7 +471,6 @@ class RelaxationDataBridge:
 
             intensities = np.array(intensities)
 
-            # Skip if too many NaN values
             valid_mask = ~np.isnan(intensities)
             if np.sum(valid_mask) < 3:
                 continue
@@ -511,7 +483,6 @@ class RelaxationDataBridge:
                 I0_guess = np.max(valid_intensities)
                 R_guess = 1.0 / (valid_delays[len(valid_delays)//2] / 1000.0)  # Rough T estimate
 
-                # Fit exponential
                 popt, pcov = curve_fit(
                     exp_decay, valid_delays, valid_intensities,
                     p0=[I0_guess, R_guess],
@@ -541,10 +512,8 @@ class RelaxationDataBridge:
                     if len(R_bootstrap) > 10:
                         R_err = np.std(R_bootstrap)
 
-                # Format residue ID
                 residue_id = self.format_residue_id(assignment, include_aa=True)
 
-                # Store result based on experiment type
                 if experiment_type.lower() in ['t1', 't1rho']:
                     rate_col = 'R1' if experiment_type.lower() == 't1' else 'R1rho'
                     residue_results.append({
@@ -563,7 +532,6 @@ class RelaxationDataBridge:
                 print(f"Warning: Could not fit {assignment}: {e}")
                 continue
 
-        # Step 4: Save results
         if not residue_results:
             raise ValueError("No residues could be fitted")
 
@@ -593,15 +561,12 @@ class RelaxationDataBridge:
             delay = delays_ms[i]
 
             try:
-                # Load spectrum
                 dic, data = ng.pipe.read(spec_file)
 
-                # Get spectral parameters
                 udic = ng.pipe.guess_udic(dic, data)
                 uc0 = ng.pipe.make_uc(dic, data, dim=0)  # 15N
                 uc1 = ng.pipe.make_uc(dic, data, dim=1)  # 1H
 
-                # Extract intensities at peak positions
                 for _, peak in peak_df.iterrows():
                     assignment = peak.get('assignment', peak.name)
                     ppm_x = peak.get('ppm_x', peak.get('H_ppm', peak.get('1H')))
@@ -610,7 +575,6 @@ class RelaxationDataBridge:
                     if pd.isna(ppm_x) or pd.isna(ppm_y):
                         continue
 
-                    # Convert ppm to indices
                     idx_y = uc0.i(ppm_y)
                     idx_x = uc1.i(ppm_x)
 
