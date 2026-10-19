@@ -30,7 +30,6 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
-# Import DynamiXs style components
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
 from constants import (
@@ -235,7 +234,6 @@ class SeriesResultsViewer(QDialog):
         layout = QVBoxLayout(table_widget)
         layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
 
-        # Filter controls
         filter_frame = QFrame()
         filter_layout = QHBoxLayout(filter_frame)
         filter_layout.setContentsMargins(0, 0, 0, SPACING_SM)
@@ -293,13 +291,11 @@ class SeriesResultsViewer(QDialog):
             self._show_empty_state()
             return
 
-        # Extract summary
         summary = self.batch_results.get_summary()
         self.total_spectra_label.setText(f"Total Spectra: {summary.get('total_spectra', 0)}")
         self.successful_label.setText(f"Successful: {summary.get('successful', 0)}")
         self.failed_label.setText(f"Failed: {summary.get('failed', 0)}")
 
-        # Build dataframe from results
         all_data = []
         for spectrum_name, result in self.batch_results.results.items():
             if result.get('integration_results'):
@@ -330,14 +326,12 @@ class SeriesResultsViewer(QDialog):
         try:
             self._df = pd.read_csv(self.tidy_csv_path)
 
-            # Map column names to expected format
             column_mapping = {
                 'spectrum': 'spectrum_name',
                 'Spectrum': 'spectrum_name',
             }
             self._df = self._df.rename(columns=column_mapping)
 
-            # Count unique spectra
             n_spectra = self._df['spectrum_name'].nunique() if 'spectrum_name' in self._df.columns else 0
             self.total_spectra_label.setText(f"Total Spectra: {n_spectra}")
             self.successful_label.setText(f"Successful: {n_spectra}")
@@ -410,7 +404,6 @@ class SeriesResultsViewer(QDialog):
         ax = self.quality_figure.add_subplot(111)
         ax.set_facecolor('#2d2d2d')
 
-        # Sort by residue number if possible
         data = self._quality_data.copy()
         try:
             # Extract residue number from assignment (e.g., "142.ALA" -> 142)
@@ -434,7 +427,6 @@ class SeriesResultsViewer(QDialog):
         x_positions = range(len(data))
         bars = ax.bar(x_positions, data['mean_r2'], color=colors, edgecolor='none', alpha=0.8)
 
-        # Add threshold lines
         ax.axhline(y=self.R2_EXCELLENT, color='#4CAF50', linestyle='--', alpha=0.5,
                    label=f'Excellent ({self.R2_EXCELLENT})')
         ax.axhline(y=self.R2_GOOD, color='#2196F3', linestyle='--', alpha=0.5,
@@ -487,7 +479,6 @@ class SeriesResultsViewer(QDialog):
                 aggfunc='first'
             )
 
-            # Sort residues by number
             try:
                 residue_order = sorted(pivot_df.index,
                                        key=lambda x: float(x.split('.')[0]) if '.' in str(x) else float(x))
@@ -497,7 +488,6 @@ class SeriesResultsViewer(QDialog):
 
             ax = self.heatmap_figure.add_subplot(111)
 
-            # Plot heatmap
             im = ax.imshow(pivot_df.values, aspect='auto', cmap='viridis')
 
             # Colorbar
@@ -542,12 +532,10 @@ class SeriesResultsViewer(QDialog):
 
         self.data_table.clear()
 
-        # Set columns
         columns = list(self._df.columns)
         self.data_table.setColumnCount(len(columns))
         self.data_table.setHorizontalHeaderLabels(columns)
 
-        # Populate rows
         self.data_table.setRowCount(len(self._df))
         for i, (_, row) in enumerate(self._df.iterrows()):
             for j, col in enumerate(columns):
@@ -581,7 +569,6 @@ class SeriesResultsViewer(QDialog):
         thresholds = [0, self.R2_EXCELLENT, self.R2_GOOD, self.R2_POOR]
 
         if filter_index == 0 or 'r_squared' not in self._df.columns:
-            # Show all
             filtered_df = self._df
         else:
             threshold = thresholds[filter_index]
