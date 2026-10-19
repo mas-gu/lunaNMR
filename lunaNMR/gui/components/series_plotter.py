@@ -75,12 +75,10 @@ class SeriesPlotter(QWidget):
         """
         super().__init__(parent)
 
-        # Create matplotlib figure and canvas
         self.figure = Figure(figsize=(8, 5), dpi=100, facecolor=BG_COLOR)
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.ax = self.figure.add_subplot(111)
 
-        # Setup layout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -96,7 +94,6 @@ class SeriesPlotter(QWidget):
         self.color_index = 0
         self.marker_index = 0
 
-        # Initialize plot appearance
         self._setup_plot_appearance()
 
     def _setup_plot_appearance(self):
@@ -104,7 +101,6 @@ class SeriesPlotter(QWidget):
         self.ax.set_facecolor(PANEL_BG_COLOR)
         self.ax.grid(True, alpha=0.3, linestyle='--', color=SECONDARY_TEXT)
 
-        # Set axis label colors
         self.ax.tick_params(colors=PRIMARY_TEXT)
         self.ax.spines['bottom'].set_color(SECONDARY_TEXT)
         self.ax.spines['top'].set_color(SECONDARY_TEXT)
@@ -155,23 +151,17 @@ class SeriesPlotter(QWidget):
             labels = {'peak_1': 'Peak A (8.2 ppm)', 'peak_2': 'Peak B (7.8 ppm)'}
             plotter.plot_series(data, labels)
         """
-        # Clear existing data
         self.clear()
 
-        # Reset color/marker cycling
         self.color_index = 0
         self.marker_index = 0
 
-        # Plot each series
         for series_id, (x_data, y_data) in data.items():
-            # Get label
             label = labels.get(series_id, series_id) if labels else series_id
 
-            # Get color and marker
             color = self._get_next_color()
             marker = self._get_next_marker()
 
-            # Plot line with markers
             line = self.ax.plot(
                 x_data, y_data,
                 color=color,
@@ -182,11 +172,9 @@ class SeriesPlotter(QWidget):
                 alpha=0.8
             )[0]
 
-            # Store data and line
             self.series_data[series_id] = (x_data, y_data, color)
             self.plot_lines[series_id] = line
 
-        # Update plot
         self._update_plot()
 
     def add_error_bars(self, errors: Dict[str, np.ndarray]):
@@ -210,14 +198,12 @@ class SeriesPlotter(QWidget):
 
             x_data, y_data, color = self.series_data[series_id]
 
-            # Remove existing error bars if present
             if series_id in self.error_bars:
                 self.error_bars[series_id].remove()
 
             # Get lighter shade of line color for error bars
             error_color = self._color_to_lighter_shade(color, alpha=0.3)
 
-            # Plot error bars
             error_bar = self.ax.errorbar(
                 x_data, y_data,
                 yerr=error_vals,
@@ -232,7 +218,6 @@ class SeriesPlotter(QWidget):
             self.error_bars[series_id] = error_bar
             self.error_data[series_id] = error_vals
 
-        # Redraw
         self.canvas.draw()
 
     def set_axis_labels(self, xlabel: str = "Time / Spectrum Index",
@@ -290,11 +275,9 @@ class SeriesPlotter(QWidget):
 
     def _update_plot(self):
         """Update plot with current settings."""
-        # Set default labels if not set
         if not self.ax.get_xlabel():
             self.set_axis_labels()
 
-        # Update legend
         self.update_legend()
 
         # Format y-axis with scientific notation if values are very large/small
@@ -308,7 +291,6 @@ class SeriesPlotter(QWidget):
         # Tight layout
         self.figure.tight_layout()
 
-        # Draw
         self.canvas.draw()
 
     def _plot_no_series_data(self):
