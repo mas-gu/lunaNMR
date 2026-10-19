@@ -186,7 +186,7 @@ class InPlaceAdvancedNMRIntegrator:
 
         # Skip auto-detection if using fallback axes (unreliable)
         if hasattr(self, '_using_fallback_ppm_axes') and self._using_fallback_ppm_axes:
-            print("⚠️  Skipping nucleus auto-detection (using fallback PPM axes)")
+            print("⚠ Skipping nucleus auto-detection (using fallback PPM axes)")
             return None
 
         try:
@@ -218,7 +218,7 @@ class InPlaceAdvancedNMRIntegrator:
             return None
 
         except Exception as e:
-            print(f"⚠️  Error during nucleus auto-detection: {e}")
+            print(f"⚠ Error during nucleus auto-detection: {e}")
             return None
 
     def _estimate_noise_level(self):

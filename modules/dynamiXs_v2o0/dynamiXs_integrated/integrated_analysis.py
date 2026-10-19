@@ -492,7 +492,7 @@ class IntegratedAnalysisPipeline:
 
         script_name, class_name = script_info
         self.log_progress(f"  Using method: {self.params.analysis_method} ({script_name})")
-        self.log_progress(f"  ⚡ Multicore spectral density analysis enabled")
+        self.log_progress(f"  Multicore spectral density analysis enabled")
 
         # Import the appropriate class
         try:

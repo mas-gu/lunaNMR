@@ -770,7 +770,7 @@ class EnhancedPeakPicker:
 
 if __name__ == "__main__":
     # Test the enhanced peak picker
-    print("🧪 Testing Enhanced Peak Picker")
+    print("Testing Enhanced Peak Picker")
     print("=" * 40)
 
     # Create synthetic 2D NMR data with multiple peaks
@@ -795,10 +795,10 @@ if __name__ == "__main__":
     picker = EnhancedPeakPicker()
     peaks = picker.comprehensive_peak_detection(synthetic_data, x_ppm, y_ppm, '1H', validate_fits=False)
 
-    print(f"✅ Detected {len(peaks)} peaks")
+    print(f"Detected {len(peaks)} peaks")
     for i, peak in enumerate(peaks[:3]):  # Show first 3 peaks
         print(f"   Peak {i+1}: ({peak['ppm_x']:.3f}, {peak['ppm_y']:.1f}) ppm, SNR={peak['snr']:.1f}")
 
     # Test DataFrame export
     df = picker.export_peaks_to_dataframe(peaks)
-    print(f"✅ Exported to DataFrame: {len(df)} rows × {len(df.columns)} columns")
+    print(f"Exported to DataFrame: {len(df)} rows × {len(df.columns)} columns")

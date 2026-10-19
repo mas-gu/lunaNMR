@@ -49,7 +49,7 @@ class CLIInterface:
 
     def _signal_handler(self, _signum, frame):
         """Handle interrupt signals for graceful shutdown."""
-        print("\n\n⚠️  Processing interrupted by user")
+        print("\n\n⚠ Processing interrupted by user")
         print("Gracefully shutting down...")
         self.interrupted = True
         sys.exit(0)

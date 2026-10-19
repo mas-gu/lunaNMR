@@ -523,7 +523,7 @@ class Ps2dMultiPeakFitter2D:
           where pᵢ = (Iᵢ/Iₘₐₓ - target_ratioᵢ) = deviation from target ratio
 
         LM minimizes: Σ(y - model)² + Σ(√λ·pᵢ)²
-                    = χ²_data + λ × Penalty_ratio ✅
+                    = χ²_data + λ × Penalty_ratio
 
         Parameters:
         -----------
@@ -643,7 +643,7 @@ class Ps2dMultiPeakFitter2D:
           where pᵢ = (Iᵢ/Iₘₐₓ - target_ratioᵢ) = deviation from target ratio
 
         LM minimizes: Σ(y - model)² + Σ(√λ·pᵢ)²
-                    = χ²_data + λ × Penalty_ratio ✅
+                    = χ²_data + λ × Penalty_ratio
 
         Parameters:
         -----------
@@ -1532,7 +1532,7 @@ class Ps2dMultiPeakFitter2D:
                 # A refit that fails leaves the capped widths with the pre-cap
                 # intensity, which is the defect above - so say so rather than
                 # reporting the numbers as if they were fitted together.
-                print(f"   ⚠️  intensity refit after the width cap failed: {error}")
+                print(f"   ⚠ intensity refit after the width cap failed: {error}")
 
         # Measured beside the analytic integral, from the same mask the fit used.
         try:
@@ -1543,7 +1543,7 @@ class Ps2dMultiPeakFitter2D:
             # NOT `model_function`: inside this function that name is a curve_fit-style
             # closure taking varargs, while region_sum_volumes wants the grid model.
         except Exception as error:                           # pragma: no cover
-            print(f"   ⚠️  region-sum volume unavailable: {error}")
+            print(f"   ⚠ region-sum volume unavailable: {error}")
             region_volumes = [None] * n_peaks
 
         # Extract fitted peaks and calculate derived quantities

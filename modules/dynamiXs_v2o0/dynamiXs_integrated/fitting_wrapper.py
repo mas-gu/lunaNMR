@@ -70,7 +70,7 @@ def fit_relaxation_data(input_csv: str,
     try:
         # Try multicore version first (5-8x faster)
         from fitmulti__Tx_NMRRE import run_analysis_with_params
-        print(f"  ⚡ Using multicore fitting ({experiment_type})")
+        print(f"  Using multicore fitting ({experiment_type})")
     except ImportError:
         # Fallback to single-core version if multicore not available
         try:

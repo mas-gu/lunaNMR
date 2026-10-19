@@ -289,7 +289,7 @@ class SimplifiedParameterManager:
     def get_parameter_summary(self) -> str:
         """Get human-readable summary of simplified parameters"""
 
-        summary = ["🔧 Simplified Parameter Summary:"]
+        summary = ["Simplified Parameter Summary:"]
         summary.append("-" * 40)
         summary.append(f"Sensitivity: {self.simplified_params.sensitivity:.2f}")
         summary.append(f"Window Scale: {self.simplified_params.window_scale:.2f}")

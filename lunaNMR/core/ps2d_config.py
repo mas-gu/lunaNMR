@@ -564,7 +564,7 @@ if __name__ == "__main__":
     try:
         bad_config = PS2DConfig('17O')
     except ValueError as e:
-        print(f"✅ Correctly caught error: {e}")
+        print(f"Correctly caught error: {e}")
 
     print("\n" + "=" * 70)
     print("All tests passed!")

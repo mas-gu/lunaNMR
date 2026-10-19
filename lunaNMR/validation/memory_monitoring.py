@@ -43,7 +43,7 @@ class MemoryMonitor:
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
 
-        print("🔍 Memory monitoring started")
+        print("Memory monitoring started")
 
     def stop_monitoring(self):
         """Stop memory monitoring"""
@@ -51,7 +51,7 @@ class MemoryMonitor:
         if self.monitor_thread:
             self.monitor_thread.join(timeout=5)
 
-        print("⏹️ Memory monitoring stopped")
+        print("Memory monitoring stopped")
 
     def _monitor_loop(self):
         """Main monitoring loop"""
@@ -89,7 +89,7 @@ class MemoryMonitor:
                 time.sleep(self.sample_interval)
 
             except Exception as e:
-                print(f"⚠️ Memory monitoring error: {e}")
+                print(f"⚠ Memory monitoring error: {e}")
                 time.sleep(self.sample_interval)
 
     def _count_shared_memory_blocks(self):
@@ -201,7 +201,7 @@ class MemoryMonitor:
         """
         Force garbage collection and test cleanup effectiveness
         """
-        print("🧹 Forcing garbage collection...")
+        print("Forcing garbage collection...")
 
         before_stats = self.get_current_memory_usage()
 
@@ -222,10 +222,10 @@ class MemoryMonitor:
         """Print comprehensive memory report"""
         stats = self.get_memory_statistics()
         if not stats:
-            print("❌ No memory statistics available")
+            print("No memory statistics available")
             return
 
-        print("\n📊 Memory Usage Report")
+        print("\nMemory Usage Report")
         print("=" * 50)
         print("RSS Memory:")
         print(f"  Current: {stats['rss_current_mb']:.1f}MB")
@@ -245,18 +245,18 @@ class MemoryMonitor:
         # Check for leaks
         leak_check = self.check_memory_leaks()
         if leak_check.get('has_potential_leaks', False):
-            print("\n⚠️ Potential Memory Issues:")
+            print("\n⚠ Potential Memory Issues:")
             for indicator in leak_check['leak_indicators']:
                 print(f"  - {indicator}")
         else:
-            print("\n✅ No significant memory leaks detected")
+            print("\nNo significant memory leaks detected")
 
 
 def test_parallel_processor_memory():
     """
     Test function to verify ParallelVoigtProcessor memory management
     """
-    print("🧪 Testing ParallelVoigtProcessor memory management")
+    print("Testing ParallelVoigtProcessor memory management")
 
     # This would be called from a test script that imports the actual classes
     monitor = MemoryMonitor(sample_interval=0.5)

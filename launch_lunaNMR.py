@@ -17,7 +17,6 @@ import os
 import matplotlib
 
 matplotlib.use("QtAgg", force=True)
-#print(f"🖼️ Matplotlib backend forced to: {matplotlib.get_backend()}")
 
 # Keep text EDITABLE in exported vector figures (so they can be tweaked in Illustrator
 # etc.): SVG keeps labels as <text> rather than outlined paths; PDF embeds TrueType so
@@ -128,12 +127,12 @@ def main():
 if __name__ == "__main__":
     try:
         success = main()
-        print(f"🏁 Launch completed with {'success' if success else 'errors'}")
+        print(f"Launch completed with {'success' if success else 'errors'}")
     except KeyboardInterrupt:
-        print("\n⏹️ Launch interrupted by user")
+        print("\nLaunch interrupted by user")
         success = True  # User interrupt is not an error
     except Exception as e:
-        print(f"💥 Critical launcher error: {e}")
+        print(f"Critical launcher error: {e}")
         import traceback
 
         traceback.print_exc()

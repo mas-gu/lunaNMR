@@ -1183,9 +1183,9 @@ class EnhancedVoigtFitter:
                 #'x_data': x_local,
                 #'y_data': y_local,
                 #'indices': local_indices,
-                'x_local': x_local,          # ✅ Consistent with caller expectations
-                'y_local': y_local,          # ✅ Consistent with caller expectations
-                'local_indices': local_indices,  # ✅ Consistent with caller expectations
+                'x_local': x_local,
+                'y_local': y_local,
+                'local_indices': local_indices,
                 'peak_center': peak_center,
                 'window_size': half_window * 2,  # total window size
                 'window_width': half_window * 2,
@@ -3663,7 +3663,7 @@ class RobustParameterEstimator:
 
 if __name__ == "__main__":
     # Test the enhanced fitter
-    print("🧪 Testing Enhanced Voigt Fitter")
+    print("Testing Enhanced Voigt Fitter")
     print("=" * 40)
 
     # Create test data
@@ -3683,10 +3683,10 @@ if __name__ == "__main__":
     result = fitter.fit_peak_enhanced(x_test, y_noisy, nucleus_type='1H')
 
     if result['success']:
-        print("✅ Fitting successful!")
+        print("Fitting successful!")
         print(f"   Quality: {result['quality_class']} (R² = {result['r_squared']:.3f})")
         print(f"   Center: {result['center']:.4f} ppm (true: {true_params[1]:.4f})")
         print(f"   Amplitude: {result['amplitude']:.1f} (true: {true_params[0]:.1f})")
         print(f"   Width (σ+γ): {result['sigma'] + result['gamma']:.4f} (true: {true_params[2] + true_params[3]:.4f})")
     else:
-        print(f"❌ Fitting failed: {result.get('error', 'Unknown error')}")
+        print(f"Fitting failed: {result.get('error', 'Unknown error')}")

@@ -220,7 +220,7 @@ class GlobalOptimizationManager:
         self.phase = "not_started"
         self.current_round = 0
 
-        logger.info("🚀 GlobalOptimizationManager initialized")
+        logger.info("GlobalOptimizationManager initialized")
         logger.info(f"   Convergence threshold: {convergence_threshold*100:.1f}%")
         logger.info(f"   Maximum rounds: {max_rounds}")
 
@@ -236,14 +236,14 @@ class GlobalOptimizationManager:
         Returns:
             Complete optimization report with all results and statistics
         """
-        logger.info("🎯 Starting Two-Phase Global Optimization")
+        logger.info("Starting Two-Phase Global Optimization")
         logger.info(f"   Processing {len(peak_list)} peaks")
 
         self.total_peaks = len(peak_list)
 
         # Phase 1: Survey - fit all peaks and collect statistics
         logger.info("\n" + "="*60)
-        logger.info("📊 PHASE 1: COMPLETE SURVEY")
+        logger.info("PHASE 1: COMPLETE SURVEY")
         logger.info("="*60)
 
         self.phase = "survey"
@@ -251,7 +251,7 @@ class GlobalOptimizationManager:
 
         # Phase 2: Iterative refinement of failed peaks
         logger.info("\n" + "="*60)
-        logger.info("🔄 PHASE 2: ITERATIVE REFINEMENT")
+        logger.info("PHASE 2: ITERATIVE REFINEMENT")
         logger.info("="*60)
 
         self.phase = "refinement"
@@ -260,7 +260,7 @@ class GlobalOptimizationManager:
         # Generate comprehensive report
         final_report = self._generate_final_report()
 
-        logger.info("\n🎉 Global Optimization Complete!")
+        logger.info("\nGlobal Optimization Complete!")
         self._print_final_summary()
 
         return final_report
@@ -309,9 +309,9 @@ class GlobalOptimizationManager:
                     # Collect statistics from successful peaks
                     if peak_result.is_successful:
                         self.linewidth_stats.add_successful_peak(peak_result)
-                        logger.info(f"    ✅ Success: R²=({peak_result.x_r_squared:.3f}, {peak_result.y_r_squared:.3f})")
+                        logger.info(f"    Success: R²=({peak_result.x_r_squared:.3f}, {peak_result.y_r_squared:.3f})")
                     else:
-                        logger.info(f"    ⚠️  Needs improvement: R²=({peak_result.x_r_squared:.3f}, {peak_result.y_r_squared:.3f})")
+                        logger.info(f"    ⚠ Needs improvement: R²=({peak_result.x_r_squared:.3f}, {peak_result.y_r_squared:.3f})")
 
                 else:
                     # Fitting failed completely
@@ -326,10 +326,10 @@ class GlobalOptimizationManager:
                         error_message="Standard fitting failed"
                     )
                     self.peak_results[peak_id] = peak_result
-                    logger.info("    ❌ Failed: Standard fitting unsuccessful")
+                    logger.info("    Failed: Standard fitting unsuccessful")
 
             except Exception as e:
-                logger.error(f"    💥 Exception during fitting: {e}")
+                logger.error(f"    Exception during fitting: {e}")
                 peak_result = PeakResult(
                     peak_id=peak_id,
                     x_position=x_pos,
@@ -368,28 +368,28 @@ class GlobalOptimizationManager:
             if result.needs_improvement
         ]
 
-        logger.info(f"🔄 Starting iterative refinement for {len(peaks_to_improve)} peaks")
+        logger.info(f"Starting iterative refinement for {len(peaks_to_improve)} peaks")
 
         if not peaks_to_improve:
-            logger.info("🎉 No peaks need improvement - all successful!")
+            logger.info("No peaks need improvement - all successful!")
             return {"message": "no_improvement_needed"}
 
         # Check if we have enough statistics for constraints
         stats_summary = self.linewidth_stats.get_statistics_summary()
         if stats_summary['peak_count'] < 3:
-            logger.warning("⚠️  Insufficient successful peaks for reliable constraints")
+            logger.warning("⚠ Insufficient successful peaks for reliable constraints")
             logger.warning("   Proceeding with fallback constraints")
 
         # Iterative refinement rounds
         for round_num in range(2, self.max_rounds + 2):  # Rounds 2, 3, 4, 5, 6
-            logger.info(f"\n🔄 Refinement Round {round_num}")
+            logger.info(f"\nRefinement Round {round_num}")
             logger.info("-" * 40)
 
             round_results = self._refinement_round(round_num, peaks_to_improve, integrator_instance)
 
             # Check convergence
             if round_results.improvement_percentage < self.convergence_threshold * 100:
-                logger.info(f"🏁 Convergence achieved: {round_results.improvement_percentage:.1f}% < {self.convergence_threshold*100:.1f}%")
+                logger.info(f"Convergence achieved: {round_results.improvement_percentage:.1f}% < {self.convergence_threshold*100:.1f}%")
                 break
 
             # Update list of peaks that still need improvement
@@ -399,7 +399,7 @@ class GlobalOptimizationManager:
             ]
 
             if not peaks_to_improve:
-                logger.info("🎉 All peaks now successful - refinement complete!")
+                logger.info("All peaks now successful - refinement complete!")
                 break
 
         return {"refinement_rounds": len(self.optimization_rounds) - 1}
@@ -462,14 +462,14 @@ class GlobalOptimizationManager:
                         if new_peak_result.is_successful:
                             self.linewidth_stats.add_successful_peak(new_peak_result)
 
-                        logger.info(f"     ✅ Improved: R²=({old_min_r2:.3f}→{new_min_r2:.3f})")
+                        logger.info(f"     Improved: R²=({old_min_r2:.3f}→{new_min_r2:.3f})")
                     else:
-                        logger.info(f"     ➖ No improvement: R²=({new_min_r2:.3f})")
+                        logger.info(f"     No improvement: R²=({new_min_r2:.3f})")
                 else:
-                    logger.info("     ❌ Constrained fitting failed")
+                    logger.info("     Constrained fitting failed")
 
             except Exception as e:
-                logger.error(f"     💥 Exception: {e}")
+                logger.error(f"     Exception: {e}")
 
             current_round.peaks_processed += 1
 
@@ -571,7 +571,7 @@ class GlobalOptimizationManager:
         round1 = self.optimization_rounds[0]
         stats = self.linewidth_stats.get_statistics_summary()
 
-        logger.info("\n📊 Phase 1 Survey Complete:")
+        logger.info("\nPhase 1 Survey Complete:")
         logger.info(f"   Total peaks processed: {round1.peaks_processed}")
         logger.info(f"   Excellent (R²>0.95): {round1.quality_distribution[PeakQuality.EXCELLENT]}")
         logger.info(f"   Good (0.85-0.95): {round1.quality_distribution[PeakQuality.GOOD]}")
@@ -580,7 +580,7 @@ class GlobalOptimizationManager:
         logger.info(f"   Success rate: {round1.success_rate:.1f}%")
         logger.info(f"   Processing time: {round1.processing_time:.1f}s")
 
-        logger.info("\n📏 Linewidth Statistics:")
+        logger.info("\nLinewidth Statistics:")
         logger.info(f"   Successful peaks for stats: {stats['peak_count']}")
         if stats['x_linewidths']['median']:
             logger.info(f"   X-dimension median: {stats['x_linewidths']['median']:.4f}")
@@ -591,7 +591,7 @@ class GlobalOptimizationManager:
         final_round = self.optimization_rounds[-1]
         initial_round = self.optimization_rounds[0]
 
-        logger.info("\n🎯 FINAL OPTIMIZATION SUMMARY")
+        logger.info("\nFINAL OPTIMIZATION SUMMARY")
         logger.info("="*50)
         logger.info(f"Total rounds: {len(self.optimization_rounds)}")
         logger.info(f"Total peaks: {self.total_peaks}")

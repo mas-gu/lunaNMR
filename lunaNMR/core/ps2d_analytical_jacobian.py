@@ -340,7 +340,7 @@ def validate_analytical_jacobian(
             passed = max_ratio <= 1.0  # Within tolerance
 
             if verbose and param_idx < 7:  # Skip spare
-                status = "✅" if passed else "❌"
+                status = "PASS" if passed else "FAIL"
                 print(f"  Peak {peak_idx+1} {param_names[param_idx]:12s}: "
                       f"rel_error = {rel_error:.2e} {status}")
 
