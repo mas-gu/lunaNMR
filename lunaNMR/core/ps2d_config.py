@@ -500,6 +500,14 @@ def distance_in_linewidths(delta_f2, delta_f1):
     return np.sqrt((delta_f2 / config.radF2)**2 + (delta_f1 / config.radF1)**2)
 
 
+def linewidths_reaching(reach_f2, reach_f1):
+    """The smallest distance in linewidths of the current nucleus whose ellipse holds
+    every offset within the ppm ellipse of semi-axes reach_f2 (1H) and reach_f1
+    (indirect): a ppm reach in linewidth units, losing no point it reached."""
+    config = get_ps2d_config()
+    return max(reach_f2 / config.radF2, reach_f1 / config.radF1)
+
+
 # ============================================================================
 # Module exports
 # ============================================================================
@@ -517,6 +525,7 @@ __all__ = [
     'get_gap_thresholds',
     'get_min_linewidths',
     'distance_in_linewidths',
+    'linewidths_reaching',
 ]
 
 

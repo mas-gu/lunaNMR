@@ -262,26 +262,6 @@ class TestRefitFitsAsTheSeriesDid:
         assert "PS2D" not in viewer.edit_status_label.text()
 
 
-METHYL = Path(__file__).resolve().parents[2] / "data_test" / "methyl" / "sampleNBD"
-
-
-@pytest.fixture(scope="module")
-def methyl_series(tmp_path_factory):
-    """A real two-point 13C methyl T2 series, the spectra linked under neutral names."""
-    if not METHYL.exists():
-        pytest.skip("data_test not present")
-    from lunaNMR.cli import main
-    root = tmp_path_factory.mktemp("methyl_series")
-    (root / "spectra").mkdir()
-    for delay in ("3ms", "18ms"):
-        (root / "spectra" / f"T2_{delay}.ft").symlink_to(METHYL / f"001_T2_NBD_{delay}.ft")
-    with contextlib.redirect_stdout(io.StringIO()):
-        assert main(["series", "--spectra", str(root / "spectra"),
-                     "--peaks", str(METHYL / "001_NBDADP_NBD.txt"), "--mode", "time",
-                     "--peak-source", "reference", "--out", str(root / "out")]) == 0
-    return root / "out"
-
-
 class TestARefitOfA13CSeriesUnderA15NWindow:
     """The main window on a 15N spectrum while a 13C series is refitted in the overlay:
     the refit must fit with the 13C config the series recorded, not the window's."""

@@ -2255,23 +2255,29 @@ class MultiSpectrumViewerDialog(BaseDialog):
             f"Editing {spec_name}: click a peak to select it, then click its true position.")
         self._update_plot()
 
+    # How far from a peak a click still selects it (ppm, 1H and indirect)
+    _PICK_REACH_F2 = 0.075
+    _PICK_REACH_F1 = 0.75
+
     def _find_nearest_overlay_peak(self, spec_idx: int, x_ppm: float, y_ppm: float):
-        """Nearest fitted peak (elliptically normalised) in a spectrum, or None if too far."""
+        """Nearest fitted peak in a spectrum, in linewidths of the PS2D config its series
+        recorded (an indirect ppm does not count as a 1H ppm), or None if out of reach."""
+        from lunaNMR.core.ps2d_config import (applied_ps2d_config, distance_in_linewidths,
+                                              linewidths_reaching)
         fitted_peaks = self._get_fitted_peaks(spec_idx)
-        # Normalise 1H and 15N distances by typical radii so both axes count fairly.
-        rad_x, rad_y = 0.05, 0.5
         best = None
-        best_d = 1.5  # max normalised pick distance
-        for i, peak in enumerate(fitted_peaks):
-            cx, cy = self._peak_center(peak)
-            if cx is None:
-                continue
-            d = (((cx - x_ppm) / rad_x) ** 2 + ((cy - y_ppm) / rad_y) ** 2) ** 0.5
-            if d < best_d:
-                best_d = d
-                best = {'idx': i, 'spec_idx': spec_idx, 'd': d,
-                        'assignment': peak.get('assignment', peak.get('Assignment', f'Peak_{i+1}')),
-                        'x': cx, 'y': cy}
+        with applied_ps2d_config(self._recorded_fit_settings(spec_idx)[0]):
+            best_d = linewidths_reaching(self._PICK_REACH_F2, self._PICK_REACH_F1)
+            for i, peak in enumerate(fitted_peaks):
+                cx, cy = self._peak_center(peak)
+                if cx is None:
+                    continue
+                d = distance_in_linewidths(cx - x_ppm, cy - y_ppm)
+                if d < best_d:
+                    best_d = d
+                    best = {'idx': i, 'spec_idx': spec_idx, 'd': d,
+                            'assignment': peak.get('assignment', peak.get('Assignment', f'Peak_{i+1}')),
+                            'x': cx, 'y': cy}
         return best
 
     def _find_nearest_peak_any_spectrum(self, x_ppm: float, y_ppm: float):

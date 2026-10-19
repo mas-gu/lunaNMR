@@ -381,6 +381,14 @@ def peak_reached_a_bound(peak, tolerance=BOUND_TOLERANCE):
     return position, intensity
 
 
+def nearest_fit(fitted_peaks, x_ppm, y_ppm):
+    """Index of the fitted peak nearest (x_ppm, y_ppm) in linewidths of the nucleus, so
+    an indirect ppm does not count as a 1H ppm."""
+    fit_x = np.array([peak_fit['pos_f2'] for peak_fit in fitted_peaks], dtype=float)
+    fit_y = np.array([peak_fit['pos_f1'] for peak_fit in fitted_peaks], dtype=float)
+    return int(np.argmin(distance_in_linewidths(fit_x - x_ppm, fit_y - y_ppm)))
+
+
 class VoigtIntegrator(BaseIntegrator):
     """Enhanced NMR integrator with Voigt profile fitting capabilities"""
 
@@ -2548,16 +2556,7 @@ class VoigtIntegrator(BaseIntegrator):
             if result_2d and result_2d['success']:
                 # Find the result for the target peak
                 # Match by finding closest position
-                best_match_idx = 0
-                min_dist = float('inf')
-                for i, peak_fit in enumerate(result_2d['peaks']):
-                    dist = np.sqrt((peak_fit['pos_f2'] - peak_x_ppm)**2 +
-                                  (peak_fit['pos_f1'] - peak_y_ppm)**2)
-                    if dist < min_dist:
-                        min_dist = dist
-                        best_match_idx = i
-
-                target_peak = result_2d['peaks'][best_match_idx]
+                target_peak = result_2d['peaks'][nearest_fit(result_2d['peaks'], peak_x_ppm, peak_y_ppm)]
 
                 # Extract detected intensity from overlap_group by matching position
                 detected_intensity = None

@@ -62,7 +62,7 @@ from lunaNMR.gui.styles.design_system import (
 # Import core processing components
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
 from lunaNMR.core.ps2d_config import (SEARCH_WINDOW_PPM, set_ps2d_config, get_ps2d_config, mark_ps2d_config_as_base,
-                                      reset_ps2d_config)
+                                      reset_ps2d_config, distance_in_linewidths, linewidths_reaching)
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.utils.config_manager import ConfigurationManager, UserPreferences, ProcessingParameters
 from lunaNMR.utils.parameter_manager import NMRParameterManager
@@ -7189,9 +7189,12 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             click_y: Y coordinate of click (ppm)
             check_edit_mode: If True, only search peaks enabled for editing.
                            If False, search all peaks (for middle-click selection).
+
+        Distances are in linewidths of the nucleus, so an indirect ppm does not count
+        as a 1H ppm; the reach is click_tolerance ppm in either dimension, in those units.
         """
-        import math
         candidates = []
+        tolerance = linewidths_reaching(self.click_tolerance, self.click_tolerance)
 
         # Check reference peaks
         search_reference = (not check_edit_mode) or self.edit_reference_peaks
@@ -7200,8 +7203,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             for idx, row in self.integrator.peak_list.iterrows():
                 peak_x = float(row['Position_X'])
                 peak_y = float(row['Position_Y'])
-                distance = math.sqrt((click_x - peak_x)**2 + (click_y - peak_y)**2)
-                if distance < self.click_tolerance:
+                distance = distance_in_linewidths(click_x - peak_x, click_y - peak_y)
+                if distance < tolerance:
                     candidates.append({
                         'type': 'reference',
                         'index': idx,
@@ -7219,8 +7222,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             for idx, peak in enumerate(self.integrator.fitted_peaks):
                 peak_x = float(peak.get('ppm_x', 0))
                 peak_y = float(peak.get('ppm_y', 0))
-                distance = math.sqrt((click_x - peak_x)**2 + (click_y - peak_y)**2)
-                if distance < self.click_tolerance:
+                distance = distance_in_linewidths(click_x - peak_x, click_y - peak_y)
+                if distance < tolerance:
                     candidates.append({
                         'type': 'detected',
                         'index': idx,
