@@ -23,7 +23,7 @@ from typing import List, Dict, Tuple, Any
 from scipy.special import wofz  # Faddeeva function for Voigt profiles
 from scipy.optimize import curve_fit
 from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
-from lunaNMR.core.ps2d_config import get_ps2d_config
+from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM, get_ps2d_config
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 from lunaNMR.utils.cancellation import raise_if_stopped
 
@@ -450,8 +450,8 @@ class VoigtIntegrator(BaseIntegrator):
         }
 
         # Detection search windows (set by GUI)
-        self.search_window_x = 0.01  # Default X search window in ppm
-        self.search_window_y = 0.05  # Default Y search window in ppm
+        self.search_window_x = SEARCH_WINDOW_PPM  # Default X search window in ppm
+        self.search_window_y = SEARCH_WINDOW_PPM  # Default Y search window in ppm
 
         # Per-step position freedom override for titration tracking (None = use
         # the relaxation config defaults). Set by the series processor.

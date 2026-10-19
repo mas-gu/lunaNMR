@@ -747,7 +747,6 @@ def _default_series_params(parallel=False):
         'detection_params': {
             'search_window_x': SEARCH_WINDOW_PPM,
             'search_window_y': SEARCH_WINDOW_PPM,
-            'noise_threshold': 3.0,
         },
         'gui_params': {
             'fix_positions': False,
@@ -921,7 +920,8 @@ def _validate_series(parser, args):
 
 
 # Keys the defaults carry for the parameter manager, which indexes them, but which
-# nothing on the series path reads - or whose value a flag always replaces.
+# nothing on the series path reads - or whose value a flag always replaces. A key the
+# defaults do not carry (noise_threshold) is refused here too, so the reason is stated.
 _SERIES_PARAMS_WITHOUT_EFFECT = {
     ('gui_params', 'use_centroid_refinement'): 'nothing reads it',
     ('gui_params', 'centroid_noise_multiplier'): 'only a detection the series never runs reads it',

@@ -624,7 +624,7 @@ class MultiSpectrumProcessor:
         # REFINED STATE MANAGEMENT: Preserve essential integrator functionality
         # Save critical components before clearing
         essential_components = {}
-        preserve_attrs = ['enhanced_fitter', 'fitting_parameters', 'gui_params', 'threshold_multiplier', 'processing_mode']
+        preserve_attrs = ['enhanced_fitter', 'fitting_parameters', 'gui_params', 'processing_mode']
 
         for attr in preserve_attrs:
             if hasattr(self.integrator, attr):

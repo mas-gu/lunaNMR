@@ -76,7 +76,6 @@ class BatchProcessor:
             'baseline_max_iter': 50,                   # Baseline correction iterations
             'convergence_tolerance': 1e-8,             # Fitting convergence tolerance
             'processing_parameters': {
-                'noise_threshold': 3.0,
                 'search_window_x': 0.2,
                 'search_window_y': 3.0,
                 'fitting_window_x': 0.3,
@@ -871,7 +870,7 @@ class BatchProcessor:
 
             numeric_overrides = {
                 key: processing_overrides[key]
-                for key in ['search_window_x', 'search_window_y', 'fitting_window_x', 'fitting_window_y', 'noise_threshold']
+                for key in ['search_window_x', 'search_window_y', 'fitting_window_x', 'fitting_window_y']
                 if key in processing_overrides
             }
             for key, value in numeric_overrides.items():

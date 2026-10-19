@@ -87,3 +87,24 @@ def test_the_cli_series_uses_the_default():
     from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM
     detection = _default_series_params()['detection_params']
     assert (detection['search_window_x'], detection['search_window_y']) == (SEARCH_WINDOW_PPM,) * 2
+
+
+def test_the_integrator_starts_at_the_default():
+    from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
+    from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM
+    integrator = EnhancedVoigtIntegrator()
+    assert (integrator.search_window_x, integrator.search_window_y) == (SEARCH_WINDOW_PPM,) * 2
+
+
+def test_the_parameter_manager_starts_at_the_default():
+    from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM
+    from lunaNMR.utils.parameter_manager import NMRParameterManager
+    detection = NMRParameterManager().get_integrator_parameters()['detection_params']
+    assert (detection['search_window_x'], detection['search_window_y']) == (SEARCH_WINDOW_PPM,) * 2
+
+
+def test_the_preflight_check_matches_the_default():
+    """spectra_check keeps its own literal so that `diagnose` does not import lunaNMR.core."""
+    from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM
+    from lunaNMR.validation.spectra_check import SEARCH_WINDOW
+    assert SEARCH_WINDOW == SEARCH_WINDOW_PPM
