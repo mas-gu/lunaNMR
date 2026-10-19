@@ -198,7 +198,6 @@ def main():
     print("NMR Peak Series Analysis - Installation Verification")
     print("=" * 65)
 
-    # Run all checks
     python_ok = check_python_version()
     missing_external, _ = check_external_dependencies()
     missing_internal, _ = check_internal_modules()
