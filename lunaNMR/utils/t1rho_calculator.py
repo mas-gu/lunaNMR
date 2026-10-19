@@ -33,7 +33,6 @@ def calculate_per_residue_theta(
     Returns:
         Effective tilt angle in degrees for this residue
     """
-    # Calculate 15N frequency in MHz
     n15_freq_mhz = spec_freq_mhz / N15_GAMMA_RATIO
 
     # Calculate the spin-lock offset (cnst30) from nominal theta and omega1
@@ -46,14 +45,12 @@ def calculate_per_residue_theta(
     else:
         cnst30_hz = omega1_hz / np.tan(theta_nominal_rad)
 
-    # Calculate residue offset from carrier in Hz
     residue_offset_hz = (residue_ppm - carrier_ppm) * n15_freq_mhz
 
     # Effective offset during spin-lock
     # The spin-lock carrier is moved to cnst30 from the original carrier
     delta_omega_hz = cnst30_hz - residue_offset_hz
 
-    # Calculate effective theta
     # theta = arctan(omega1 / |delta_omega|)
     if np.isclose(delta_omega_hz, 0.0, atol=0.1):
         # Residue is at the spin-lock carrier position
@@ -125,18 +122,15 @@ def calculate_T2_from_T1rho(
     Returns:
         DataFrame with columns ['residue', 'R1', 'R1rho', 'theta', 'R2', 'T2', 'T2_err']
     """
-    # Find common residues in both datasets
     common_residues = set(r1_data['residue']) & set(r1rho_data['residue'])
 
     if len(common_residues) == 0:
         raise ValueError("No common residues found between R1 and R1rho datasets")
 
-    # Build result dataframe
     results = []
     unmatched = []
 
     for residue in sorted(common_residues):
-        # Get R1 and R1rho for this residue
         r1_row = r1_data[r1_data['residue'] == residue].iloc[0]
         r1rho_row = r1rho_data[r1rho_data['residue'] == residue].iloc[0]
 
@@ -145,10 +139,8 @@ def calculate_T2_from_T1rho(
         R1rho = r1rho_row['R1rho']
         R1rho_err = r1rho_row.get('R1rho_err', 0.0)
 
-        # Get chemical shift for this residue
         peak_row = peak_list[peak_list['residue'] == residue]
         if len(peak_row) == 0:
-            # Try to find by residue number only
             residue_num = residue.split('.')[0] if '.' in residue else residue
             peak_row = peak_list[peak_list['residue'].str.startswith(residue_num + '.')]
 
@@ -163,7 +155,6 @@ def calculate_T2_from_T1rho(
         else:
             residue_ppm = peak_row[chemical_shift_column].iloc[0]
 
-        # Calculate per-residue theta
         theta_effective = calculate_per_residue_theta(
             residue_ppm=residue_ppm,
             carrier_ppm=carrier_ppm,
@@ -172,14 +163,12 @@ def calculate_T2_from_T1rho(
             spec_freq_mhz=spec_freq_mhz
         )
 
-        # Calculate R2
         try:
             R2 = calculate_R2_from_R1_R1rho(R1, R1rho, theta_effective)
         except ValueError:
             # Skip this residue if calculation fails
             continue
 
-        # Calculate T2 in ms
         if R2 > 0:
             T2 = 1000.0 / R2  # Convert to ms
         else:
