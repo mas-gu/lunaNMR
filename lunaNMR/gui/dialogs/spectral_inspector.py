@@ -2152,7 +2152,6 @@ class SpectrumContourDialog:
         self._spec.contour_increment = self._incr_spin.value()
 
 
-
 class GroupPropertiesDialog:
     """Dialog showing all spectra in a group with editable properties and propagation."""
 
