@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-# Add lunaNMR to path
 lunaNMR_path = Path(__file__).parent.parent
 sys.path.insert(0, str(lunaNMR_path))
 
@@ -33,11 +32,9 @@ class MockEnhancedVoigtFitter:
 
     def __init__(self, data_size_mb=50):
         """Create mock fitter with specified data size"""
-        # Create mock NMR data
         data_points = int((data_size_mb * 1024 * 1024) / 8)  # 8 bytes per float64
         self.nmr_data = np.random.random((data_points,)).astype(np.float64)
 
-        # Create mock PPM axes
         self.ppm_x_axis = np.linspace(0, 10, data_points)
         self.ppm_y_axis = np.linspace(0, 10, 1000)
 
@@ -93,15 +90,12 @@ def test_single_execution_memory():
 
         print(f"Baseline memory: {baseline_rss:.1f}MB")
 
-        # Create mock fitter and processor
         mock_fitter = MockEnhancedVoigtFitter(data_size_mb=100)
         processor = ParallelVoigtProcessor(mock_fitter, max_workers=4)
 
-        # Create test peak list
         peak_list = create_test_peak_list(num_peaks=10)
         print(f"Created peak list with {len(peak_list)} peaks")
 
-        # Run parallel processing
         print("Starting parallel processing...")
         results = processor.fit_all_peaks_parallel(peak_list)
 
@@ -120,7 +114,6 @@ def test_single_execution_memory():
         print(f"Final memory: {final_rss:.1f}MB")
         print(f"Memory growth: {final_rss - baseline_rss:.1f}MB")
 
-        # Check for leaks
         leak_check = monitor.check_memory_leaks(baseline_rss)
         if leak_check.get('has_potential_leaks', False):
             print("Potential memory leaks detected:")
@@ -156,18 +149,14 @@ def test_repeated_execution_memory():
         for run_num in range(5):
             print(f"\nRun {run_num + 1}/5")
 
-            # Create fresh instances each time
             mock_fitter = MockEnhancedVoigtFitter(data_size_mb=75)
             processor = ParallelVoigtProcessor(mock_fitter, max_workers=3)
 
-            # Create test peak list
             peak_list = create_test_peak_list(num_peaks=8)
 
-            # Run processing
             results = processor.fit_all_peaks_parallel(peak_list)
             print(f"   Results: {len(results)}")
 
-            # Check memory after each run
             current_usage = monitor.get_current_memory_usage()
             current_rss = current_usage['rss_mb'] if current_usage else 0
             memory_per_run.append(current_rss)
@@ -218,7 +207,6 @@ def test_exception_handling_memory():
 
         print(f"Baseline memory: {baseline_rss:.1f}MB")
 
-        # Test with intentional failure
         class FailingMockFitter(MockEnhancedVoigtFitter):
             def enhanced_peak_fitting(self, peak_x, peak_y, assignment):
                 if assignment == 'Peak_3':  # Fail on third peak
@@ -265,7 +253,6 @@ def main():
 
     test_results = []
 
-    # Run all tests
     test_results.append(("Single Execution", test_single_execution_memory()))
     test_results.append(("Repeated Execution", test_repeated_execution_memory()))
     test_results.append(("Exception Handling", test_exception_handling_memory()))
