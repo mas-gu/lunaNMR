@@ -150,10 +150,3 @@ if __name__ == "__main__":
             os._exit(0 if success else 1)
         else:
             sys.exit(0 if success else 1)
-
-        # if platform.system() == "Linux":
-        #    import os
-        #    # Force clean exit
-        #    os._exit(0 if success else 1)
-        # else:
-        #    sys.exit(0 if success else 1)
