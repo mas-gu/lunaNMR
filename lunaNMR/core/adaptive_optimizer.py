@@ -74,7 +74,6 @@ def _fit_peak_worker(args):
     from lunaNMR.core.parallel_voigt_processor import _initialize_worker_fitter
     worker_integrator = _initialize_worker_fitter(shared_context)
 
-    # Import PS2D config
     from lunaNMR.core.ps2d_config import get_ps2d_config
     config = get_ps2d_config()
 
@@ -85,7 +84,6 @@ def _fit_peak_worker(args):
         radF1 = mult_f1 * median_lw_f1
         radF2 = mult_f2 * median_lw_f2
 
-        # Save original config values
         old_radF1 = config.radF1
         old_radF2 = config.radF2
 
@@ -105,13 +103,11 @@ def _fit_peak_worker(args):
                 scores_by_combo.append((combo_idx, 0.0, False))
                 continue
 
-            # Extract r_squared
             r_squared = _extract_r_squared_helper(result)
             if r_squared is None:
                 scores_by_combo.append((combo_idx, 0.0, False))
                 continue
 
-            # Compute composite score
             score = _compute_composite_score_helper(
                 result,
                 initial_pos=(peak.get('x_ppm'), peak.get('y_ppm')),
@@ -166,7 +162,6 @@ def _compute_composite_score_helper(result: Dict,
                                     config,
                                     weights: Dict[str, float]) -> float:
     """Helper function for computing composite score in worker processes."""
-    # Extract weights
     weight_r2 = weights['r2']
     weight_snr = weights['snr']
     weight_position = weights['position']
@@ -302,11 +297,9 @@ class AdaptiveOptimizer:
         parameter spaces (>20 combinations). Current grid search is appropriate
         for 9 combinations.
         """
-        # Check minimum peaks requirement
         if len(isolated_peaks) < self.MIN_PEAKS_FOR_OPTIMIZATION:
             return self._get_fallback_params(median_lw_f1, median_lw_f2, reason="insufficient_peaks")
 
-        # Route to parallel or sequential mode
         if use_parallel and shared_context is not None:
             return self._optimize_parallel(
                 isolated_peaks, median_lw_f1, median_lw_f2,
@@ -331,7 +324,6 @@ class AdaptiveOptimizer:
 
         This is the original optimize() logic extracted into a separate method.
         """
-        # Split into train/validation sets
         train_peaks, val_peaks = self._split_train_validation(isolated_peaks)
 
         opt_start_time = time.time()
@@ -355,9 +347,7 @@ class AdaptiveOptimizer:
             train_failures = 0
             total_fits_in_combo = len(train_peaks) + len(val_peaks)
             for peak_idx, peak in enumerate(train_peaks):
-                # Update GUI progress
                 if progress_callback:
-                    # Calculate overall progress across all combinations
                     fits_done = combo_idx * n_fits_per_combo + peak_idx
                     total_fits = n_combinations * n_fits_per_combo
                     progress = int(100 * fits_done / total_fits)
@@ -372,7 +362,6 @@ class AdaptiveOptimizer:
                         train_failures += 1
                         continue
 
-                    # Extract r_squared - handle nested result structures
                     r_squared = self._extract_r_squared(result)
                     if r_squared is not None:
                         score = self.compute_composite_score(
@@ -386,7 +375,6 @@ class AdaptiveOptimizer:
                     train_failures += 1
                     continue
 
-            # Check if we got enough training scores
             if len(train_scores) == 0:
                 continue
 
@@ -396,7 +384,6 @@ class AdaptiveOptimizer:
             val_scores = []
             val_failures = 0
             for peak_idx, peak in enumerate(val_peaks):
-                # Update GUI progress
                 if progress_callback:
                     fits_done = combo_idx * n_fits_per_combo + len(train_peaks) + peak_idx
                     total_fits = n_combinations * n_fits_per_combo
@@ -455,11 +442,9 @@ class AdaptiveOptimizer:
                     'val_score': val_score
                 }
 
-        # Check if optimization succeeded
         if best_params is None or best_score < 0.6:
             return self._get_fallback_params(median_lw_f1, median_lw_f2, reason="poor_score")
 
-        # Build result
         self.best_params = best_params
         self.optimization_results = {
             'radF1': best_params['radF1'],
@@ -515,16 +500,13 @@ class AdaptiveOptimizer:
         -------
         dict : Optimal parameters and optimization metadata
         """
-        # Split into train/validation sets
         train_peaks, val_peaks = self._split_train_validation(isolated_peaks)
 
         opt_start_time = time.time()
 
-        # Build list of all parameter combinations
         combinations = [(m1, m2) for m1 in self.MULTIPLIERS for m2 in self.MULTIPLIERS]
         n_combinations = len(combinations)
 
-        # Build extended shared context for adaptive optimization
         adaptive_context = {
             'median_lw_f1': median_lw_f1,
             'median_lw_f2': median_lw_f2,
@@ -538,11 +520,9 @@ class AdaptiveOptimizer:
             'all_peaks_context': all_peaks_context
         }
 
-        # Add adaptive context to shared_context
         extended_context = shared_context.copy()
         extended_context['adaptive_context'] = adaptive_context
 
-        # Prepare worker tasks (one task per peak)
         worker_tasks = []
 
         # Training peaks
@@ -554,7 +534,6 @@ class AdaptiveOptimizer:
             # Use offset index to distinguish from train peaks
             worker_tasks.append((len(train_peaks) + peak_idx, peak, False, combinations, extended_context))
 
-        # Execute parallel optimization
         max_workers = mp.cpu_count() - 2  # Leave 2 cores free
         max_workers = max(1, max_workers)
 
@@ -570,7 +549,6 @@ class AdaptiveOptimizer:
                     async_result = pool.apply_async(_fit_peak_worker, (task,))
                     async_results.append(async_result)
 
-                # Collect results with progress tracking
                 completed = 0
                 for async_result in async_results:
                     try:
@@ -607,7 +585,6 @@ class AdaptiveOptimizer:
         except Cancelled:
             raise
         except Exception as e:
-            # Fallback to sequential mode on error
             from lunaNMR.utils.output_manager import log_warning
             log_warning(f"Parallel optimization failed: {e}. Falling back to sequential.")
             return self._get_fallback_params(median_lw_f1, median_lw_f2, reason="parallel_failed")
@@ -654,11 +631,9 @@ class AdaptiveOptimizer:
                     'val_score': val_score
                 }
 
-        # Check if optimization succeeded
         if best_params is None or best_score < 0.6:
             return self._get_fallback_params(median_lw_f1, median_lw_f2, reason="poor_score")
 
-        # Build result
         self.best_params = best_params
         self.optimization_results = {
             'radF1': best_params['radF1'],
@@ -707,12 +682,10 @@ class AdaptiveOptimizer:
         if 'r_squared' in result:
             return result['r_squared']
 
-        # Check nested 'fit_result'
         if 'fit_result' in result and isinstance(result['fit_result'], dict):
             if 'r_squared' in result['fit_result']:
                 return result['fit_result']['r_squared']
 
-        # Check 'peak_results' (for cluster results)
         if 'peak_results' in result and isinstance(result['peak_results'], list):
             for pr in result['peak_results']:
                 if pr and 'r_squared' in pr:
@@ -723,7 +696,6 @@ class AdaptiveOptimizer:
             if isinstance(result[0], dict) and 'r_squared' in result[0]:
                 return result[0]['r_squared']
 
-        # Check 'results' key
         if 'results' in result and isinstance(result['results'], dict):
             if 'r_squared' in result['results']:
                 return result['results']['r_squared']
@@ -865,7 +837,6 @@ def estimate_noise_level(spectrum: np.ndarray, method: str = 'corner') -> float:
     """
     if method == 'corner':
         ny, nx = spectrum.shape
-        # Use 10% corners
         size_y = max(1, ny // 10)
         size_x = max(1, nx // 10)
 
@@ -961,7 +932,6 @@ def check_lw_deviation(current_lw_f1: float,
     ref_lw_f1 = series_params.get('reference_LW_f1', current_lw_f1)
     ref_lw_f2 = series_params.get('reference_LW_f2', current_lw_f2)
 
-    # Compute relative deviations
     dev_f1 = abs(current_lw_f1 - ref_lw_f1) / ref_lw_f1 if ref_lw_f1 > 0 else 0
     dev_f2 = abs(current_lw_f2 - ref_lw_f2) / ref_lw_f2 if ref_lw_f2 > 0 else 0
 
