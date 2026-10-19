@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QFont, QFontDatabase
 
-# Import design constants
 from constants import (
     BG_COLOR, PANEL_BG_COLOR, FRAME_BG_COLOR,
     PRIMARY_TEXT, SECONDARY_TEXT, DISABLED_TEXT,
@@ -127,7 +126,6 @@ class CollapsibleGroupBox(QFrame):
         self._collapsed = initially_collapsed
         self._collapsible = collapsible
 
-        # Set up styling
         self.setProperty("class", "panel")
 
         # Main layout
@@ -143,7 +141,6 @@ class CollapsibleGroupBox(QFrame):
             header_layout.setContentsMargins(0, 0, 0, 0)
             header_layout.setSpacing(SPACING_SM)
 
-            # Collapse button (if collapsible)
             if collapsible:
                 self._collapse_btn = QPushButton("▼" if not initially_collapsed else "▶")
                 self._collapse_btn.setProperty("class", "icon")
@@ -168,7 +165,6 @@ class CollapsibleGroupBox(QFrame):
         self._content_layout.setSpacing(SPACING_SM)
         self._layout.addWidget(self._content)
 
-        # Apply initial collapsed state
         if initially_collapsed:
             self._content.setVisible(False)
 
@@ -999,7 +995,6 @@ class SpectraInputWidget(QFrame):
                  mode: str = None):
         super().__init__(parent)
 
-        # Determine mode
         if mode is not None:
             self._mode = mode
         elif single_experiment_mode:
@@ -1129,7 +1124,6 @@ class SpectraInputWidget(QFrame):
         # --- Field 2 Section (Optional) ---
         field2_group = CollapsibleGroupBox("Field 2 Data (Optional)", collapsible=True, initially_collapsed=True)
 
-        # Enable toggle and frequency
         enable_row = QHBoxLayout()
         enable_row.setSpacing(SPACING_SM)
 
@@ -1213,7 +1207,6 @@ class SpectraInputWidget(QFrame):
         # --- Field 2 Section (Optional) ---
         field2_group = CollapsibleGroupBox("Field 2 Data (Optional - for dual-field)", collapsible=True, initially_collapsed=True)
 
-        # Enable toggle and frequency in header
         enable_row = QHBoxLayout()
         enable_row.setSpacing(SPACING_SM)
 
@@ -1424,7 +1417,6 @@ class SpectraInputWidget(QFrame):
                 widgets['status'].setText("Found")
                 widgets['status'].setStyleSheet(f"color: {SUCCESS_GREEN};")
 
-                # Format details
                 if experiment_type in ['hetNOE_sat', 'hetNOE_unsat']:
                     details = f"{len(result)} spectrum"
                 else:
@@ -1436,7 +1428,6 @@ class SpectraInputWidget(QFrame):
                 # Folder exists but no NMR files with delays
                 # For hetNOE, this is OK (no delay expected)
                 if experiment_type in ['hetNOE_sat', 'hetNOE_unsat']:
-                    # Count any NMR files
                     nmr_files = [f for f in os.listdir(folder_path)
                                  if os.path.splitext(f)[1].lower() in
                                  {'.ft', '.ucsf', '.pipe', '.2rr', '.2ii'}]
@@ -1521,10 +1512,8 @@ class SpectraInputWidget(QFrame):
         """Check if all data is available for dual-field Model-Free analysis."""
         if not self._field2_enabled:
             return False
-        # Check Field 1
         if not self.is_ready_for_model_free():
             return False
-        # Check Field 2
         has_t1 = 'T1' in self._field2_experiments
         has_t2 = 'T2' in self._field2_experiments
         has_noe_sat = 'hetNOE_sat' in self._field2_experiments
