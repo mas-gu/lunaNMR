@@ -122,7 +122,6 @@ class DelayExtractor:
             if delay is not None:
                 files_with_delays.append((filename, delay))
 
-        # Sort by delay value
         files_with_delays.sort(key=lambda x: x[1])
 
         return files_with_delays
@@ -145,7 +144,6 @@ class DelayExtractor:
 
         try:
             for filename in os.listdir(folder_path):
-                # Check if it's likely an NMR file
                 _, ext = os.path.splitext(filename.lower())
                 if ext not in self.NMR_EXTENSIONS:
                     continue
@@ -161,7 +159,6 @@ class DelayExtractor:
         except PermissionError:
             return []
 
-        # Sort by delay value
         files_with_delays.sort(key=lambda x: x[1])
 
         return files_with_delays
@@ -216,12 +213,10 @@ class DelayExtractor:
             List of (filename, delay_ms, sequence) tuples, sorted by delay
             then alphabetically within the same delay.
         """
-        # Extract delays
         files_with_delays = []
         for filename in files:
             delay = self.extract_value(filename)
             if delay is not None:
-                # Get basename for sorting (handles full paths)
                 basename = os.path.basename(filename)
                 files_with_delays.append((filename, delay, basename))
 
@@ -313,7 +308,6 @@ class DelayExtractor:
 
         try:
             for idx, filename in enumerate(sorted(os.listdir(folder_path))):
-                # Check if it's likely an NMR file
                 _, ext = os.path.splitext(filename.lower())
                 if ext not in self.NMR_EXTENSIONS:
                     continue
@@ -329,7 +323,6 @@ class DelayExtractor:
         except PermissionError:
             return []
 
-        # Sort by delay, then by original index
         files_with_delays_and_idx.sort(key=lambda x: (x[1], x[2]))
 
         # Assign sequence numbers
