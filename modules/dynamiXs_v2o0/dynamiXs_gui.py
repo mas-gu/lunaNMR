@@ -144,10 +144,6 @@ class DynamiXsMainWindow(QMainWindow):
         self.spectral_page = SpectralDensityPage(self)
         self.stack.addWidget(self.spectral_page)
 
-        # Plotting page
-        self.plotting_page = PlottingPage(self)
-        self.stack.addWidget(self.plotting_page)
-
         # Integrated Analysis page
         self.integrated_page = IntegratedAnalysisPage(self)
         self.stack.addWidget(self.integrated_page)
@@ -219,15 +215,6 @@ class DynamiXsMainWindow(QMainWindow):
         btn_spectral.setFont(get_font(18, bold=True))
         options_layout.addWidget(btn_spectral, alignment=Qt.AlignCenter)
 
-        # Plot Data button
-        btn_plot = create_secondary_button(
-            "Plot Data",
-            clicked=self.show_plotting,
-            width=200
-        )
-        btn_plot.setFont(get_font(18, bold=True))
-        options_layout.addWidget(btn_plot, alignment=Qt.AlignCenter)
-
         layout.addWidget(options_panel, stretch=1)
 
         # Working directory info
@@ -271,10 +258,6 @@ class DynamiXsMainWindow(QMainWindow):
     def show_spectral_density(self):
         """Show spectral density analysis page."""
         self.stack.setCurrentWidget(self.spectral_page)
-
-    def show_plotting(self):
-        """Show plotting page."""
-        self.stack.setCurrentWidget(self.plotting_page)
 
     def show_integrated_analysis(self):
         """Show integrated analysis page."""
@@ -2772,46 +2755,6 @@ class SpectralDensityPage(BasePage):
 
         # Update UI based on analysis type
         self._update_analysis_type()
-
-
-# =============================================================================
-# PLOTTING PAGE
-# =============================================================================
-
-class PlottingPage(BasePage):
-    """Plotting and data comparison page."""
-
-    def __init__(self, main_window: DynamiXsMainWindow):
-        super().__init__(main_window, "Data Plotting")
-        self._setup_content()
-
-    def _setup_content(self):
-        """Setup the page content."""
-        # Placeholder for plotting options
-        info_label = create_label(
-            "Plotting functionality allows you to:\n\n"
-            "• Compare datasets from different experiments\n"
-            "• Visualize dual-field data overlays\n"
-            "• Generate publication-quality figures\n"
-            "• Export data in various formats",
-            font_size=FONT_SIZE_BODY
-        )
-        info_label.setWordWrap(True)
-        self.content_layout.addWidget(info_label)
-
-        # Placeholder buttons
-        btn_frame = QFrame()
-        btn_layout = create_v_layout(SPACING_SM)
-        btn_frame.setLayout(btn_layout)
-
-        btn1 = create_secondary_button("Compare Datasets", width=200)
-        btn_layout.addWidget(btn1, alignment=Qt.AlignCenter)
-
-        btn2 = create_secondary_button("Dual-Field Overlay", width=200)
-        btn_layout.addWidget(btn2, alignment=Qt.AlignCenter)
-
-        self.content_layout.addWidget(btn_frame)
-        self.content_layout.addStretch()
 
 
 # =============================================================================

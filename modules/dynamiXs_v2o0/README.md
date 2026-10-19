@@ -28,7 +28,7 @@ A comprehensive graphical user interface for NMR relaxation data analysis built 
 - **Model Free Analysis page**: the same analysis run from relaxation series (T1/T2 fitted first), single- or dual-field, J(ωH) or J(0.87ωH) (default: dual-field J(0.87ωH))
 
 ### 4. Data Plotting Tools
-The GUI's "Plot Data" page is a placeholder: its buttons are not connected. The tools run as standalone scripts in `dynamiXs_plot/`:
+The GUI has no plotting page. The tools run as standalone scripts in `dynamiXs_plot/`:
 - **Dataset comparison** (`compare_datasets.py`) with difference plots and mean/std of the difference
 - **Dual field plotting** (`plot_dual_field_datasets.py`) for multi-field NMR experiments
 - **Rex field analysis** (`plot_rex_field_analysis.py`, see [README_rex_field_analysis.md](dynamiXs_plot/README_rex_field_analysis.md))
@@ -47,7 +47,7 @@ The GUI's "Plot Data" page is a placeholder: its buttons are not connected. The 
    python run_dynamixs_gui.py
    ```
 
-2. **Select your analysis type** from the main menu (Model Free Analysis, T1/T2 Fitting Analysis, T2 Methyl Fitting Analysis, hetNOE Analysis, Spectral Density Analysis, Plot Data)
+2. **Select your analysis type** from the main menu (Model Free Analysis, T1/T2 Fitting Analysis, T2 Methyl Fitting Analysis, hetNOE Analysis, Spectral Density Analysis)
 
 3. **Import your CSV data files** using the browse buttons
 
@@ -239,7 +239,7 @@ dynamiXs_v2o0/
 ## Current Implementation Status
 
 ✅ **Completed:**
-- Main GUI menu: 6 options in LunaNMR (Model Free, T1/T2, Methyl T2, hetNOE, Spectral Density, Plot Data), 5 standalone (no hetNOE)
+- Main GUI menu: 5 options in LunaNMR (Model Free, T1/T2, Methyl T2, hetNOE, Spectral Density), 4 standalone (no hetNOE)
 - T1/T2 fitting interface (multi-core), with T1ρ → T2 conversion
 - Methyl T2, hetNOE, spectral density and model-free interfaces
 - "Save run to project" on each page (inside LunaNMR)
@@ -247,7 +247,6 @@ dynamiXs_v2o0/
 - Real-time progress monitoring
 
 🚧 **In Development:**
-- Plot Data page (dataset comparison and dual-field plotting run as scripts only)
 - CPMG analysis integration
 - Data formatting utilities
 
