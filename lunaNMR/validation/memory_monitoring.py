@@ -59,14 +59,11 @@ class MemoryMonitor:
 
         while self.monitoring:
             try:
-                # Get memory info
                 memory_info = process.memory_info()
                 memory_percent = process.memory_percent()
 
-                # Get system memory
                 system_memory = psutil.virtual_memory()
 
-                # Count shared memory blocks
                 shared_memory_count = self._count_shared_memory_blocks()
 
                 sample = {
@@ -153,7 +150,6 @@ class MemoryMonitor:
         stats = self.get_memory_statistics()
         current_usage = self.get_current_memory_usage()
 
-        # Calculate memory growth trend
         first_half = self.memory_samples[:len(self.memory_samples)//2]
         second_half = self.memory_samples[len(self.memory_samples)//2:]
 
@@ -163,7 +159,6 @@ class MemoryMonitor:
         memory_growth = second_half_avg - first_half_avg
         growth_percent = (memory_growth / first_half_avg) * 100 if first_half_avg > 0 else 0
 
-        # Check for shared memory block accumulation
         first_shm_avg = sum(s['shared_memory_blocks'] for s in first_half) / len(first_half)
         second_shm_avg = sum(s['shared_memory_blocks'] for s in second_half) / len(second_half)
         shm_growth = second_shm_avg - first_shm_avg
@@ -242,7 +237,6 @@ class MemoryMonitor:
         print(f"  Duration: {stats['monitoring_duration']:.1f}s")
         print(f"  Samples:  {stats['sample_count']}")
 
-        # Check for leaks
         leak_check = self.check_memory_leaks()
         if leak_check.get('has_potential_leaks', False):
             print("\n⚠ Potential Memory Issues:")
@@ -267,11 +261,9 @@ def test_parallel_processor_memory():
         print("⏳ Simulating parallel processing...")
         time.sleep(10)
 
-        # Test cleanup
         monitor.force_cleanup_test()
         time.sleep(2)
 
-        # Generate report
         monitor.print_memory_report()
 
     finally:
