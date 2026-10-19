@@ -99,7 +99,7 @@ Examples:
         parser.add_argument(
             '--nucleus',
             choices=['15N1H', '13C1H', '1H'],
-            help='Fixed nucleus type (if not specified, will auto-detect from filenames)'
+            help="Fixed nucleus type (if not specified, detected from each spectrum's ranges on load)"
         )
 
         parser.add_argument(
@@ -387,7 +387,7 @@ Examples:
 
             print(f"Found {len(spectrum_files)} spectrum files:")
             for i, file_path in enumerate(spectrum_files[:10]):  # Show first 10
-                nucleus_type = args.nucleus or processor.detect_nucleus_type(file_path.name)
+                nucleus_type = args.nucleus or processor.spectrum_nucleus(file_path)
                 print(f"  {i+1:3d}. {file_path.name} (detected: {nucleus_type})")
 
             if len(spectrum_files) > 10:
