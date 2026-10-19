@@ -54,7 +54,7 @@ The primary fitting engine for overlapping peaks — not optional.
 
 ### Two-Phase Fitting
 - **Phase 1 (detect + cluster):** prominence detection → top-contour centroid refinement → hierarchical graph-based clustering into disjoint clusters (each peak in exactly one).
-- **Phase 2 (fit):** single-peak clusters → 1D cross-section fitting; multi-peak clusters → PS2D. Parallel mode distributes whole clusters across cores; results are identical to sequential.
+- **Phase 2 (fit):** single-peak clusters → single-peak PS2D fitting; multi-peak clusters → PS2D. Parallel mode distributes whole clusters across cores; results are identical to sequential.
 
 See [ALGORITHMS.md](ALGORITHMS.md) for detection, clustering, and fitting details.
 
@@ -65,7 +65,7 @@ Peak markers are colored by the fit's quality label, assigned once by `fit_quali
 |---------|-----|-------|
 | Excellent | > 0.9 | lime |
 | Good | > 0.8 | green |
-| Fair | > 0.6 (0.5–0.6 when S/N ≤ 5) | orange |
+| Fair | > 0.6 | orange |
 | Poor / Failed / unfitted | below Fair; Failed < 0.2 at S/N ≤ 5, never for a near-noise peak | red |
 
 ---

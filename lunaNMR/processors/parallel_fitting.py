@@ -137,7 +137,7 @@ class ParallelPeakFitter:
 
         except Exception:
             # Fallback to sequential processing
-            return self._fit_peaks_sequential_fallback(peak_list, progress_callback)
+            return self._fit_peaks_sequential_fallback(peak_list, all_peaks_context, progress_callback)
 
         return results
 
@@ -173,7 +173,7 @@ class ParallelPeakFitter:
 
         return integrator_data
 
-    def _fit_peaks_sequential_fallback(self, peak_list, progress_callback=None):
+    def _fit_peaks_sequential_fallback(self, peak_list, all_peaks_context, progress_callback=None):
         """Fallback to sequential processing if parallel fails"""
         results = []
 
@@ -184,7 +184,8 @@ class ParallelPeakFitter:
             peak_y = float(peak_row['Position_Y'])
 
             try:
-                result = self.integrator.enhanced_peak_fitting(peak_x, peak_y, assignment)
+                result = self.integrator.enhanced_peak_fitting(peak_x, peak_y, assignment,
+                                                               all_peaks_context=all_peaks_context)
                 if result:
                     result['peak_number'] = peak_number
                     results.append(result)

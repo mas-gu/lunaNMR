@@ -37,6 +37,43 @@ def _expected(fit, assignment):
                              fit.get('detection_sigma'))
 
 
+# (point, assignment, R-squared, S/N) of real series fits with R-squared in [0.5, 0.6]:
+# a DNAJA1 titration and a 700 MHz T1 series.
+BELOW_MEASURED_SNR = [
+    ("DNAJA1 1", "32LysH", 0.5948, 3.5096),
+    ("DNAJA1 2", "68GlyH", 0.5307, 3.3196),
+    ("DNAJA1 3", "18ThrH", 0.5708, 4.4859),
+    ("DNAJA1 3", "20GluH", 0.5912, 4.2854),
+    ("DNAJA1 3", "55LeuH", 0.5792, 4.7823),
+    ("DNAJA1 3", "58AlaH", 0.5579, 4.5334),
+    ("T1 1800", "67GlyH", 0.5751, 4.5093),
+    ("T1 2400", "45PheH", 0.5202, 4.9253),
+    ("T1 2400", "47GlnH", 0.5625, 4.0572),
+    ("T1 2400", "57AspH", 0.5657, 4.2408),
+]
+ABOVE_MEASURED_SNR = [
+    ("DNAJA1 1", "30AlaH", 0.5476, 5.4073),
+    ("DNAJA1 2", "19GlnH", 0.5118, 5.5555),
+    ("DNAJA1 3", "3LysH", 0.5755, 5.8168),
+    ("T1 1800", "11LeuH", 0.5936, 5.2520),
+    ("T1 2400", "25AlaH", 0.5082, 6.6606),
+]
+
+
+class TestFairNeedsRSquaredAbove06:
+    @pytest.mark.parametrize("point, assignment, r2, snr", BELOW_MEASURED_SNR)
+    def test_a_fit_at_or_below_06_is_poor_near_the_noise(self, point, assignment, r2, snr):
+        assert fit_quality_label(r2, True, False, snr) == 'Poor'
+
+    @pytest.mark.parametrize("point, assignment, r2, snr", ABOVE_MEASURED_SNR)
+    def test_a_fit_at_or_below_06_is_poor_clear_of_the_noise(self, point, assignment, r2, snr):
+        assert fit_quality_label(r2, True, False, snr) == 'Poor'
+
+    @pytest.mark.parametrize("point, assignment, r2, snr", BELOW_MEASURED_SNR + ABOVE_MEASURED_SNR)
+    def test_the_label_does_not_depend_on_snr(self, point, assignment, r2, snr):
+        assert {fit_quality_label(r2, True, False, s) for s in (None, 1.0, snr, 50.0)} == {'Poor'}
+
+
 @pytest.fixture(scope="module")
 def stored_series(dnaja1_titration_series):
     return json.loads((dnaja1_titration_series / "batch_results.json").read_text())

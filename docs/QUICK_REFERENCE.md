@@ -57,7 +57,7 @@ Full clustering/fitting algorithm: [ALGORITHMS.md](ALGORITHMS.md).
 |-------|-----|----------|
 | 🟩 Lime | > 0.9 | Excellent |
 | 🟢 Green | > 0.8 | Good |
-| 🟠 Orange | > 0.6 (0.5–0.6 at S/N ≤ 5) | Fair |
+| 🟠 Orange | > 0.6 | Fair |
 | 🔴 Red | below Fair | Poor / Failed / unfitted |
 
 Failed is R² < 0.2 at S/N ≤ 5, or a fit that did not succeed; a near-noise peak is Poor, never Failed. Marker colors follow the label the fit carries, given by the one rule every fitter and the series use: `fit_quality_label` (`utils/quality_categories.py`); full table in [ALGORITHMS.md §4](ALGORITHMS.md).

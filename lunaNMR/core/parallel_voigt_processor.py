@@ -163,45 +163,7 @@ class ParallelVoigtProcessor:
 
         try:
             # STEP 1: Build all_peaks_context (identical to sequential mode)
-            # Include detection fields from fitted_peaks if available
-            fitted_peaks_by_pos = {}
-            if hasattr(self.original_fitter, 'parent') and hasattr(self.original_fitter.parent, 'fitted_peaks'):
-                for fp in self.original_fitter.parent.fitted_peaks:
-                    key = (fp.get('ppm_x', 0), fp.get('ppm_y', 0))
-                    fitted_peaks_by_pos[key] = fp
-
-            all_peaks_context = []
-            for _, row in peak_list.iterrows():
-                intensity = row.get('Height', row.get('Intensity', None))
-                x_ppm = float(row['Position_X'])
-                y_ppm = float(row['Position_Y'])
-
-                peak_ctx = {
-                    'assignment': str(row.get('Assignment', 'Unknown')),
-                    'x_ppm': x_ppm,
-                    'y_ppm': y_ppm,
-                    'pos_x': x_ppm,
-                    'pos_y': y_ppm,
-                    'intensity': intensity
-                }
-
-                # Merge detection fields from fitted_peaks if available
-                # Match by position with tolerance (detected peaks can drift from reference)
-                for (fp_x, fp_y), fp_data in fitted_peaks_by_pos.items():
-                    if abs(fp_x - x_ppm) < 0.001 and abs(fp_y - y_ppm) < 0.01:
-                        peak_ctx['detected'] = fp_data.get('detected', True)
-                        peak_ctx['detection_quality'] = fp_data.get('detection_quality', 'Matched')
-                        peak_ctx['distance_from_reference'] = fp_data.get('distance_from_reference', 0)
-                        peak_ctx['distance_from_reference_x'] = fp_data.get('distance_from_reference_x', 0)
-                        peak_ctx['distance_from_reference_y'] = fp_data.get('distance_from_reference_y', 0)
-                        peak_ctx['distance_from_reference_elliptical'] = fp_data.get('distance_from_reference_elliptical', 0)
-                        peak_ctx['reference_retained'] = fp_data.get('reference_retained', False)
-                        # Copy detected intensity if not already in peak_list
-                        if peak_ctx['intensity'] is None:
-                            peak_ctx['intensity'] = fp_data.get('intensity')
-                        break
-
-                all_peaks_context.append(peak_ctx)
+            all_peaks_context = self._peaks_context(peak_list)
             log_info(f"2D overlap detection enabled with {len(all_peaks_context)} peaks context")
 
             # STEP 2: Get clusters - either locked or computed
@@ -608,6 +570,50 @@ class ParallelVoigtProcessor:
             # Always cleanup shared memory and force resource cleanup
             self._cleanup_shared_memory()
             
+    def _peaks_context(self, peak_list):
+        """Every peak of `peak_list` as the 2D fitter places it among its neighbours,
+        with the detection fields of the integrator's fitted_peaks at its position."""
+        # Include detection fields from fitted_peaks if available
+        fitted_peaks_by_pos = {}
+        if hasattr(self.original_fitter, 'parent') and hasattr(self.original_fitter.parent, 'fitted_peaks'):
+            for fp in self.original_fitter.parent.fitted_peaks:
+                key = (fp.get('ppm_x', 0), fp.get('ppm_y', 0))
+                fitted_peaks_by_pos[key] = fp
+
+        all_peaks_context = []
+        for _, row in peak_list.iterrows():
+            intensity = row.get('Height', row.get('Intensity', None))
+            x_ppm = float(row['Position_X'])
+            y_ppm = float(row['Position_Y'])
+
+            peak_ctx = {
+                'assignment': str(row.get('Assignment', 'Unknown')),
+                'x_ppm': x_ppm,
+                'y_ppm': y_ppm,
+                'pos_x': x_ppm,
+                'pos_y': y_ppm,
+                'intensity': intensity
+            }
+
+            # Merge detection fields from fitted_peaks if available
+            # Match by position with tolerance (detected peaks can drift from reference)
+            for (fp_x, fp_y), fp_data in fitted_peaks_by_pos.items():
+                if abs(fp_x - x_ppm) < 0.001 and abs(fp_y - y_ppm) < 0.01:
+                    peak_ctx['detected'] = fp_data.get('detected', True)
+                    peak_ctx['detection_quality'] = fp_data.get('detection_quality', 'Matched')
+                    peak_ctx['distance_from_reference'] = fp_data.get('distance_from_reference', 0)
+                    peak_ctx['distance_from_reference_x'] = fp_data.get('distance_from_reference_x', 0)
+                    peak_ctx['distance_from_reference_y'] = fp_data.get('distance_from_reference_y', 0)
+                    peak_ctx['distance_from_reference_elliptical'] = fp_data.get('distance_from_reference_elliptical', 0)
+                    peak_ctx['reference_retained'] = fp_data.get('reference_retained', False)
+                    # Copy detected intensity if not already in peak_list
+                    if peak_ctx['intensity'] is None:
+                        peak_ctx['intensity'] = fp_data.get('intensity')
+                    break
+
+            all_peaks_context.append(peak_ctx)
+        return all_peaks_context
+
     def _cleanup_shared_memory(self):
         """Enhanced cleanup to prevent resource leaks"""
         for memory_block in self.shared_memory_blocks:
@@ -1365,7 +1371,8 @@ class ParallelVoigtProcessor:
         Fallback to existing sequential processing if parallel fails.
         """
         log_info("Using sequential fallback processing")
-        # Call existing enhanced_peak_fitting method for each peak
+        # Fit each peak in 2D among the whole peak list
+        all_peaks_context = self._peaks_context(peak_list)
         results = []
         for i, (peak_idx, peak_row) in enumerate(peak_list.iterrows()):
             raise_if_stopped(self.stop)
@@ -1375,7 +1382,8 @@ class ParallelVoigtProcessor:
 
             result = None
             try:
-                result = self.original_fitter.enhanced_peak_fitting(peak_x, peak_y, assignment)
+                result = self.original_fitter.parent.enhanced_peak_fitting(
+                    peak_x, peak_y, assignment, all_peaks_context=all_peaks_context)
                 if result:
                     result['processing_mode'] = 'sequential_fallback'
             except Exception as e:
@@ -1452,12 +1460,12 @@ def _parallel_cluster_worker(cluster_task):
         peak_results = []
 
         if cluster_size == 1:
-            # Isolated peak - standard 1D fitting (IDENTICAL to sequential)
+            # Isolated peak - single-peak 2D fitting (IDENTICAL to sequential)
             peak_x, peak_y = cluster_task['cluster_positions'][0]
             assignment = cluster_assignments[0]
             peak_number = cluster_peak_numbers[0]
 
-            # Fit using enhanced_peak_fitting (routes through consensus or standard 1D)
+            # Fit using enhanced_peak_fitting (routes through consensus or 2D fitting)
             result = worker_integrator.enhanced_peak_fitting(
                 peak_x, peak_y, assignment,
                 all_peaks_context=cluster_task['shared_context']['all_peaks_context']
@@ -1756,7 +1764,7 @@ def _initialize_worker_fitter(shared_context):
         worker_fitter.gui_params = shared_context['gui_params']
 
         # CRITICAL: Update enhanced_fitter's parent reference to point to worker_integrator
-        # This ensures enhanced_fitter calls adaptive_fit_1d on the correct integrator with gui_params
+        # This ensures enhanced_fitter's calls reach the worker integrator, which holds gui_params
         worker_fitter.parent = worker_integrator
         
         # Advanced settings

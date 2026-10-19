@@ -204,8 +204,8 @@ and Lorentzian) to each peak's 1D cross-sections, with <strong>ArPLS baseline co
 (Asymmetrically Reweighted Penalized Least Squares). Overlapping peaks are handled by multi-peak
 deconvolution — simultaneously fitting neighbours rather than one at a time.</p>
 <p><code>core/core_integrator.py</code> (<code>EnhancedVoigtIntegrator</code>) is the master orchestrator:
-it runs detection, centroid refinement, overlap clustering, and decides whether a cluster needs the
-2D PS2D path or a 1D cross-section fit.</p>
+it runs detection, centroid refinement, overlap clustering, and fits every cluster, a single peak
+included, with the 2D PS2D path.</p>
 </section>
 
 <section id="ps2d">
@@ -237,8 +237,8 @@ The Jacobian is chain-ruled (<code>J_norm = J_phys · scales</code>) and the cov
 </table>
 <p class="muted">5-stage Levenberg-Marquardt: (0) intensity-only (disabled), (1) linewidths + intensities, (2) positions, (4) global.
 The intensity box carries the seed's sign (negative peaks are fitted); a peak inside the noise has its shape held.
-Hard position bounds are enforced via <code>np.clip()</code> every iteration. Falls back to 1D cross-sections
-if 2D fitting fails.</p>
+Hard position bounds are enforced via <code>np.clip()</code> every iteration. A 2D fit that fails is
+reported Failed; there is no 1D cross-section fallback.</p>
 </section>
 
 <section id="parallel">
@@ -376,7 +376,7 @@ near-noise; the series output and the browsers show that label and never recompu
 <tr><th>Category</th><th>R²</th><th>Color</th></tr>
 <tr><td>Excellent</td><td>&gt; 0.9</td><td><span class="dot" style="background:#32cd32"></span>lime</td></tr>
 <tr><td>Good</td><td>&gt; 0.8</td><td><span class="dot" style="background:#34c759"></span>green</td></tr>
-<tr><td>Fair</td><td>&gt; 0.6 (0.5–0.6 when S/N ≤ 5)</td><td><span class="dot" style="background:#ffa500"></span>orange</td></tr>
+<tr><td>Fair</td><td>&gt; 0.6</td><td><span class="dot" style="background:#ffa500"></span>orange</td></tr>
 <tr><td>Poor / Failed / Unknown</td><td>below Fair / unfitted. Failed: R² &lt; 0.2 at S/N ≤ 5, never a near-noise peak</td><td><span class="dot" style="background:#ff4040"></span>red</td></tr>
 </table>
 <p class="muted">Note: in the overlay viewer, per-spectrum peak lists are colored by <em>spectrum</em> (to tell
