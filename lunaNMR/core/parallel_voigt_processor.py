@@ -1428,6 +1428,26 @@ def _test_parallel_worker(_test_data):
     return "test_success"
 
 
+def match_fits_to_members(cluster_positions, fitted_peaks):
+    """
+    Hand each fitted peak of a cluster back to one member: the 1-to-1 assignment
+    (Hungarian) with the smallest total distance in linewidths of the nucleus, so an
+    indirect ppm does not count as a 1H ppm. Returns {member index: fitted peak index}.
+    """
+    from scipy.optimize import linear_sum_assignment
+    from lunaNMR.core.ps2d_config import distance_in_linewidths
+
+    if len(cluster_positions) == 0 or len(fitted_peaks) == 0:
+        return {}
+    member_x, member_y = np.array(cluster_positions, dtype=float).T
+    fit_x = np.array([peak_fit['pos_f2'] for peak_fit in fitted_peaks], dtype=float)
+    fit_y = np.array([peak_fit['pos_f1'] for peak_fit in fitted_peaks], dtype=float)
+    cost_matrix = distance_in_linewidths(fit_x[None, :] - member_x[:, None],
+                                         fit_y[None, :] - member_y[:, None])
+    row_indices, col_indices = linear_sum_assignment(cost_matrix)
+    return {int(row): int(col) for row, col in zip(row_indices, col_indices)}
+
+
 def _parallel_cluster_worker(cluster_task):
     """
     Worker function that fits ONE cluster (IDENTICAL logic to sequential mode).
@@ -1535,29 +1555,9 @@ def _parallel_cluster_worker(cluster_task):
                     region_2d, group_result['peaks']
                 )
 
-                # OPTIMAL MATCHING using Hungarian algorithm (IDENTICAL to sequential)
-                # This ensures 1-to-1 matching and prevents peak swapping
-                from scipy.optimize import linear_sum_assignment
-
                 cluster_positions = cluster_task['cluster_positions']
                 fitted_peaks = group_result['peaks']
-
-                if len(cluster_positions) > 0 and len(fitted_peaks) > 0:
-                    # Build cost matrix: distance from each original peak to each fitted peak
-                    cost_matrix = np.zeros((len(cluster_positions), len(fitted_peaks)))
-                    for i, (peak_x, peak_y) in enumerate(cluster_positions):
-                        for j, peak_fit in enumerate(fitted_peaks):
-                            fit_x = peak_fit['pos_f2']
-                            fit_y = peak_fit['pos_f1']
-                            cost_matrix[i, j] = np.sqrt((fit_x - peak_x)**2 + (fit_y - peak_y)**2)
-
-                    # Hungarian algorithm: find optimal 1-to-1 assignment
-                    row_indices, col_indices = linear_sum_assignment(cost_matrix)
-
-                    # Create mapping: original peak index → fitted peak index
-                    peak_to_fit_mapping = dict(zip(row_indices, col_indices))
-                else:
-                    peak_to_fit_mapping = {}
+                peak_to_fit_mapping = match_fits_to_members(cluster_positions, fitted_peaks)
 
                 # Extract result for EACH peak using optimal matching
                 for i, (peak_x, peak_y) in enumerate(cluster_positions):

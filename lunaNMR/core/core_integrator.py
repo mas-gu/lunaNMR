@@ -23,7 +23,7 @@ from typing import List, Dict, Tuple, Any
 from scipy.special import wofz  # Faddeeva function for Voigt profiles
 from scipy.optimize import curve_fit
 from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
-from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM, get_ps2d_config
+from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM, distance_in_linewidths, get_ps2d_config
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 from lunaNMR.utils.cancellation import raise_if_stopped
 from lunaNMR.utils.quality_categories import fit_quality_label
@@ -2819,14 +2819,9 @@ class VoigtIntegrator(BaseIntegrator):
 
         #print(f"   Step 2: Matching to reference peaks (search windows: X=±{search_window_x_ppm:.3f}, Y=±{search_window_y_ppm:.3f} ppm)")
 
-        # Linewidth scale of each dimension: the PS2D radii of the spectrum's nucleus
-        ps2d_config = get_ps2d_config()
-        rad_f2 = ps2d_config.radF2  # 1H
-        rad_f1 = ps2d_config.radF1  # indirect (15N/13C)
-
         # Every reference-candidate pair inside the search box, at its distance in
-        # linewidths: the distance in each dimension over that nucleus's PS2D radius, so
-        # an indirect ppm does not count as a 1H ppm
+        # linewidths of the spectrum's nucleus: the distance in each dimension over that
+        # nucleus's PS2D radius, so an indirect ppm does not count as a 1H ppm
         candidate_x = np.array([p['x_ppm'] for p in all_detected_peaks], dtype=float)
         candidate_y = np.array([p['y_ppm'] for p in all_detected_peaks], dtype=float)
         references = []
@@ -2850,7 +2845,7 @@ class VoigtIntegrator(BaseIntegrator):
             x_distance = np.abs(candidate_x - centre_x)
             y_distance = np.abs(candidate_y - centre_y)
             inside = np.flatnonzero((x_distance <= window_x) & (y_distance <= window_y))
-            scaled_distance = np.sqrt((x_distance[inside] / rad_f2)**2 + (y_distance[inside] / rad_f1)**2)
+            scaled_distance = distance_in_linewidths(x_distance[inside], y_distance[inside])
             pairs.extend(zip(scaled_distance.tolist(), [len(references)] * len(inside), inside.tolist()))
             references.append((assignment, ref_x_ppm, ref_y_ppm))
 
@@ -2886,7 +2881,7 @@ class VoigtIntegrator(BaseIntegrator):
                     'distance_from_reference': np.sqrt(best_x_dist**2 + best_y_dist**2),
                     'distance_from_reference_x': best_x_dist,
                     'distance_from_reference_y': best_y_dist,
-                    'distance_from_reference_elliptical': np.sqrt((best_x_dist / rad_f2)**2 + (best_y_dist / rad_f1)**2)
+                    'distance_from_reference_elliptical': distance_in_linewidths(best_x_dist, best_y_dist)
                 }
 
             else:

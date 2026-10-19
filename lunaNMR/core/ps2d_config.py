@@ -18,6 +18,8 @@ Author: Claude Code (architectural refactoring)
 from contextlib import contextmanager
 from typing import Dict, Any, Optional
 
+import numpy as np
+
 # Detection search window in 1H (ppm), for every nucleus. The indirect one is each
 # nucleus's search_window_f1
 SEARCH_WINDOW_PPM = 0.070
@@ -490,6 +492,14 @@ def get_min_linewidths() -> tuple:
     return config.min_linewidth_f1, config.min_linewidth_f2
 
 
+def distance_in_linewidths(delta_f2, delta_f1):
+    """Distance in linewidths of the current nucleus: each dimension's ppm offset over
+    its PS2D radius (radF2 in 1H, radF1 in the indirect dimension), so an indirect ppm
+    does not count as a 1H ppm. Takes scalars or arrays."""
+    config = get_ps2d_config()
+    return np.sqrt((delta_f2 / config.radF2)**2 + (delta_f1 / config.radF1)**2)
+
+
 # ============================================================================
 # Module exports
 # ============================================================================
@@ -506,6 +516,7 @@ __all__ = [
     'get_overlap_thresholds',
     'get_gap_thresholds',
     'get_min_linewidths',
+    'distance_in_linewidths',
 ]
 
 
