@@ -9,7 +9,7 @@ Scannable condensation of `docs/CLI.md` + `cli.py` for an agent. Run from `lunaN
 ```bash
 python -m lunaNMR <subcommand> [flags]   # `lunanmr` only after `pip install -e .`
 ```
-No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every analysis subcommand accepts `--format {text,json}`, and every one that writes something also accepts `--dry-run`. **`diagnose` takes `--format` only** — it is read-only, so a dry-run has nothing to mean. **`project inventory` takes `--format` only**; `project export`, `remove` and `build` take both `--format` and `--dry-run` — dry-run `remove` first, it cannot be undone. **`batch`** takes `--format {text,json}` and its own `--dry-run`: under json its progress text goes to stderr and the envelope carries the dry run's `spectra_found`/`spectra`, or the run's `total_files`/`processed_files`/`failed_files`, or `error.type` `BatchFailed`/`UsageError`. A dry run that finds no spectra exits `1`.
+No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every analysis subcommand accepts `--format {text,json}`, and every one that writes something also accepts `--dry-run`. **`diagnose` takes `--format` only** — it is read-only, so a dry-run has nothing to mean. **`project inventory` takes `--format` only**; `project export`, `remove` and `build` take both `--format` and `--dry-run` — dry-run `remove` first, it cannot be undone. **`batch`** takes `--format {text,json}` and its own `--dry-run`: under json its progress text goes to stderr and the envelope carries the dry run's `spectra_found`/`spectra`, or the run's `total_files`/`processed_files`/`failed_files`/`total_peaks_detected`/`total_peaks_fitted` and `files` (per spectrum: `filename`, `success`, `nucleus_type`, `sn_threshold`, `expected_peak_count`, `peaks_detected`, `peaks_fitted`, `peaks_above_quality_threshold`, `results_file`, `processing_time`, `error`), or `error.type` `BatchFailed`/`UsageError`. A dry run that finds no spectra exits `1`. A spectrum is processed only when at least one peak fitted; a run with none processed exits `1` with `BatchFailed`, whose message names each spectrum's error. The fit is the GUI's Fit Spectrum on the detected peaks (same processor, main-window defaults, parallel), so its CSV equals the one the GUI saves.
 
 ## Subcommands
 | Command | Does | Required inputs | Key outputs |
@@ -30,7 +30,7 @@ No Qt/display needed (`__init__` is lazy, matplotlib forced to `Agg`). Every ana
 | `project inventory` | List a bundle's contents | `<bundle.lunaNMR>` | stdout listing |
 | `project export` | Copy a bundle's contents to a plain folder | `<bundle.lunaNMR>` `--out` | copied tree + manifest |
 | `project remove` | Delete bundle-relative paths | `<bundle> <rel/path>…` | (mutates bundle) |
-| `batch` | Folder-wide detect + Voigt/PS2D fit | `<folder>` (flags pass through to `batch_processing`) | per-spectrum fit outputs |
+| `batch` | Folder-wide detect + Voigt/PS2D fit | `<folder>` (flags pass through to `batch_processing`) `[--output DIR]` | `<stem>_fitting_results.csv` per spectrum (the GUI's Fit Spectrum CSV), `batch_processing_<timestamp>.log`, all in `--output` |
 
 **Doing T1/T2/hetNOE?** Follow the Recipe below in order — it is the canonical workflow and
 states every requirement that is not visible from `--help`. The Copy-paste blocks after it are
