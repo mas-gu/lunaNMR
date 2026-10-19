@@ -842,8 +842,15 @@ class MultiSpectrumProcessor:
                 self.integrator.set_search_window(detection['search_window_x'],
                                                   detection['search_window_y'])
 
-            # Call the same detection method used by GUI - this finds actual peak positions
-            detected_peaks = self.integrator._detect_peaks_reference_based()
+            # Call the same detection method used by GUI - this finds actual peak positions.
+            # Spectrum 1 searches the full window; every later spectrum only the narrow box
+            # around each reference's listed position, so a decayed peak cannot take a
+            # neighbour and a strong plane is never anchored on a weak one.
+            listed = None
+            if spectrum_number > 1:
+                listed = {str(row['Assignment']): (float(row['Position_X']), float(row['Position_Y']))
+                          for _, row in self.integrator.peak_list.iterrows()}
+            detected_peaks = self.integrator._detect_peaks_reference_based(anchors=listed)
 
             # Restore original setting
             self.integrator.auto_add_dummy_peaks = original_auto_add_dummy

@@ -79,7 +79,6 @@ def test_a_wider_window_does_not_let_a_reference_take_anothers_maximum():
     _keeps_its_maximum(matched, '53.0', 9.129978, 124.395505, '5.0', (9.097587, 124.508188))
 
 
-@pytest.mark.xfail(reason="needs the wider indirect window (option 2)", strict=True)
 def test_a_peak_one_15n_point_off_its_reference_is_reached():
     """At 600 MHz the planes have 0.074 ppm per 15N point, so a 0.070 ppm indirect window
     cannot reach 20.0's maximum one point off its reference (7.600, 117.111)."""

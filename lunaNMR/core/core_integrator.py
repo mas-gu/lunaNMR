@@ -452,7 +452,7 @@ class VoigtIntegrator(BaseIntegrator):
 
         # Detection search windows (set by GUI)
         self.search_window_x = SEARCH_WINDOW_PPM  # Default X search window in ppm
-        self.search_window_y = SEARCH_WINDOW_PPM  # Default Y search window in ppm
+        self.search_window_y = get_ps2d_config().search_window_f1  # Default Y search window in ppm
 
         # Per-step position freedom override for titration tracking (None = use
         # the relaxation config defaults). Set by the series processor.
@@ -481,10 +481,12 @@ class VoigtIntegrator(BaseIntegrator):
 
         Args:
             x_ppm (float): ±X ppm search window (1H dimension)
-            y_ppm (float): ±Y ppm search window (15N/13C dimension)
+            y_ppm (float or None): ±Y ppm search window (15N/13C dimension); None takes
+                the current nucleus's search_window_f1, for a caller that sets the
+                window before it knows the nucleus
         """
         self.search_window_x = x_ppm
-        self.search_window_y = y_ppm
+        self.search_window_y = get_ps2d_config().search_window_f1 if y_ppm is None else y_ppm
         #print(f"🔍 Search windows set: X=±{x_ppm:.3f} ppm, Y=±{y_ppm:.3f} ppm")
 
     def ensure_peak_ids(self):
@@ -2773,9 +2775,16 @@ class VoigtIntegrator(BaseIntegrator):
             log_error("No peak list loaded for standard detection mode. Please load a peak list or switch to S/N threshold mode")
             return []
 
-    def _detect_peaks_reference_based(self, stop=None):
+    def _detect_peaks_reference_based(self, stop=None, anchors=None):
         """Detect all peaks then match closest to peak list (exact backup approach).
-        A set stop event raises Cancelled before the next candidate or reference peak."""
+        A set stop event raises Cancelled before the next candidate or reference peak.
+
+        anchors: Optional {assignment: (ppm_x, ppm_y)}, the centre of each reference's
+            narrow box on a series' later spectra (its listed position). A reference with an anchor takes a maximum only within
+            the SEARCH_WINDOW_PPM box around it, nearest it first, so a peak that has
+            decayed below the threshold cannot reach a neighbour through the wider
+            indirect window. A reference without one searches its own search box.
+        """
         if self.peak_list is None:
             raise ValueError("Peak list must be loaded before detection")
         if self.nmr_data is None:
@@ -2831,9 +2840,16 @@ class VoigtIntegrator(BaseIntegrator):
             except (ValueError, KeyError) as e:
                 log_warning(f"Skipping peak {idx+1}: {e}")
                 continue
-            x_distance = np.abs(candidate_x - ref_x_ppm)
-            y_distance = np.abs(candidate_y - ref_y_ppm)
-            inside = np.flatnonzero((x_distance <= search_window_x_ppm) & (y_distance <= search_window_y_ppm))
+            anchor = anchors.get(str(assignment)) if anchors is not None else None
+            if anchor is None:
+                centre_x, centre_y = ref_x_ppm, ref_y_ppm
+                window_x, window_y = search_window_x_ppm, search_window_y_ppm
+            else:
+                centre_x, centre_y = anchor
+                window_x = window_y = SEARCH_WINDOW_PPM
+            x_distance = np.abs(candidate_x - centre_x)
+            y_distance = np.abs(candidate_y - centre_y)
+            inside = np.flatnonzero((x_distance <= window_x) & (y_distance <= window_y))
             scaled_distance = np.sqrt((x_distance[inside] / rad_f2)**2 + (y_distance[inside] / rad_f1)**2)
             pairs.extend(zip(scaled_distance.tolist(), [len(references)] * len(inside), inside.tolist()))
             references.append((assignment, ref_x_ppm, ref_y_ppm))

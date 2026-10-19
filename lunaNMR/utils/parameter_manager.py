@@ -10,7 +10,7 @@ Date: 2025
 
 #import tkinter as tk
 from typing import Dict, Any, List
-from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM
+from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM, get_ps2d_config
 from lunaNMR.utils.output_manager import log_info, log_warning
 
 class NMRParameterManager:
@@ -40,7 +40,7 @@ class NMRParameterManager:
         self.parameter_definitions = {
             # Detection Parameters
             'search_window_x': {'default': SEARCH_WINDOW_PPM, 'min': 0.001, 'max': 1.0, 'type': float},  # F2/1H
-            'search_window_y': {'default': SEARCH_WINDOW_PPM, 'min': 0.001, 'max': 2.0, 'type': float},  # F1/15N or 13C
+            'search_window_y': {'default': get_ps2d_config().search_window_f1, 'min': 0.001, 'max': 2.0, 'type': float},  # F1/15N or 13C
 
             # Fitting Parameters
             'fitting_window_x': {'default': 0.15, 'min': 0.01, 'max': 0.5, 'type': float},  # Increased from 0.05 to ensure adequate data points

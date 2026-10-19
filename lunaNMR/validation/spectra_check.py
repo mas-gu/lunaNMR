@@ -25,9 +25,10 @@ from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import numpy as np
 
-# ppm, the detection default in both dimensions. Must equal ps2d_config.SEARCH_WINDOW_PPM:
-# a literal, because importing lunaNMR.core pulls PySide6 into this light module
-SEARCH_WINDOW = 0.070
+# ppm, the detection default (1H, 15N). Must equal ps2d_config.SEARCH_WINDOW_PPM and the
+# 15N search_window_f1: a literal, because importing lunaNMR.core pulls PySide6 into this
+# light module
+SEARCH_WINDOW = (0.070, 0.3)
 _STRONG_SNR = 20.0             # peaks this far above noise carry the intensity comparisons
 _DETECT_SNR = 10.0             # a local maximum this far above noise counts as detected
 _DECAYED_FRACTION = 0.10       # this many peaks under the detection threshold = decay setting in
@@ -123,8 +124,8 @@ def _capture(path, peaks) -> Dict:
     found_y = np.array([uy.ppm(i) for i in iy])
     found_x = np.array([ux.ppm(i) for i in ix])
     captured = sum(1 for _, x, y in peaks
-                   if ((np.abs(found_x - x) <= SEARCH_WINDOW)
-                       & (np.abs(found_y - y) <= SEARCH_WINDOW)).any())
+                   if ((np.abs(found_x - x) <= SEARCH_WINDOW[0])
+                       & (np.abs(found_y - y) <= SEARCH_WINDOW[1])).any())
     snr = np.array([_box_max(magnitude, uy(y, 'ppm'), ux(x, 'ppm')) / noise
                     for _, x, y in peaks])
     outside = [name for (name, _, _), v in zip(peaks, snr) if np.isnan(v)]
@@ -334,12 +335,12 @@ def check_experiment(spectra_dir, peaks_path, *, quick: bool = False,
                 f'{name}: {len(cap["outside"])} listed peak(s) lie outside the spectral '
                 f'window and were not measured ({", ".join(cap["outside"])}) — folded, '
                 f'or from a different experiment'))
-        offset = max(abs(dx), abs(dy)) / SEARCH_WINDOW
+        offset = max(abs(dx) / SEARCH_WINDOW[0], abs(dy) / SEARCH_WINDOW[1])
         if offset > 0.5:
             result['findings'].append(Finding(
                 'FAIL', 'registration',
                 f'{name}: peak list off by ({dx:+.4f}, {dy:+.3f}) ppm = {offset:.1f}x the '
-                f'{SEARCH_WINDOW} ppm window — wrong list for these spectra'))
+                f'{SEARCH_WINDOW[0]}/{SEARCH_WINDOW[1]} ppm window — wrong list for these spectra'))
         elif offset > 0.15:
             result['findings'].append(Finding(
                 'WARN', 'registration',

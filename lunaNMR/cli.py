@@ -746,7 +746,8 @@ def _default_series_params(parallel=False):
     return {
         'detection_params': {
             'search_window_x': SEARCH_WINDOW_PPM,
-            'search_window_y': SEARCH_WINDOW_PPM,
+            # The indirect window of the series' nucleus, known once spectrum 1 is loaded
+            'search_window_y': None,
         },
         'gui_params': {
             'fix_positions': False,

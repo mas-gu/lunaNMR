@@ -423,7 +423,7 @@ class LunaNMRMainWindow(BaseWindow):
         # ===== Peak Detection Parameters (Expert Mode) =====
         # Nucleus-adaptive search windows (from ps2d_config)
         self.search_window_x = SEARCH_WINDOW_PPM  # 1H dimension (ppm) - F2
-        self.search_window_y = SEARCH_WINDOW_PPM  # 15N/13C dimension (ppm) - F1
+        self.search_window_y = get_ps2d_config().search_window_f1  # 15N/13C dimension (ppm) - F1
         self.detection_square_size = 3  # X-dimension/1H (pixels)
         self.detection_rectangle_y = 1  # Y-dimension/15N (pixels)
         self.detection_square_ppm_x = "0.000"  # Auto-calculated ppm conversion
@@ -3450,7 +3450,7 @@ class LunaNMRMainWindow(BaseWindow):
         if hasattr(self, 'expert_search_x_spin') and self.expert_search_x_spin:
             self.expert_search_x_spin.setValue(SEARCH_WINDOW_PPM)
         if hasattr(self, 'expert_search_y_spin') and self.expert_search_y_spin:
-            self.expert_search_y_spin.setValue(SEARCH_WINDOW_PPM)
+            self.expert_search_y_spin.setValue(get_ps2d_config().search_window_f1)
         if hasattr(self, 'expert_centroid_x_spin') and self.expert_centroid_x_spin:
             self.expert_centroid_x_spin.setValue(0.01)
         if hasattr(self, 'expert_centroid_y_spin') and self.expert_centroid_y_spin:
