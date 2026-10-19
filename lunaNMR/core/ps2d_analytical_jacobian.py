@@ -90,7 +90,6 @@ def voigt_2d_with_derivatives(
         dV_dgau_f2  : ∂V/∂lw_gau_f2
         dV_dA       : ∂V/∂intensity
     """
-    # Convert FWHM to internal parameters
     sigma_f1 = max(lw_gau_f1 / SQRT_8LN2, 1e-10)
     sigma_f2 = max(lw_gau_f2 / SQRT_8LN2, 1e-10)
     gamma_f1 = lw_lor_f1 / 2.0
@@ -212,14 +211,12 @@ def compute_analytical_jacobian_2d(
     n_points = len(f1)
     n_params = n_peaks * NPAR_VOIGT
 
-    # Initialize outputs
     y_total = np.zeros(n_points)
     jacobian = np.zeros((n_points, n_params))
 
     for peak_idx in range(n_peaks):
         offset = peak_idx * NPAR_VOIGT
 
-        # Extract parameters for this peak
         # Order: pos_f1, lw_lor_f1, lw_gau_f1, pos_f2, lw_lor_f2, lw_gau_f2, intensity, spare
         pos_f1 = params[offset + 0]
         lw_lor_f1 = params[offset + 1]
@@ -286,10 +283,8 @@ def validate_analytical_jacobian(
     """
     from .ps2d_style_fitter import multi_voigt_profile_2d
 
-    # Compute analytical Jacobian
     y_analytical, jac_analytical = compute_analytical_jacobian_2d(f1, f2, params, n_peaks)
 
-    # Compute numerical Jacobian
     n_params = n_peaks * NPAR_VOIGT
     jac_numerical = np.zeros((len(f1), n_params))
     y_base = multi_voigt_profile_2d(f1, f2, params, n_peaks)
@@ -320,7 +315,6 @@ def validate_analytical_jacobian(
             ana = jac_analytical[:, col]
             num = jac_numerical[:, col]
 
-            # Compute error using allclose-style metric
             abs_diff = np.abs(ana - num)
             tolerance = atol + rtol * np.abs(num)
 
