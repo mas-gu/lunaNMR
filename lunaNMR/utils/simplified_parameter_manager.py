@@ -242,7 +242,6 @@ class SimplifiedParameterManager:
             # Detection Parameters - KEEP COMPLEX DEFAULTS (not affected by simplified mode)
             'search_window_x': base_window['x'],  # Use base window, not scaled
             'search_window_y': base_window['y'],  # Use base window, not scaled
-            'noise_threshold': 0.1,  # Fixed default, not sensitivity-based
 
             # Fitting Parameters - AFFECTED BY SIMPLIFIED MODE
             'fitting_window_x': base_window['x'] * scale,
@@ -283,7 +282,6 @@ class SimplifiedParameterManager:
             # Adapt thresholds based on actual SNR
             if snr < 3.0:
                 legacy_params['min_r_squared'] *= 0.8  # Be more tolerant for low SNR
-                legacy_params['noise_threshold'] *= 1.2
             elif snr > 10.0:
                 legacy_params['min_r_squared'] = min(0.95, legacy_params['min_r_squared'] * 1.1)
 
@@ -364,8 +362,7 @@ class ParameterAdapter:
         return {
             'detection_params': {
                 'search_window_x': legacy_params['search_window_x'],
-                'search_window_y': legacy_params['search_window_y'],
-                'noise_threshold': legacy_params['noise_threshold']
+                'search_window_y': legacy_params['search_window_y']
             },
             'fitting_params': {
                 'fitting_window_x': legacy_params['fitting_window_x'],

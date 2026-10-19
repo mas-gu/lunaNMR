@@ -25,7 +25,9 @@ from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import numpy as np
 
-SEARCH_WINDOW = 0.070          # ppm, the detection default in both dimensions
+# ppm, the detection default in both dimensions. Must equal ps2d_config.SEARCH_WINDOW_PPM:
+# a literal, because importing lunaNMR.core pulls PySide6 into this light module
+SEARCH_WINDOW = 0.070
 _STRONG_SNR = 20.0             # peaks this far above noise carry the intensity comparisons
 _DETECT_SNR = 10.0             # a local maximum this far above noise counts as detected
 _DECAYED_FRACTION = 0.10       # this many peaks under the detection threshold = decay setting in

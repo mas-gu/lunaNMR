@@ -10,6 +10,7 @@ Date: 2025
 
 #import tkinter as tk
 from typing import Dict, Any, List
+from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM
 from lunaNMR.utils.output_manager import log_info, log_warning
 
 class NMRParameterManager:
@@ -37,10 +38,9 @@ class NMRParameterManager:
 
         # Define all default parameters with validation ranges
         self.parameter_definitions = {
-            # Detection Parameters (nucleus-adaptive tight values)
-            'search_window_x': {'default': 0.005, 'min': 0.001, 'max': 1.0, 'type': float},  # Tight: 0.005 ppm (F2/1H)
-            'search_window_y': {'default': 0.020, 'min': 0.001, 'max': 2.0, 'type': float},  # Tight: 0.020 ppm (F1/15N default)
-            'noise_threshold': {'default': 0.1, 'min': 0.01, 'max': 10.0, 'type': float},
+            # Detection Parameters
+            'search_window_x': {'default': SEARCH_WINDOW_PPM, 'min': 0.001, 'max': 1.0, 'type': float},  # F2/1H
+            'search_window_y': {'default': SEARCH_WINDOW_PPM, 'min': 0.001, 'max': 2.0, 'type': float},  # F1/15N or 13C
 
             # Fitting Parameters
             'fitting_window_x': {'default': 0.15, 'min': 0.01, 'max': 0.5, 'type': float},  # Increased from 0.05 to ensure adequate data points
@@ -105,7 +105,6 @@ class NMRParameterManager:
         gui_variable_mapping = {
             'search_window_x': 'search_window_x',
             'search_window_y': 'search_window_y',
-            'noise_threshold': 'noise_threshold',
             'fitting_window_x': 'fitting_window_x',
             'fitting_window_y': 'fitting_window_y',
             'min_r_squared': 'min_r_squared',
@@ -290,7 +289,7 @@ class NMRParameterManager:
         lines.append("-" * 40)
 
         categories = {
-            'Detection': ['search_window_x', 'search_window_y', 'noise_threshold'],
+            'Detection': ['search_window_x', 'search_window_y'],
             'Fitting': ['fitting_window_x', 'fitting_window_y', 'min_r_squared', 'max_iterations'],
             'Peak Detection': ['height_threshold', 'distance_factor', 'prominence_threshold', 'smoothing_sigma'],
             'Processing': ['use_parallel_processing', 'use_global_optimization', 'max_peaks_fit']

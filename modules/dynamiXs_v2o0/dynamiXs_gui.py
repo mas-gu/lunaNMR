@@ -65,6 +65,7 @@ from workers import (
 from dynamiXs_T1_T2.delay_units import (
     TIME_UNITS_DEFAULT, resolve_time_units, series_sidecar
 )
+from dynamiXs_T1_T2.series_inputs import tidy_table_refusal
 
 # The delay units a page can state for its series, and the factor turning ms into each:
 # the initial-guess fields are in ms, the fitters work in the series' own units.
@@ -144,10 +145,6 @@ class DynamiXsMainWindow(QMainWindow):
         self.spectral_page = SpectralDensityPage(self)
         self.stack.addWidget(self.spectral_page)
 
-        # Plotting page
-        self.plotting_page = PlottingPage(self)
-        self.stack.addWidget(self.plotting_page)
-
         # Integrated Analysis page
         self.integrated_page = IntegratedAnalysisPage(self)
         self.stack.addWidget(self.integrated_page)
@@ -219,15 +216,6 @@ class DynamiXsMainWindow(QMainWindow):
         btn_spectral.setFont(get_font(18, bold=True))
         options_layout.addWidget(btn_spectral, alignment=Qt.AlignCenter)
 
-        # Plot Data button
-        btn_plot = create_secondary_button(
-            "Plot Data",
-            clicked=self.show_plotting,
-            width=200
-        )
-        btn_plot.setFont(get_font(18, bold=True))
-        options_layout.addWidget(btn_plot, alignment=Qt.AlignCenter)
-
         layout.addWidget(options_panel, stretch=1)
 
         # Working directory info
@@ -271,10 +259,6 @@ class DynamiXsMainWindow(QMainWindow):
     def show_spectral_density(self):
         """Show spectral density analysis page."""
         self.stack.setCurrentWidget(self.spectral_page)
-
-    def show_plotting(self):
-        """Show plotting page."""
-        self.stack.setCurrentWidget(self.plotting_page)
 
     def show_integrated_analysis(self):
         """Show integrated analysis page."""
@@ -687,6 +671,14 @@ class BasePage(QWidget):
                 widget.appendPlainText(str(msg))
                 return
 
+    def _refuses_tidy_table(self, path) -> bool:
+        """Whether `path` is a series' tidy table, which the fitters cannot read as a
+        relaxation matrix; the refusal, naming the matrix to use, goes to the page's log."""
+        refusal = tidy_table_refusal(path, self._observable_matrix_name())
+        if refusal:
+            self._page_log(refusal)
+        return bool(refusal)
+
     # ---------- saving the run to the project ----------
 
     def _make_save_run_button(self):
@@ -897,7 +889,7 @@ class T1T2FittingPage(BasePage):
             directory=self.main_window.current_dir,
             filter="CSV files (*.csv);;All files (*.*)"
         )
-        if filename:
+        if filename and not self._refuses_tidy_table(filename):
             self._assign_data_file(field_name, filename)
 
     def _assign_data_file(self, field_name: str, path: str):
@@ -2775,46 +2767,6 @@ class SpectralDensityPage(BasePage):
 
 
 # =============================================================================
-# PLOTTING PAGE
-# =============================================================================
-
-class PlottingPage(BasePage):
-    """Plotting and data comparison page."""
-
-    def __init__(self, main_window: DynamiXsMainWindow):
-        super().__init__(main_window, "Data Plotting")
-        self._setup_content()
-
-    def _setup_content(self):
-        """Setup the page content."""
-        # Placeholder for plotting options
-        info_label = create_label(
-            "Plotting functionality allows you to:\n\n"
-            "• Compare datasets from different experiments\n"
-            "• Visualize dual-field data overlays\n"
-            "• Generate publication-quality figures\n"
-            "• Export data in various formats",
-            font_size=FONT_SIZE_BODY
-        )
-        info_label.setWordWrap(True)
-        self.content_layout.addWidget(info_label)
-
-        # Placeholder buttons
-        btn_frame = QFrame()
-        btn_layout = create_v_layout(SPACING_SM)
-        btn_frame.setLayout(btn_layout)
-
-        btn1 = create_secondary_button("Compare Datasets", width=200)
-        btn_layout.addWidget(btn1, alignment=Qt.AlignCenter)
-
-        btn2 = create_secondary_button("Dual-Field Overlay", width=200)
-        btn_layout.addWidget(btn2, alignment=Qt.AlignCenter)
-
-        self.content_layout.addWidget(btn_frame)
-        self.content_layout.addStretch()
-
-
-# =============================================================================
 # INTEGRATED ANALYSIS PAGE
 # =============================================================================
 
@@ -3196,9 +3148,13 @@ class IntegratedAnalysisPage(BasePage):
             directory=self.main_window.current_dir,
             filter="CSV files (*.csv);;All files (*.*)"
         )
-        if filename:
-            setattr(self, f"{field_name}_file", filename)
-            display_label.setText(os.path.basename(filename))
+        if not filename:
+            return
+        # A T1 or T2 slot reads a relaxation matrix; a hetNOE slot reads one plane's file
+        if 'noe' not in field_name and self._refuses_tidy_table(filename):
+            return
+        setattr(self, f"{field_name}_file", filename)
+        display_label.setText(os.path.basename(filename))
 
     # =========================================================================
     # SERIES PICKER METHODS

@@ -113,11 +113,6 @@ def kd_page_state(fit_data, fit_path, input_file=None):
 
 DYNAMIXS_RECORD_SUFFIX = '_dynamixs.json'
 
-# DynamiXs dialog stack indices (dynamixs_dialog: menu, t1t2, spectral, plotting,
-# integrated, methyl_t2).
-T1T2_PAGE, SPECTRAL_PAGE, INTEGRATED_PAGE, METHYL_T2_PAGE, HETNOE_PAGE = 1, 2, 4, 5, 6
-
-
 def find_dynamixs_records(run_dir):
     """Every `<prefix>_dynamixs.json` a dynamixs command left under the run, each with the
     file it was read from as `record_file`."""
@@ -129,11 +124,11 @@ def find_dynamixs_records(run_dir):
     return records
 
 
-def _analysis_state(name, page_index, analysis_type, page_key, page_state, records):
+def _analysis_state(name, analysis_type, page_key, page_state, records):
     """A DynamiXs analysis state, with the CLI runs it came from in its metadata - every
     input on record, including those the page has no field for (an R2 table)."""
     runs = [{key: r[key] for key in ('command', 'args', 'record_file')} for r in records]
-    return {'active_page': page_index, 'analysis_name': name,
+    return {'active_page': page_key, 'analysis_name': name,
             'analysis_metadata': {'analysis_name': name, 'analysis_type': analysis_type,
                                   'cli_runs': runs},
             page_key: page_state}
@@ -236,7 +231,7 @@ def t1t2_analysis(records, name, staging, t1rho_records=()):
         page['peak_list_file'] = refs['peak_list_file'] = args['peaks']
     page['file_prefixes'] = sorted({e['file_prefix'] for f in session.values() if f
                                     for e in f.values() if isinstance(e, dict)})
-    return {'state': _analysis_state(name, T1T2_PAGE, 't1t2', 't1t2', page, all_records),
+    return {'state': _analysis_state(name, 't1t2', 't1t2', page, all_records),
             'file_refs': {'t1t2': refs}}
 
 
@@ -272,7 +267,7 @@ def modelfree_analysis(record, name, out):
     }
     page = {k: v for k, v in page.items() if v is not None}
     refs = {key: page[key] for key in page if key.endswith('_file')}
-    return {'state': _analysis_state(name, INTEGRATED_PAGE, 'model_free', 'integrated',
+    return {'state': _analysis_state(name, 'model_free', 'integrated',
                                      page, [record]),
             'file_refs': {'integrated': refs}}
 
@@ -292,7 +287,7 @@ def methyl_t2_analysis(record, name, out):
             'file_prefixes': [args['prefix']],
             'field_freq': args.get('field_freq'), 'bootstrap_iter': args.get('bootstrap')}
     page = {k: v for k, v in page.items() if v is not None}
-    return {'state': _analysis_state(name, METHYL_T2_PAGE, 'methyl_t2', 'methyl_t2',
+    return {'state': _analysis_state(name, 'methyl_t2', 'methyl_t2',
                                      page, [record]),
             'file_refs': {'methyl_t2': {'input_file': args['input']}}}
 
@@ -305,7 +300,7 @@ def hetnoe_analysis(record, name, out):
             'output_dir': str(out), 'prefix': args['prefix'],
             'file_prefixes': [args['prefix']],
             'last_results_file': str(out / Path(summary['output']).name)}
-    return {'state': _analysis_state(name, HETNOE_PAGE, 'hetnoe', 'hetnoe', page, [record]),
+    return {'state': _analysis_state(name, 'hetnoe', 'hetnoe', page, [record]),
             'file_refs': {'hetnoe': {'sat_file': args['sat'], 'unsat_file': args['unsat']}}}
 
 
@@ -333,7 +328,7 @@ def density_analysis(record, name, out):
             'prefix': args['prefix'], 'file_prefixes': [args['prefix']]}
     page = {k: v for k, v in page.items() if v is not None}
     refs = {k: page[k] for k in ('input_file1', 'input_file2') if k in page}
-    return {'state': _analysis_state(name, SPECTRAL_PAGE, 'spectral_density', 'spectral',
+    return {'state': _analysis_state(name, 'spectral_density', 'spectral',
                                      page, [record]),
             'file_refs': {'spectral': refs}}
 

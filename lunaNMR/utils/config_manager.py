@@ -47,7 +47,6 @@ class ConfigurationManager:
                 "confirm_exit": True
             },
             "processing_parameters": {
-                "noise_threshold": 3.0,
                 "search_window_x": 0.2,
                 "search_window_y": 3.0,
                 "fitting_window_x": 0.3,
@@ -331,7 +330,6 @@ class ProcessingParameters:
     def get_detection_params(self):
         """Get peak detection parameters"""
         return {
-            'noise_threshold': self.config_manager.get("processing_parameters.noise_threshold", 3.0),
             'search_window_x': self.config_manager.get("processing_parameters.search_window_x", 0.2),
             'search_window_y': self.config_manager.get("processing_parameters.search_window_y", 3.0),
             'use_reference_detection': self.config_manager.get("processing_parameters.use_reference_detection", True)

@@ -215,7 +215,7 @@ class MethylT2FittingPage(BasePage):
             self.main_window.current_dir if hasattr(self.main_window, "current_dir") else "",
             "CSV files (*.csv);;All files (*)"
         )
-        if path:
+        if path and not self._refuses_tidy_table(path):
             self._set_input_file(path)
             self.file_drop.setText(os.path.basename(path))
 

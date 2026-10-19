@@ -367,6 +367,9 @@ python -m lunaNMR dynamixs methyl-t2 --input <matrix.csv> --out <dir> \
 Input = a series `peak_intensity_matrix.csv` / `comprehensive_peak_tracking.csv`. Delay column
 headers are parsed by `parse_delay_column` (explicit `ms`/`s`/`us` unit + optional repeat
 marker `b` or `_2`), which returns every delay in ms. Exit code 1 if nothing fits.
+A series' `series_analysis_tidy.csv` (one row per spectrum and peak) is not a matrix: it is
+refused as a usage error (exit 2) naming the `peak_intensity_matrix.csv` beside it, here and on
+every other matrix input (`t1rho --input/--t1`, `modelfree --f{1,2}-t{1,2}`).
 Writes `<prefix>_fit_results.txt` (`t1t2` adds its `_fig{1,2,3}.pdf` plots), the fit JSON
 `<prefix>_<field-name>_<exp>_fit_data.json` (`methyl-t2`: `<prefix>_<field-name>_methylT2_fit_data.json`),
 and the `<prefix>_dynamixs.json` record every `dynamixs` subcommand leaves for `project build`.

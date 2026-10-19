@@ -226,6 +226,90 @@ def test_the_modelfree_page_reopens_its_results_from_the_bundle(app, loaded, bun
         dialog.deleteLater()
 
 
+PAGE_OF = {T1T2: "t1t2", MODELFREE: "integrated", METHYL_T2: "methyl_t2",
+           HETNOE: "hetnoe", DENSITY: "spectral"}
+
+
+@pytest.mark.parametrize("name", list(PAGE_OF))
+def test_a_built_analysis_names_its_page_by_key(loaded, name):
+    """A stack index moves whenever a page is added or removed; the key does not."""
+    assert loaded.dynamixs_analyses[name]["state"]["active_page"] == PAGE_OF[name]
+
+
+@pytest.mark.parametrize("name", list(PAGE_OF))
+def test_a_gui_saved_analysis_reopens_on_its_page(app, loaded, name, tmp_path):
+    """Reopened from the built bundle, saved again by the dialog through a real project
+    save, loaded and reopened: it lands on its own page."""
+    import types
+    from lunaNMR.gui.dialogs.dynamixs_dialog import DynamiXsDialog
+    from lunaNMR.utils.project_manager import ProjectManager
+    window = types.SimpleNamespace(integrator=types.SimpleNamespace(peak_list=None),
+                                   dynamixs_analyses={})
+    first = DynamiXsDialog(parent=None, main_window=window)
+    try:
+        first.open_analysis(loaded.dynamixs_analyses[name], name)
+        assert first.ensure_current_saved() == name
+        assert window.dynamixs_analyses[name]["state"]["active_page"] == PAGE_OF[name]
+        assert ProjectManager(window).save_project(tmp_path / "again.lunaNMR")[0]
+    finally:
+        first.deleteLater()
+    reloaded = types.SimpleNamespace(integrator=types.SimpleNamespace(peak_list=None))
+    assert ProjectManager(reloaded).load_project(tmp_path / "again.lunaNMR")
+    second = DynamiXsDialog(parent=None, main_window=reloaded)
+    try:
+        second.open_analysis(reloaded.dynamixs_analyses[name], name)
+        assert second.stack.currentWidget() is second._pages()[PAGE_OF[name]]
+        assert second.page_notice.isHidden()
+    finally:
+        second.deleteLater()
+
+
+@pytest.mark.parametrize("active_page", [6, "plotting"])
+def test_a_page_it_cannot_read_opens_no_page_and_says_so(app, loaded, active_page):
+    """An integer is a stack index from another page layout; whatever page it named then
+    is not the one it names now, so none is guessed."""
+    import copy
+    import types
+    from lunaNMR.gui.dialogs.dynamixs_dialog import DynamiXsDialog
+    entry = copy.deepcopy(loaded.dynamixs_analyses[HETNOE])
+    entry["state"]["active_page"] = active_page
+    # Its own window: closing the dialog keeps its state on the window it was given
+    dialog = DynamiXsDialog(parent=None, main_window=types.SimpleNamespace())
+    try:
+        dialog.show()
+        dialog.open_analysis(entry, HETNOE)
+        assert dialog.stack.currentWidget() is dialog.main_menu_page
+        assert not dialog.page_notice.isHidden()
+        assert "page layout this version does not read" in dialog.page_notice.text()
+        dialog.show_hetnoe()
+        assert dialog.page_notice.isHidden()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+
+
+def test_the_menu_offers_no_plot_data_page(app):
+    import types
+    from PySide6.QtWidgets import QPushButton
+    from lunaNMR.gui.dialogs.dynamixs_dialog import DynamiXsDialog
+    dialog = DynamiXsDialog(parent=None, main_window=types.SimpleNamespace())
+    try:
+        labels = [b.text() for b in dialog.main_menu_page.findChildren(QPushButton)]
+        assert "Plot Data" not in labels
+        assert not hasattr(dialog, "plotting_page")
+        assert dialog.stack.count() == 1 + len(dialog._pages())
+        opened = []
+        for button in dialog.main_menu_page.findChildren(QPushButton):
+            if button.text() == "Change Directory":
+                continue
+            dialog.show_main_menu()
+            button.click()
+            opened.append(dialog._active_page_key())
+        assert sorted(opened) == sorted(dialog._pages())
+    finally:
+        dialog.deleteLater()
+
+
 @pytest.fixture
 def default_prefix_run(tmp_path):
     """Two fits on the default --prefix, relative paths, from a folder that holds names

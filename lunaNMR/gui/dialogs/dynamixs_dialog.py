@@ -22,7 +22,6 @@ if str(_dynamixs_path) not in sys.path:
 from dynamiXs_gui import (
     T1T2FittingPage,
     SpectralDensityPage,
-    PlottingPage,
     IntegratedAnalysisPage
 )
 from gui_components import (
@@ -45,7 +44,6 @@ class DynamiXsDialog(BaseDialog):
     the existing DynamiXs page classes for:
     - T1/T2 Fitting Analysis
     - Spectral Density Analysis
-    - Plotting
     - Integrated Model-Free Analysis
 
     State Management:
@@ -109,8 +107,16 @@ class DynamiXsDialog(BaseDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # One line on the dialog, whatever page is shown, for a saved analysis this
+        # version cannot place on a page
+        self.page_notice = create_label("", font_size=FONT_SIZE_SMALL)
+        self.page_notice.setStyleSheet(f"color: {SECONDARY_TEXT};")
+        self.page_notice.hide()
+        layout.addWidget(self.page_notice)
+
         # Create stacked widget for page navigation
         self.stack = QStackedWidget()
+        self.stack.currentChanged.connect(self.page_notice.hide)
 
         # Create main menu page
         self.main_menu_page = self._create_main_menu_page()
@@ -120,7 +126,6 @@ class DynamiXsDialog(BaseDialog):
         # Pass 'self' as main_window since we provide the same navigation interface
         self.t1t2_page = T1T2FittingPage(self)
         self.spectral_page = SpectralDensityPage(self)
-        self.plotting_page = PlottingPage(self)
         self.integrated_page = IntegratedAnalysisPage(self)
 
         from methyl_t2_page import MethylT2FittingPage
@@ -131,7 +136,6 @@ class DynamiXsDialog(BaseDialog):
 
         self.stack.addWidget(self.t1t2_page)
         self.stack.addWidget(self.spectral_page)
-        self.stack.addWidget(self.plotting_page)
         self.stack.addWidget(self.integrated_page)
         self.stack.addWidget(self.methyl_t2_page)
         self.stack.addWidget(self.hetnoe_page)
@@ -222,15 +226,6 @@ class DynamiXsDialog(BaseDialog):
         btn_spectral.setFont(get_font(18, bold=True))
         options_layout.addWidget(btn_spectral, alignment=Qt.AlignCenter)
 
-        # Plot Data button
-        btn_plot = create_secondary_button(
-            "Plot Data",
-            clicked=self.show_plotting,
-            width=200
-        )
-        btn_plot.setFont(get_font(18, bold=True))
-        options_layout.addWidget(btn_plot, alignment=Qt.AlignCenter)
-
         layout.addWidget(options_panel, stretch=1)
 
         # Working directory info
@@ -280,10 +275,6 @@ class DynamiXsDialog(BaseDialog):
     def show_spectral_density(self):
         """Show spectral density analysis page."""
         self.stack.setCurrentWidget(self.spectral_page)
-
-    def show_plotting(self):
-        """Show plotting page."""
-        self.stack.setCurrentWidget(self.plotting_page)
 
     def show_integrated_analysis(self):
         """Show integrated analysis page."""
@@ -433,7 +424,7 @@ class DynamiXsDialog(BaseDialog):
             Dictionary containing state from all pages
         """
         return {
-            'active_page': self.stack.currentIndex(),
+            'active_page': self._active_page_key(),
             'current_dir': self.current_dir,
             'analysis_name': self.current_analysis_name,
             'analysis_metadata': self.get_analysis_metadata(),
@@ -472,7 +463,22 @@ class DynamiXsDialog(BaseDialog):
         if 'hetnoe' in state:
             self.hetnoe_page.restore_session_state(state['hetnoe'])
         if 'active_page' in state:
-            self.stack.setCurrentIndex(state['active_page'])
+            self._show_saved_page(state['active_page'])
+
+    def _show_saved_page(self, page_key):
+        """Switch to the page a saved state names by its key. None is the main menu,
+        where the dialog stays. Any other value - a stack index from another page layout
+        among them - names no page this version can be sure of, so none is guessed."""
+        if page_key is None:
+            return
+        page = self._pages().get(page_key) if isinstance(page_key, str) else None
+        if page is None:
+            self.page_notice.setText(
+                "This analysis was saved with a page layout this version does not read: "
+                "re-run or re-save it from its page.")
+            self.page_notice.show()
+            return
+        self.stack.setCurrentWidget(page)
 
     def get_file_refs(self) -> Dict[str, Any]:
         """Collect file references from all pages.
