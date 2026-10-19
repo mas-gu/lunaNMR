@@ -48,7 +48,6 @@ class DeletePeakCommand(QUndoCommand):
         integrator = self.main_window.integrator
 
         if self.peak_type == 'reference':
-            # Find row by peak_id, store snapshot, delete
             if integrator.peak_list is not None and 'peak_id' in integrator.peak_list.columns:
                 mask = integrator.peak_list['peak_id'] == self.peak_id
                 if mask.any():
@@ -329,7 +328,6 @@ class PeakUndoManager(QObject):
         self.undo_stack = QUndoStack(self)
         self.undo_stack.setUndoLimit(self.MAX_UNDO_DEPTH)
 
-        # Connect signals
         self.undo_stack.canUndoChanged.connect(self.can_undo_changed)
         self.undo_stack.canRedoChanged.connect(self.can_redo_changed)
 
