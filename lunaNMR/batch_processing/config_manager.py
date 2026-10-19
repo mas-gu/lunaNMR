@@ -56,7 +56,7 @@ class ConfigManager:
                 'exclude_patterns': ['*backup*', '*temp*']
             },
             'optimization': {
-                'enable_auto_optimization': True,
+                'enable_auto_optimization': False,
                 'optimization_strategy': 'balanced',  # 'conservative', 'balanced', 'aggressive'
                 'sn_test_range': {
                     '15N1H': [1.8, 2.0, 2.5, 3.0, 3.5],
