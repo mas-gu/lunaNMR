@@ -115,7 +115,6 @@ class MethylT2FitViewer(QMainWindow):
         main.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
         main.setSpacing(SPACING_SM)
 
-        # Plot panel (left)
         left = QFrame()
         left.setStyleSheet(f"QFrame {{ background-color: {PANEL_BG_COLOR}; border-radius: 8px; }}")
         self._create_plot_panel(left)
