@@ -82,8 +82,10 @@ Without a noise level every peak is treated as positive. Mixed-sign clusters are
 **Merging**: start singletons → repeatedly merge the closest overlapping pair whose merged **diameter** stays within `max_cluster_diameter_x=0.20` (1H), `max_cluster_diameter_y=1.5` (15N); oversized clusters (>`max_cluster_size`, default 20) are split. Diameter/size constraints deliberately bound transitive closure so it can't form mega-clusters. Result = disjoint partition, each peak in exactly one cluster.
 
 **Routing**: `needs_2d = len(cluster) > 1`.
-- size 1 → 1D consensus / staged Voigt (`enhanced_peak_fitting`).
-- size >1 → `fit_overlap_group_2d` → PS2D; falls back to 1D cross-sections on failure.
+- size 1 → `enhanced_peak_fitting` → single-peak PS2D fit (1D consensus only when simplified parameters are on).
+- size >1 → `fit_overlap_group_2d` → PS2D.
+
+There is no 1D cross-section fallback: a 2D fit that fails is reported Failed. Without a peak list to place the peak among its neighbours (`all_peaks_context`), `fit_peak_voigt_2d` returns `{'success': False, 'error': 'no 2D fit context: …'}`, and the reason is logged.
 
 **One pipeline, sequential or parallel** (`parallel_voigt_processor.py::fit_all_peaks_parallel`): the clustering runs once, then whole clusters are fitted as tasks of `_parallel_cluster_worker` — over a `spawn` pool in parallel mode, as direct calls in this process in sequential mode (`ParallelVoigtProcessor(in_process=True)`, also used below 3 peaks). Results are consolidated by integer `peak_number`, and the two modes give identical results; parallel pays off only on large lists (~2.7× on 6 cores). **Two-pass linewidth learning**: pass 1 fits isolated peaks → median linewidths (+MAD); pass 2 seeds multi-peak clusters with them (R² > 0.85, at least 3 good fits; otherwise `ps2d_config.py` defaults).
 
@@ -95,7 +97,7 @@ Without a noise level every peak is treated as positive. Mixed-sign clusters are
 
 ## 4. Quality Assessment
 
-One rule labels every fit: `fit_quality_label(r_squared, success, near_noise, snr)` (`utils/quality_categories.py`). The fitters call it (the 2D path for an isolated peak or a cluster member, the parallel worker, the 1D cross-section path, the overlay refit); the series output, the results browser and the markers show the label the fit carries and never recompute it. For a cluster member, R² is the cluster's and S/N its own `detection_sigma`.
+One rule labels every fit: `fit_quality_label(r_squared, success, near_noise, snr)` (`utils/quality_categories.py`). The fitters call it (the 2D path for an isolated peak or a cluster member, the parallel worker, the overlay refit); the series output, the results browser and the markers show the label the fit carries and never recompute it. For a cluster member, R² is the cluster's and S/N its own `detection_sigma`.
 
 | Condition (in order) | Label |
 |---|---|
