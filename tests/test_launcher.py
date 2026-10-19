@@ -23,7 +23,11 @@ def _exec_until_main_window(self):
         shown = [w for w in self.topLevelWidgets()
                  if type(w).__name__ == "LunaNMRMainWindow" and w.isVisible()]
         if shown:
+            import logging
+            root = logging.getLogger()
+            formats = [h.formatter._fmt for h in root.handlers if h.formatter]
             print("MAIN_WINDOW_SHOWN", flush=True)
+            print(f"ROOT_LOGGING {logging.getLevelName(root.level)} {formats}", flush=True)
             for w in self.topLevelWidgets():
                 w.close()
             return 0
@@ -42,6 +46,27 @@ def test_launcher_shows_the_main_window():
                             capture_output=True, text=True, env=env, timeout=300)
     assert "MAIN_WINDOW_SHOWN" in result.stdout, result.stdout[-2000:] + result.stderr[-2000:]
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+
+
+def test_the_launcher_sends_info_logging_to_the_terminal():
+    """The terminal the app is started from shows the INFO records of lunaNMR, in the
+    logging module's basic format."""
+    import logging
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    result = subprocess.run([sys.executable, "-c", _LAUNCH], cwd=str(REPO_ROOT),
+                            capture_output=True, text=True, env=env, timeout=300)
+    assert f"ROOT_LOGGING INFO {[logging.BASIC_FORMAT]}" in result.stdout, \
+        result.stdout[-2000:] + result.stderr[-2000:]
+
+
+def test_importing_the_utilities_configures_no_logging():
+    """Configuring the root logger is the application's choice, not a side effect of an
+    import: a host importing lunaNMR keeps the logging it had."""
+    probe = ("import logging, lunaNMR.utils, lunaNMR.utils.global_optimization_manager; "
+             "print(len(logging.getLogger().handlers))")
+    result = subprocess.run([sys.executable, "-c", probe], cwd=str(REPO_ROOT),
+                            capture_output=True, text=True, timeout=300)
+    assert result.stdout.strip() == "0", result.stdout[-2000:] + result.stderr[-2000:]
 
 
 def _absolute_imports(path):

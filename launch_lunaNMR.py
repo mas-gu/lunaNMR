@@ -8,6 +8,7 @@ Launches LunaNMR; the optional modules (DynamiXs, Kd, 1D integration) open from 
 Modules menu. This script handles environment setup and graceful error handling.
 """
 
+import logging
 import sys
 import os
 
@@ -72,6 +73,9 @@ def launch_lunaNMR():
 def main():
     """Main launcher function - directly launches LunaNMR"""
     print("LunaNMR Suite v1.0 - Starting...")
+
+    # The terminal the app is started from shows lunaNMR's INFO records
+    logging.basicConfig(level=logging.INFO)
 
     # Setup paths
     current_dir, parent_dir = setup_paths()
