@@ -50,11 +50,9 @@ class BatchProcessor:
                 (default: the current directory)
         """
         self.output_dir = Path(output_dir) if output_dir else Path.cwd()
-        # Set up logging
         self.logger = logging.getLogger(__name__)
         self._setup_logging(self.output_dir)
 
-        # Default configuration
         self.config = {
             'sn_thresholds': {
                 '15N1H': 2.5,
@@ -73,7 +71,6 @@ class BatchProcessor:
             'skip_on_error': True,
             'detailed_logging': True,
             'progress_interval': 5,
-            # Add missing iteration parameters
             'max_iterations': 1000,                    # Curve fitting max iterations
             'max_optimization_iterations': 50,         # Parameter optimization iterations
             'baseline_max_iter': 50,                   # Baseline correction iterations
@@ -83,7 +80,6 @@ class BatchProcessor:
             'processing_parameters': {}
         }
 
-        # Default file handling configuration (matching ConfigManager structure)
         self.default_file_handling = {
             'extensions': ['.ft2', '.ft', '.pipe', '.ucsf', '.nmrpipe'],
             'recursive_search': True,
@@ -91,12 +87,9 @@ class BatchProcessor:
             'exclude_patterns': ['*backup*', '*temp*']
         }
 
-        # Update with provided config
         if config:
-            # Handle nested config structure from aggressive_config.json
             if 'processing' in config:
                 processing_config = config['processing']
-                # Extract processing parameters to flat structure
                 if 'sn_thresholds' in processing_config:
                     self.config['sn_thresholds'] = processing_config['sn_thresholds']
                 if 'expected_peaks' in processing_config:
@@ -121,16 +114,13 @@ class BatchProcessor:
             if 'processing_parameters' in config:
                 self.config['processing_parameters'].update(config['processing_parameters'])
 
-            # Handle other top-level config sections
             for key in ['file_handling', 'logging', 'output']:
                 if key in config:
                     self.config[key] = config[key]
 
-        # Ensure file_handling section exists with defaults
         if 'file_handling' not in self.config:
             self.config['file_handling'] = self.default_file_handling
         else:
-            # Merge file_handling defaults with provided config
             for key, default_value in self.default_file_handling.items():
                 if key not in self.config['file_handling']:
                     self.config['file_handling'][key] = default_value
@@ -149,11 +139,9 @@ class BatchProcessor:
             'files': []
         }
 
-        # Initialize core integrator
         if CORE_AVAILABLE:
             self.integrator = EnhancedVoigtIntegrator()
 
-            # Configure integrator with batch config parameters
             max_iter = self.config.get('max_iterations', 1000)
             self.integrator.fitting_parameters['max_iterations'] = max_iter
             if hasattr(self.integrator, 'enhanced_fitter') and self.integrator.enhanced_fitter:
@@ -208,7 +196,6 @@ class BatchProcessor:
         and every earlier log file stays open. Its lines are printed and written here
         only: propagated, the root logger's handlers would print each again.
         """
-        # Create logger
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.INFO)
         logger.propagate = False
@@ -216,24 +203,20 @@ class BatchProcessor:
             logger.removeHandler(handler)
             handler.close()
 
-        # Create console handler
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
 
-        # Create file handler
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"batch_processing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         file_handler = logging.FileHandler(log_file)
         file_handler.setLevel(logging.DEBUG)
 
-        # Create formatter
         formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
         console_handler.setFormatter(formatter)
         file_handler.setFormatter(formatter)
 
-        # Add handlers
         logger.addHandler(console_handler)
         logger.addHandler(file_handler)
 
@@ -263,7 +246,6 @@ class BatchProcessor:
         Returns:
             Dictionary with the processing parameters of that nucleus type
         """
-        # Get base parameters from config
         sn_threshold = self.config['sn_thresholds'].get(nucleus_type,
                                                        self.config['sn_thresholds']['default'])
         expected_peaks = self.config['expected_peaks'].get(nucleus_type,
@@ -311,9 +293,7 @@ class BatchProcessor:
         try:
             self.logger.info(f"Processing: {spectrum_file.name}")
 
-            # Load spectrum
             if self._load_spectrum(spectrum_file):
-                # Set up integrator parameters
                 self.integrator.sn_threshold = parameters['sn_threshold']
                 self.integrator.expected_peak_count = parameters['expected_peak_count']
 
@@ -385,7 +365,6 @@ class BatchProcessor:
             if hasattr(self.integrator, 'load_spectrum_only'):
                 success = self.integrator.load_spectrum_only(str(spectrum_file))
             elif hasattr(self.integrator, 'load_nmr_file'):
-                # Fallback to load_nmr_file method
                 success = self.integrator.load_nmr_file(str(spectrum_file))
             else:
                 self.logger.error("No suitable spectrum loading method available")
@@ -495,20 +474,17 @@ class BatchProcessor:
 
         spectrum_files = []
 
-        # Get file handling configuration with fallbacks
         file_config = self.config.get('file_handling', {})
         extensions = file_config.get('extensions', self.config.get('file_extensions', ['.ft2', '.ft', '.pipe', '.ucsf', '.nmrpipe']))
         recursive_search = file_config.get('recursive_search', False)
         pattern_filters = file_config.get('pattern_filters', [])
         exclude_patterns = file_config.get('exclude_patterns', [])
 
-        # Determine search pattern (recursive or not)
         if recursive_search:
             self.logger.debug(f"Using recursive search in {folder}")
         else:
             self.logger.debug(f"Using non-recursive search in {folder}")
 
-        # Find files by extension
         for ext in extensions:
             if recursive_search:
                 pattern = f"**/*{ext}"
@@ -548,12 +524,10 @@ class BatchProcessor:
         # Remove duplicates (can happen with recursive search and multiple extensions)
         spectrum_files = list(set(spectrum_files))
 
-        # Sort by name for consistent processing order
         spectrum_files.sort(key=lambda x: x.name.lower())
 
         self.logger.info(f"Found {len(spectrum_files)} spectrum files in {folder}")
 
-        # Log file discovery details in debug mode
         if self.logger.isEnabledFor(logging.DEBUG) and spectrum_files:
             self.logger.debug("Found spectrum files:")
             for i, file_path in enumerate(spectrum_files[:10]):  # Show first 10
@@ -596,14 +570,12 @@ class BatchProcessor:
         self.stats['processing_start_time'] = datetime.now()
 
         try:
-            # Find spectrum files
             spectrum_files = self.find_spectrum_files(folder_path)
             if not spectrum_files:
                 raise ValueError(f"No spectrum files found in {folder_path}")
 
             self.stats['total_files'] = len(spectrum_files)
 
-            # Process each spectrum
             for i, spectrum_file in enumerate(spectrum_files):
                 try:
                     # Progress reporting
@@ -619,10 +591,8 @@ class BatchProcessor:
                     # The configured parameters of its nucleus type
                     parameters = self.nucleus_parameters(detected_nucleus)
 
-                    # Process the spectrum
                     result = self.process_single_spectrum(spectrum_file, parameters)
 
-                    # Update statistics
                     self.stats['files'].append({key: value for key, value in result.items()
                                                 if key != 'fitted_results'})
                     if result['success']:
@@ -696,7 +666,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Create and run batch processor
     processor = BatchProcessor()
     try:
         results = processor.process_folder(args.folder, args.nucleus)
