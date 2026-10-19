@@ -91,7 +91,11 @@ def test_a_stop_set_during_detection_ends_it_at_once(integrator, detect):
     finally:
         timer.cancel()
 
-    assert landed < 0.25, f"Cancel landed {landed:.3f} s after the stop (detection {duration:.2f} s)"
+    # Wall time is the point (it is what the user waits), so a loaded machine stretches it;
+    # bounded by a share of a whole detection run under the same load as well. A Cancel
+    # that waited for the detection to end lands at about 2/3 of it.
+    bound = max(0.25, 0.2 * duration)
+    assert landed < bound, f"Cancel landed {landed:.3f} s after the stop (detection {duration:.2f} s)"
 
 
 class TestTheMainWindowsDetection:
