@@ -110,7 +110,6 @@ def calculate_pan_limits(
     Returns:
         Tuple of (new_x_lim, new_y_lim)
     """
-    # Calculate delta in data coordinates
     delta_x = end_x - start_x
     delta_y = end_y - start_y
 
@@ -209,7 +208,6 @@ class NMRNavigationHandler:
         # Set focus policy to receive keyboard events
         self._canvas.setFocusPolicy(Qt.StrongFocus)
 
-        # Connect matplotlib events
         self._connection_ids = [
             self._canvas.mpl_connect('button_press_event', self._on_mouse_press),
             self._canvas.mpl_connect('button_release_event', self._on_mouse_release),
@@ -218,7 +216,6 @@ class NMRNavigationHandler:
             self._canvas.mpl_connect('key_press_event', self._on_key_press),
         ]
 
-        # Set default cursor
         self._canvas.setCursor(Qt.OpenHandCursor)
 
     def detach(self):
@@ -228,14 +225,12 @@ class NMRNavigationHandler:
                 self._canvas.mpl_disconnect(cid)
             self._connection_ids = []
 
-            # Restore default cursor
             self._canvas.setCursor(Qt.ArrowCursor)
 
         self._widget = None
         self._canvas = None
         self._ax = None
         self._pan_active = False
-        # Clear rectangle selection state
         self._rect_select_active = False
         self._rect_start_x_data = None
         self._rect_start_y_data = None
@@ -287,7 +282,6 @@ class NMRNavigationHandler:
 
     def _on_mouse_release(self, event):
         """Handle mouse button release event."""
-        # Handle rectangle selection release (middle-click)
         if event.button == 2 and self._rect_select_active:
             self._rect_select_active = False
             self._canvas.setCursor(Qt.OpenHandCursor)
@@ -311,7 +305,6 @@ class NMRNavigationHandler:
                             event.ydata
                         )
 
-            # Clear rectangle selection state
             self._rect_start_x_data = None
             self._rect_start_y_data = None
             self._rect_start_x_pixel = None
@@ -332,17 +325,14 @@ class NMRNavigationHandler:
 
     def _on_mouse_motion(self, event):
         """Handle mouse motion event for panning and rectangle selection."""
-        # Handle rectangle selection drag
         if self._rect_select_active:
             if event.inaxes != self._ax or event.xdata is None:
                 return
 
-            # Check if we've exceeded drag threshold
             if self._rect_start_x_pixel is not None and event.x is not None:
                 dx = abs(event.x - self._rect_start_x_pixel)
                 dy = abs(event.y - self._rect_start_y_pixel)
                 if dx >= self.DRAG_THRESHOLD_PIXELS or dy >= self.DRAG_THRESHOLD_PIXELS:
-                    # Notify for rubber-band update
                     if self.on_rect_drag is not None:
                         self.on_rect_drag(
                             self._rect_start_x_data,
@@ -352,7 +342,6 @@ class NMRNavigationHandler:
                         )
             return
 
-        # Handle pan drag
         if not self._pan_active:
             return
 
@@ -389,14 +378,12 @@ class NMRNavigationHandler:
         current_x_data = self._pan_start_xlim[0] - frac_x * orig_x_range
         current_y_data = self._pan_start_ylim[0] - frac_y * orig_y_range
 
-        # Calculate pan delta from original click position
         new_x_lim, new_y_lim = calculate_pan_limits(
             self._pan_start_xlim, self._pan_start_ylim,
             self._pan_start_x_data, self._pan_start_y_data,
             current_x_data, current_y_data
         )
 
-        # Apply new limits
         self._ax.set_xlim(new_x_lim)
         self._ax.set_ylim(new_y_lim)
 
@@ -410,7 +397,6 @@ class NMRNavigationHandler:
         if event.xdata is None or event.ydata is None:
             return
 
-        # Determine zoom direction
         if event.button == 'up':
             factor = self.ZOOM_FACTOR
         elif event.button == 'down':
@@ -418,7 +404,6 @@ class NMRNavigationHandler:
         else:
             return
 
-        # Calculate new limits
         x_lim = self._ax.get_xlim()
         y_lim = self._ax.get_ylim()
 
@@ -428,7 +413,6 @@ class NMRNavigationHandler:
             factor
         )
 
-        # Apply new limits
         self._ax.set_xlim(new_x_lim)
         self._ax.set_ylim(new_y_lim)
 
@@ -436,14 +420,12 @@ class NMRNavigationHandler:
 
     def _on_key_press(self, event):
         """Handle keyboard events for navigation."""
-        # Get current view
         x_lim = self._ax.get_xlim()
         y_lim = self._ax.get_ylim()
 
         x_range = abs(x_lim[0] - x_lim[1])
         y_range = abs(y_lim[0] - y_lim[1])
 
-        # Calculate pan step
         pan_step_x = x_range * self.PAN_STEP
         pan_step_y = y_range * self.PAN_STEP
 
@@ -466,17 +448,14 @@ class NMRNavigationHandler:
             # Zoom out
             self._zoom_center(1.0 / self.ZOOM_FACTOR)
         elif event.key == 'home':
-            # Reset view
             if self.on_reset_zoom is not None:
                 self.on_reset_zoom()
             elif hasattr(self._widget, 'reset_zoom'):
                 self._widget.reset_zoom()
         elif event.key == 'escape':
-            # Clear selection
             if self.on_escape is not None:
                 self.on_escape()
         elif event.key in ['delete', 'backspace']:
-            # Delete selected peaks
             if self.on_delete is not None:
                 self.on_delete()
         elif event.key == 'd':
