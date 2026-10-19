@@ -112,7 +112,6 @@ def main():
                 ax.set_ylabel("R2,eff (s⁻¹)")
                 ax.grid(True)
 
-            # Hide unused axes
             for j in range(ax_idx + 1, len(axes)):
                 fig.delaxes(axes[j])
 
