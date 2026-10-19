@@ -1177,7 +1177,7 @@ class MultiSpectrumProcessor:
         peak_data = []
         for result in fitted_results:
             if result and result.get('success', False):
-                #Use DETECTED position (peak_x, peak_y) NOT fitted position
+                # Use DETECTED position (peak_x, peak_y) NOT fitted position
                 # (center_x, center_y). Fitted positions can drift during 2D multi-peak
                 # optimization, causing cascade errors to compound.
                 # peak_x/peak_y = where detection found the peak in the current spectrum

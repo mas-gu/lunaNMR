@@ -324,18 +324,18 @@ class NMRParameterManager:
             # Simplified parameters, expanded to the full set
             params = self.parameter_adapter.get_integrator_parameters(nucleus_type)
 
-            #Detection parameters (search windows) must ALWAYS use GUI values
+            # Detection parameters (search windows) must ALWAYS use GUI values
             # Simplified mode only affects FITTING parameters, NOT detection parameters
             params['detection_params']['search_window_x'] = self.current_params['search_window_x']
             params['detection_params']['search_window_y'] = self.current_params['search_window_y']
 
-            #GUI control parameters must ALWAYS use GUI values
+            # GUI control parameters must ALWAYS use GUI values
             # Simplified mode should NOT override fix_positions, fix_linewidths, use_parallel_processing
             params['gui_params']['fix_positions'] = self.current_params.get('fix_positions', False)
             params['gui_params']['fix_linewidths'] = self.current_params.get('fix_linewidths', False)
             params['gui_params']['use_parallel_processing'] = self.current_params.get('use_parallel_processing', False)
 
-            #Centroid parameters must ALWAYS use GUI values
+            # Centroid parameters must ALWAYS use GUI values
             # Simplified mode should NOT override user-specified centroid window sizes
             params['gui_params']['centroid_window_x_ppm'] = self.current_params.get('centroid_window_x_ppm', 0.01)
             params['gui_params']['centroid_window_y_ppm'] = self.current_params.get('centroid_window_y_ppm', 0.1)

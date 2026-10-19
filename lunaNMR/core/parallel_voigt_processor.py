@@ -912,19 +912,19 @@ class ParallelVoigtProcessor:
             'optimization_settings': self._get_optimization_settings(),
             'validation_thresholds': self._get_validation_thresholds(),
 
-            #Overlap resolution parameters
+            # Overlap resolution parameters
             'overlap_resolution_params': self._serialize_overlap_resolution_params(),
 
             # CRITICAL: All peaks context for automatic 2D routing
             'all_peaks_context': all_peaks_context if all_peaks_context is not None else [],
 
-            #PS2D configuration synchronization
+            # PS2D configuration synchronization
             'ps2d_config': self._serialize_ps2d_config(),
 
-            #Spectrum-wide linewidth statistics from Pass 1
+            # Spectrum-wide linewidth statistics from Pass 1
             'spectrum_statistics': spectrum_statistics,
 
-            #Per-peak reference linewidths for reuse
+            # Per-peak reference linewidths for reuse
             'reference_linewidths': reference_linewidths,
 
             # Original reference positions: the cascade's absolute drift limit
@@ -1720,7 +1720,7 @@ def _initialize_worker_fitter(shared_context):
     # CRITICAL: Set gui_params on integrator (needed for PS2D multi-peak activation)
     worker_integrator.gui_params = shared_context['gui_params']
 
-    #Set spectrum-wide linewidth statistics (Pass 2 only)
+    # Set spectrum-wide linewidth statistics (Pass 2 only)
     spectrum_statistics = shared_context.get('spectrum_statistics', None)
     if spectrum_statistics:
         worker_integrator.spectrum_statistics = spectrum_statistics
@@ -1757,7 +1757,7 @@ def _initialize_worker_fitter(shared_context):
         _restore_optimization_settings(worker_fitter, shared_context['optimization_settings'])
         _restore_validation_thresholds(worker_fitter, shared_context['validation_thresholds'])
 
-        #Overlap resolution settings
+        # Overlap resolution settings
         _restore_overlap_resolution_params(worker_fitter, shared_context['overlap_resolution_params'])
 
         # Set noise_level on worker_integrator for fit_overlap_group_2d() weak peak detection
