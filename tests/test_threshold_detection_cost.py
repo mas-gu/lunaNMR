@@ -36,7 +36,9 @@ def test_the_noise_is_estimated_once_per_detection(integrator, monkeypatch):
 
 
 def test_a_low_threshold_detection_takes_seconds(integrator):
-    start = time.time()
+    """CPU time, not wall time: a busy machine (a parallel test run) stretches the wall
+    clock past the bound without the detection doing any more work."""
+    start = time.process_time()
     peaks = integrator._detect_peaks_by_threshold(2.5 * integrator._estimate_noise_level_advanced())
     assert len(peaks) > 10000
-    assert time.time() - start < 30
+    assert time.process_time() - start < 30
