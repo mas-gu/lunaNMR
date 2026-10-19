@@ -289,7 +289,6 @@ def color_with_alpha(hex_color: str, alpha: float) -> str:
 
 
 # DESIGN SYSTEM VALIDATION
-# Ensure all constants follow design principles
 
 def validate_design_system():
     """
@@ -298,13 +297,11 @@ def validate_design_system():
 
     This is primarily for testing and development purposes.
     """
-    # Validate spacing follows 8pt grid
     spacing_values = [SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL]
     for i, spacing in enumerate(spacing_values):
         if spacing % 4 != 0:
             raise ValueError(f"Spacing value {spacing} does not follow 4px grid")
 
-    # Validate corner radii are reasonable
     radii = [BUTTON_CORNER_RADIUS, FRAME_CORNER_RADIUS, DIALOG_CORNER_RADIUS, CARD_CORNER_RADIUS]
     for radius in radii:
         if radius < 0 or radius > 20:
@@ -326,7 +323,6 @@ def validate_design_system():
 
 
 if __name__ == "__main__":
-    # Run validation when module is executed directly
     try:
         validate_design_system()
         print("✓ Design system validation passed")
