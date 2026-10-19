@@ -2,7 +2,6 @@ import glob
 import os
 import re
 
-# Define input directory and file pattern
 input_directory = "data_comp"
 #file_pattern = "*_peak_list_2_transformed.txt"
 
@@ -22,7 +21,6 @@ if not input_files:
 else:
     # Function to extract the number before "_peak" from filename
     def extract_number(filename):
-        # Extract just the filename without path
         basename = os.path.basename(filename)
         # Look for number before "_peak"
         match = re.search(r'(\d+)_peak', basename)
@@ -31,7 +29,6 @@ else:
     # Sort files by the number before "_peak"
     sorted_files = sorted(input_files, key=extract_number)
     
-    # Read all files and store their content
     file_data = {}
     max_lines = 0
     
@@ -44,14 +41,11 @@ else:
             file_data[filename] = lines
             max_lines = max(max_lines, len(lines))
     
-    # Write the compiled output
     with open(os.path.join(input_directory, output_file), 'w') as outfile:
-        # Write headers (filenames)
         headers = list(file_data.keys())
         header_line = "\t,\t,\t,\t,\t".join(headers)  # Tab-comma-tab for separation
         outfile.write(header_line + "\n")
         
-        # Write data rows
         for row_idx in range(max_lines):
             row_data = []
             for filename in headers:
@@ -60,7 +54,6 @@ else:
                 else:
                     row_data.append("")  # Empty cell if file has fewer lines
             
-            # Join with tab-comma-tab for separation
             row_line = "\t,\t,\t,\t,\t".join(row_data)
             outfile.write(row_line + "\n")
     
