@@ -61,7 +61,6 @@ class ConfigManager:
         """Initialize the configuration manager."""
         self.logger = logging.getLogger(__name__)
 
-        # Default configuration template
         self.default_config = {
             'processing': {
                 'sn_thresholds': {
@@ -201,10 +200,8 @@ class ConfigManager:
                 raise UnreadConfigKeys(
                     f"{config_path} sets {', '.join(unread)}, which batch does not read")
 
-            # Merge with defaults
             merged_config = self._merge_configs(self.default_config, user_config)
 
-            # Validate configuration
             self._validate_config(merged_config)
 
             return merged_config
@@ -227,16 +224,13 @@ class ConfigManager:
         Raises:
             ValueError: If configuration is invalid
         """
-        # Validate before saving
         self._validate_config(config)
 
         config_path = Path(config_path)
 
         try:
-            # Ensure directory exists
             config_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Save with pretty formatting
             with open(config_path, 'w') as f:
                 json.dump(config, f, indent=2, sort_keys=True)
 
@@ -264,7 +258,6 @@ class ConfigManager:
 
         preset = self.presets[preset_name]
 
-        # Merge preset with defaults
         config = self._merge_configs(self.default_config, preset)
 
         self.logger.info(f"Using preset configuration: {preset_name}")
@@ -312,7 +305,6 @@ class ConfigManager:
                 # Recursively merge nested dictionaries
                 merged[key] = self._merge_configs(merged[key], value)
             else:
-                # Override value
                 merged[key] = value
 
         return merged
@@ -329,29 +321,24 @@ class ConfigManager:
         """
         errors = []
 
-        # Validate processing parameters
         if 'processing' in config:
             proc_config = config['processing']
 
-            # Validate S/N thresholds
             if 'sn_thresholds' in proc_config:
                 for nucleus, threshold in proc_config['sn_thresholds'].items():
                     if not isinstance(threshold, (int, float)) or threshold <= 0:
                         errors.append(f"Invalid S/N threshold for {nucleus}: {threshold}")
 
-            # Validate expected peaks
             if 'expected_peaks' in proc_config:
                 for nucleus, peaks in proc_config['expected_peaks'].items():
                     if not isinstance(peaks, int) or peaks <= 0:
                         errors.append(f"Invalid expected peaks for {nucleus}: {peaks}")
 
-            # Validate quality threshold
             if 'quality_threshold' in proc_config:
                 qt = proc_config['quality_threshold']
                 if not isinstance(qt, (int, float)) or not (0 < qt <= 1):
                     errors.append(f"Quality threshold must be between 0 and 1: {qt}")
 
-        # Validate file handling parameters
         if 'file_handling' in config:
             fh_config = config['file_handling']
 
@@ -363,7 +350,6 @@ class ConfigManager:
                         if not isinstance(ext, str) or not ext.startswith('.'):
                             errors.append(f"Invalid file extension: {ext}")
 
-        # Validate logging parameters
         if 'logging' in config:
             log_config = config['logging']
 
@@ -397,7 +383,6 @@ class ConfigManager:
         """
         output_path = Path(output_path)
 
-        # Create a comprehensive example config
         example_config = {
             "_comment": "Example configuration for lunaNMR batch processing",
             "_description": {
@@ -409,7 +394,6 @@ class ConfigManager:
             **self.default_config
         }
 
-        # Add comments to sections
         example_config["processing"]["_comment"] = "S/N thresholds and peak count expectations by nucleus type"
         example_config["logging"]["_comment"] = "Logging level and progress reporting settings"
 
@@ -422,15 +406,12 @@ if __name__ == "__main__":
     # Example usage
     cm = ConfigManager()
 
-    # Create example configurations
     print("Available presets:")
     for name, desc in cm.get_available_presets().items():
         print(f"  {name}: {desc}")
 
-    # Create preset configuration files
     cm.create_preset_config_files("config_presets")
 
-    # Create example configuration
     cm.create_example_config("example_config.json")
 
     print("\nConfiguration files created in current directory")
