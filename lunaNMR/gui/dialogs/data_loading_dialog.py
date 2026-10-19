@@ -73,11 +73,9 @@ class DataLoadingDialog(BaseDialog):
         self.current_nmr_folder = current_nmr_folder
         self.current_peak_folder = current_peak_folder
 
-        # Store selections
         self.nmr_file = None
         self.peak_file = None
 
-        # Build UI
         self.setup_ui()
 
         # Center on parent
@@ -131,7 +129,6 @@ class DataLoadingDialog(BaseDialog):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        # Add stretch to push buttons to bottom
         layout.addStretch()
 
         # Button row
@@ -297,7 +294,6 @@ class DataLoadingDialog(BaseDialog):
         layout = QHBoxLayout()
         layout.setSpacing(SPACING_SM)
 
-        # Add stretch to center buttons
         layout.addStretch()
 
         # Load button (primary - enabled based on validation)
@@ -329,7 +325,6 @@ class DataLoadingDialog(BaseDialog):
         self.load_button.clicked.connect(self.on_load)
         layout.addWidget(self.load_button)
 
-        # Cancel button (secondary)
         cancel_button = QPushButton("Cancel")
         cancel_button.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         cancel_button.setMinimumWidth(120)
@@ -352,7 +347,6 @@ class DataLoadingDialog(BaseDialog):
         cancel_button.clicked.connect(self.reject)
         layout.addWidget(cancel_button)
 
-        # Add stretch to center buttons
         layout.addStretch()
 
         return layout
@@ -372,7 +366,6 @@ class DataLoadingDialog(BaseDialog):
             self.nmr_file = file_path
             self.nmr_path_edit.setText(file_path)
 
-            # Update current folder
             self.current_nmr_folder = str(Path(file_path).parent)
 
             logger.debug(f"NMR file selected: {file_path}")
@@ -393,7 +386,6 @@ class DataLoadingDialog(BaseDialog):
             self.peak_file = file_path
             self.peak_path_edit.setText(file_path)
 
-            # Update current folder
             self.current_peak_folder = str(Path(file_path).parent)
 
             logger.debug(f"Peak list file selected: {file_path}")
@@ -408,7 +400,6 @@ class DataLoadingDialog(BaseDialog):
         """
         status_parts = []
 
-        # Build status message
         if self.nmr_file:
             nmr_name = Path(self.nmr_file).name
             status_parts.append(f"📊 NMR: {nmr_name}")
@@ -417,7 +408,6 @@ class DataLoadingDialog(BaseDialog):
             peak_name = Path(self.peak_file).name
             status_parts.append(f"📌 Peaks: {peak_name}")
 
-        # Update status label
         if status_parts:
             self.status_label.setText(" | ".join(status_parts))
             self.status_label.setStyleSheet(f"""
@@ -430,7 +420,6 @@ class DataLoadingDialog(BaseDialog):
         else:
             self.status_label.setText("")
 
-        # Validate and enable/disable load button (workflow-aware)
         if self.workflow_mode == 'sn_threshold':
             # S/N Threshold mode: Only NMR file required
             if self.nmr_file:
@@ -466,7 +455,6 @@ class DataLoadingDialog(BaseDialog):
             )
             return
 
-        # Verify files exist
         if not Path(self.nmr_file).exists():
             QMessageBox.critical(
                 self,
