@@ -1,5 +1,5 @@
 # ABOUTME: Every path that labels a fit labels the same (R-squared, success, near-noise, S/N) identically.
-# ABOUTME: Real DNAJA1 fits: the series pipeline, the integrator called directly, the overlay refit.
+# ABOUTME: Real DNAJA1 fits: the series pipeline, the integrator called directly, the overlay refit, the browser.
 
 """
 The fit-quality label decides what the Kd loader and the matrices keep: they drop a
@@ -142,3 +142,31 @@ class TestTheOverlayRefit:
                 checked += 1
         assert checked
 
+
+class TestTheResultsBrowser:
+    def test_the_status_column_shows_the_label_the_fit_carries(self, stored_series):
+        from PySide6.QtWidgets import QApplication
+        from lunaNMR.gui.dialogs.results_browser_dialog import ResultsBrowserDialog
+        from lunaNMR.processors.multi_spectrum_processor import BatchResults
+        QApplication.instance() or QApplication(sys.argv)
+        batch = BatchResults()
+        for name, result in stored_series['results'].items():
+            batch.add_result(name, result)
+        dialog = ResultsBrowserDialog(batch_results=batch)
+        try:
+            carried = {}
+            for name, result in stored_series['results'].items():
+                for fit in result['fitted_results']:
+                    carried.setdefault(str(fit['assignment']), {})[name] = fit['fitting_quality']
+            shown = 0
+            for assignment in ('28LysH', '48IleH', '3LysH'):
+                dialog.peak_combo.setCurrentText(assignment)
+                dialog.on_peak_selected(dialog.peak_combo.currentIndex())
+                table = dialog.tracking_table
+                for row in range(table.rowCount()):
+                    name = table.item(row, 0).text()
+                    assert table.item(row, 6).text() == carried[assignment][name]
+                    shown += 1
+            assert shown
+        finally:
+            dialog.deleteLater()

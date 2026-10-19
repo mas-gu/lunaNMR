@@ -14,10 +14,11 @@ from PySide6.QtGui import QColor
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
+from lunaNMR.gui.styles.quality_colors import peak_quality_label, quality_color
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
-    PRIMARY_TEXT, SECONDARY_TEXT, SUCCESS_GREEN, ERROR_RED, WARNING_ORANGE,
+    PRIMARY_TEXT, SECONDARY_TEXT, SUCCESS_GREEN, ERROR_RED,
     INFO_BLUE,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
@@ -526,20 +527,15 @@ class ResultsBrowserDialog(BaseDialog):
                         volume = peak.get('volume', 0)
                         self.tracking_table.setItem(row, 4, QTableWidgetItem(f"{volume:.2e}"))
 
-                        # R²
+                        # R², coloured by the label the fit carries
                         r2 = peak.get('r_squared', 0)
+                        status = peak_quality_label(peak)
                         r2_item = QTableWidgetItem(f"{r2:.4f}")
-                        if r2 < 0.7:
-                            r2_item.setForeground(QColor(ERROR_RED))
-                        elif r2 < 0.85:
-                            r2_item.setForeground(QColor(WARNING_ORANGE))
-                        else:
-                            r2_item.setForeground(QColor(SUCCESS_GREEN))
+                        r2_item.setForeground(QColor(quality_color(status)))
                         self.tracking_table.setItem(row, 5, r2_item)
 
                         # Status
-                        status = "Good" if r2 >= 0.8 else ("Fair" if r2 >= 0.7 else "Poor")
-                        self.tracking_table.setItem(row, 6, QTableWidgetItem(status))
+                        self.tracking_table.setItem(row, 6, QTableWidgetItem(status or "Unknown"))
 
     def on_evolution_peak_selected(self, index: int = None):
         """Handle peak/property selection for evolution plot."""
@@ -677,15 +673,10 @@ class ResultsBrowserDialog(BaseDialog):
             lw_f1 = peak.get('lw_f1') or peak.get('linewidth_y', 0)
             self.details_table.setItem(row, 6, QTableWidgetItem(f"{lw_f1:.3f}"))
 
-            # R²
+            # R², coloured by the label the fit carries
             r2 = peak.get('r_squared', 0)
             r2_item = QTableWidgetItem(f"{r2:.4f}")
-            if r2 < 0.7:
-                r2_item.setForeground(QColor(ERROR_RED))
-            elif r2 < 0.85:
-                r2_item.setForeground(QColor(WARNING_ORANGE))
-            else:
-                r2_item.setForeground(QColor(SUCCESS_GREEN))
+            r2_item.setForeground(QColor(quality_color(peak_quality_label(peak))))
             self.details_table.setItem(row, 7, r2_item)
 
     def export_results(self):
