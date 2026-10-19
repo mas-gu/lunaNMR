@@ -199,10 +199,10 @@ restriction; the search window is 0.070 ppm in both dimensions for ¹⁵N and ¹
 
 <section id="voigt">
 <h2>Voigt fitting</h2>
-<p><code>core/enhanced_voigt_fitter.py</code> fits a <strong>Voigt profile</strong> (convolution of Gaussian
-and Lorentzian) to each peak's 1D cross-sections, with <strong>ArPLS baseline correction</strong>
-(Asymmetrically Reweighted Penalized Least Squares). Overlapping peaks are handled by multi-peak
-deconvolution — simultaneously fitting neighbours rather than one at a time.</p>
+<p>Each peak is modelled as a 2D <strong>Voigt profile</strong> (convolution of Gaussian and
+Lorentzian in each dimension), with <strong>ArPLS baseline correction</strong> (Asymmetrically
+Reweighted Penalized Least Squares). Overlapping peaks are fitted together, as one cluster,
+rather than one at a time.</p>
 <p><code>core/core_integrator.py</code> (<code>EnhancedVoigtIntegrator</code>) is the master orchestrator:
 it runs detection, centroid refinement, overlap clustering, and fits every cluster, a single peak
 included, with the 2D PS2D path.</p>
@@ -210,11 +210,12 @@ included, with the 2D PS2D path.</p>
 
 <section id="ps2d">
 <h2>PS2D — 2D simultaneous multi-peak fitting</h2>
-<p>When peaks are too close for 1D cross-sections to separate them, LunaNMR fits the full 2D region
-with <strong>all</strong> overlapping peaks at once. This is an exact port of the C++ PINT algorithm.</p>
-<h3>When it triggers</h3>
-<p>Automatically when peaks are separated by &lt; 0.08 ppm (¹H) or &lt; 0.8 ppm (¹⁵N). Typical gain:
-1D cross-section fit R² ≈ 0.84 → 2D fit R² ≈ 0.90, position accuracy &lt; 10 ppb.</p>
+<p>Every peak is fitted in 2D over its region; peaks whose windows overlap are fitted
+<strong>all</strong> at once. This is an exact port of the C++ PINT algorithm.</p>
+<h3>When peaks are fitted together</h3>
+<p>When they are separated by &lt; 0.08 ppm (¹H) or &lt; 0.8 ppm (¹⁵N). On such a pair, fitting
+each peak's 1D cross-sections gave R² ≈ 0.84 against R² ≈ 0.90 for the joint 2D fit, position
+accuracy &lt; 10 ppb.</p>
 <h3>Clustering (critical)</h3>
 <p><code>identify_overlap_clusters()</code> is called <strong>once</strong> before fitting and builds
 clusters by agglomerative closest-pair merging: two peaks overlap when their ellipses touch, and clusters

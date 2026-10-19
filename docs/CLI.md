@@ -557,8 +557,8 @@ python -m lunaNMR batch <folder> [--preset 1H] [--config ...] [--optimize] ...
 ```
 Flags pass straight through to `batch_processing`.
 Each spectrum is detected by S/N (the threshold and peak count from the preset or config
-entry of its nucleus type, tuned per spectrum by the optimiser unless the config disables
-it), and its detected peaks
+entry of its nucleus type; tuned per spectrum by the optimiser only under `--optimize` or a
+config that enables it), and its detected peaks
 are fitted as the GUI's **Fit Spectrum** fits them after a Detect: the same processor
 (`SingleSpectrumProcessor.process_peak_list`), the main window's default parameters, the
 PS2D configuration of the nucleus detected on load, parallel, clusters computed afresh. A
