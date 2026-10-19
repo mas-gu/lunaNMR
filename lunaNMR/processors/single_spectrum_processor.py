@@ -57,7 +57,6 @@ def write_fitting_results_csv(fitted_results: List[Dict], output_file) -> None:
         lw_x = 0.0
         lw_y = 0.0
 
-        # Try to get from x_fit/y_fit dicts first
         x_fit = result.get('x_fit', {})
         y_fit = result.get('y_fit', {})
 
@@ -198,7 +197,6 @@ class SingleSpectrumProcessor:
         self._pre_learned_statistics = pre_learned_statistics  # Store for parallel fitting
         # Store original reference positions for cascade mode absolute drift limiting
         self._original_reference_positions = processing_options.get('original_reference_positions') if processing_options else None
-        # Store reference linewidths for per-peak linewidth reuse
         self._reference_linewidths = processing_options.get('reference_linewidths', {}) if processing_options else {}
         self._force_reference_linewidths = processing_options.get('force_reference_linewidths', False) if processing_options else False
         # Skip series_params to force fresh adaptive optimization (Independent mode)
@@ -211,10 +209,8 @@ class SingleSpectrumProcessor:
             if locked_clusters_by_assignment is None and pre_learned_statistics is None:
                 restore_base_ps2d_config()
 
-            # Update integrator parameters from parameter manager
             self.sync_parameters_to_integrator()
 
-            # Override adaptive optimization if skip_adaptive is requested
             if processing_options and processing_options.get('skip_adaptive', False):
                 if hasattr(self.integrator, 'gui_params') and self.integrator.gui_params:
                     self.integrator.gui_params['use_adaptive_optimization'] = False
@@ -245,17 +241,14 @@ class SingleSpectrumProcessor:
 
         params = self.parameter_manager.get_integrator_parameters()
 
-        # Apply detection parameters
         detection_params = params['detection_params']
         self.integrator.set_search_window(
             detection_params['search_window_x'],
             detection_params['search_window_y']
         )
 
-        # Apply fitting parameters
         self.integrator.fitting_parameters.update(params['fitting_params'])
 
-        # Apply GUI parameters
         self.integrator.gui_params = params['gui_params']
 
         log_info("Single spectrum processor parameters synchronized")
@@ -297,17 +290,14 @@ class SingleSpectrumProcessor:
             log_info(f"Parallel mode: Using {len(reference_linewidths)} reference linewidths")
 
         fallback_reason = "the cluster-based parallel fitter is unavailable"
-        # Check if enhanced parallel fitting is available
         if (hasattr(self.integrator, 'enhanced_fitter') and
             hasattr(self.integrator.enhanced_fitter, 'enhanced_peak_fitting_parallel')):
 
-            # Define progress callback for parallel processing
             def parallel_progress_callback(progress, status, current_item):
                 if self.progress_callback and self.processing_active:
                     self.progress_callback(progress, status, current_item)
 
             try:
-                # Use new complete parallel implementation
                 # Returns tuple: (fitted_results, learned_statistics)
                 # skip_series_params forces fresh adaptive optimization (Independent mode)
                 skip_series_params = getattr(self, '_skip_series_params', False)
@@ -330,11 +320,9 @@ class SingleSpectrumProcessor:
                     fitted_results = result
                     learned_statistics = None
                 
-                # Ensure results is a list
                 if not isinstance(fitted_results, list):
                     fitted_results = [fitted_results] if fitted_results else []
                 
-                # Add metadata to results
                 for i, result in enumerate(fitted_results):
                     if result:
                         # A fallback's own mode is the one thing that says it happened
@@ -371,16 +359,13 @@ class SingleSpectrumProcessor:
         log_warning(f"Falling back to the original parallel fitter, with no locked clusters "
                     f"or learned statistics, because {fallback_reason}")
 
-        # Fallback to existing ParallelPeakFitter (unchanged)
         try:
             from lunaNMR.processors.parallel_fitting import ParallelPeakFitter
 
             log_info(f"Using original parallel fitting for {len(peak_list)} peaks")
 
-            # Create parallel fitter
             parallel_fitter = ParallelPeakFitter(self.integrator)
 
-            # Define progress callback for original parallel processing
             def original_parallel_progress_callback(completed, total, _current_assignment):
                 if self.progress_callback and self.processing_active:
                     progress = (completed / total) * 100
@@ -390,10 +375,8 @@ class SingleSpectrumProcessor:
                         "Processing peaks in parallel"
                     )
 
-            # Run original parallel fitting
             fitted_results = parallel_fitter.fit_peaks_parallel(peak_list, original_parallel_progress_callback)
 
-            # Add metadata to results
             for i, result in enumerate(fitted_results):
                 if result:
                     result['processing_mode'] = 'original_parallel'
@@ -422,34 +405,28 @@ class SingleSpectrumProcessor:
                 assignment = row.get('Assignment', f'Peak_{i+1}')
                 peak_tuples.append((peak_x, peak_y, assignment))
 
-            # Update progress
             if self.progress_callback:
                 self.progress_callback(10, "Global optimization", "Analyzing peak patterns...")
 
-            # Use global optimization from integrator
             optimization_report = self.integrator.optimize_peak_list_globally(
                 peak_tuples,
                 convergence_threshold=0.05,
                 max_rounds=5
             )
 
-            # Update progress
             if self.progress_callback:
                 self.progress_callback(90, "Global optimization", "Finalizing results...")
 
-            # Extract fitted results from optimization report
             fitted_results = []
             if 'fitted_results' in optimization_report:
                 fitted_results = optimization_report['fitted_results']
 
-                # Add metadata
                 for i, result in enumerate(fitted_results):
                     if result:
                         result['processing_mode'] = 'global_optimization'
                         if 'peak_number' not in result:
                             result['peak_number'] = i + 1
 
-            # Get summary statistics
             if 'optimization_summary' in optimization_report:
                 summary = optimization_report['optimization_summary']
                 success_rate = summary.get('final_success_rate', 0)
@@ -470,7 +447,6 @@ class SingleSpectrumProcessor:
         successful_count = len(fitted_results)
         success_rate = (successful_count / total_peaks * 100) if total_peaks > 0 else 0
 
-        # Calculate quality statistics
         quality_scores = []
         for result in fitted_results:
             r_squared = result.get('avg_r_squared', 0)
@@ -520,7 +496,6 @@ class SingleSpectrumProcessor:
         Returns:
             List of clusters by assignment: [['Peak1', 'Peak2'], ['Peak3'], ...]
         """
-        # Build all_peaks_context
         all_peaks_context = []
         for _, row in peak_list.iterrows():
             all_peaks_context.append({
@@ -531,7 +506,6 @@ class SingleSpectrumProcessor:
                 'pos_y': float(row['Position_Y'])
             })
 
-        # Get position-based clusters
         position_clusters = self.integrator.identify_overlap_clusters(all_peaks_context)
 
         # Build position → assignment mapping
@@ -543,7 +517,6 @@ class SingleSpectrumProcessor:
             if x is not None and y is not None:
                 position_to_assignment[(x, y)] = assignment
 
-        # Convert position clusters to assignment clusters
         assignment_clusters = []
         for cluster_positions in position_clusters:
             cluster_assignments = []
