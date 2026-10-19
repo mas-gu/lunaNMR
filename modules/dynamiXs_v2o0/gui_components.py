@@ -999,9 +999,9 @@ class SpectraInputWidget(QFrame):
     Modes:
     - mode='full': Full dual-field support with all experiments (T1, T2, hetNOE) - for Model-Free
     - mode='t1t2': Multi-field support for T1/T2 only (no hetNOE) - for T1/T2 Fitting
-    - mode='single': Simple single-folder input - legacy mode
+    - mode='single': Simple single-folder input
 
-    Legacy parameter single_experiment_mode=True maps to mode='single'.
+    single_experiment_mode=True maps to mode='single'.
     """
 
     folders_changed = Signal()
@@ -1074,7 +1074,7 @@ class SpectraInputWidget(QFrame):
         main_layout.addWidget(peak_group)
 
         if self._mode == 'single':
-            # Simple single-folder mode (legacy)
+            # Simple single-folder mode
             self._setup_single_mode(main_layout)
         elif self._mode == 't1t2':
             # Multi-field T1/T2 mode (no hetNOE)
@@ -1597,12 +1597,3 @@ class SpectraInputWidget(QFrame):
         it contains the spectra. Returns empty string if not set.
         """
         return self._field1_folder
-
-    # Legacy compatibility methods
-    def get_experiment_folders(self) -> dict:
-        """Get Field 1 experiment folders (legacy compatibility)."""
-        return self.get_field1_experiments()
-
-    def get_delay_summary(self) -> dict:
-        """Get Field 1 delay summaries (legacy compatibility)."""
-        return self.get_field1_delays()

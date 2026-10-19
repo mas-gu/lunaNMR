@@ -853,25 +853,6 @@ def get_plot_title(column):
             return title
     return column
 
-def set_ylimits(ax, column, data):
-    """Set reasonable y-limits based on data type (legacy function for compatibility)"""
-    if 'R1' in column:
-        ax.set_ylim(0, max(3, data.max() * 1.1))
-    elif 'R2' in column:
-        ax.set_ylim(0, max(30, data.max() * 1.1))
-    elif 'hetNOE' in column:
-        ax.set_ylim(0, 1.2)
-    elif 'J0' in column:
-        ax.set_ylim(0, data.max() * 1.2)
-    elif 'JwN' in column or 'JwH_087' in column:
-        ax.set_ylim(0, data.max() * 1.2)
-    elif 'S2' in column:
-        ax.set_ylim(0, 1)
-    elif 'te' in column: #tau_e
-        ax.set_ylim(0, data.max() * 1.2)
-    elif 'Rex' in column:
-        ax.set_ylim(0, data.max() * 1.2)
-
 def interactive_mode():
     """Run script in interactive mode"""
     print("=== Dual-Field NMR Data Plotting Tool (with Y-limits Configuration and Secondary Structure) ===\n")

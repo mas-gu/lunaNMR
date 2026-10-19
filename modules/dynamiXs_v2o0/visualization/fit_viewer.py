@@ -73,7 +73,7 @@ class FitViewer(QMainWindow):
         parent : QWidget, optional
             Parent widget
         json_folder : str, optional
-            Path to JSON data folder (legacy single folder)
+            Path to JSON data folder (single folder)
         json_folders : list, optional
             List of JSON data folder paths (for multi-experiment support)
         source_series_map : dict, optional
@@ -784,7 +784,7 @@ class FitViewer(QMainWindow):
         return None
 
     def _update_plots(self):
-        """Update plots with current selection (legacy method kept for compatibility)"""
+        """Update plots for the selected residue"""
         current_item = self.residue_list.currentItem()
         if current_item:
             residue = current_item.data(Qt.UserRole)
@@ -1168,7 +1168,7 @@ def open_fit_viewer(parent=None, json_folder=None, json_folders=None):
     parent : QWidget, optional
         Parent widget
     json_folder : str, optional
-        Path to JSON data folder (legacy single folder)
+        Path to JSON data folder (single folder)
     json_folders : list, optional
         List of JSON data folder paths (for multi-experiment support)
 

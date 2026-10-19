@@ -47,12 +47,10 @@ class SpectrumPlotter(MatplotlibWidget):
     Inherits from MatplotlibWidget for consistent matplotlib integration.
 
     Signals:
-        peak_clicked: Emitted when a peak is clicked (x_ppm, y_ppm) [legacy]
         peak_edit_requested: Emitted when modifier+click for peak editing (x_ppm, y_ppm, modifiers)
         peak_select_requested: Emitted when middle-click to select peak for moving (x_ppm, y_ppm)
     """
 
-    peak_clicked = Signal(float, float)
     peak_edit_requested = Signal(float, float, object)  # x_ppm, y_ppm, Qt.KeyboardModifiers
     peak_select_requested = Signal(float, float)  # x_ppm, y_ppm - middle-click selection
     peak_left_click_requested = Signal(float, float)  # x_ppm, y_ppm - left-click (no drag)
@@ -638,8 +636,6 @@ class SpectrumPlotter(MatplotlibWidget):
         """
         # Emit signal for main window to handle peak editing
         self.peak_edit_requested.emit(x_ppm, y_ppm, modifiers)
-        # Also emit legacy signal for backward compatibility
-        self.peak_clicked.emit(x_ppm, y_ppm)
 
     def _on_peak_select_request(self, x_ppm: float, y_ppm: float):
         """

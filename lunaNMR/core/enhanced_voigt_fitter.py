@@ -96,8 +96,7 @@ class EnhancedVoigtFitter:
             self.simplified_param_manager = None
             self.parameter_adapter = None
 
-        # Consensus fitting engine was removed (Phase 2 cleanup - orphaned overlap subsystem)
-        # Kept flag for backward compatibility with any code checking this attribute
+        # There is no consensus fitting engine; fit_with_consensus returns None
         self.use_automated_fitting = False
 
     def set_gui_parameters(self, gui_fitting_params):
@@ -129,7 +128,7 @@ class EnhancedVoigtFitter:
         self.gui_window_x = self.gui_fitting_params.get('fitting_window_x', 0.2)  # default fallback
         self.gui_window_y = self.gui_fitting_params.get('fitting_window_y', 2.0)  # default fallback
 
-        # CRITICAL FIX: Update actual fitting parameters used by curve_fit
+        #Update actual fitting parameters used by curve_fit
         if 'max_iterations' in self.gui_fitting_params:
             self.fitting_parameters['max_iterations'] = self.gui_fitting_params['max_iterations']
 
@@ -978,7 +977,7 @@ class EnhancedVoigtFitter:
 
             # Perform monitored fitting with bounds validation
             try:
-                # NEW: Validate initial guess against bounds to prevent 'x0 is infeasible' errors
+                # Validate initial guess against bounds to prevent 'x0 is infeasible' errors
                 validated_guess, validated_bounds, validation_info = self.validate_and_fix_initial_guess(
                     initial_guess, bounds, x_data, y_data
                 )
@@ -2407,7 +2406,7 @@ class EnhancedVoigtFitter:
                     fit_result = self.fit_peak_enhanced(x_data, y_data, center_pos, nucleus_type,
                                                       method='single_step')  # Use standard method for single peaks
 
-                # CRITICAL FIX: Handle cases where fit_result might be a tuple instead of dict
+                #Handle cases where fit_result might be a tuple instead of dict
                 if isinstance(fit_result, tuple):
                     # Convert tuple to dict format (assuming standard tuple format)
                     fit_result = {
@@ -2714,7 +2713,7 @@ class EnhancedVoigtFitter:
             bounds_fixes = []
 
             for i, (param, (lower, upper)) in enumerate(zip(initial_params, bounds)):
-                # CRITICAL FIX: Check for inverted bounds first
+                #Check for inverted bounds first
                 if lower > upper:
                     # Fix by swapping and expanding around parameter
                     param_range = abs(lower - upper)

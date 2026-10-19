@@ -844,7 +844,7 @@ class T1T2FittingPage(BasePage):
 
     def _init_file_vars(self):
         """Initialize file path variables for dual-field support."""
-        # Legacy single-file input (for backward compatibility)
+        # Single-file input
         self.input_file = None
 
         # Field 1 files
@@ -2841,8 +2841,6 @@ class IntegratedAnalysisPage(BasePage):
         scroll_content.setLayout(scroll_layout)
 
         # Subtitle
-        # Note: "From NMR Spectra" option removed - use LunaNMR Fit Series with
-        # "Extract delays" checkbox to produce CSVs, then load them here.
         subtitle = create_secondary_label("Automated workflow from NMR relaxation data to model-free parameters")
         scroll_layout.addWidget(subtitle)
 

@@ -87,7 +87,7 @@ class T1T2ResultsViewer(QMainWindow):
         # Multi-experiment data storage {key: DataFrame}
         self.experiment_data = {}
 
-        # Data storage (legacy single file mode)
+        # Data storage (single file mode)
         self.df = None
         self.show_errors = True
         self.exclude_outliers = False

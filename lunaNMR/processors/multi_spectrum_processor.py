@@ -162,8 +162,8 @@ def measure_repeat_scale(intensity_matrix, columns) -> Optional[Dict[str, Any]]:
 # flags were exactly that: computed on every fit, stopping at this boundary.
 #
 # They default to None, not False. A peak that did not report them is UNKNOWN, and a
-# reader that cannot tell unknown from "not pinned" would silently treat a legacy
-# series as clean. See lunaNMR.utils.quality_categories.usable_points.
+# reader that cannot tell unknown from "not pinned" would silently treat a series
+# written before the flags existed as clean. See lunaNMR.utils.quality_categories.usable_points.
 TIDY_COLUMNS = {
     'spectrum_name': '',
     'assignment': 'Unknown',
@@ -252,7 +252,7 @@ class MultiSpectrumProcessor:
                 self.voigt_params.get('fitting_params', {})
             )
         else:
-            # Flat structure (backward compatibility)
+            # Flat structure
             self.integrator.gui_params = self.voigt_params.copy()
             self.integrator.fitting_parameters.update(self.voigt_params)
 
@@ -435,7 +435,8 @@ class MultiSpectrumProcessor:
                           stop=None) -> Dict[str, Any]:
         """
         Main entry point for processing NMR series.
-        Returns comprehensive results in both new and legacy-compatible formats.
+        Returns comprehensive results, each peak keyed both by fit field and by
+        peak-list column name.
 
         Args:
             nmr_files: List of NMR spectrum file paths
@@ -1179,7 +1180,7 @@ class MultiSpectrumProcessor:
         peak_data = []
         for result in fitted_results:
             if result and result.get('success', False):
-                # CRITICAL FIX: Use DETECTED position (peak_x, peak_y) NOT fitted position
+                #Use DETECTED position (peak_x, peak_y) NOT fitted position
                 # (center_x, center_y). Fitted positions can drift during 2D multi-peak
                 # optimization, causing cascade errors to compound.
                 # peak_x/peak_y = where detection found the peak in the current spectrum
@@ -1441,7 +1442,7 @@ class MultiSpectrumProcessor:
                 'fitted': False,
                 'voigt_fit_data': None,
 
-                # Add legacy format fields for backward compatibility
+                # The same values under the peak-list column names
                 'Assignment': assignment,
                 'Position_X': ref_x,
                 'Position_Y': ref_y,
@@ -1612,11 +1613,11 @@ class MultiSpectrumProcessor:
                         'y_fit': y_fit
                     },
 
-                    # Update legacy fields as well
+                    # The same values under the peak-list column names
                     'Position_X': final_x,
                     'Position_Y': final_y,
                     'Height': height,
-                    'Volume': volume,  # FIXED: Now correctly uses PS2D volume
+                    'Volume': volume,
                     'SNR': snr,
                     'Quality': quality,
                     'R_Squared': r_squared

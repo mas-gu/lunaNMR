@@ -1,4 +1,4 @@
-# ABOUTME: 3-5 slider interface mapping to 25+ legacy parameters via nucleus-specific adaptive thresholds.
+# ABOUTME: 3-5 slider interface mapping to the 25+ full parameters via nucleus-specific adaptive thresholds.
 # ABOUTME: Reduces complexity for users while maintaining full parameter control for advanced workflows.
 """
 Simplified Parameter Manager for Automated NMR Fitting
@@ -202,12 +202,10 @@ class SimplifiedParameterManager:
 
         return max(snr, 0.1)  # Minimum SNR to avoid issues
 
-    def derive_legacy_parameters(self, nucleus_type: str = 'default',
+    def derive_full_parameters(self, nucleus_type: str = 'default',
                                spectrum_info: Optional[Dict] = None) -> Dict[str, Any]:
         """
-        Derive legacy parameter set from simplified parameters for backward compatibility.
-
-        This ensures all existing workflows continue to work unchanged.
+        Derive the full parameter set from the simplified parameters.
 
         Parameters:
         -----------
@@ -218,7 +216,7 @@ class SimplifiedParameterManager:
 
         Returns:
         --------
-        dict : Complete legacy parameter set
+        dict : Complete parameter set
         """
 
         # Check cache validity
@@ -236,9 +234,9 @@ class SimplifiedParameterManager:
         # Sensitivity affects detection thresholds
         sensitivity = self.simplified_params.sensitivity
 
-        # Derive complete legacy parameter set
+        # Derive the complete parameter set
         # IMPORTANT: Simplified parameters ONLY affect Voigt fitting, NOT peak detection
-        legacy_params = {
+        full_params = {
             # Detection Parameters - KEEP COMPLEX DEFAULTS (not affected by simplified mode)
             'search_window_x': base_window['x'],  # Use base window, not scaled
             'search_window_y': base_window['y'],  # Use base window, not scaled
@@ -281,15 +279,15 @@ class SimplifiedParameterManager:
             snr = spectrum_info['snr']
             # Adapt thresholds based on actual SNR
             if snr < 3.0:
-                legacy_params['min_r_squared'] *= 0.8  # Be more tolerant for low SNR
+                full_params['min_r_squared'] *= 0.8  # Be more tolerant for low SNR
             elif snr > 10.0:
-                legacy_params['min_r_squared'] = min(0.95, legacy_params['min_r_squared'] * 1.1)
+                full_params['min_r_squared'] = min(0.95, full_params['min_r_squared'] * 1.1)
 
         # Cache the results
-        self._derived_params_cache[cache_key] = legacy_params.copy()
+        self._derived_params_cache[cache_key] = full_params.copy()
         self._cache_valid = True
 
-        return legacy_params
+        return full_params
 
     def get_parameter_summary(self) -> str:
         """Get human-readable summary of simplified parameters"""
@@ -352,39 +350,38 @@ class ParameterAdapter:
 
     def __init__(self, simplified_manager: SimplifiedParameterManager):
         self.simplified_manager = simplified_manager
-        self.legacy_manager = None  # Will be set if needed
 
     def get_integrator_parameters(self, nucleus_type: str = 'default') -> Dict[str, Dict[str, Any]]:
-        """Get parameters formatted for core integrator (backward compatible)"""
+        """Get parameters formatted for core integrator"""
 
-        legacy_params = self.simplified_manager.derive_legacy_parameters(nucleus_type)
+        full_params = self.simplified_manager.derive_full_parameters(nucleus_type)
 
         return {
             'detection_params': {
-                'search_window_x': legacy_params['search_window_x'],
-                'search_window_y': legacy_params['search_window_y']
+                'search_window_x': full_params['search_window_x'],
+                'search_window_y': full_params['search_window_y']
             },
             'fitting_params': {
-                'fitting_window_x': legacy_params['fitting_window_x'],
-                'fitting_window_y': legacy_params['fitting_window_y'],
-                'min_r_squared': legacy_params['min_r_squared'],
-                'max_iterations': legacy_params['max_iterations']
+                'fitting_window_x': full_params['fitting_window_x'],
+                'fitting_window_y': full_params['fitting_window_y'],
+                'min_r_squared': full_params['min_r_squared'],
+                'max_iterations': full_params['max_iterations']
             },
             'gui_params': {
-                'height_threshold': legacy_params['height_threshold'],
-                'distance_factor': legacy_params['distance_factor'],
-                'prominence_threshold': legacy_params['prominence_threshold'],
-                'smoothing_sigma': legacy_params['smoothing_sigma'],
-                'max_peaks_fit': legacy_params['max_peaks_fit'],
-                'max_optimization_iterations': legacy_params['max_optimization_iterations'],
-                'use_parallel_processing': legacy_params['use_parallel_processing'],
-                'use_centroid_refinement': legacy_params['use_centroid_refinement'],
-                'centroid_window_x_ppm': legacy_params['centroid_window_x_ppm'],
-                'centroid_window_y_ppm': legacy_params['centroid_window_y_ppm'],
-                'centroid_noise_multiplier': legacy_params['centroid_noise_multiplier']
+                'height_threshold': full_params['height_threshold'],
+                'distance_factor': full_params['distance_factor'],
+                'prominence_threshold': full_params['prominence_threshold'],
+                'smoothing_sigma': full_params['smoothing_sigma'],
+                'max_peaks_fit': full_params['max_peaks_fit'],
+                'max_optimization_iterations': full_params['max_optimization_iterations'],
+                'use_parallel_processing': full_params['use_parallel_processing'],
+                'use_centroid_refinement': full_params['use_centroid_refinement'],
+                'centroid_window_x_ppm': full_params['centroid_window_x_ppm'],
+                'centroid_window_y_ppm': full_params['centroid_window_y_ppm'],
+                'centroid_noise_multiplier': full_params['centroid_noise_multiplier']
             },
             'processing_options': {
-                'use_parallel_processing': legacy_params['use_parallel_processing'],
-                'use_global_optimization': legacy_params['use_global_optimization']
+                'use_parallel_processing': full_params['use_parallel_processing'],
+                'use_global_optimization': full_params['use_global_optimization']
             }
         }

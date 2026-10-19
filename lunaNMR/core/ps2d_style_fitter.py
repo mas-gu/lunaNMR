@@ -287,7 +287,7 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
     # Initialize Jacobian
     jac = np.zeros((n_points, n_params))
 
-    # Compute individual peak contributions ONCE (Faddeeva caching - 2025-10-08)
+    # Compute individual peak contributions ONCE (Faddeeva caching)
     # Previous code computed full profile once + each peak individually (2×n_peaks calls)
     # Now compute each peak once, sum for y_base, reuse for intensity derivatives
     y_individual_peaks = []
@@ -468,7 +468,7 @@ class Ps2dStyleLevenbergMarquardt:
         params = np.array(p0, dtype=np.float64)
 
         # ═══════════════════════════════════════════════════════════════════
-        # PARAMETER NORMALIZATION (2025-11-20)
+        # PARAMETER NORMALIZATION
         # ═══════════════════════════════════════════════════════════════════
         # Scale all parameters to O(1) for numerical stability.
         # Improves Hessian condition number from ~10¹⁰ to ~10³-10⁴.
@@ -569,10 +569,8 @@ class Ps2dStyleLevenbergMarquardt:
             if bounds is not None:
                 params_new = np.clip(params_new, bounds[0], bounds[1])
 
-                # CRITICAL FIX: Restore fixed parameters after bounds clipping
-                # This ensures fixed params are ABSOLUTELY fixed, even if bounds would change them
-                # USER EXPECTATION: Fixed parameters are inviolable constraints
-                # Note: fixed_params values are in normalized space (already normalized at start)
+                # Fixed parameters are restored after clipping: a bound must not move
+                # them. fixed_params values are in normalized space.
                 for param_idx, fixed_value in fixed_params.items():
                     params_new[param_idx] = fixed_value
 

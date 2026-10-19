@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ABOUTME: Peak Navigator component for interactive peak list display and navigation
-# ABOUTME: Qt/PySide6 port from CustomTkinter version with improved signal/slot architecture
+# ABOUTME: Qt table widget emitting selection, prev/next navigation and add/edit/delete signals
 
 import logging
 

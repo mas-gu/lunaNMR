@@ -814,11 +814,9 @@ class Ps2dMultiPeakFitter2D:
 
         Notes:
         ------
-        5-stage fitting strategy
-        - Stage 0: Fix positions/widths, fit intensities only
+        Staged fitting
         - Stage 1: Fix positions, float widths + intensities
         - Stage 2: Float positions (if allowed)
-        - Stage 3: For future implementations
         - Stage 4: Final global refinement (all parameters float)
         """
 
@@ -1156,132 +1154,122 @@ class Ps2dMultiPeakFitter2D:
 
         total_iterations = 0
 
-        # ====================================================================
-        # STAGE 0: DISABLED - Causes intensity collapse with wrong initial linewidths
-        # ====================================================================
-        # Root cause: Fitting intensity-only with fixed (wrong) linewidths is unstable.
-        # When initial linewidths don't match true peak shape (common for 13C peaks),
-        # the optimizer drives intensity → 0 to minimize χ² (intensity hits lower bound).
-        #
-        # Why it fails for 13C but works for 15N:
-        # - 15N peaks: FWHM ~0.10 ppm → 1D cross-section guess ~0.10 ppm (close enough)
-        # - 13C peaks: FWHM ~0.05 ppm → 1D cross-section guess ~0.10 ppm (2× too broad)
-        #
-        # Solution: Skip Stage 0, start with Stage 1 (linewidths + intensity together)
-        # This allows optimizer to adjust both simultaneously, preventing collapse.
-        # ====================================================================
+        # No intensity-only stage. Fitting the intensity alone against the seeded
+        # linewidths is unstable: when the seed does not match the peak (a 13C peak
+        # has FWHM ~0.05 ppm while the 1D cross-section guess is ~0.10 ppm, 2× too
+        # broad; 15N at ~0.10 ppm is close enough), the optimizer drives the intensity
+        # onto its lower bound to minimize χ². Stage 1 fits linewidths and intensity
+        # together, so both adjust at once.
 
-        # Compute initial χ² for convergence tracking (before any optimization)
+        # Initial χ², before any optimization, for the convergence test
         y_pred_initial = multi_voigt_profile_2d(f1_grid, f2_grid, params, n_peaks).ravel()
         y_pred_initial_masked = y_pred_initial[mask_flat]
-        self._stage0_initial_chi2 = np.sum((y_flat_masked - y_pred_initial_masked)**2)
+        self._initial_chi2 = np.sum((y_flat_masked - y_pred_initial_masked)**2)
 
 
         # ====================================================================
         # STAGE 1: Fix positions, float linewidths + intensities
         # ====================================================================
-        # fix_linewidths used to skip this stage OUTRIGHT. The stage fits linewidths
-        # AND INTENSITIES, so gating the whole of it on one of the two threw the
-        # intensity fit away with the linewidth fit - a weak peak then carried its
-        # initial intensity GUESS into Stages 2-4 and failed to converge. Measured on a
-        # T1 series: the 2000 ms point, the weakest, dropped from 3 fitted peaks to 2
-        # the moment linewidths were held.
-        #
-        # The stage now always runs; fix_linewidths adds the four linewidth parameters
-        # to the fixed set instead, which is what the flag has always meant to a user
-        # ticking "hold the linewidths" and what fixed_params already exists to express.
-        if True:
-            # Positions always; linewidths too when the caller holds them. Intensity
-            # is the one thing this stage must always be free to fit.
-            fixed_stage1 = {}
-            for i in range(n_peaks):
-                offset = i * NPAR_VOIGT
-                fixed_stage1[offset + 0] = params[offset + 0]  # Fix pos_f1
-                fixed_stage1[offset + 3] = params[offset + 3]  # Fix pos_f2
-                fixed_stage1[offset + 7] = 0.0  # Fix spare
-                if fix_linewidths or i in weak_peak_indices:
-                    fixed_stage1[offset + 1] = params[offset + 1]  # lw_lor_f1
-                    fixed_stage1[offset + 2] = params[offset + 2]  # lw_gau_f1
-                    fixed_stage1[offset + 4] = params[offset + 4]  # lw_lor_f2
-                    fixed_stage1[offset + 5] = params[offset + 5]  # lw_gau_f2
+        # This stage runs whether or not the linewidths are held. It fits linewidths
+        # AND INTENSITIES, and skipping it on fix_linewidths throws the intensity fit
+        # away with the linewidth fit - a weak peak then carries its initial intensity
+        # GUESS into Stages 2-4 and fails to converge. Measured on a T1 series: the
+        # 2000 ms point, the weakest, dropped from 3 fitted peaks to 2 the moment
+        # linewidths were held. fix_linewidths adds the four linewidth parameters to
+        # the fixed set instead, which is what fixed_params exists to express.
+        # Positions always; linewidths too when the caller holds them. Intensity
+        # is the one thing this stage must always be free to fit.
+        fixed_stage1 = {}
+        for i in range(n_peaks):
+            offset = i * NPAR_VOIGT
+            fixed_stage1[offset + 0] = params[offset + 0]  # Fix pos_f1
+            fixed_stage1[offset + 3] = params[offset + 3]  # Fix pos_f2
+            fixed_stage1[offset + 7] = 0.0  # Fix spare
+            if fix_linewidths or i in weak_peak_indices:
+                fixed_stage1[offset + 1] = params[offset + 1]  # lw_lor_f1
+                fixed_stage1[offset + 2] = params[offset + 2]  # lw_gau_f1
+                fixed_stage1[offset + 4] = params[offset + 4]  # lw_lor_f2
+                fixed_stage1[offset + 5] = params[offset + 5]  # lw_gau_f2
 
-            # Stage 1: Apply constraints via penalty functions (true soft constraints)
-            # Both L/G ratio and intensity ratio penalties integrated into objective
-            # CRITICAL: Both constraints ONLY applied when peaks are too close (spectral ambiguity)
-            # DECOUPLED from heavy_overlap (which only affects linewidth estimation)
+        # Stage 1: constraints as penalty terms in the objective (soft). Measured peak
+        # height ratios guide the volume ratios within a tolerance - they come from
+        # the detected positions, so they hold whether or not positions float - and
+        # hard clipping after Stage 4 destroyed fit quality. Both penalties apply ONLY
+        # when peaks are too close (spectral ambiguity), decoupled from heavy_overlap
+        # (which only affects linewidth estimation).
 
-            # Check which penalties to apply
-            apply_lg_penalty = (self.lg_penalty_weight > 0.0 and
-                               has_tooclose)  # Only for peaks that are too close
-            apply_intensity_penalty = (self.constrain_intensity_ratios and
-                                      len(initial_intensity_ratios) == n_peaks and
-                                      n_peaks >= 2 and
-                                      has_tooclose)  # Only for peaks that are too close
+        # Check which penalties to apply
+        apply_lg_penalty = (self.lg_penalty_weight > 0.0 and
+                           has_tooclose)  # Only for peaks that are too close
+        apply_intensity_penalty = (self.constrain_intensity_ratios and
+                                  len(initial_intensity_ratios) == n_peaks and
+                                  n_peaks >= 2 and
+                                  has_tooclose)  # Only for peaks that are too close
 
-            if apply_lg_penalty and apply_intensity_penalty:
-                # Apply L/G penalty first
-                params, cov, info = self._fit_stage1_with_lg_penalty(
-                    model_function=model_function,
-                    jacobian_function=jacobian_function,
-                    x=f1_flat,
-                    y=y_flat_masked,
-                    p0=params,
-                    bounds=bounds,
-                    fixed_params=fixed_stage1,
-                    n_peaks=n_peaks
-                )
-                # Then apply intensity ratio penalty (proper penalty in objective)
-                params, cov, info = self._fit_stage1_with_intensity_penalty(
-                    model_function=model_function,
-                    jacobian_function=jacobian_function,
-                    x=f1_flat,
-                    y=y_flat_masked,
-                    p0=params,
-                    bounds=bounds,
-                    fixed_params=fixed_stage1,
-                    n_peaks=n_peaks,
-                    target_ratios=initial_intensity_ratios,
-                    lambda_ratio=self.intensity_ratio_penalty_weight
-                )
-            elif apply_lg_penalty:
-                # Apply only L/G penalty
-                params, cov, info = self._fit_stage1_with_lg_penalty(
-                    model_function=model_function,
-                    jacobian_function=jacobian_function,
-                    x=f1_flat,
-                    y=y_flat_masked,
-                    p0=params,
-                    bounds=bounds,
-                    fixed_params=fixed_stage1,
-                    n_peaks=n_peaks
-                )
-            elif apply_intensity_penalty:
-                # Apply only intensity ratio penalty
-                params, cov, info = self._fit_stage1_with_intensity_penalty(
-                    model_function=model_function,
-                    jacobian_function=jacobian_function,
-                    x=f1_flat,
-                    y=y_flat_masked,
-                    p0=params,
-                    bounds=bounds,
-                    fixed_params=fixed_stage1,
-                    n_peaks=n_peaks,
-                    target_ratios=initial_intensity_ratios,
-                    lambda_ratio=self.intensity_ratio_penalty_weight
-                )
-            else:
-                # Standard optimization without penalties
-                params, cov, info = self.optimizer.fit(
-                    func=model_function,
-                    jacobian=jacobian_function,
-                    x=f1_flat,
-                    y=y_flat_masked,
-                    p0=params,
-                    bounds=bounds,
-                    fixed_params=fixed_stage1
-                )
+        if apply_lg_penalty and apply_intensity_penalty:
+            # Apply L/G penalty first
+            params, cov, info = self._fit_stage1_with_lg_penalty(
+                model_function=model_function,
+                jacobian_function=jacobian_function,
+                x=f1_flat,
+                y=y_flat_masked,
+                p0=params,
+                bounds=bounds,
+                fixed_params=fixed_stage1,
+                n_peaks=n_peaks
+            )
+            # Then apply intensity ratio penalty (proper penalty in objective)
+            params, cov, info = self._fit_stage1_with_intensity_penalty(
+                model_function=model_function,
+                jacobian_function=jacobian_function,
+                x=f1_flat,
+                y=y_flat_masked,
+                p0=params,
+                bounds=bounds,
+                fixed_params=fixed_stage1,
+                n_peaks=n_peaks,
+                target_ratios=initial_intensity_ratios,
+                lambda_ratio=self.intensity_ratio_penalty_weight
+            )
+        elif apply_lg_penalty:
+            # Apply only L/G penalty
+            params, cov, info = self._fit_stage1_with_lg_penalty(
+                model_function=model_function,
+                jacobian_function=jacobian_function,
+                x=f1_flat,
+                y=y_flat_masked,
+                p0=params,
+                bounds=bounds,
+                fixed_params=fixed_stage1,
+                n_peaks=n_peaks
+            )
+        elif apply_intensity_penalty:
+            # Apply only intensity ratio penalty
+            params, cov, info = self._fit_stage1_with_intensity_penalty(
+                model_function=model_function,
+                jacobian_function=jacobian_function,
+                x=f1_flat,
+                y=y_flat_masked,
+                p0=params,
+                bounds=bounds,
+                fixed_params=fixed_stage1,
+                n_peaks=n_peaks,
+                target_ratios=initial_intensity_ratios,
+                lambda_ratio=self.intensity_ratio_penalty_weight
+            )
+        else:
+            # Standard optimization without penalties
+            params, cov, info = self.optimizer.fit(
+                func=model_function,
+                jacobian=jacobian_function,
+                x=f1_flat,
+                y=y_flat_masked,
+                p0=params,
+                bounds=bounds,
+                fixed_params=fixed_stage1
+            )
 
-            total_iterations += info['iterations']
+        total_iterations += info['iterations']
 
         params, _ = cap_linewidth_totals(params, n_peaks,
                                          lw_caps_f1, lw_caps_f2)
@@ -1326,17 +1314,8 @@ class Ps2dMultiPeakFitter2D:
                                          lw_caps_f1, lw_caps_f2)
 
         # ====================================================================
-        # STAGE 3: Final global refinement
+        # STAGE 4: Final global refinement
         # ====================================================================
-        # DIAGNOSTIC: Save positions before Stage 4 for comparison
-        positions_before_stage4 = []
-        for i in range(n_peaks):
-            offset = i * NPAR_VOIGT
-            positions_before_stage4.append({
-                'f1': params[offset + 0],
-                'f2': params[offset + 3]
-            })
-
         # Fix spare parameters + respect fix_positions/fix_linewidths flags
         # USER EXPECTATION: fix_positions/fix_linewidths are ABSOLUTE constraints
         # Positions/linewidths must remain unchanged regardless of χ² improvement potential
@@ -1399,9 +1378,8 @@ class Ps2dMultiPeakFitter2D:
         # ====================================================================
         # L/G RATIO CONSTRAINT: Apply after Stage 4 if enabled
         # ====================================================================
-        # CRITICAL: Stage 4 allows linewidths to float (unless fix_linewidths=True)
-        # This can undo the L/G constraint applied in Stage 1
-        # Solution: Re-apply constraint after Stage 4 optimization completes
+        # Stage 4 floats the linewidths (unless fix_linewidths), which can undo the
+        # L/G constraint Stage 1 applied, so it is re-applied here.
         if self.lg_penalty_weight > 0.0 and not fix_linewidths:
 
             # Calculate current L/G ratios for F1 and F2 dimensions
@@ -1450,20 +1428,6 @@ class Ps2dMultiPeakFitter2D:
                                                     lw_caps_f1, lw_caps_f2)
 
         # ====================================================================
-        # INTENSITY RATIO CONSTRAINT: Apply after Stage 4 if enabled
-        # ====================================================================
-        # PHYSICAL PRINCIPLE: Measured peak height ratios provide guidance for volume ratios.
-        # Use soft constraint: ratios can vary within tolerance to minimize χ², but
-        # cannot deviate too far from measured values (prevents unphysical solutions).
-        #
-        # APPLIES REGARDLESS OF fix_positions FLAG:
-        # Initial intensities come from detected peak positions (already refined by
-        # parabolic interpolation), so ratios are valid whether positions float or not.
-        # Intensity ratio guidance is now applied in Stage 1 via gentle nudging
-        # No post-Stage-4 hard clipping needed (hard clipping destroyed fit quality)
-
-
-        # ====================================================================
         # Compute final R² and prepare results
         # ====================================================================
         y_fit_flat = multi_voigt_profile_2d(f1_grid, f2_grid, params, n_peaks).ravel()
@@ -1504,14 +1468,13 @@ class Ps2dMultiPeakFitter2D:
         formal_convergence = info['success']
         pragmatic_r2_success = r_squared > 0.2
 
-        # Check χ² reduction from Stage 0 initial χ²
-        # We track Stage 0's first iteration as the baseline
-        # Require 100× reduction as evidence of successful convergence
+        # χ² reduction from the initial parameters: 100× is taken as evidence of
+        # convergence
         chi2_reduction_success = False
         chi2_initial = 0.0
         chi2_reduction_factor = 0.0
-        if hasattr(self, '_stage0_initial_chi2'):
-            chi2_initial = self._stage0_initial_chi2
+        if hasattr(self, '_initial_chi2'):
+            chi2_initial = self._initial_chi2
             chi2_reduction_factor = chi2_initial / info['final_chi2'] if info['final_chi2'] > 0 else 0.0
             chi2_reduction_success = chi2_reduction_factor > 100
 

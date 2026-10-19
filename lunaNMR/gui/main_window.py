@@ -3548,7 +3548,7 @@ class LunaNMRMainWindow(BaseWindow):
         voigt_2d_tab = self._create_voigt_2d_tab()
         tab_widget.addTab(voigt_2d_tab, "📈 Voigt Analysis")
 
-        # Create 3D Voigt Analysis tab (placeholder for Phase 4)
+        # Create 3D Voigt Analysis tab
         voigt_3d_tab = self._create_voigt_3d_tab()
         tab_widget.addTab(voigt_3d_tab, "3D Voigt Analysis")
 
@@ -4203,7 +4203,7 @@ class LunaNMRMainWindow(BaseWindow):
                     selected_result = fitted_result
                     break
 
-        # Fallback to voigt_fits (legacy location) for backward compatibility
+        # Fall back to voigt_fits
         if selected_result is None and (hasattr(self.integrator, 'voigt_fits') and
             self.integrator.voigt_fits is not None and
             len(self.integrator.voigt_fits) > 0):
@@ -5101,7 +5101,7 @@ class LunaNMRMainWindow(BaseWindow):
             series_name = list(saved_series.keys())[0]
             batch_results = saved_series[series_name]
         elif hasattr(self, 'batch_results') and self.batch_results:
-            # Fallback to batch_results for backward compatibility
+            # Fall back to the current batch_results
             batch_results = self.batch_results
         else:
             QMessageBox.warning(self, "No Data",
@@ -6055,7 +6055,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             if hasattr(self, 'auto_add_dummy_peaks'):
                 self.integrator.auto_add_dummy_peaks = self.auto_add_dummy_peaks
 
-            # Sync peak_list S/N threshold (legacy, used as fallback)
+            # Sync peak_list S/N threshold (used as fallback)
             if hasattr(self, 'peak_list_sn_threshold'):
                 self.integrator.peak_list_sn_threshold = self.peak_list_sn_threshold
 

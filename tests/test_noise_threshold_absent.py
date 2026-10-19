@@ -20,7 +20,7 @@ def test_the_parameter_manager_carries_none():
 def test_the_simplified_parameters_carry_none(snr):
     from lunaNMR.utils.simplified_parameter_manager import ParameterAdapter, SimplifiedParameterManager
     manager = SimplifiedParameterManager()
-    assert 'noise_threshold' not in manager.derive_legacy_parameters(
+    assert 'noise_threshold' not in manager.derive_full_parameters(
         '15N', None if snr is None else {'snr': snr})
     detection = ParameterAdapter(manager).get_integrator_parameters('15N')['detection_params']
     assert 'noise_threshold' not in detection

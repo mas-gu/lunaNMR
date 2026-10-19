@@ -434,8 +434,8 @@ class VoigtIntegrator(BaseIntegrator):
         else:
             self.enhanced_fitter = None
 
-        # NEW: Overlap resolution configuration (optional)
-        self.overlap_resolution_enabled = False  # Default OFF for backward compatibility
+        # Overlap resolution configuration (optional)
+        self.overlap_resolution_enabled = False
 
         # Initialize with nucleus-specific windows (will be overridden by GUI if provided)
         self.detected_nucleus_type = None
@@ -1521,7 +1521,7 @@ class VoigtIntegrator(BaseIntegrator):
                                 dist = ((peak_i[0] - peak_j[0])**2 + (peak_i[1] - peak_j[1])**2)**0.5
                                 min_dist = min(min_dist, dist)
 
-                    # CRITICAL FIX: Check diameter constraint BEFORE selecting as best pair
+                    # Check the diameter constraint BEFORE selecting as best pair
                     # This prevents blocking all merges when one pair violates diameter
                     if overlaps:
                         # Test if merge would violate diameter
@@ -1923,7 +1923,7 @@ class VoigtIntegrator(BaseIntegrator):
         # Use median of edges to avoid outliers
         baseline = np.median(edge_pixels)
 
-        # Initialize fitted_surface with zeros (baseline removed per user request 2025-11-19)
+        # The surface holds the peaks only; the baseline is returned beside it
         fitted_surface = np.zeros_like(region_2d['intensity'], dtype=np.float64)
         individual_surfaces = []  # Store each peak separately
 
@@ -1976,9 +1976,8 @@ class VoigtIntegrator(BaseIntegrator):
             # negative point of its tail - measured 1000x too small on a -48 sigma peak.
             peak_max = float(peak_surface.flat[np.argmax(np.abs(peak_surface))])
 
-            # CRITICAL FIX: Override the height field with reconstructed max
-            # The calculate_peak_height formula doesn't match actual peak height
-            # Use the actual reconstructed maximum as the true height
+            # The height is the reconstructed maximum: the calculate_peak_height
+            # formula does not match the actual peak height
             fitted_peaks[i]['height'] = peak_max
             fitted_peaks[i]['amplitude'] = peak_max  # Amplitude = height in NMR convention
 
@@ -2318,10 +2317,9 @@ class VoigtIntegrator(BaseIntegrator):
         # These will be used by intensity ratio constraint in PS2D fitter
         original_heights = [peak['intensity'] for peak in initial_peaks]
 
-        # Normalize initial intensity guesses
-        # CRITICAL FIX: Convert HEIGHT to VOLUME using linewidth estimates
-        # Root cause: Peak picker returns peak HEIGHT (point value at maximum),
-        # but Voigt intensity parameter represents VOLUME (integral under 2D surface).
+        # Convert HEIGHT to VOLUME using linewidth estimates: the peak picker returns
+        # the HEIGHT (point value at maximum), but the Voigt intensity parameter is
+        # the VOLUME (integral under the 2D surface).
         # For 2D Gaussian: Volume = Height × 2π × σ_F1 × σ_F2
         # We use FWHM estimates from 1D cross-sections to calculate σ = FWHM / (2√(2ln2))
         SQRT_8LN2 = 2.3548200450309493  # 2 * sqrt(2 * ln(2))
@@ -2367,13 +2365,9 @@ class VoigtIntegrator(BaseIntegrator):
         # Reshape mask back to 2D grid
         data_mask = mask_result['mask'].reshape(region['intensity'].shape)
 
-        # Fit using 2D multi-peak fitter
-        # Constraint parameters controlled by ps2d_2d_fitter.py constructor defaults
-        # To enable/disable constraints, change defaults in ps2d_2d_fitter.py:111
-        # verbose=True with PROGRESS_PRINT_INTERVAL=200 (prints every 200 iterations)
-        #
-        # PASS1→PASS2 Learning: Pass spectrum_statistics for adaptive bounds
-        # If available, fitter uses median + 5×MAD to constrain linewidth bounds
+        # Constraint defaults come from the Ps2dMultiPeakFitter2D constructor.
+        # spectrum_statistics, when present, tightens the linewidth bounds to
+        # median + α×MAD (Pass 1 → Pass 2 learning).
         spectrum_stats = getattr(self, 'spectrum_statistics', None)
 
         fitter = Ps2dMultiPeakFitter2D(verbose=True)
@@ -2654,7 +2648,7 @@ class VoigtIntegrator(BaseIntegrator):
                 'radF2_used': x_selection['radius_used']
             }
 
-        # FALLBACK: OLD ADAPTIVE METHOD (for backward compatibility if PS2D not available)
+        # Without PS2D: rectangular fitting windows
         # Use default fitting windows if not provided
         if fitting_window_x is None:
             fitting_window_x = self.fitting_parameters['fitting_window_x']
@@ -3655,9 +3649,9 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
                     self.update_statistics(True, result['avg_r_squared'])
                     return result
                 else:
-                    log_warning("Consensus fitting failed, falling back to legacy method")
+                    log_warning("Consensus fitting unavailable; fitting in 2D")
 
-        # Fallback to legacy fitting method with PS2D linewidth constraints and 2D routing support
+        # 2D fit with PS2D linewidth constraints and 2D routing
         result = self.fit_peak_voigt_2d(
             peak_x_ppm, peak_y_ppm, assignment,
             linewidth_constraints=linewidth_constraints,  # Pass through PS2D constraints
@@ -3776,13 +3770,11 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             # Get peak positions from original result
             peak_position = voigt2d_result.get('peak_position', (center_x, center_y))
 
-            # CRITICAL: Preserve volume/height/intensity from PS2D if already present
-            # These values come directly from fit_peak_voigt_2d which gets them from ps2d_2d_fitter
-            # Only calculate if not present (legacy fallback)
+            # volume/height/intensity come from fit_peak_voigt_2d (ps2d_2d_fitter)
+            # when present; approximated otherwise
             if 'volume' in voigt2d_result:
                 volume = voigt2d_result['volume']
             else:
-                # Legacy fallback: approximate volume
                 volume = amplitude * width * np.pi
 
             if 'height' in voigt2d_result:

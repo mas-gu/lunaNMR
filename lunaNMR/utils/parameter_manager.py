@@ -1,4 +1,4 @@
-# ABOUTME: GUI parameter synchronization and validation with simplified/legacy mode support.
+# ABOUTME: GUI parameter synchronization and validation with simplified/full mode support.
 # ABOUTME: Overrides calculated defaults with GUI spinbox values (critical for centroid windows in simplified mode).
 """
 Centralized Parameter Management for NMR Processing
@@ -321,24 +321,24 @@ class NMRParameterManager:
         """
         Get effective parameters based on current mode.
 
-        Returns either simplified-derived parameters or legacy parameters.
+        Returns either simplified-derived parameters or the full parameter set.
         """
         if self.use_simplified_mode and self.parameter_adapter:
-            # Use simplified parameters with legacy compatibility
+            # Simplified parameters, expanded to the full set
             params = self.parameter_adapter.get_integrator_parameters(nucleus_type)
 
-            # CRITICAL FIX: Detection parameters (search windows) must ALWAYS use GUI values
+            #Detection parameters (search windows) must ALWAYS use GUI values
             # Simplified mode only affects FITTING parameters, NOT detection parameters
             params['detection_params']['search_window_x'] = self.current_params['search_window_x']
             params['detection_params']['search_window_y'] = self.current_params['search_window_y']
 
-            # CRITICAL FIX: GUI control parameters must ALWAYS use GUI values
+            #GUI control parameters must ALWAYS use GUI values
             # Simplified mode should NOT override fix_positions, fix_linewidths, use_parallel_processing
             params['gui_params']['fix_positions'] = self.current_params.get('fix_positions', False)
             params['gui_params']['fix_linewidths'] = self.current_params.get('fix_linewidths', False)
             params['gui_params']['use_parallel_processing'] = self.current_params.get('use_parallel_processing', False)
 
-            # CRITICAL FIX: Centroid parameters must ALWAYS use GUI values
+            #Centroid parameters must ALWAYS use GUI values
             # Simplified mode should NOT override user-specified centroid window sizes
             params['gui_params']['centroid_window_x_ppm'] = self.current_params.get('centroid_window_x_ppm', 0.01)
             params['gui_params']['centroid_window_y_ppm'] = self.current_params.get('centroid_window_y_ppm', 0.1)
@@ -349,7 +349,7 @@ class NMRParameterManager:
 
             return params
         else:
-            # Use legacy parameters
+            # Full parameter set
             return self.get_integrator_parameters()
 
     def validate_simplified_parameters(self):

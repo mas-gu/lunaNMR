@@ -1160,7 +1160,7 @@ class SeriesIntegrationDialog(BaseDialog):
 
         # Store results in main window
         if self.main_window:
-            # Store as current batch_results (for backward compatibility)
+            # Store as current batch_results
             self.main_window.batch_results = batch_results
 
             # Also store in saved_series dict with the series name

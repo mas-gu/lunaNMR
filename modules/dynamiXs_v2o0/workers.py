@@ -176,7 +176,7 @@ class T1T2FittingParams:
     When input_df or series_name is used, a temporary CSV file is created
     for the fitting module.
     """
-    input_file: str = ""  # CSV file path (legacy mode)
+    input_file: str = ""  # CSV file path (single-file mode)
     output_dir: str = ""
     experiment_type: str = "T1"  # "T1" or "T2"
     results_prefix: str = ""

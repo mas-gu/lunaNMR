@@ -798,7 +798,7 @@ def main():
     
     # Analyze CSV file with new Monte Carlo error propagation
     try:
-        # Option 1: Use Monte Carlo errors (new default behavior)
+        # Monte Carlo error propagation (the default)
         print("Running analysis with Monte Carlo error propagation...")
         results = analyzer.analyze_csv('data_in.csv', 
                                      use_monte_carlo_errors=True,

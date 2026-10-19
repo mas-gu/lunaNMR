@@ -255,22 +255,6 @@ BUTTON_HEIGHT_DIALOG = 40  # Dialog button height
 
 
 # ============================================================================
-# LEGACY COMPATIBILITY
-# Aliases for backward compatibility during migration
-# These will be phased out in future versions
-# ============================================================================
-
-BUTTON_FG_COLOR = SECONDARY_BUTTON_BG
-"""DEPRECATED: Use SECONDARY_BUTTON_BG instead."""
-
-BUTTON_HOVER_COLOR = SECONDARY_BUTTON_HOVER
-"""DEPRECATED: Use SECONDARY_BUTTON_HOVER instead."""
-
-BUTTON_TEXT_COLOR = SECONDARY_BUTTON_TEXT
-"""DEPRECATED: Use SECONDARY_BUTTON_TEXT instead."""
-
-
-# ============================================================================
 # COLOR UTILITY FUNCTIONS
 # Helper functions for color manipulation
 # ============================================================================

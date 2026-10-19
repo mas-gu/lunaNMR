@@ -86,8 +86,8 @@ def usable_points(frame, observable):
     0.9884.
 
     A row from before these flags existed carries NaN. It is kept: refusing every
-    legacy series would be worse than the risk it represents, and the flags are absent
-    rather than negative. Re-run the series to get the filter.
+    series written before them would be worse than the risk it represents, and the
+    flags are absent rather than negative. Re-run the series to get the filter.
 
     :param frame: a DataFrame of series rows, one per (spectrum, peak)
     :param observable: what is being measured; see POSITION_OBSERVABLES

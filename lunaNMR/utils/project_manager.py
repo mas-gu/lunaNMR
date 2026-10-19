@@ -1054,7 +1054,7 @@ class ProjectManager:
         saved_series = getattr(self.main_window, 'saved_series', None)
         if saved_series and len(saved_series) > 0:
             return True
-        # Fallback to single batch_results for backward compatibility
+        # A session with batch_results but no saved_series
         return getattr(self.main_window, 'batch_results', None) is not None
 
     # =========================================================================
@@ -1083,8 +1083,7 @@ class ProjectManager:
         # Get all saved series
         saved_series = getattr(self.main_window, 'saved_series', {}) or {}
 
-        # For backward compatibility, if no saved_series but batch_results exists,
-        # save it as "default" series
+        # batch_results without saved_series is saved as the "default" series
         if not saved_series:
             batch_results = getattr(self.main_window, 'batch_results', None)
             if batch_results is not None:
@@ -1202,7 +1201,7 @@ class ProjectManager:
                 self.main_window.saved_series[series_name] = batch_results
                 logger.info(f"Loaded series '{series_name}': {len(batch_results.results)} spectra")
 
-            # Set first series as current batch_results for backward compatibility
+            # The first series is the current batch_results
             if self.main_window.saved_series:
                 first_name = list(self.main_window.saved_series.keys())[0]
                 self.main_window.batch_results = self.main_window.saved_series[first_name]
@@ -1223,7 +1222,7 @@ class ProjectManager:
                 self.main_window.batch_results = batch_results
                 self.main_window.saved_series['default'] = batch_results
 
-                logger.info(f"Loaded legacy series results: {len(batch_results.results)} spectra")
+                logger.info(f"Loaded series results from batch_results: {len(batch_results.results)} spectra")
 
         return bool(self.main_window.saved_series)
 

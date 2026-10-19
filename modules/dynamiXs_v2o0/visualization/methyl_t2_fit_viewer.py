@@ -710,7 +710,7 @@ class MethylT2FitViewer(QMainWindow):
     @staticmethod
     def _panel_value_and_err(fit, value_key, err_key):
         """Resolve (value, err) for a panel, deriving reparam keys from the
-        legacy (t2_a, t2_b) entries when older JSON files lack T2_avg/dT2.
+        (t2_a, t2_b) entries when older JSON files lack T2_avg/dT2.
         """
         if value_key in ("T2_avg", "dT2"):
             T2_avg, dT2, T2_avg_err, dT2_err, _ = MethylT2FitViewer._reparam_view(fit)

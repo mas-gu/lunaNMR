@@ -719,7 +719,7 @@ class DynamiXsDialog(BaseDialog):
         if hasattr(page, 'field2_t1rho_file') and page.field2_t1rho_file:
             refs['field2_t1rho_file'] = page.field2_t1rho_file
 
-        # T1rho specific files (legacy)
+        # T1rho specific files
         if hasattr(page, 'peak_list_file') and page.peak_list_file:
             refs['peak_list_file'] = page.peak_list_file
 

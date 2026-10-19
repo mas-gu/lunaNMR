@@ -221,7 +221,7 @@ class KdTitrationFitViewer(QMainWindow):
         if isinstance(er, dict):
             self.excluded_residues = {"csp": set(er.get("csp", [])),
                                       "intensity": set(er.get("intensity", []))}
-        else:  # legacy flat list → applied to both observables
+        else:  # flat list from an older fit JSON → applied to both observables
             self.excluded_residues = {"csp": set(er or []), "intensity": set(er or [])}
         self._update_global_label()
         self._populate_point_combos()
