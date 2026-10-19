@@ -24,7 +24,6 @@ Usage:
 __version__ = "1.0.0"
 __author__ = "lunaNMR Development Team"
 
-# Import main components when available
 try:
     from .batch_processor import BatchProcessor
     from .config_manager import ConfigManager
