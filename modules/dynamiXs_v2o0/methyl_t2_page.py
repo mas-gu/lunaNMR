@@ -244,6 +244,8 @@ class MethylT2FittingPage(BasePage):
     # ---------- run ----------
 
     def _start_analysis(self):
+        if self._analysis_running(self.log_text.appendPlainText):
+            return
         if not self.input_file or not os.path.exists(self.input_file):
             show_error(self, "Input required", "Select a CSV file or drop a series first.")
             return

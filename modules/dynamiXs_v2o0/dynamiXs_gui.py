@@ -488,6 +488,18 @@ class BasePage(QWidget):
 
     # ---------- the LunaNMR project's series ----------
 
+    def _analysis_running(self, log) -> bool:
+        """True while this page's analysis thread still runs, said through `log`.
+
+        A second start would replace `self.worker`, the only reference to the running
+        QThread; Python then collects it mid-run and Qt aborts the application.
+        """
+        worker = getattr(self, 'worker', None)
+        if worker is not None and worker.isRunning():
+            log("An analysis is already running on this page: wait for it to finish.")
+            return True
+        return False
+
     def _lunanmr_main_window(self):
         """The real LunaNMR main window. In the app the page's main_window is the
         hosting dialog, which holds the main window as .main_window; in isolation the
@@ -1545,6 +1557,8 @@ class T1T2FittingPage(BasePage):
 
     def _start_analysis(self):
         """Start the T1/T2 analysis based on selected analysis type."""
+        if self._analysis_running(self.results_text.appendPlainText):
+            return
         # Require output directory to be set before fitting
         if not self.output_dir:
             show_warning(
@@ -2609,6 +2623,8 @@ class SpectralDensityPage(BasePage):
 
     def _start_analysis(self):
         """Start the spectral density analysis."""
+        if self._analysis_running(self.results_text.appendPlainText):
+            return
         if not self.input_file1:
             show_error(self, "Error", "Please select at least one input file.")
             return
@@ -3319,6 +3335,8 @@ class IntegratedAnalysisPage(BasePage):
 
     def _start_analysis(self):
         """Start the integrated analysis."""
+        if self._analysis_running(self.progress_text.appendPlainText):
+            return
         # Validate required files
         if not all([self.field1_t1_file, self.field1_t2_file,
                    self.field1_noe_sat_file, self.field1_noe_unsat_file]):

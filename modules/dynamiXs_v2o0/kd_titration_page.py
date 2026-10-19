@@ -538,6 +538,8 @@ class KdTitrationPage(BasePage):
             show_error(self, "Could not save parameters", str(e))
 
     def _start_analysis(self):
+        if self._analysis_running(lambda msg: self._show_result(msg, WARNING_ORANGE)):
+            return
         if not self.input_file or not os.path.exists(self.input_file):
             show_error(self, "Input required", "Select a CSV file first.")
             return
