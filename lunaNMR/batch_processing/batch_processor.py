@@ -17,7 +17,6 @@ import time
 import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Union, Any
-import numpy as np
 from datetime import datetime
 
 # Import lunaNMR core components (READ-ONLY usage)
@@ -29,6 +28,9 @@ except ImportError:
     CORE_AVAILABLE = False
 
 # Note: Processor imports will be done dynamically in methods to avoid import issues
+
+# The batch configuration's nucleus type for each nucleus the integrator detects on load
+INTEGRATOR_NUCLEUS_TYPES = {'15N': '15N1H', '13C': '13C1H'}
 
 class BatchProcessor:
     """
@@ -204,11 +206,13 @@ class BatchProcessor:
 
         The logger is shared by every processor in the process, so the handlers a previous
         processor added are closed first: otherwise each line is printed once per processor
-        and every earlier log file stays open.
+        and every earlier log file stays open. Its lines are printed and written here
+        only: propagated, the root logger's handlers would print each again.
         """
         # Create logger
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.INFO)
+        logger.propagate = False
         for handler in list(logger.handlers):
             logger.removeHandler(handler)
             handler.close()
@@ -234,361 +238,21 @@ class BatchProcessor:
         logger.addHandler(console_handler)
         logger.addHandler(file_handler)
 
-    def detect_nucleus_type(self, filename: str, spectrum_data: Optional[np.ndarray] = None,
-                          f1_range: Optional[tuple] = None, f2_range: Optional[tuple] = None,
-                          return_details: bool = False) -> Union[str, Dict[str, Any]]:
+    def spectrum_nucleus(self, spectrum_file: Path) -> str:
         """
-        Enhanced nucleus type detection using chemical shifts and filename patterns.
-
-        Args:
-            filename: Name of the spectrum file
-            spectrum_data: Optional spectrum data (maintained for backward compatibility)
-            f1_range: Optional tuple of (min, max) chemical shifts for F1 dimension
-            f2_range: Optional tuple of (min, max) chemical shifts for F2 dimension
-            return_details: If True, return detailed detection results, else just nucleus type string
+        The nucleus type of a spectrum, as the integrator detects it on load from the
+        spectral ranges: the detection the PS2D configuration of its fit follows.
 
         Returns:
-            If return_details=False: Detected nucleus type string ('15N1H', '13C1H', '1H', or 'unknown')
-            If return_details=True: Dictionary with detailed detection results and confidence scores
+            '15N1H', '13C1H', or 'unknown' when the spectrum does not load or its
+            ranges name no nucleus
         """
-        detection_results = []
-
-        # Method 1: Chemical shift analysis (highest priority if available)
-        if f1_range is not None and f2_range is not None:
-            try:
-                chem_result = self._detect_from_chemical_shifts(f1_range, f2_range)
-                detection_results.append(chem_result)
-
-                # If high confidence chemical shift detection, use it immediately
-                if chem_result['confidence'] >= 0.8:
-                    if return_details:
-                        return {
-                            'nucleus_type': chem_result['nucleus_type'],
-                            'confidence': chem_result['confidence'],
-                            'primary_method': 'chemical_shift',
-                            'all_methods': [chem_result],
-                            'filename': filename,
-                            'chemical_shifts': {'f1_range': f1_range, 'f2_range': f2_range}
-                        }
-                    else:
-                        return chem_result['nucleus_type']
-            except Exception as e:
-                self.logger.debug(f"Chemical shift detection failed for {filename}: {e}")
-
-        # Method 2: Filename pattern matching (always performed for compatibility)
-        try:
-            filename_result = self._detect_from_filename(filename)
-            detection_results.append(filename_result)
-        except Exception as e:
-            self.logger.debug(f"Filename detection failed for {filename}: {e}")
-
-        # Method 3: Combine results and resolve conflicts
-        final_result = self._resolve_detection_conflicts(detection_results, filename)
-
-        # Log detection details for debugging
-        if len(detection_results) > 1:
-            methods_used = [r['method'] for r in detection_results]
-            confidences = [r['confidence'] for r in detection_results]
-            self.logger.debug(f"Detection for {filename}: methods={methods_used}, confidences={confidences}, final={final_result['nucleus_type']}")
-
-        # Return result in requested format
-        if return_details:
-            return {
-                'nucleus_type': final_result['nucleus_type'],
-                'confidence': final_result['confidence'],
-                'primary_method': final_result['method'],
-                'all_methods': detection_results,
-                'filename': filename,
-                'chemical_shifts': {'f1_range': f1_range, 'f2_range': f2_range} if f1_range and f2_range else None
-            }
-        else:
-            # Backward compatibility: return just the nucleus type string
-            return final_result['nucleus_type']
-
-    def _resolve_detection_conflicts(self, detection_results: List[Dict[str, Any]], filename: str) -> Dict[str, Any]:
-        """
-        Resolve conflicts between different detection methods.
-
-        Args:
-            detection_results: List of detection results from different methods
-            filename: Filename for logging purposes
-
-        Returns:
-            Final detection result with highest confidence/priority
-        """
-        if not detection_results:
-            self.logger.warning(f"Could not determine nucleus type for {filename}, using default")
-            return {
-                'nucleus_type': 'unknown',
-                'confidence': 0.0,
-                'method': 'default'
-            }
-
-        # Filter out unknown results if we have any confident detections
-        confident_results = [r for r in detection_results if r['nucleus_type'] != 'unknown' and r['confidence'] > 0.5]
-
-        if confident_results:
-            # Check for conflicts between high-confidence methods
-            chemical_shift_results = [r for r in confident_results if r['method'] == 'chemical_shift']
-            filename_results = [r for r in confident_results if r['method'] == 'filename']
-
-            # If we have both chemical shift and filename results, check for conflicts
-            if chemical_shift_results and filename_results:
-                chem_nucleus = chemical_shift_results[0]['nucleus_type']
-                filename_nucleus = filename_results[0]['nucleus_type']
-
-                if chem_nucleus != filename_nucleus:
-                    self.logger.warning(f"Detection conflict for {filename}: "
-                                      f"Chemical shifts suggest {chem_nucleus} "
-                                      f"(confidence: {chemical_shift_results[0]['confidence']:.2f}), "
-                                      f"filename suggests {filename_nucleus} "
-                                      f"(confidence: {filename_results[0]['confidence']:.2f})")
-
-                    # Trust chemical shifts over filename (they are more reliable)
-                    if chemical_shift_results[0]['confidence'] >= 0.7:
-                        self.logger.info(f"Using chemical shift detection: {chem_nucleus}")
-                        return chemical_shift_results[0]
-
-            # Return the result with highest confidence
-            best_result = max(confident_results, key=lambda x: x['confidence'])
-            return best_result
-        else:
-            # No confident results, return the best of what we have
-            best_result = max(detection_results, key=lambda x: x['confidence'])
-            if best_result['nucleus_type'] == 'unknown':
-                self.logger.warning(f"Could not determine nucleus type for {filename}, using default")
-            return best_result
-
-    def _detect_from_chemical_shifts(self, f1_range: tuple, f2_range: tuple) -> Dict[str, Any]:
-        """
-        Detect nucleus type from F1/F2 chemical shift ranges.
-
-        Args:
-            f1_range: Tuple of (min, max) chemical shifts for F1 dimension
-            f2_range: Tuple of (min, max) chemical shifts for F2 dimension
-
-        Returns:
-            Dictionary with detection results
-        """
-        f1_min, f1_max = f1_range
-        f2_min, f2_max = f2_range
-
-        # Chemical shift signatures for different nucleus types
-        signatures = {
-            '15N1H': {
-                'f1_range': (90, 140),      # 15N backbone/side chains
-                'f2_range': (5, 12),        # Amide protons
-                'confidence_base': 0.9
-            },
-            '13C1H': {
-                'f1_ranges': [(0, 60), (100, 180)],  # Aliphatic OR aromatic
-                'f2_range': (-1, 10),       # Broad 1H range
-                'confidence_base': 0.8
-            },
-            '1H': {
-                'f1_range': (-1, 12),       # 1H range
-                'f2_range': (-1, 12),       # Same range (homonuclear)
-                'confidence_base': 0.7
-            }
-        }
-
-        detection_results = []
-
-        for nucleus_type, sig in signatures.items():
-            confidence = 0.0
-
-            if nucleus_type == '15N1H':
-                # Check if ranges match 15N1H signature
-                f1_match = sig['f1_range'][0] <= f1_min <= f1_max <= sig['f1_range'][1]
-                f2_match = sig['f2_range'][0] <= f2_min <= f2_max <= sig['f2_range'][1]
-
-                if f1_match and f2_match:
-                    confidence = sig['confidence_base']
-                elif f1_match or f2_match:
-                    confidence = sig['confidence_base'] * 0.6
-
-            elif nucleus_type == '13C1H':
-                # Check aliphatic OR aromatic carbon ranges
-                f1_aliphatic = sig['f1_ranges'][0][0] <= f1_min <= f1_max <= sig['f1_ranges'][0][1]
-                f1_aromatic = sig['f1_ranges'][1][0] <= f1_min <= f1_max <= sig['f1_ranges'][1][1]
-                f2_match = sig['f2_range'][0] <= f2_min <= f2_max <= sig['f2_range'][1]
-
-                if (f1_aliphatic or f1_aromatic) and f2_match:
-                    confidence = sig['confidence_base']
-                elif f1_aliphatic or f1_aromatic or f2_match:
-                    confidence = sig['confidence_base'] * 0.5
-
-            elif nucleus_type == '1H':
-                # Check if F1 and F2 ranges are similar (homonuclear)
-                f1_match = sig['f1_range'][0] <= f1_min <= f1_max <= sig['f1_range'][1]
-                f2_match = sig['f2_range'][0] <= f2_min <= f2_max <= sig['f2_range'][1]
-
-                # Calculate range similarity
-                f1_center = (f1_min + f1_max) / 2
-                f2_center = (f2_min + f2_max) / 2
-                range_similarity = 1.0 - min(abs(f1_center - f2_center) / 12.0, 1.0)
-
-                if f1_match and f2_match and range_similarity > 0.8:
-                    confidence = sig['confidence_base'] * range_similarity
-
-            if confidence > 0:
-                detection_results.append({
-                    'nucleus_type': nucleus_type,
-                    'confidence': confidence,
-                    'method': 'chemical_shift',
-                    'details': {
-                        'f1_range': f1_range,
-                        'f2_range': f2_range,
-                        'signature_match': sig
-                    }
-                })
-
-        # Return the highest confidence result, or unknown if none found
-        if detection_results:
-            best_result = max(detection_results, key=lambda x: x['confidence'])
-            return best_result
-        else:
-            return {
-                'nucleus_type': 'unknown',
-                'confidence': 0.0,
-                'method': 'chemical_shift',
-                'details': {'f1_range': f1_range, 'f2_range': f2_range}
-            }
-
-    def _detect_from_filename(self, filename: str) -> Dict[str, Any]:
-        """
-        Detect nucleus type from filename patterns (original method refactored).
-
-        Args:
-            filename: Name of the spectrum file
-
-        Returns:
-            Dictionary with detection results
-        """
-        filename_lower = filename.lower()
-
-        # Primary filename patterns
-        if '15n' in filename_lower or 'hsqc' in filename_lower:
-            return {
-                'nucleus_type': '15N1H',
-                'confidence': 0.9,
-                'method': 'filename',
-                'details': {'pattern_found': '15n or hsqc in filename'}
-            }
-        elif '13c' in filename_lower or 'hmqc' in filename_lower:
-            return {
-                'nucleus_type': '13C1H',
-                'confidence': 0.9,
-                'method': 'filename',
-                'details': {'pattern_found': '13c or hmqc in filename'}
-            }
-        elif '1h' in filename_lower and ('15n' not in filename_lower and '13c' not in filename_lower):
-            return {
-                'nucleus_type': '1H',
-                'confidence': 0.9,
-                'method': 'filename',
-                'details': {'pattern_found': '1h without 15n/13c in filename'}
-            }
-
-        # Extended pattern search
-        nucleus_patterns = {
-            '15N1H': ['n15', 'nitrogen', '15n1h', 'hn', 'hsqc'],
-            '13C1H': ['c13', 'carbon', '13c1h', 'hc', 'hmqc'],
-            '1H': ['proton', '1h', 'h1']
-        }
-
-        for nucleus_type, patterns in nucleus_patterns.items():
-            for pattern in patterns:
-                if pattern in filename_lower:
-                    return {
-                        'nucleus_type': nucleus_type,
-                        'confidence': 0.8,
-                        'method': 'filename',
-                        'details': {'pattern_found': f'{pattern} in filename'}
-                    }
-
-        # No patterns found
-        return {
-            'nucleus_type': 'unknown',
-            'confidence': 0.0,
-            'method': 'filename',
-            'details': {'patterns_searched': list(nucleus_patterns.keys())}
-        }
-
-    def _extract_chemical_shift_ranges_from_integrator(self) -> Optional[Dict[str, tuple]]:
-        """
-        Extract chemical shift ranges from loaded spectrum in integrator.
-
-        Returns:
-            Dictionary with f1_range and f2_range tuples, or None if not available
-        """
-        try:
-            if not hasattr(self.integrator, 'spectrum_data') or self.integrator.spectrum_data is None:
-                return None
-
-            ranges = {}
-
-            # Method 1: Check for direct ppm scale attributes
-            if hasattr(self.integrator, 'f1_ppm') and self.integrator.f1_ppm is not None:
-                f1_ppm = self.integrator.f1_ppm
-                ranges['f1_range'] = (float(min(f1_ppm)), float(max(f1_ppm)))
-
-            if hasattr(self.integrator, 'f2_ppm') and self.integrator.f2_ppm is not None:
-                f2_ppm = self.integrator.f2_ppm
-                ranges['f2_range'] = (float(min(f2_ppm)), float(max(f2_ppm)))
-
-            # Method 2: Check for ppm_scale attribute (for F2/X dimension)
-            if 'f2_range' not in ranges and hasattr(self.integrator, 'ppm_scale'):
-                ppm_scale = self.integrator.ppm_scale
-                if ppm_scale is not None and len(ppm_scale) > 0:
-                    ranges['f2_range'] = (float(min(ppm_scale)), float(max(ppm_scale)))
-
-            # Method 3: Try to extract from spectrum metadata attributes
-            for attr_name in ['ppm_x', 'ppm_f2', 'x_ppm']:
-                if 'f2_range' not in ranges and hasattr(self.integrator, attr_name):
-                    ppm_data = getattr(self.integrator, attr_name)
-                    if ppm_data is not None and len(ppm_data) > 0:
-                        ranges['f2_range'] = (float(min(ppm_data)), float(max(ppm_data)))
-                        break
-
-            for attr_name in ['ppm_y', 'ppm_f1', 'y_ppm']:
-                if 'f1_range' not in ranges and hasattr(self.integrator, attr_name):
-                    ppm_data = getattr(self.integrator, attr_name)
-                    if ppm_data is not None and len(ppm_data) > 0:
-                        ranges['f1_range'] = (float(min(ppm_data)), float(max(ppm_data)))
-                        break
-
-            # Method 4: Parse from recent log output (fallback)
-            if len(ranges) < 2:
-                ranges_from_log = self._parse_chemical_shifts_from_log()
-                if ranges_from_log:
-                    ranges.update(ranges_from_log)
-
-            # Ensure we have both dimensions
-            if 'f1_range' in ranges and 'f2_range' in ranges:
-                self.logger.debug(f"Extracted chemical shift ranges: F1={ranges['f1_range']}, F2={ranges['f2_range']}")
-                return ranges
-            else:
-                self.logger.debug(f"Incomplete chemical shift ranges: {ranges}")
-                return None
-
-        except Exception as e:
-            self.logger.debug(f"Could not extract chemical shift ranges: {e}")
-            return None
-
-    def _parse_chemical_shifts_from_log(self) -> Optional[Dict[str, tuple]]:
-        """
-        Parse chemical shift ranges from log output as fallback.
-
-        Returns:
-            Dictionary with chemical shift ranges or None
-        """
-        try:
-            # This is a fallback method that could parse from captured log output
-            # For now, return None and rely on the direct attribute methods
-            return None
-        except Exception:
-            return None
+        if not self._load_spectrum(Path(spectrum_file)):
+            return 'unknown'
+        nucleus = INTEGRATOR_NUCLEUS_TYPES.get(self.integrator.auto_detected_nucleus, 'unknown')
+        if nucleus == 'unknown':
+            self.logger.warning(f"Could not determine nucleus type for {Path(spectrum_file).name}, using default")
+        return nucleus
 
     def get_optimal_parameters(self, nucleus_type: str, spectrum_file: Path) -> Dict[str, Any]:
         """
@@ -1025,49 +689,10 @@ class BatchProcessor:
                         progress = (i / len(spectrum_files)) * 100
                         self.logger.info(f"Progress: {progress:.1f}% ({i}/{len(spectrum_files)})")
 
-                    # Enhanced nucleus type detection with chemical shift analysis
-                    if nucleus_type:
-                        # User provided nucleus type - use it directly (backward compatibility)
-                        detected_nucleus = nucleus_type
-                        detection_details = None
-                    else:
-                        # Attempt to extract chemical shift ranges for enhanced detection
-                        chemical_shift_ranges = None
-                        try:
-                            # Load spectrum temporarily to extract chemical shift information
-                            if self._load_spectrum(spectrum_file):
-                                chemical_shift_ranges = self._extract_chemical_shift_ranges_from_integrator()
-                                if chemical_shift_ranges:
-                                    self.logger.debug(f"Extracted chemical shifts for {spectrum_file.name}: {chemical_shift_ranges}")
-                        except Exception as e:
-                            self.logger.debug(f"Could not extract chemical shifts for {spectrum_file.name}: {e}")
-
-                        # Perform enhanced nucleus detection
-                        if chemical_shift_ranges and 'f1_range' in chemical_shift_ranges and 'f2_range' in chemical_shift_ranges:
-                            # Use enhanced detection with chemical shifts
-                            detection_details = self.detect_nucleus_type(
-                                spectrum_file.name,
-                                f1_range=chemical_shift_ranges['f1_range'],
-                                f2_range=chemical_shift_ranges['f2_range'],
-                                return_details=True
-                            )
-                            detected_nucleus = detection_details['nucleus_type']
-
-                            # Log enhanced detection results
-                            confidence = detection_details['confidence']
-                            method = detection_details['primary_method']
-                            self.logger.info(f"Enhanced detection for {spectrum_file.name}: {detected_nucleus} "
-                                           f"(confidence: {confidence:.2f}, method: {method})")
-
-                            if confidence >= 0.8:
-                                self.logger.debug(f"High confidence detection using {method}")
-                            elif len(detection_details['all_methods']) > 1:
-                                self.logger.debug(f"Multiple detection methods used: {[m['method'] for m in detection_details['all_methods']]}")
-                        else:
-                            # Fallback to filename-only detection (backward compatibility)
-                            detected_nucleus = self.detect_nucleus_type(spectrum_file.name)
-                            detection_details = None
-                            self.logger.debug(f"Using filename-only detection for {spectrum_file.name}: {detected_nucleus}")
+                    # The nucleus the integrator detects on load, unless the user gave one
+                    detected_nucleus = nucleus_type or self.spectrum_nucleus(spectrum_file)
+                    self.logger.info(f"Nucleus type of {spectrum_file.name}: {detected_nucleus}"
+                                     f"{' (user provided)' if nucleus_type else ''}")
 
                     # Get optimal parameters
                     parameters = self.get_optimal_parameters(detected_nucleus, spectrum_file)
@@ -1079,27 +704,9 @@ class BatchProcessor:
                     # Process the spectrum
                     result = self.process_single_spectrum(spectrum_file, parameters)
 
-                    # Add enhanced detection metadata to result
-                    if detection_details:
-                        result['nucleus_detection'] = {
-                            'detected_nucleus': detected_nucleus,
-                            'confidence': detection_details['confidence'],
-                            'method': detection_details['primary_method'],
-                            'chemical_shifts': detection_details.get('chemical_shifts'),
-                            'all_methods': [m['method'] for m in detection_details['all_methods']]
-                        }
-                    else:
-                        result['nucleus_detection'] = {
-                            'detected_nucleus': detected_nucleus,
-                            'confidence': 0.8 if nucleus_type else 0.0,  # User-provided vs unknown
-                            'method': 'user_provided' if nucleus_type else 'filename_fallback',
-                            'chemical_shifts': None,
-                            'all_methods': []
-                        }
-
                     # Update statistics
                     self.stats['files'].append({key: value for key, value in result.items()
-                                                if key not in ('fitted_results', 'nucleus_detection')})
+                                                if key != 'fitted_results'})
                     if result['success']:
                         self.stats['processed_files'] += 1
                         self.stats['total_peaks_detected'] += result['peaks_detected']
@@ -1158,35 +765,6 @@ class BatchProcessor:
         success_rate = (self.stats['processed_files'] / self.stats['total_files'] * 100) if self.stats['total_files'] > 0 else 0
         self.logger.info(f"\nSuccess rate: {success_rate:.1f}%")
         self.logger.info("="*60)
-
-    def _detect_nucleus_type(self, file_path: Path) -> str:
-        """
-        Detect nucleus type from file path using enhanced detection methods.
-
-        Args:
-            file_path: Path to the spectrum file
-
-        Returns:
-            Detected nucleus type string
-        """
-        try:
-            # Load spectrum temporarily for chemical shift analysis
-            if self._load_spectrum(file_path):
-                chemical_shift_ranges = self._extract_chemical_shift_ranges_from_integrator()
-                if chemical_shift_ranges and 'f1_range' in chemical_shift_ranges and 'f2_range' in chemical_shift_ranges:
-                    # Use enhanced detection with chemical shifts
-                    detection_result = self.detect_nucleus_type(
-                        file_path.name,
-                        f1_range=chemical_shift_ranges['f1_range'],
-                        f2_range=chemical_shift_ranges['f2_range']
-                    )
-                    return detection_result
-
-            # Fallback to filename detection
-            return self.detect_nucleus_type(file_path.name)
-        except Exception as e:
-            self.logger.debug(f"Nucleus detection failed for {file_path}: {e}")
-            return 'unknown'
 
     def _get_nucleus_parameters(self, nucleus_type: str) -> Dict[str, Any]:
         """

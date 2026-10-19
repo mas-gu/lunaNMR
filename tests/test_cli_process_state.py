@@ -11,12 +11,16 @@ import pytest
 from lunaNMR import cli
 
 _BATCH_LOGGER = 'lunaNMR.batch_processing.batch_processor'
+_BATCH_PACKAGE = 'lunaNMR.batch_processing'
 
 
 def _process_state():
     root = logging.getLogger()
     return {'root_handlers': list(root.handlers), 'root_level': root.level,
             'batch_handlers': list(logging.getLogger(_BATCH_LOGGER).handlers),
+            'batch_propagate': logging.getLogger(_BATCH_LOGGER).propagate,
+            'batch_package_handlers': list(logging.getLogger(_BATCH_PACKAGE).handlers),
+            'batch_package_propagate': logging.getLogger(_BATCH_PACKAGE).propagate,
             'sigint': signal.getsignal(signal.SIGINT),
             'sigterm': signal.getsignal(signal.SIGTERM)}
 

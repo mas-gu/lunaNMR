@@ -99,7 +99,7 @@ Examples:
         parser.add_argument(
             '--nucleus',
             choices=['15N1H', '13C1H', '1H'],
-            help='Fixed nucleus type (if not specified, will auto-detect from filenames)'
+            help="Fixed nucleus type (if not specified, detected from each spectrum's ranges on load)"
         )
 
         parser.add_argument(
@@ -258,13 +258,6 @@ Examples:
         else:
             console_level = getattr(logging, args.log_level)
 
-        # Configure root logger
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[]
-        )
-
         # Console handler
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(console_level)
@@ -278,8 +271,11 @@ Examples:
 
         console_handler.setFormatter(logging.Formatter(console_format))
 
-        # Add handlers
-        logger = logging.getLogger()
+        # The batch modules print here, not through the host's root logger, whose
+        # handlers would print each line again
+        logger = logging.getLogger(__package__)
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
         logger.addHandler(console_handler)
 
     def load_configuration(self, args: argparse.Namespace) -> Dict[str, Any]:
@@ -387,7 +383,7 @@ Examples:
 
             print(f"Found {len(spectrum_files)} spectrum files:")
             for i, file_path in enumerate(spectrum_files[:10]):  # Show first 10
-                nucleus_type = args.nucleus or processor.detect_nucleus_type(file_path.name)
+                nucleus_type = args.nucleus or processor.spectrum_nucleus(file_path)
                 print(f"  {i+1:3d}. {file_path.name} (detected: {nucleus_type})")
 
             if len(spectrum_files) > 10:
@@ -492,15 +488,16 @@ Examples:
     def _process_state_restored(self):
         """
         Install the interrupt handlers for one run, and give the process back the
-        logging handlers, levels and signal handlers it had before the run.
+        logging handlers, levels, propagation and signal handlers it had before the run.
 
         A host that calls the CLI repeatedly in one process otherwise gains a stdout
         handler on the root logger per call, and its own SIGTERM becomes sys.exit(0).
         Signal handlers can only be set from the main thread, so a run on any other
         thread leaves them to the host.
         """
-        loggers = [logging.getLogger(), logging.getLogger(f"{__package__}.batch_processor")]
-        saved_loggers = [(lg, list(lg.handlers), lg.level) for lg in loggers]
+        loggers = [logging.getLogger(), logging.getLogger(__package__),
+                   logging.getLogger(f"{__package__}.batch_processor")]
+        saved_loggers = [(lg, list(lg.handlers), lg.level, lg.propagate) for lg in loggers]
         saved_signals = {}
         if threading.current_thread() is threading.main_thread():
             for signum in (signal.SIGINT, signal.SIGTERM):
@@ -511,12 +508,13 @@ Examples:
             for signum, handler in saved_signals.items():
                 if handler is not None:
                     signal.signal(signum, handler)
-            for lg, handlers, level in saved_loggers:
+            for lg, handlers, level, propagate in saved_loggers:
                 for handler in list(lg.handlers):
                     if handler not in handlers:
                         lg.removeHandler(handler)
                         handler.close()
                 lg.setLevel(level)
+                lg.propagate = propagate
 
     def _run(self, argv: Optional[List[str]] = None) -> int:
         """

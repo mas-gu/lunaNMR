@@ -101,6 +101,7 @@ def test_the_spectrum_is_fitted_and_processed(batch_run):
     assert envelope["processed_files"] == 1
     assert envelope["failed_files"] == 0
     spectrum_run = envelope["files"][0]
+    assert spectrum_run["nucleus_type"] == "15N1H"
     assert spectrum_run["peaks_detected"] > 0
     assert spectrum_run["peaks_fitted"] > 0.8 * spectrum_run["peaks_detected"]
 
@@ -149,7 +150,7 @@ def test_a_spectrum_with_nothing_fitted_fails_the_run(tmp_path):
     run - exit 1, BatchFailed naming the spectrum and why."""
     from lunaNMR.cli import main
     config = tmp_path / "config.json"
-    config.write_text(json.dumps({"processing": {"sn_thresholds": {"default": 1000.0}},
+    config.write_text(json.dumps({"processing": {"sn_thresholds": {"15N1H": 1000.0}},
                                   "optimization": {"enable_auto_optimization": False}}))
     stdout = io.StringIO()
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):

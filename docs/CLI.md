@@ -556,12 +556,18 @@ separates `removed` from `missing` (named paths that were not there).
 python -m lunaNMR batch <folder> [--preset 1H] [--config ...] [--optimize] ...
 ```
 Flags pass straight through to `batch_processing`.
-Each spectrum is detected by S/N (the threshold and peak count from the preset or config,
-tuned per spectrum by the optimiser unless the config disables it), and its detected peaks
+Each spectrum is detected by S/N (the threshold and peak count from the preset or config
+entry of its nucleus type, tuned per spectrum by the optimiser unless the config disables
+it), and its detected peaks
 are fitted as the GUI's **Fit Spectrum** fits them after a Detect: the same processor
 (`SingleSpectrumProcessor.process_peak_list`), the main window's default parameters, the
 PS2D configuration of the nucleus detected on load, parallel, clusters computed afresh. A
 config's `processing_parameters` replace the search and fitting windows.
+
+The nucleus type is the one the integrator detects on load from the spectral ranges (the
+same detection the PS2D configuration follows): `15N1H` for a 15N-HSQC, `13C1H` for a 13C
+spectrum, `unknown` — and the config's `default` entries — when the ranges name neither.
+`--nucleus` overrides it for every spectrum. The filename plays no part.
 
 Written into `--output` (default: the current directory):
 - `<spectrum stem>_fitting_results.csv` per spectrum — the file Fit Spectrum saves beside
