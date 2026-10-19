@@ -27,10 +27,8 @@ class FontManager:
             test_root = tk.Tk()
             test_root.withdraw()  # Hide the test window
             
-            # Get default font
             self.default_font = tkfont.nametofont("TkDefaultFont")
             
-            # Configure emoji-capable fonts based on platform
             if self.system == "Linux":
                 self._configure_linux_fonts()
             elif self.system == "Darwin":  # macOS
@@ -177,10 +175,8 @@ def print_font_info():
 
 
 if __name__ == "__main__":
-    # Test the font configuration
     print_font_info()
     
-    # Test emoji conversion
     test_text = "✅ Success! 📊 Data loaded 🔧 Ready"
     converted = get_display_text(test_text)
     print(f"Original: {test_text}")
@@ -193,7 +189,6 @@ if platform.system() == "Linux":
         """Force emoji display on Linux instead of fallback"""
         return text  # Don't convert to fallbacks
     
-    # Override the fallback function
     import sys
     current_module = sys.modules[__name__]
     current_module.get_display_text = get_display_text_bypass
