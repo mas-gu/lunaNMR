@@ -10,8 +10,6 @@ S2, Rex, and te parameters with proper error propagation.
 import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
-from scipy import stats
-from scipy.optimize import minimize
 
 # Physical constants
 GAMMA_H = 2.67522128e8  # 1H gyromagnetic ratio (rad s-1 T-1)
@@ -476,7 +474,6 @@ class ReducedSpectralDensityAnalysis:
         sigma_noe = (noe - 1.0) * r1 * gamma_ratio
         dsigma_dr1 = (noe - 1.0) * gamma_ratio
         dsigma_dnoe = r1 * gamma_ratio
-        sigma_noe_err = np.sqrt((dsigma_dr1 * r1_err)**2 + (dsigma_dnoe * noe_err)**2)
         
         # J(0) and its error (Farrow-exact notation with d²/4)
         j0 = (3.0 / (2.0 * (3.0 * d / 4.0 + c))) * (-0.5 * r1 + r2 - (3.0/5.0) * sigma_noe)
@@ -638,7 +635,7 @@ class ReducedSpectralDensityAnalysis:
             processed += 1
         
         # Report data quality summary
-        print(f"\nData Quality Summary:")
+        print("\nData Quality Summary:")
         print(f"  Total residues in file: {total_residues}")
         print(f"  Processed successfully: {processed}")
         print(f"  Skipped (NaN values): {skipped_nan}")
@@ -791,7 +788,7 @@ def main():
         analyzer.plot_results(results)
         
         success_rate = results['fit_success'].mean() * 100
-        print(f"\nModel-Free Fitting Results:")
+        print("\nModel-Free Fitting Results:")
         print(f"  Fit success rate: {success_rate:.1f}%")
         
         if success_rate > 0:

@@ -17,16 +17,12 @@ MULTICORE VERSION: Modified to utilize multiple CPU cores for parallel processin
 import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
-from scipy import stats
-from scipy.optimize import minimize
 
 # Multiprocessing imports
 import multiprocessing
 from multiprocessing import cpu_count
-from functools import partial
 from dynamiXs_density_functions.model_free_search import (
     SINGLE_FIELD_STARTS, S2_BOUNDS, TE_BOUNDS, REX_BOUNDS, TE_SCALE, best_least_squares)
-import pickle
 
 # Numba JIT compilation for performance (optional but recommended)
 try:
@@ -413,7 +409,6 @@ class ReducedSpectralDensityAnalysis:
         sigma_noe = (noe - 1.0) * r1 * gamma_ratio
         dsigma_dr1 = (noe - 1.0) * gamma_ratio
         dsigma_dnoe = r1 * gamma_ratio
-        sigma_noe_err = np.sqrt((dsigma_dr1 * r1_err)**2 + (dsigma_dnoe * noe_err)**2)
         
         # J(0) and its error (Farrow-exact notation with d²/4)
         j0 = (3.0 / (2.0 * (3.0 * d / 4.0 + c))) * (-0.5 * r1 + r2 - (3.0/5.0) * sigma_noe)
@@ -593,7 +588,7 @@ class ReducedSpectralDensityAnalysis:
             processed += 1
         
         # Report data quality summary
-        print(f"\nData Quality Summary:")
+        print("\nData Quality Summary:")
         print(f"  Total residues in file: {total_residues}")
         print(f"  Processed successfully: {processed}")
         print(f"  Skipped (NaN values): {skipped_nan}")
@@ -653,7 +648,7 @@ class ReducedSpectralDensityAnalysis:
         total_residues = len(data)
         processed = len(results)
         
-        print(f"\nData Quality Summary:")
+        print("\nData Quality Summary:")
         print(f"  Total residues in file: {total_residues}")
         print(f"  Processed successfully: {processed}")
         print(f"  Skipped (NaN values): {skipped_nan}")
@@ -907,7 +902,7 @@ def main():
         analyzer.plot_results(results)
         
         success_rate = results['fit_success'].mean() * 100
-        print(f"\nModel-Free Fitting Results:")
+        print("\nModel-Free Fitting Results:")
         print(f"  Fit success rate: {success_rate:.1f}%")
         print(f"  Multiprocessing enabled: {success_rate > 0}")
         
