@@ -81,9 +81,7 @@ def test_the_fitter_has_no_simplified_parameter_manager():
         assert not hasattr(fitter, name), name
 
 
-def test_the_integrator_leaves_ppm_range_nucleus_detection_to_its_fitter():
+def test_the_integrator_has_no_ppm_range_nucleus_detection():
     from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator, VoigtIntegrator
-    from lunaNMR.core.enhanced_voigt_fitter import EnhancedVoigtFitter
     assert not hasattr(VoigtIntegrator, 'detect_nucleus_type')
     assert not hasattr(EnhancedVoigtIntegrator, 'detect_nucleus_type')
-    assert EnhancedVoigtFitter().detect_nucleus_type([110.0, 130.0]) == '15N'
