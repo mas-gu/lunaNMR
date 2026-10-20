@@ -1426,7 +1426,7 @@ def _parallel_cluster_worker(cluster_task):
             assignment = cluster_assignments[0]
             peak_number = cluster_peak_numbers[0]
 
-            # Fit using enhanced_peak_fitting (routes through consensus or 2D fitting)
+            # Fit using enhanced_peak_fitting (single-peak 2D fitting)
             result = worker_integrator.enhanced_peak_fitting(
                 peak_x, peak_y, assignment,
                 all_peaks_context=cluster_task['shared_context']['all_peaks_context']

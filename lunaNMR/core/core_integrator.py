@@ -3445,7 +3445,7 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
 
     def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown", linewidth_constraints=None, all_peaks_context=None):
         """
-        Enhanced peak fitting with advanced features and consensus fitting integration
+        Fit one peak in 2D among the peaks of the spectrum
 
         Parameters
         ----------
@@ -3464,39 +3464,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             Format: [{'assignment': str, 'x_ppm': float, 'y_ppm': float, 'pos_x': float, 'pos_y': float}, ...]
         """
 
-        # Check if simplified parameters are enabled (indicating automated mode preference)
-        use_consensus = False
-        if hasattr(self, 'parameter_manager') and hasattr(self.parameter_manager, 'use_simplified_mode'):
-            use_consensus = self.parameter_manager.use_simplified_mode
-        elif hasattr(self, 'gui_params') and self.gui_params.get('use_simplified_parameters', False):
-            use_consensus = True
-
-        if use_consensus and hasattr(self.voigt_fitter, 'fit_with_consensus'):
-            log_progress(f"Using consensus fitting for peak at ({peak_x_ppm:.4f}, {peak_y_ppm:.4f})")
-
-            # Extract region data for consensus fitting using existing method
-            region_data = self.extract_peak_region(peak_x_ppm, peak_y_ppm, self.fitting_parameters.get('fitting_window_x', 0.15), self.fitting_parameters.get('fitting_window_y', 2.0))
-            if region_data is not None:
-                # Use the x cross-section for 1D consensus fitting
-                x_region = region_data['x_ppm_scale']
-                y_region = region_data['x_cross_section']  # Intensity data along x-axis
-            else:
-                x_region, y_region = None, None
-            if x_region is not None and y_region is not None:
-                nucleus_type = self.detect_nucleus_type(peak_x_ppm, peak_y_ppm)
-                consensus_result = self.voigt_fitter.fit_with_consensus(
-                    x_region, y_region, nucleus_type, use_simplified=True
-                )
-
-                if consensus_result and consensus_result.get('success', False):
-                    result = self.convert_consensus_result_to_standard(consensus_result, peak_x_ppm, peak_y_ppm, assignment)
-                    log_info(f"Consensus fitting successful: R² = {result.get('avg_r_squared', 0):.4f}")
-
-                    self.update_statistics(True, result['avg_r_squared'])
-                    return result
-                else:
-                    log_warning("Consensus fitting unavailable; fitting in 2D")
-
         # 2D fit with PS2D linewidth constraints and 2D routing
         result = self.fit_peak_voigt_2d(
             peak_x_ppm, peak_y_ppm, assignment,
@@ -3506,7 +3473,7 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
 
         if result and result.get('success', True):
             self.update_statistics(True, result['avg_r_squared'])
-            # Convert nested format to flat format for consistency with consensus results
+            # Convert nested format to flat format
             result = self.convert_voigt2d_result_to_standard(result)
         else:
             self.update_statistics(False)
@@ -3527,71 +3494,16 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
         else:
             return '1H'  # Default fallback
 
-    def convert_consensus_result_to_standard(self, consensus_result, peak_x_ppm, peak_y_ppm, assignment):
-        """Convert consensus fitting result to standard peak result format"""
-        try:
-            r_squared = consensus_result.get('r_squared', 0)
-            parameters = consensus_result.get('parameters', [])
-            fitted_curve = consensus_result.get('fitted_curve')
-
-            # Extract fitted parameters (assuming Voigt format: [amp, center, sigma, gamma, baseline])
-            if len(parameters) >= 5:
-                amplitude = parameters[0]
-                center = parameters[1]
-                sigma = parameters[2]
-                gamma = parameters[3]
-                baseline = parameters[4]
-                width = sigma + gamma  # Total width
-            else:
-                amplitude, center, sigma, gamma, baseline, width = 1000, peak_x_ppm, 0.01, 0.01, 0, 0.02
-
-            result = {
-                'assignment': assignment,
-                'peak_x': peak_x_ppm,
-                'peak_y': peak_y_ppm,
-                'amplitude': amplitude,
-                'volume': amplitude * width * np.pi,  # Approximate volume
-                'avg_r_squared': r_squared,
-                'height': amplitude,
-                'width': width,
-                'sigma': sigma,
-                'gamma': gamma,
-                'baseline': baseline,
-                'center_x': center,
-                'center_y': peak_y_ppm,
-                'success': True,
-                'method': 'consensus_fitting',
-                'quality_class': consensus_result.get('quality_class', 'Fair'),
-                'fitted_curve': fitted_curve,
-                'original_consensus_result': consensus_result
-            }
-
-            return result
-
-        except Exception as e:
-            log_error(f"Failed to convert consensus result: {e}")
-            return {
-                'assignment': assignment,
-                'peak_x': peak_x_ppm,
-                'peak_y': peak_y_ppm,
-                'amplitude': 1000,
-                'volume': 1000,
-                'avg_r_squared': 0.5,
-                'success': False,
-                'method': 'consensus_fitting_failed'
-            }
-
     def convert_voigt2d_result_to_standard(self, voigt2d_result):
         """Convert nested 2D Voigt result to flat standard format
 
-        This ensures enhanced_peak_fitting() always returns a consistent flat format,
-        regardless of whether it uses consensus fitting or fit_peak_voigt_2d().
+        This ensures enhanced_peak_fitting() always returns a consistent flat format.
 
         Args:
             voigt2d_result: Result dict from fit_peak_voigt_2d() with nested x_fit/y_fit structure
 
         Returns:
-            Flattened result dict compatible with consensus format and parallel processing
+            Flattened result dict compatible with parallel processing
         """
         try:
             # Extract x and y fit parameters (use x_fit for primary parameters)

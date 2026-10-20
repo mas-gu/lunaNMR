@@ -91,9 +91,6 @@ class EnhancedVoigtFitter:
             self.simplified_param_manager = None
             self.parameter_adapter = None
 
-        # There is no consensus fitting engine; fit_with_consensus returns None
-        self.use_automated_fitting = False
-
     def set_gui_parameters(self, gui_fitting_params):
         """
         Store GUI fitting parameters for consistent window sizing in analysis displays.
@@ -171,98 +168,6 @@ class EnhancedVoigtFitter:
         """
         # RETURN DUMMY VALUE - NOT USED ANYMORE
         return 1.0  # No multiplier needed - PS2D uses fixed radF1/radF2
-
-    # AUTOMATED FITTING METHODS (Priority 1 & 2)
-
-    def fit_with_consensus(self, x_data, y_data, nucleus_type='default', use_simplified=True):
-        """
-        Fit peaks using automated consensus fitting approach.
-
-        This method implements Priority 2 improvements:
-        - Separates detection from fitting
-        - Uses multi-method consensus
-        - Automated peak counting with AIC/BIC model selection
-
-        Parameters:
-        -----------
-        x_data : np.ndarray
-            Frequency/chemical shift data
-        y_data : np.ndarray
-            Intensity data
-        nucleus_type : str
-            Type of nucleus ('1H', '15N', '13C', 'default')
-        use_simplified : bool
-            Whether to use simplified parameters (Priority 1)
-
-        Returns:
-        --------
-        dict : Consensus fitting results with backward-compatible format
-        """
-        if not self.use_automated_fitting:
-            log_warning("Automated fitting not available, falling back to legacy method")
-            return self._legacy_fit_fallback(x_data, y_data, nucleus_type)
-
-        try:
-            # Phase 1: Detection using consensus detector
-            if use_simplified:
-                sensitivity = self.simplified_param_manager.simplified_params.sensitivity
-            else:
-                sensitivity = 0.5
-
-            peak_candidates = self.consensus_detector.detect_peaks(
-                x_data, y_data, nucleus_type, sensitivity
-            )
-
-            if not peak_candidates:
-                log_info("No peaks detected")
-                return self._empty_result()
-
-            # Phase 2: Consensus fitting with automated peak counting
-            max_peaks = min(10, len(peak_candidates))  # Reasonable limit
-            consensus_result = self.consensus_fitter.fit_consensus(
-                x_data, y_data, peak_candidates, max_peaks
-            )
-
-            # Phase 3: Convert to backward-compatible format
-            legacy_result = self._convert_consensus_to_legacy(
-                consensus_result, x_data, y_data, nucleus_type
-            )
-
-            # Phase 4: Adaptive quality assessment
-            if use_simplified:
-                adaptive_threshold = self.simplified_param_manager.calculate_adaptive_quality_threshold(
-                    y_data, nucleus_type
-                )
-                legacy_result['adaptive_threshold'] = adaptive_threshold
-                legacy_result['meets_adaptive_threshold'] = legacy_result.get('r_squared', 0) >= adaptive_threshold
-
-            return legacy_result
-
-        except Exception as e:
-            log_error(f"Automated fitting failed: {e}")
-            return self._legacy_fit_fallback(x_data, y_data, nucleus_type)
-
-    def _convert_consensus_to_legacy(self, consensus_result):
-        """DEPRECATED: This method is no longer used."""
-        return None
-
-    def _legacy_fit_fallback(self, x_data, y_data, peak_center, **kwargs):
-        """DEPRECATED: This method is no longer used."""
-        return None
-
-    def _empty_result(self):
-        """Return empty result in legacy format"""
-        return {
-            'peaks': [],
-            'r_squared': 0.0,
-            'residual_std': np.inf,
-            'aic': np.inf,
-            'bic': np.inf,
-            'method': 'no_peaks',
-            'n_peaks': 0,
-            'quality_category': 'no_signal',
-            'automated_fitting': True
-        }
 
     @staticmethod
     def voigt_profile_1d(x, amplitude, center, sigma, gamma, baseline=0):
