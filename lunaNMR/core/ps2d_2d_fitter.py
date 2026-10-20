@@ -893,22 +893,16 @@ class Ps2dMultiPeakFitter2D:
         #   - Tighter bounds prevent optimizer wandering into unrealistic values
         #   - Works automatically - no manual parameter tuning needed
 
-        # Linewidth bounds strategy depends on cluster vs isolated peak:
-        # - Isolated (n_peaks == 1): Absolute bounds, full optimizer freedom
-        # - Cluster (n_peaks > 1): Per-peak bounds (30-200% of reference), prevents collapse
-        is_cluster = n_peaks > 1
-
-        # Absolute minimum bounds (per component: Lorentzian or Gaussian)
-        # Physical minimum linewidths at 600 MHz:
-        # - 15N: ~0.03 ppm (T2 relaxation limit)
-        # - 1H:  ~0.005 ppm (T2 relaxation limit)
-        # Too-loose bounds cause optimizer to find unrealistic narrow peaks,
-        # leading to unstable volume attribution in overlapping clusters.
-        absolute_min_lw_f1 = 0.03    # ppm - realistic 15N minimum
-        absolute_min_lw_f2 = 0.005   # ppm - realistic 1H minimum
-
-        fallback_min_lw_f1 = config.min_linewidth_f1  # 0.05 for 15N, 0.025 for 13C
-        fallback_min_lw_f2 = config.min_linewidth_f2  # 0.001 for 15N, 0.005 for 13C
+        # Minimum per component (Lorentzian or Gaussian), the same for every nucleus.
+        # It bounds the SPLIT more than the width: the data fix each peak's total, and
+        # the component they leave free rests on whatever floor it is given. Measured on
+        # two 13C-HSQCs (80 peaks each), an F1 floor of 0.025 ppm moved nearly every
+        # peak on 0.03 onto 0.025 with R2 unchanged, while cluster members traded width
+        # or volume with each other by up to 14%; at 0.009 volumes moved by up to 292%.
+        # Too low a floor lets the optimizer find unrealistically narrow peaks, and the
+        # volume of an overlapping cluster is no longer attributed stably.
+        absolute_min_lw_f1 = 0.03    # ppm, F1 (15N or 13C)
+        absolute_min_lw_f2 = 0.005   # ppm, F2 (1H)
 
         # Maximum bounds: use learned statistics if available, else config defaults
         if spectrum_statistics is not None:
