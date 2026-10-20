@@ -1604,15 +1604,7 @@ def _initialize_worker_fitter(shared_context):
     if lunaNMR_path not in sys.path:
         sys.path.insert(0, lunaNMR_path)
 
-    # 2. CRITICAL: Import PS2D modules in worker process (MUST happen before integrator creation)
-    try:
-        from lunaNMR.core.ps2d_2d_fitter import Ps2dMultiPeakFitter2D
-        from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
-    except ImportError:
-        # Workers will fall back to 1D fitting for overlapping peaks
-        pass
-
-    # 3. Reconstruct shared spectral data
+    # 2. Reconstruct shared spectral data
     shared_spectrum = shared_memory.SharedMemory(
         name=shared_context['spectrum_memory_name']
     )
@@ -1648,17 +1640,13 @@ def _initialize_worker_fitter(shared_context):
     # CRITICAL: Synchronize PS2D configuration
     ps2d_config = shared_context.get('ps2d_config', {})
     if ps2d_config:
-        try:
-            from lunaNMR.core.ps2d_config import get_ps2d_config
-            config = get_ps2d_config()
+        from lunaNMR.core.ps2d_config import get_ps2d_config
+        config = get_ps2d_config()
 
-            # Directly set attributes on config object (same as GUI does)
-            for key, value in ps2d_config.items():
-                if hasattr(config, key):
-                    setattr(config, key, value)
-
-        except ImportError:
-            pass  # Could not synchronize PS2D config
+        # Directly set attributes on config object (same as GUI does)
+        for key, value in ps2d_config.items():
+            if hasattr(config, key):
+                setattr(config, key, value)
 
     # 6. Restore enhanced fitter parameters
     if worker_integrator.enhanced_fitter:
@@ -1679,15 +1667,6 @@ def _initialize_worker_fitter(shared_context):
 
         # Set noise_level on worker_integrator for fit_overlap_group_2d() weak peak detection
         worker_integrator.noise_level = shared_context['validation_thresholds'].get('noise_level')
-
-    # CRITICAL: Verify worker integrator has all required methods for PS2D 2D routing
-    required_methods = [
-        'check_if_peaks_need_2d_fitting',
-        'fit_overlap_group_2d',
-        'extract_2d_region_for_overlap_group',
-        'identify_overlap_clusters'
-    ]
-    missing_methods = [m for m in required_methods if not hasattr(worker_integrator, m)]
 
     # Cleanup shared memory reference in worker
     try:

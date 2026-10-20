@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# ABOUTME: Plots Rex field dependence and Rex field scaling side by side from a dual-field relaxation CSV.
+# ABOUTME: Standalone script; the two field frequencies are given on the command line.
 """
 Standalone script for plotting Rex Field Dependence and Rex Field Scaling plots
 from dual-field NMR relaxation data CSV files.
@@ -12,7 +14,7 @@ The Rex Field Scaling plot uses Option 3 filtering:
 - Outlier removal (ratio must be within 0.3× to 3× expected)
 
 Usage:
-    python plot_rex_field_analysis.py <csv_file> [--field1 600] [--field2 700] [--min-rex 0.5] [--output output.pdf]
+    python plot_rex_field_analysis.py <csv_file> --field1 600 --field2 700 [--min-rex 0.5] [--output output.pdf]
 
 Example:
     python plot_rex_field_analysis.py ../density_function_macro/087_density_basic.csv --field1 600 --field2 700 --output rex_analysis_ctrl.pdf
@@ -31,32 +33,6 @@ matplotlib.rcParams['pdf.fonttype'] = 42  # TrueType fonts
 matplotlib.rcParams['ps.fonttype'] = 42   # PostScript compatibility
 matplotlib.rcParams['font.family'] = 'sans-serif'
 matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Liberation Sans', 'Arial']
-
-
-def detect_field_frequencies(df):
-    """
-    Try to detect field frequencies from column names or data
-
-    Parameters:
-    -----------
-    df : pd.DataFrame
-        Input dataframe
-
-    Returns:
-    --------
-    tuple : (field1_freq, field2_freq) or (None, None) if cannot detect
-    """
-    # Common field combinations
-    common_fields = {
-        ('600', '700'): (600, 700),
-        ('500', '600'): (500, 600),
-        ('700', '800'): (700, 800),
-        ('800', '900'): (800, 900),
-    }
-
-    # (This is dataset-specific, adjust as needed)
-
-    return None, None  # Default: cannot auto-detect
 
 
 def load_and_validate_csv(csv_file, rex_col_f1='Rex_f1', rex_col_f2='Rex_f2'):
