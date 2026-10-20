@@ -290,8 +290,6 @@ class LunaNMRMainWindow(BaseWindow):
 
         self.setup_ui()
 
-        self.apply_user_preferences()
-
         self.sync_parameters_to_integrator()
 
         logger.info("lunaNMR v1.0 main window initialized successfully")
@@ -5579,57 +5577,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
         QMessageBox.about(self, "About LunaNMR", about_text)
 
-    def apply_user_preferences(self):
-        """Apply saved user preferences to the window.
-
-        This restores:
-        - Window geometry (size and position)
-        - Splitter positions
-        - Display options
-        - Last used directories
-
-        Uses Qt's QSettings for cross-platform persistence.
-        """
-        logger.debug("Applying user preferences")
-
-        try:
-            from PySide6.QtCore import QSettings
-
-            settings = QSettings("LunaNMR", "LunaNMR_v1")
-
-            geometry = settings.value("window/geometry")
-            if geometry:
-                self.restoreGeometry(geometry)
-                logger.debug("Restored window geometry")
-
-            state = settings.value("window/state")
-            if state:
-                self.restoreState(state)
-                logger.debug("Restored window state")
-
-            if hasattr(self, 'main_splitter'):
-                splitter_state = settings.value("splitter/main")
-                if splitter_state:
-                    self.main_splitter.restoreState(splitter_state)
-                    logger.debug("Restored main splitter state")
-
-            last_nmr_folder = settings.value("paths/last_nmr_folder", "")
-            if last_nmr_folder:
-                self.current_nmr_folder = last_nmr_folder
-
-            last_peak_folder = settings.value("paths/last_peak_folder", "")
-            if last_peak_folder:
-                self.current_peak_folder = last_peak_folder
-
-            self.show_detected = settings.value("display/show_detected", True, type=bool)
-            self.show_assigned = settings.value("display/show_assigned", True, type=bool)
-            self.show_fitted_curves = settings.value("display/show_fitted_curves", True, type=bool)
-            self.show_ellipses = settings.value("display/show_ellipses", False, type=bool)
-
-            logger.debug("User preferences applied successfully")
-
-        except Exception as e:
-            logger.warning(f"Failed to apply user preferences: {e}")
             # Continue - don't fail startup for preference issues
 
     def sync_parameters_to_integrator(self):
