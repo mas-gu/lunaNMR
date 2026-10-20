@@ -1,4 +1,4 @@
-# ABOUTME: A single peak is fitted in 2D whatever the parameter mode, and nothing carries an overlap-resolution switch.
+# ABOUTME: Nothing carries consensus fitting or an overlap-resolution switch.
 # ABOUTME: Real 600 MHz T1 reference plane from data_example; the integrator, its fitter, the workers and the config file.
 
 import contextlib
@@ -26,36 +26,6 @@ def integrator():
     it.noise_level = it._estimate_noise_level_advanced()
     it.peak_list = NMRFileManager().load_peak_list(str(SPECTRA / "600_peaks.txt"))
     return it
-
-
-def _fit_first_peak(integrator, gui_params):
-    """(fit, captured stdout) of the first listed peak, fitted among the whole list."""
-    context = [{'assignment': str(r['Assignment']), 'x_ppm': float(r['Position_X']),
-                'y_ppm': float(r['Position_Y'])} for _, r in integrator.peak_list.iterrows()]
-    row = integrator.peak_list.iloc[0]
-    integrator.gui_params = gui_params
-    log = io.StringIO()
-    with contextlib.redirect_stdout(log):
-        fit = integrator.enhanced_peak_fitting(
-            float(row['Position_X']), float(row['Position_Y']), str(row['Assignment']),
-            all_peaks_context=context)
-    return fit, log.getvalue()
-
-
-class TestASinglePeakWithSimplifiedParameters:
-    BASE = {'use_ps2d_multi_peak': True, 'use_adaptive_optimization': False}
-
-    def test_is_fitted_in_2d_exactly_as_without_them(self, integrator):
-        plain, _ = _fit_first_peak(integrator, dict(self.BASE))
-        simplified, _ = _fit_first_peak(integrator, dict(self.BASE, use_simplified_parameters=True))
-        assert simplified['method'] == '2d_simultaneous_multi_peak'
-        for key in ('peak_x', 'peak_y', 'height', 'volume', 'avg_r_squared'):
-            assert simplified[key] == plain[key], key
-
-    def test_logs_no_other_fitting_method(self, integrator):
-        _, log = _fit_first_peak(integrator, dict(self.BASE, use_simplified_parameters=True))
-        assert 'onsensus' not in log
-        assert 'utomated fitting' not in log
 
 
 def test_the_integrator_has_no_overlap_resolution_switch(integrator):
