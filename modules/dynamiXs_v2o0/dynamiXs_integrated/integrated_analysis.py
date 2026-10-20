@@ -9,9 +9,6 @@ model-free parameters, automating:
 3. Data format conversion (times → rates)
 4. Dataset merging and validation
 5. Spectral density analysis
-
-Author: DynamiXs Development Team
-Date: 2025-01-23
 """
 
 import importlib
@@ -206,7 +203,6 @@ class IntegratedAnalysisPipeline:
         self.log_progress("INTEGRATED SPECTRAL DENSITY ANALYSIS")
         self.log_progress("=" * 60)
 
-        # Step 1: Process Field 1 data
         self.log_progress("\n[1/7] Processing Field 1 data...")
         self.field1_results = self._process_field_data(
             field_freq=self.params.field1_freq_mhz,
@@ -235,24 +231,19 @@ class IntegratedAnalysisPipeline:
         else:
             self.log_progress("\n[2/7] Skipping Field 2 (single-field analysis)")
 
-        # Step 3: Validate datasets
         self.log_progress("\n[3/7] Validating datasets...")
         validation_report = self._validate_datasets()
         self.log_progress(validation_report)
 
-        # Step 4: Create spectral density input files
         self.log_progress("\n[4/7] Creating spectral density input files...")
         input_files = self._create_spectral_density_inputs()
 
-        # Step 5: Run spectral density analysis
         self.log_progress("\n[5/7] Running spectral density analysis...")
         results = self._run_spectral_density_analysis(input_files)
 
-        # Step 6: Generate comprehensive report
         self.log_progress("\n[6/7] Generating analysis report...")
         self._generate_report(results)
 
-        # Step 7: Save final results
         self.log_progress("\n[7/7] Saving final results...")
         output_file = self._save_final_results(results)
         self.log_progress(f"✓ Results saved to: {output_file}")
@@ -285,7 +276,6 @@ class IntegratedAnalysisPipeline:
         t1_initial_time = self.params.t1_initial_time if t1_units == 'ms' else None
         t2_initial_time = self.params.t2_initial_time if t2_units == 'ms' else None
 
-        # Step 1: Fit T1 data
         self.log_progress(f"  ├─ Fitting T1 data ({field_freq} MHz)...")
         t1_params, t1_results_file = run_t1_fitting(
             input_csv=t1_file,
@@ -333,7 +323,6 @@ class IntegratedAnalysisPipeline:
             )
             self.log_progress(f"  │  ✓ {len(t2_params)} residues fitted")
 
-        # Step 3: Calculate hetNOE
         self.log_progress(f"  ├─ Calculating hetNOE...")
         sat_intensities, sat_errors = parse_intensity_csv(noe_sat_file)
         unsat_intensities, unsat_errors = parse_intensity_csv(noe_unsat_file)
@@ -363,7 +352,6 @@ class IntegratedAnalysisPipeline:
                      else convert_relaxation_times_to_rates(t2_params, time_units=t2_units))
         self.log_progress(f"  │  ✓ Converted to R1/R2 (s⁻¹)")
 
-        # Step 5: Merge datasets
         self.log_progress(f"  └─ Merging datasets...")
         merged_data, excluded = merge_datasets_by_residue(
             r1_data=r1_params,
@@ -391,12 +379,10 @@ class IntegratedAnalysisPipeline:
         to learn that the only physical-plausibility check in the pipeline fired.
         """
 
-        # Validate Field 1
         warnings_field1 = validate_relaxation_rates(self.field1_results['merged_data'])
         self.validation_warnings = {k: len(v) for k, v in warnings_field1.items()}
         check_minimum_residue_count(self.field1_results['merged_data'])
 
-        # Validate Field 2 if present
         if self.params.enable_dual_field:
             warnings_field2 = validate_relaxation_rates(self.field2_results['merged_data'])
             for key, residues in warnings_field2.items():
@@ -404,7 +390,6 @@ class IntegratedAnalysisPipeline:
                                                  + len(residues))
             check_minimum_residue_count(self.field2_results['merged_data'])
 
-            # Check consistency between fields
             common, f1_only, f2_only = validate_field_consistency(
                 self.field1_results['merged_data'],
                 self.field2_results['merged_data']
@@ -414,7 +399,6 @@ class IntegratedAnalysisPipeline:
                 self.log_progress(f"  ⚠ Field mismatch: {len(common)} common, "
                                 f"{len(f1_only)} only in field1, {len(f2_only)} only in field2")
 
-        # Generate validation report
         report = generate_validation_report(
             warnings_field1,
             self.field1_results['excluded_residues']
@@ -481,7 +465,6 @@ class IntegratedAnalysisPipeline:
         if dynamixs_path not in sys.path:
             sys.path.insert(0, dynamixs_path)
 
-        # Determine which multicore script to use
         method_map = {
             'single_jwh': ('ZZ_multi_density', 'ReducedSpectralDensityAnalysis'),
             'single_087': ('ZZ_multi_density_087', 'ReducedSpectralDensityAnalysis'),
@@ -495,25 +478,20 @@ class IntegratedAnalysisPipeline:
 
         script_name, class_name = script_info
         self.log_progress(f"  Using method: {self.params.analysis_method} ({script_name})")
-        self.log_progress(f"  ⚡ Multicore spectral density analysis enabled")
+        self.log_progress(f"  Multicore spectral density analysis enabled")
 
-        # Import the appropriate class
         try:
             module = importlib.import_module(f'dynamiXs_density_functions.{script_name}')
             AnalysisClass = getattr(module, class_name)
         except ImportError as e:
             raise ImportError(f"Could not import {script_name}: {e}")
 
-        # Prepare output files
         output_prefix = str(self.work_dir / self.params.output_prefix)
 
-        # Convert rNH from Angstroms to meters
         rNH_meters = self.params.rNH_angstrom * 1e-10
 
-        # Convert CSA from ppm to proper units
         csaN_units = self.params.csaN_ppm * 1e-6
 
-        # Run analysis based on method type
         if self.params.analysis_method.startswith('dual_'):
             # Dual-field analysis
             self.log_progress(f"  Analyzing dual-field data ({self.params.field1_freq_mhz} MHz + {self.params.field2_freq_mhz} MHz)")
@@ -534,7 +512,6 @@ class IntegratedAnalysisPipeline:
                 n_processes=None  # Use default (80% of cores)
             )
 
-            # Save results
             basic_csv = f"{output_prefix}_spectral_density_basic.csv"
             detailed_csv = f"{output_prefix}_spectral_density_detailed.csv"
             plots_pdf = f"{output_prefix}_spectral_density_plots.pdf"
@@ -565,7 +542,6 @@ class IntegratedAnalysisPipeline:
                 n_processes=None  # Use default (80% of cores)
             )
 
-            # Save results
             basic_csv = f"{output_prefix}_spectral_density_basic.csv"
             detailed_csv = f"{output_prefix}_spectral_density_detailed.csv"
             plots_pdf = f"{output_prefix}_spectral_density_plots.pdf"
@@ -578,7 +554,6 @@ class IntegratedAnalysisPipeline:
             self.log_progress(f"  ✓ Results saved to: {basic_csv}")
             self.log_progress(f"  ✓ Plots saved to: {plots_pdf}")
 
-        # Return summary
         success_count = results_df['fit_success'].sum() if 'fit_success' in results_df.columns else len(results_df)
         # fit_success is True for a fit that ran out of iterations as well, so the
         # residues that did are reported beside it rather than hidden in the CSV.

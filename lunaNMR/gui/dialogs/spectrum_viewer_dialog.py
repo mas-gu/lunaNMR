@@ -101,13 +101,10 @@ class SpectrumViewerDialog(BaseDialog):
         self.voigt_2d_plotter = None
         self.voigt_3d_plotter = None
 
-        # Build UI
         self.setup_ui()
 
-        # Load spectrum data
         self._load_spectrum()
 
-        # Update displays
         self._update_contour_plot()
         self._populate_peak_list()
 
@@ -140,7 +137,6 @@ class SpectrumViewerDialog(BaseDialog):
         right_panel = self._create_right_panel()
         main_splitter.addWidget(right_panel)
 
-        # Set splitter proportions (plots get more space)
         main_splitter.setSizes([1000, 400])
 
         layout.addWidget(main_splitter, stretch=1)
@@ -200,7 +196,6 @@ class SpectrumViewerDialog(BaseDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Create tab widget
         self.plot_tabs = QTabWidget()
 
         # Tab 1: Main Spectrum
@@ -239,7 +234,6 @@ class SpectrumViewerDialog(BaseDialog):
         )
         contour_layout.addWidget(self.contour_widget)
 
-        # Attach navigation handler for pan/zoom
         self._nav_handler = NMRNavigationHandler()
         self._nav_handler.attach(self.contour_widget)
         contour_group.setLayout(contour_layout)
@@ -306,7 +300,6 @@ class SpectrumViewerDialog(BaseDialog):
         plot_group.setLayout(plot_layout)
         layout.addWidget(plot_group)
 
-        # Initialize with placeholder message
         self.voigt_2d_plotter.show_placeholder("Select a peak to view Voigt analysis")
 
         tab.setLayout(layout)
@@ -336,7 +329,6 @@ class SpectrumViewerDialog(BaseDialog):
         layer_layout.setContentsMargins(8, 3, 8, 3)
         layer_layout.setSpacing(15)
 
-        # Initialize control state variables
         self.show_exp_3d = True
         self.show_fit_3d = True
         self.show_individual_3d = False
@@ -381,7 +373,6 @@ class SpectrumViewerDialog(BaseDialog):
         self.colormap_3d_combo = QComboBox()
         self.colormap_3d_combo.addItems(['Classic', 'Clean', 'Dark', 'Warm'])
         self.colormap_3d_combo.setCurrentText('Clean')
-        # Make dropdown larger with larger text
         self.colormap_3d_combo.setMinimumWidth(120)
         self.colormap_3d_combo.setStyleSheet(f"QComboBox {{ font-size: {FONT_SIZE_MEDIUM_HEADER}pt; padding: 4px 8px; }}")
         self.colormap_3d_combo.currentTextChanged.connect(self._on_3d_colormap_changed)
@@ -401,14 +392,12 @@ class SpectrumViewerDialog(BaseDialog):
         plot_group.setStyleSheet(self._get_group_style())
         plot_layout = QVBoxLayout()
 
-        # Create VoigtAnalysisPlotter for 3D
         self.voigt_3d_plotter = VoigtAnalysisPlotter(parent=plot_group, toolbar=True)
         plot_layout.addWidget(self.voigt_3d_plotter)
 
         plot_group.setLayout(plot_layout)
         layout.addWidget(plot_group, stretch=1)
 
-        # Initialize with placeholder message
         self.voigt_3d_plotter.show_placeholder("Select a peak to view 3D Voigt analysis")
 
         tab.setLayout(layout)
@@ -564,7 +553,6 @@ class SpectrumViewerDialog(BaseDialog):
         self.colormap_combo.currentTextChanged.connect(self._on_contour_changed)
         layout.addWidget(self.colormap_combo)
 
-        # Refresh button
         refresh_btn = QPushButton("Refresh Plot")
         refresh_btn.clicked.connect(self._update_contour_plot)
         layout.addWidget(refresh_btn)
@@ -584,7 +572,6 @@ class SpectrumViewerDialog(BaseDialog):
 
         layout.addStretch()
 
-        # Close button
         close_btn = QPushButton("Close")
         close_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         close_btn.setStyleSheet(self._get_secondary_button_style())
@@ -645,8 +632,6 @@ class SpectrumViewerDialog(BaseDialog):
                 logger.error(f"Failed to load spectrum: {self.spectrum_file_path}")
                 return
 
-            # Load fitted peaks from result data
-            # v0.9 pattern: check integration_results first, then fitted_peaks
             self.fitted_peaks = self.result_data.get('integration_results', [])
             if not self.fitted_peaks:
                 self.fitted_peaks = self.result_data.get('fitted_peaks', [])
@@ -676,15 +661,12 @@ class SpectrumViewerDialog(BaseDialog):
             ppm_x = self.integrator.ppm_x_axis
             ppm_y = self.integrator.ppm_y_axis
 
-            # Clear and redraw
             self.contour_widget.clear()
 
-            # Get contour parameters
             num_levels = self.levels_spin.value()
             min_level = self.min_spin.value()
             cmap = self.colormap_combo.currentText()
 
-            # Calculate contour levels
             data_abs = np.abs(data)
             max_intensity = np.max(data_abs)
             min_intensity = min_level * max_intensity
@@ -699,7 +681,6 @@ class SpectrumViewerDialog(BaseDialog):
                 linewidths=0.5
             )
 
-            # Mark peaks
             if self.fitted_peaks:
                 for i, peak in enumerate(self.fitted_peaks):
                     pos_x = peak.get('pos_f2', peak.get('position_x', 0))
@@ -713,7 +694,6 @@ class SpectrumViewerDialog(BaseDialog):
                         c=color, s=size, marker='x', linewidths=2
                     )
 
-            # Configure axes
             self.contour_widget.axes.set_xlabel('¹H (ppm)', fontsize=10)
             self.contour_widget.axes.set_ylabel('¹⁵N/¹³C (ppm)', fontsize=10)
             self.contour_widget.axes.invert_xaxis()
@@ -787,7 +767,6 @@ class SpectrumViewerDialog(BaseDialog):
             ppm_x = self.integrator.ppm_x_axis
             ppm_y = self.integrator.ppm_y_axis
 
-            # Find indices for cross-sections
             idx_x = np.argmin(np.abs(ppm_x - pos_x))
             idx_y = np.argmin(np.abs(ppm_y - pos_y))
 
@@ -896,10 +875,8 @@ class SpectrumViewerDialog(BaseDialog):
 
         try:
             if stored_result and self.voigt_2d_plotter:
-                # Plot 2D Voigt analysis
                 self.voigt_2d_plotter.plot_voigt_analysis(stored_result)
 
-                # Plot 3D Voigt analysis
                 if self.voigt_3d_plotter:
                     self.voigt_3d_plotter.plot_voigt_analysis_3d(stored_result)
 
@@ -954,7 +931,6 @@ class SpectrumViewerDialog(BaseDialog):
             logger.debug(f"Using peak directly as Voigt result for {assignment}")
             return peak
 
-        # Check integration_results first (v0.9 pattern)
         integration_results = self.result_data.get('integration_results', [])
         if integration_results:
             for result in integration_results:
@@ -966,7 +942,6 @@ class SpectrumViewerDialog(BaseDialog):
                     logger.debug(f"Found integration_results Voigt result for {assignment}: R²={r_squared:.3f}")
                     return result
 
-        # Check fitted_results from result_data (detailed Voigt analysis)
         if self.fitted_results:
             for result in self.fitted_results:
                 result_assignment = result.get('assignment') or result.get('Assignment')
@@ -985,7 +960,6 @@ class SpectrumViewerDialog(BaseDialog):
                         logger.debug(f"Found integrator Voigt result for {assignment}")
                         return result
 
-        # Also check fitted_peaks in result_data
         fitted_peaks = self.result_data.get('fitted_peaks', [])
         for result in fitted_peaks:
             result_assignment = result.get('assignment') or result.get('Assignment')

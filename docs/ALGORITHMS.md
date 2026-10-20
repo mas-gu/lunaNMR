@@ -83,7 +83,7 @@ Without a noise level every peak is treated as positive. Mixed-sign clusters are
 **Merging**: start singletons → repeatedly merge the closest overlapping pair whose merged **diameter** stays within `max_cluster_diameter_x=0.20` (1H), `max_cluster_diameter_y=1.5` (15N); oversized clusters (>`max_cluster_size`, default 20) are split. Diameter/size constraints deliberately bound transitive closure so it can't form mega-clusters. Result = disjoint partition, each peak in exactly one cluster.
 
 **Routing**: `needs_2d = len(cluster) > 1`.
-- size 1 → `enhanced_peak_fitting` → single-peak PS2D fit (1D consensus only when simplified parameters are on).
+- size 1 → `enhanced_peak_fitting` → single-peak PS2D fit.
 - size >1 → `fit_overlap_group_2d` → PS2D.
 
 There is no 1D cross-section fallback: a 2D fit that fails is reported Failed. Without a peak list to place the peak among its neighbours (`all_peaks_context`), `fit_peak_voigt_2d` returns `{'success': False, 'error': 'no 2D fit context: …'}`, and the reason is logged.
@@ -150,14 +150,9 @@ Dropping a decayed residue from an intensity series fabricates a plateau that is
 
 ## 5. Parameter Management
 
-`utils/parameter_manager.py` (+ `simplified_parameter_manager.py`).
+`utils/parameter_manager.py`: one parameter set, with a default, range and type per parameter.
 
-**Simplified mode** (`use_simplified_mode`) exposes 3 knobs → maps to legacy params via nucleus-adaptive thresholds:
-- `sensitivity` (legacy, no longer affects detection)
-- `window_scale` (default 1.0) — fitting-window sizing
-- `quality_target` (default 0.85) — feeds `min_r_squared`
-
-GUI spinbox values for `centroid_window_x/y_ppm` **override** simplified defaults via `update_from_gui_variables` → `get_effective_parameters` → `integrator.gui_params`.
+GUI spinbox values (search and centroid windows, fixed positions/linewidths, custom linewidths) **override** the defaults: `main_window.sync_parameters_to_integrator` writes them into `current_params`, and `get_integrator_parameters` groups them into the detection, fitting and `integrator.gui_params` sets.
 
 ---
 

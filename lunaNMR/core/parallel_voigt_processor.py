@@ -16,9 +16,6 @@ Key Features:
 - Quality assessment parallelization
 - Shared memory for efficient data transfer
 - Maintains 100% compatibility with existing interfaces
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import contextlib
@@ -90,7 +87,6 @@ class ParallelVoigtProcessor:
 
         self.pass1_results = None   # PASS1 (isolated) results of the last run
 
-        # Configure worker processes
         if max_workers is None:
             self.max_workers = max(1, int(cpu_count() * 0.75))
         else:
@@ -177,12 +173,10 @@ class ParallelVoigtProcessor:
                     log_info(f"Using locked clusters from series_params ({len(effective_locked_clusters)} clusters)")
 
             if effective_locked_clusters is not None:
-                # Use locked clusters from reference spectrum
                 log_info(f"Using LOCKED clusters from reference spectrum ({len(effective_locked_clusters)} clusters)")
                 clusters = self._convert_locked_clusters_to_positions(
                     effective_locked_clusters, all_peaks_context
                 )
-                # Apply locked thresholds from series_params if available
                 if self.series_params:
                     from lunaNMR.core.ps2d_config import get_ps2d_config
                     config = get_ps2d_config()
@@ -196,7 +190,6 @@ class ParallelVoigtProcessor:
                     if 'overlap_threshold_y' in self.series_params:
                         config.overlap_threshold_y = self.series_params['overlap_threshold_y']
             else:
-                # First spectrum - calculate fresh clusters
                 clusters = self.original_fitter.parent.identify_overlap_clusters(all_peaks_context)
                 log_info(f"Computed {len(clusters)} fresh clusters")
 
@@ -248,10 +241,8 @@ class ParallelVoigtProcessor:
                                                                         reference_linewidths=self._reference_linewidths,
                                                                         reference_positions=self._reference_positions)
 
-                    # Create tasks for isolated peaks only
                     isolated_tasks = self._create_cluster_tasks(isolated_clusters, peak_metadata, peak_list, shared_context_pass1)
 
-                    # Execute Pass 1 fitting in parallel
                     isolated_results = self._execute_parallel_cluster_fitting(isolated_tasks, progress_callback, pass_name="PASS 1")
 
                     # Collect spectrum-wide linewidth statistics from Pass 1 results
@@ -293,21 +284,16 @@ class ParallelVoigtProcessor:
                 log_progress("ADAPTIVE OPTIMIZATION: Learning optimal parameters...")
                 adaptive_start = time.time()
 
-                # Estimate noise level from spectrum
                 noise_level = estimate_noise_level(self.original_fitter.parent.nmr_data)
 
-                # Get PS2D config for bounds
                 from lunaNMR.core.ps2d_config import get_ps2d_config
                 config = get_ps2d_config()
 
-                # Create optimizer
                 optimizer = AdaptiveOptimizer(noise_level=noise_level, config=config)
 
-                # Extract good isolated peaks for optimization
                 good_isolated_peaks = self._extract_good_peaks_for_optimization(isolated_results)
 
                 if len(good_isolated_peaks) >= 10:
-                    # Prepare shared context for parallel adaptive optimization
                     # This includes spectrum_statistics for proper worker initialization
                     shared_context_adaptive = self._prepare_shared_context(
                         all_peaks_context=all_peaks_context,
@@ -315,7 +301,6 @@ class ParallelVoigtProcessor:
                         reference_linewidths=self._reference_linewidths,
                         reference_positions=self._reference_positions
                     )
-                    # Define fit function for grid search evaluation
                     _debug_shown = [False]  # Use list to allow modification in nested function
 
                     def fit_single_peak(peak, radF1, radF2):
@@ -344,7 +329,6 @@ class ParallelVoigtProcessor:
 
                         return result
 
-                    # Run grid search optimization in PARALLEL mode
                     # Distributes peaks across workers for 5-7× speedup
                     optimal_params = optimizer.optimize(
                         isolated_peaks=good_isolated_peaks,
@@ -359,7 +343,6 @@ class ParallelVoigtProcessor:
                     )
 
                     if optimal_params and optimal_params.get('success'):
-                        # Apply optimal parameters to config
                         config.radF1 = optimal_params['radF1']
                         config.radF2 = optimal_params['radF2']
                         config.overlap_threshold_x = optimal_params['overlap_threshold_x']
@@ -386,7 +369,6 @@ class ParallelVoigtProcessor:
                         if effective_locked_clusters is None and len(original_multi_peak_clusters) > 0:
                             log_info(f"RE-CLUSTERING: Applying optimal overlap thresholds to {sum(len(c) for c in original_multi_peak_clusters)} clustered peaks...")
 
-                            # Extract only originally clustered peak positions
                             originally_clustered_peaks = []
                             for cluster in original_multi_peak_clusters:
                                 for pos in cluster:
@@ -413,7 +395,7 @@ class ParallelVoigtProcessor:
                             # Add newly isolated peaks to isolated_clusters for PASS 1-bis
                             isolated_clusters = isolated_clusters + new_isolated_from_recluster
 
-                            # CRITICAL FIX: Update clusters to reflect final state after re-clustering
+                            # Update clusters to reflect final state after re-clustering
                             # This ensures stored locked_clusters_by_assignment matches what was actually fitted
                             clusters = isolated_clusters + multi_peak_clusters
                             log_info(f"After re-clustering: {len(clusters)} total clusters")
@@ -431,7 +413,6 @@ class ParallelVoigtProcessor:
                 log_progress(f"PASS 1-bis: Re-fitting {len(isolated_clusters)} isolated peaks with optimal parameters...")
                 pass1bis_start = time.time()
 
-                # Prepare shared context with optimal parameters
                 shared_context_pass1bis = self._prepare_shared_context(all_peaks_context, spectrum_statistics=None,
                                                                       reference_linewidths=self._reference_linewidths,
                                                                         reference_positions=self._reference_positions)
@@ -439,10 +420,8 @@ class ParallelVoigtProcessor:
                 # Create tasks for all isolated peaks (including newly isolated from re-clustering)
                 isolated_tasks_bis = self._create_cluster_tasks(isolated_clusters, peak_metadata, peak_list, shared_context_pass1bis)
 
-                # Execute Pass 1-bis fitting in parallel
                 isolated_results = self._execute_parallel_cluster_fitting(isolated_tasks_bis, progress_callback, pass_name="PASS 1-bis")
 
-                # Update statistics with new fits
                 spectrum_statistics = self._collect_linewidth_statistics(isolated_results)
 
                 pass1bis_time = time.time() - pass1bis_start
@@ -471,10 +450,8 @@ class ParallelVoigtProcessor:
                                                                     reference_linewidths=self._reference_linewidths,
                                                                         reference_positions=self._reference_positions)
 
-                # Create tasks for clusters
                 pass2_tasks = self._create_cluster_tasks(all_pass2_clusters, peak_metadata, peak_list, shared_context_pass2)
 
-                # Execute Pass 2 fitting in parallel
                 multi_peak_results = self._execute_parallel_cluster_fitting(pass2_tasks, progress_callback, pass_name="PASS 2")
 
                 pass2_time = time.time() - pass2_start
@@ -488,7 +465,6 @@ class ParallelVoigtProcessor:
 
             # ========== Create series_params if adaptive optimization succeeded ==========
             if self.optimal_params and self.optimal_params.get('success'):
-                # Build cluster assignments map (position-based, for logging)
                 cluster_assignments = {}
                 for i, cluster in enumerate(isolated_clusters):
                     for pos in cluster:
@@ -499,7 +475,6 @@ class ParallelVoigtProcessor:
                         peak_id = f"peak_{pos[0]:.4f}_{pos[1]:.4f}"
                         cluster_assignments[peak_id] = f'cluster_{i}'
 
-                # Build locked_clusters_by_assignment (assignment-based, for cluster locking)
                 # Convert position clusters to assignment clusters using peak_metadata
                 locked_clusters_by_assignment = []
                 for cluster in clusters:
@@ -516,14 +491,12 @@ class ParallelVoigtProcessor:
                     cluster_assignments=cluster_assignments,
                     reference_spectrum='current'  # Will be updated by GUI with actual filename
                 )
-                # Store locked clusters for series integration
                 self.series_params['locked_clusters_by_assignment'] = locked_clusters_by_assignment
                 log_info(f"Series parameters saved with {len(locked_clusters_by_assignment)} locked clusters")
 
             # Store locked clusters even if adaptive optimization didn't run
             # This ensures series integration always has clusters available
             if not self.series_params:
-                # Build locked_clusters_by_assignment from current clusters
                 locked_clusters_by_assignment = []
                 for cluster in clusters:
                     cluster_assignments_list = []
@@ -534,7 +507,6 @@ class ParallelVoigtProcessor:
                     if cluster_assignments_list:
                         locked_clusters_by_assignment.append(cluster_assignments_list)
 
-                # Create minimal series_params with just cluster info
                 self.series_params = {
                     'locked_clusters_by_assignment': locked_clusters_by_assignment,
                     'success': True
@@ -547,7 +519,6 @@ class ParallelVoigtProcessor:
             if spectrum_statistics:
                 log_info("Improvement: Multi-peak clusters fitted with data-driven linewidth priors")
 
-            # Return tuple: (results, learned_statistics)
             # learned_statistics is None if we used pre-learned stats (nothing new was learned)
             return (consolidated_results, learned_statistics)
 
@@ -595,7 +566,6 @@ class ParallelVoigtProcessor:
                 'intensity': intensity
             }
 
-            # Merge detection fields from fitted_peaks if available
             # Match by position with tolerance (detected peaks can drift from reference)
             for (fp_x, fp_y), fp_data in fitted_peaks_by_pos.items():
                 if abs(fp_x - x_ppm) < 0.001 and abs(fp_y - y_ppm) < 0.01:
@@ -665,7 +635,6 @@ class ParallelVoigtProcessor:
             if assignment and x is not None and y is not None:
                 assignment_to_position[assignment] = (x, y)
 
-        # Convert each cluster from assignments to positions
         position_clusters = []
         for cluster_assignments in locked_clusters_by_assignment:
             cluster_positions = []
@@ -712,13 +681,11 @@ class ParallelVoigtProcessor:
 
         successful_fits = 0
 
-        # Extract linewidths from successful fits
         # fitting_results is a list of cluster results, each containing peak_results array
         for cluster_result in fitting_results:
             if not cluster_result or not cluster_result.get('success'):
                 continue
 
-            # Extract individual peak results from cluster
             for peak_result in cluster_result.get('peak_results', []):
                 if not peak_result or not peak_result.get('success'):
                     continue
@@ -744,12 +711,8 @@ class ParallelVoigtProcessor:
                 lw_f1_total = lw_lor_f1 + lw_gau_f1
                 lw_f2_total = lw_lor_f2 + lw_gau_f2
 
-                # ================================================================
                 # NUCLEUS-ADAPTIVE SANITY CHECKS
-                # ================================================================
-                # Use config thresholds instead of hardcoded values
                 # This ensures 13C peaks (min 0.025 ppm) are not rejected
-                # ================================================================
                 from lunaNMR.core.ps2d_config import get_ps2d_config
                 config = get_ps2d_config()
 
@@ -765,14 +728,11 @@ class ParallelVoigtProcessor:
                     if lw_gau_f2 > min_gau_f2:
                         linewidth_stats['lg_f2'].append(lw_lor_f2 / lw_gau_f2)
 
-        # ================================================================
         # SAMPLE SIZE CHECK AND ADAPTIVE ALPHA
-        # ================================================================
         # MAD reliability depends on sample size:
         #   n < 3:  Unreliable, return None (fall back to config)
         #   n < 10: Use conservative alpha=7 (wider bounds)
         #   n >= 10: Use standard alpha=5
-        # ================================================================
         MIN_SAMPLES = 3
         RELIABLE_SAMPLES = 10
 
@@ -841,7 +801,6 @@ class ParallelVoigtProcessor:
                     y_ppm = (peak_result.get('peak_y') or peak_result.get('center_y') or
                              peak_result.get('pos_y') or peak_result.get('pos_f1') or peak_result.get('y_ppm'))
 
-                    # Skip peaks without valid positions
                     if x_ppm is None or y_ppm is None:
                         continue
 
@@ -891,7 +850,6 @@ class ParallelVoigtProcessor:
         )
         self.shared_memory_blocks.append(shared_spectrum)
         
-        # Copy spectral data to shared memory
         shared_array = np.ndarray(spectrum_shape, dtype=spectrum_dtype, 
                                  buffer=shared_spectrum.buf)
         shared_array[:] = self.original_fitter.nmr_data[:]
@@ -921,19 +879,16 @@ class ParallelVoigtProcessor:
             'optimization_settings': self._get_optimization_settings(),
             'validation_thresholds': self._get_validation_thresholds(),
 
-            # NEW: Overlap resolution parameters
-            'overlap_resolution_params': self._serialize_overlap_resolution_params(),
-
             # CRITICAL: All peaks context for automatic 2D routing
             'all_peaks_context': all_peaks_context if all_peaks_context is not None else [],
 
-            # NEW: PS2D configuration synchronization
+            # PS2D configuration synchronization
             'ps2d_config': self._serialize_ps2d_config(),
 
-            # NEW: Spectrum-wide linewidth statistics from Pass 1
+            # Spectrum-wide linewidth statistics from Pass 1
             'spectrum_statistics': spectrum_statistics,
 
-            # NEW: Per-peak reference linewidths for reuse
+            # Per-peak reference linewidths for reuse
             'reference_linewidths': reference_linewidths,
 
             # Original reference positions: the cascade's absolute drift limit
@@ -959,13 +914,11 @@ class ParallelVoigtProcessor:
             use_ps2d = gui_params.get('use_ps2d_multi_peak', False)
             return gui_params
 
-        # Fall back to fitter's gui_params
         if hasattr(self.original_fitter, 'gui_params') and self.original_fitter.gui_params:
             gui_params = self.original_fitter.gui_params
             use_ps2d = gui_params.get('use_ps2d_multi_peak', False)
             return gui_params
 
-        # Last resort: empty dict
         log_warning("Parallel: No gui_params found, using empty dict (PS2D multi-peak will NOT activate)")
         return {}
 
@@ -1010,10 +963,8 @@ class ParallelVoigtProcessor:
         """Extract integrator-specific parameters from parent"""
         params = {}
         
-        # Get parent integrator if available
         parent = getattr(self.original_fitter, 'parent', None)
         if parent:
-            # Copy important integrator parameters
             for param_name in ['fitting_parameters', 'gui_params', 'processing_mode',
                                'titration_pos_margin_f1', 'titration_pos_margin_f2',
                                'titration_pos_margins', 'titration_lw_margins']:
@@ -1028,27 +979,6 @@ class ParallelVoigtProcessor:
             'algorithm': getattr(self.original_fitter, 'optimization_algorithm', 'lm'),
             'step_size': getattr(self.original_fitter, 'step_size', 1e-8),
             'gradient_tolerance': getattr(self.original_fitter, 'gradient_tolerance', 1e-12)
-        }
-
-    def _serialize_overlap_resolution_params(self):
-        """Extract overlap resolution parameters"""
-        # Check if overlap_config exists (may be disabled in enhanced_voigt_fitter)
-        if not hasattr(self.original_fitter, 'overlap_config'):
-            return {
-                'enabled': False,
-                'threshold': 0.5,
-                'config': None
-            }
-
-        overlap_config = getattr(self.original_fitter, 'overlap_config', None)
-        # Convert OverlapResolutionConfig to dict for multiprocessing serialization
-        if overlap_config is not None and hasattr(overlap_config, 'to_dict'):
-            overlap_config = overlap_config.to_dict()
-
-        return {
-            'enabled': getattr(self.original_fitter, 'overlap_detection_enabled', False),
-            'threshold': getattr(self.original_fitter, 'overlap_detection_threshold', 0.5),
-            'config': overlap_config
         }
 
     def _serialize_ps2d_config(self):
@@ -1096,13 +1026,11 @@ class ParallelVoigtProcessor:
         for cluster_idx, cluster in enumerate(clusters):
             cluster_size = len(cluster)
 
-            # Convert cluster positions to full peak dictionaries
             cluster_dicts = []
             cluster_assignments = []
             cluster_peak_numbers = []
 
             for peak_x, peak_y in cluster:
-                # Find matching peak in all_peaks_context
                 peak_dict = None
                 for ctx_peak in all_peaks_context:
                     ctx_x = ctx_peak.get('x_ppm') or ctx_peak.get('pos_x')
@@ -1123,7 +1051,6 @@ class ParallelVoigtProcessor:
 
                 cluster_dicts.append(peak_dict)
 
-                # Get metadata for this peak
                 meta = peak_metadata.get((peak_x, peak_y))
                 if meta:
                     cluster_assignments.append(meta['assignment'])
@@ -1132,7 +1059,6 @@ class ParallelVoigtProcessor:
                     cluster_assignments.append('Unknown')
                     cluster_peak_numbers.append(0)
 
-            # Create cluster task
             cluster_task = {
                 'task_id': cluster_idx,
                 'cluster_idx': cluster_idx,
@@ -1186,7 +1112,6 @@ class ParallelVoigtProcessor:
                             raise Exception(f"Multiprocessing test failed: {test_result}")
                     raise_if_stopped(self.stop)
 
-                    # Execute parallel cluster fitting
                     pool = stack.enter_context(_SPAWN.Pool(processes=self.max_workers))
                     # Submit all cluster tasks
                     async_results = []
@@ -1194,7 +1119,6 @@ class ParallelVoigtProcessor:
                         async_result = pool.apply_async(_parallel_cluster_worker, (task,))
                         async_results.append((task['task_id'], task['cluster_size'], async_result))
 
-                # Collect results with progress tracking
                 for task_id, cluster_size, async_result in async_results:
                     raise_if_stopped(self.stop)
                     try:
@@ -1209,7 +1133,6 @@ class ParallelVoigtProcessor:
                             r_squared = result.get('r_squared', 0)
                             log_info(f"Cluster {task_id + 1}: {result['peaks_fitted']} peaks, R²={r_squared:.3f}")
 
-                            # Log individual peaks for progress dialog
                             if progress_callback:
                                 progress = ((successful_clusters + failed_clusters) / len(async_results)) * 100
                                 task_desc = f"{pass_prefix}Parallel cluster fitting:\n{successful_clusters + failed_clusters}/{len(async_results)} clusters\n{total_peaks_processed} peaks fitted"
@@ -1223,7 +1146,6 @@ class ParallelVoigtProcessor:
                             error_msg = result.get('error', 'Unknown error')
                             log_warning(f"Cluster {task_id + 1}: {error_msg}")
 
-                            # Log failed cluster for progress dialog
                             if progress_callback:
                                 progress = ((successful_clusters + failed_clusters) / len(async_results)) * 100
                                 task_desc = f"{pass_prefix}Parallel cluster fitting:\n{successful_clusters + failed_clusters}/{len(async_results)} clusters\n{total_peaks_processed} peaks fitted"
@@ -1308,13 +1230,11 @@ class ParallelVoigtProcessor:
             peak_x = float(peak_row['Position_X'])
             peak_y = float(peak_row['Position_Y'])
 
-            # Try matching by peak_number first, then assignment
             result = results_by_number.get(peak_number)
             if not result:
                 result = results_by_assignment.get(assignment)
 
             if result:
-                # Ensure processing_mode is set to 'parallel'
                 result['processing_mode'] = 'parallel'
                 result['peak_number'] = peak_number  # Ensure correct peak_number
                 consolidated_results.append(result)
@@ -1353,7 +1273,6 @@ class ParallelVoigtProcessor:
         log_info(f"  Successful fits: {successful_count}")
         log_info(f"  Failed fits (placeholders): {failed_count}")
 
-        # Verify 1:1 mapping maintained
         if len(consolidated_results) != len(peak_list):
             log_warning(f"Peak count mismatch! {len(consolidated_results)} != {len(peak_list)}")
             log_warning("This suggests a logic error in consolidation")
@@ -1465,7 +1384,6 @@ def _parallel_cluster_worker(cluster_task):
         Dict with success flag and peak_results list
     """
     try:
-        # Step 1: Initialize worker environment
         worker_integrator = _initialize_worker_fitter(cluster_task['shared_context'])
 
         cluster_size = cluster_task['cluster_size']
@@ -1485,7 +1403,7 @@ def _parallel_cluster_worker(cluster_task):
             assignment = cluster_assignments[0]
             peak_number = cluster_peak_numbers[0]
 
-            # Fit using enhanced_peak_fitting (routes through consensus or 2D fitting)
+            # Fit using enhanced_peak_fitting (single-peak 2D fitting)
             result = worker_integrator.enhanced_peak_fitting(
                 peak_x, peak_y, assignment,
                 all_peaks_context=cluster_task['shared_context']['all_peaks_context']
@@ -1540,7 +1458,6 @@ def _parallel_cluster_worker(cluster_task):
             )
 
             if group_result and group_result.get('success', False):
-                # Extract 2D region for visualization
                 region_2d = worker_integrator.extract_2d_region_for_overlap_group(cluster_dicts)
 
                 if region_2d is None:
@@ -1561,7 +1478,6 @@ def _parallel_cluster_worker(cluster_task):
 
                 # Extract result for EACH peak using optimal matching
                 for i, (peak_x, peak_y) in enumerate(cluster_positions):
-                    # Get optimally matched fitted peak
                     if i in peak_to_fit_mapping:
                         best_match = fitted_peaks[peak_to_fit_mapping[i]]
                     else:
@@ -1572,7 +1488,6 @@ def _parallel_cluster_worker(cluster_task):
                             group_result['r_squared'], True, best_match.get('near_noise', False),
                             best_match.get('detection_sigma'))
 
-                        # Get detected_intensity from original cluster_dicts (before fitting)
                         orig_detected_intensity = cluster_dicts[i].get('intensity') if i < len(cluster_dicts) else None
 
                         # Convert to standard format (IDENTICAL to sequential lines 338-387)
@@ -1729,7 +1644,6 @@ def _initialize_worker_fitter(shared_context):
     # CRITICAL: Set gui_params on integrator (needed for PS2D multi-peak activation)
     worker_integrator.gui_params = shared_context['gui_params']
 
-    # NEW: Set spectrum-wide linewidth statistics (Pass 2 only)
     spectrum_statistics = shared_context.get('spectrum_statistics', None)
     if spectrum_statistics:
         worker_integrator.spectrum_statistics = spectrum_statistics
@@ -1749,12 +1663,6 @@ def _initialize_worker_fitter(shared_context):
         except ImportError:
             pass  # Could not synchronize PS2D config
 
-    # DEBUG: Verify gui_params were set
-    #if worker_integrator.gui_params:
-    #    print(f"✅ Worker: gui_params set on integrator (use_ps2d_multi_peak={worker_integrator.gui_params.get('use_ps2d_multi_peak', 'N/A')})")
-    #else:
-    #    print(f"❌ Worker: gui_params is None or empty!")
-
     # 6. Restore enhanced fitter parameters
     if worker_integrator.enhanced_fitter:
         worker_fitter = worker_integrator.enhanced_fitter
@@ -1771,9 +1679,6 @@ def _initialize_worker_fitter(shared_context):
         _restore_fitting_windows(worker_fitter, shared_context['fitting_windows'])
         _restore_optimization_settings(worker_fitter, shared_context['optimization_settings'])
         _restore_validation_thresholds(worker_fitter, shared_context['validation_thresholds'])
-
-        # NEW: Overlap resolution settings
-        _restore_overlap_resolution_params(worker_fitter, shared_context['overlap_resolution_params'])
 
         # Set noise_level on worker_integrator for fit_overlap_group_2d() weak peak detection
         worker_integrator.noise_level = shared_context['validation_thresholds'].get('noise_level')
@@ -1836,23 +1741,3 @@ def _restore_validation_thresholds(worker_fitter, validation_thresholds):
     worker_fitter.peak_threshold = validation_thresholds['peak_detection_threshold']
     worker_fitter.multipeak_threshold = validation_thresholds['multipeak_threshold']
     worker_fitter.noise_level = validation_thresholds['noise_level']
-
-def _restore_overlap_resolution_params(worker_fitter, overlap_params):
-    """Restore overlap resolution settings"""
-    # CRITICAL: Set the overlap_detection_enabled flag
-    worker_fitter.overlap_detection_enabled = overlap_params.get('enabled', False)
-    worker_fitter.overlap_detection_threshold = overlap_params.get('threshold', 0.5)
-
-    # Restore configuration if present
-    config = overlap_params.get('config')
-    if config is not None:
-        # Convert dict back to OverlapResolutionConfig if needed
-        if isinstance(config, dict):
-            try:
-                from lunaNMR.utils.overlap_config import OverlapResolutionConfig
-                worker_fitter.overlap_config = OverlapResolutionConfig(user_config=config)
-            except ImportError:
-                # Fallback: store as dict
-                worker_fitter.overlap_config = config
-        else:
-            worker_fitter.overlap_config = config

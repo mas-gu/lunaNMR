@@ -84,11 +84,9 @@ class ReducedSpectralDensityAnalysis:
         self.rNH = rNH
         self.csaN = csaN
         
-        # Calculate angular frequencies
         self.omegaH = self._calculate_omegaH()
         self.omegaN = self._calculate_omegaN()
         
-        # Calculate dipolar and CSA constants
         self.d_factor = self._calculate_d_factor()
         self.c_factor = self._calculate_c_factor()
         
@@ -354,13 +352,11 @@ class ReducedSpectralDensityAnalysis:
             r2_sample = np.random.normal(r2, r2_err) 
             noe_sample = np.random.normal(noe, noe_err)
             
-            # Ensure physical validity
             r1_sample = max(0.1, r1_sample)  # R1 must be positive
             r2_sample = max(r1_sample * 1.1, r2_sample)  # R2 > R1
             # NOE can be negative but typically between -0.5 and 1.0
             noe_sample = np.clip(noe_sample, -0.5, 1.0)
             
-            # Fit the synthetic dataset with reduced iterations
             mc_fit = self._fit_single_dataset(r1_sample, r2_sample, noe_sample, 
                                             tc_fixed, mc_niter)
             
@@ -372,24 +368,20 @@ class ReducedSpectralDensityAnalysis:
         
         print(" done")
         
-        # Calculate errors from Monte Carlo distribution
         n_successful = len(mc_results['S2'])
         if n_successful < 10:  # Need minimum samples for reliable errors
             print(f"    Warning: Only {n_successful}/{n_monte_carlo} MC fits succeeded")
             # Fall back to ensemble-based errors
             return best_fit
         
-        # Update errors with Monte Carlo results
         best_fit['S2_err'] = np.std(mc_results['S2'])
         best_fit['te_err'] = np.std(mc_results['te'])
         best_fit['Rex_err'] = np.std(mc_results['Rex'])
         
-        # Add confidence intervals
         best_fit['S2_95CI'] = np.percentile(mc_results['S2'], [2.5, 97.5])
         best_fit['te_95CI'] = np.percentile(mc_results['te'], [2.5, 97.5])
         best_fit['Rex_95CI'] = np.percentile(mc_results['Rex'], [2.5, 97.5])
         
-        # Add MC success rate
         best_fit['mc_success_rate'] = n_successful / n_monte_carlo
         
         return best_fit
@@ -476,16 +468,13 @@ class ReducedSpectralDensityAnalysis:
         --------
         pandas.DataFrame : Analysis results
         """
-        # Load data
         data = pd.read_csv(csv_file)
         
-        # Check required columns
         required_cols = ['R1', 'R1err', 'R2', 'R2err', 'hetNOE', 'hetNOEerr']
         missing_cols = [col for col in required_cols if col not in data.columns]
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
         
-        # Determine number of processes
         if n_processes is None:
             n_processes = max(1, int(cpu_count() * 0.8))
         
@@ -509,7 +498,6 @@ class ReducedSpectralDensityAnalysis:
             print("ERROR: Not enough valid R1/R2 data to estimate overall correlation time!")
             return pd.DataFrame()
         
-        # Estimate overall correlation time
         tc_overall = self.estimate_overall_correlation_time(np.array(valid_r1), np.array(valid_r2))
         print(f"Estimated overall correlation time: {tc_overall*1e9:.1f} ns")
         
@@ -534,9 +522,7 @@ class ReducedSpectralDensityAnalysis:
         skipped_zero_negative = 0
         processed = 0
         
-        # Process individual residues
         for idx, row in data.iterrows():
-            # Extract data
             r1 = row['R1']
             r1_err = row['R1err'] 
             r2 = row['R2']
@@ -544,10 +530,8 @@ class ReducedSpectralDensityAnalysis:
             noe = row['hetNOE']
             noe_err = row['hetNOEerr']
             
-            # Get residue identifier for reporting
             residue_id = row[residue_col] if residue_col in data.columns else f"Index_{idx}"
             
-            # Skip if any values are NaN
             if any(pd.isna([r1, r1_err, r2, r2_err, noe, noe_err])):
                 skipped_nan += 1
                 print(f"  Skipping {residue_id}: Contains NaN values")
@@ -578,7 +562,6 @@ class ReducedSpectralDensityAnalysis:
             if warnings:
                 print(f"  Warning for {residue_id}: {', '.join(warnings)}")
                 
-            # Calculate spectral densities with error propagation
             j_results = self.propagate_errors(r1, r1_err, r2, r2_err, noe, noe_err)
             
             # Fit model-free parameters using fixed overall tc
@@ -603,7 +586,6 @@ class ReducedSpectralDensityAnalysis:
                 **mf_results
             }
             
-            # Add residue info if available
             if residue_col in data.columns:
                 result_row['Residue'] = row[residue_col]
                 
@@ -636,7 +618,6 @@ class ReducedSpectralDensityAnalysis:
             'csaN': self.csaN
         }
         
-        # Prepare arguments for worker processes
         worker_args = []
         for idx, row in data.iterrows():
             worker_args.append((
@@ -644,12 +625,10 @@ class ReducedSpectralDensityAnalysis:
                 use_monte_carlo_errors, n_monte_carlo, residue_col
             ))
         
-        # Process residues in parallel
         print("Starting parallel processing...")
         with multiprocessing.get_context('spawn').Pool(processes=n_processes) as pool:
             worker_results = pool.map(_worker_process_residue_single, worker_args)
         
-        # Collect results and count statistics
         results = []
         skipped_nan = 0
         skipped_invalid = 0
@@ -703,7 +682,6 @@ class ReducedSpectralDensityAnalysis:
         axes = fig.subplots(2, 3)
         fig.suptitle('Reduced Spectral Density Analysis Results', fontsize=16)
         
-        # Filter successful fits
         success_mask = results_df['fit_success'] == True
         good_data = results_df[success_mask]
         
@@ -711,7 +689,6 @@ class ReducedSpectralDensityAnalysis:
             print("No successful fits to plot!")
             return
         
-        # Plot spectral densities
         residues = good_data.index if 'Residue' not in good_data.columns else good_data['Residue']
         
         # J(0)
@@ -752,7 +729,6 @@ class ReducedSpectralDensityAnalysis:
         axes[1,2].set_title('Chemical Exchange Rex')
         axes[1,2].set_ylabel('Rex (s⁻¹)')
         
-        # Format all subplots
         for ax in axes.flat:
             ax.set_xlabel('Residue')
             ax.grid(True, alpha=0.3)
@@ -775,9 +751,7 @@ class ReducedSpectralDensityAnalysis:
         filename : str
             Output filename
         """
-        # Check if Monte Carlo results are available
         if 'S2_95CI' in results_df.columns:
-            # Format confidence intervals for readability
             results_df['S2_CI'] = results_df['S2_95CI'].apply(
                 lambda x: f"[{x[0]:.3f}, {x[1]:.3f}]" if not pd.isna(x).any() else ""
             )
@@ -812,7 +786,6 @@ def _worker_process_residue_single(args):
             csaN=analyzer_state['csaN']
         )
         
-        # Extract data
         r1 = residue_data['R1']
         r1_err = residue_data['R1err']
         r2 = residue_data['R2']
@@ -820,10 +793,8 @@ def _worker_process_residue_single(args):
         noe = residue_data['hetNOE']
         noe_err = residue_data['hetNOEerr']
         
-        # Get residue identifier
         residue_id = residue_data[residue_col] if residue_col in residue_data else f"Index_{idx}"
         
-        # Check for NaN values
         if any(pd.isna([r1, r1_err, r2, r2_err, noe, noe_err])):
             return {
                 'status': 'skipped_nan',
@@ -833,7 +804,6 @@ def _worker_process_residue_single(args):
                 'error': None
             }
         
-        # Check for invalid values
         if (r1 <= 0 or r2 <= 0 or r1_err <= 0 or r2_err <= 0 or 
             noe == 0 or noe_err <= 0):
             return {
@@ -852,10 +822,8 @@ def _worker_process_residue_single(args):
         if r1_err/r1 > 0.5: warnings.append(f"large R1 error ({r1_err/r1*100:.1f}%)")
         if r2_err/r2 > 0.5: warnings.append(f"large R2 error ({r2_err/r2*100:.1f}%)")
         
-        # Calculate spectral densities with error propagation
         j_results = analyzer.propagate_errors(r1, r1_err, r2, r2_err, noe, noe_err)
         
-        # Fit model-free parameters
         if use_monte_carlo_errors:
             # Use sequential Monte Carlo in worker processes to avoid nested multiprocessing
             mf_results = analyzer.fit_model_free_individual(
@@ -876,7 +844,6 @@ def _worker_process_residue_single(args):
             **mf_results
         }
         
-        # Add residue info if available
         if residue_col in residue_data:
             result_row['Residue'] = residue_data[residue_col]
         
@@ -904,7 +871,6 @@ def main():
     """
     Example usage of the ReducedSpectralDensityAnalysis class with multiprocessing
     """
-    # Initialize analysis with experimental parameters
     analyzer = ReducedSpectralDensityAnalysis(
         spectrometer_frequency=700.0,  # MHz
         rNH=1.023e-10,                   # meters
@@ -920,16 +886,13 @@ def main():
                                      use_multiprocessing=True,
                                      n_processes=None)  # Use 80% of available cores
         
-        # Check if any data was processed
         if len(results) == 0:
             print("No data to analyze after filtering!")
             return
         
-        # Display results
         print("\nReduced Spectral Density Analysis Results (Multiprocessing):")
         print("=" * 70)
         
-        # Show results with residue info if available
         if 'Residue' in results.columns:
             display_cols = ['Residue', 'J0', 'JwN', 'JwH', 'S2', 'tc', 'te', 'Rex']
         else:
@@ -937,16 +900,12 @@ def main():
         
         print(results[display_cols].round(4))
         
-        # Save basic results
         results.to_csv('ZZ_rsdm_multicore.csv', index=False)
         
-        # Save detailed results with confidence intervals
         analyzer.save_detailed_results(results)
         
-        # Generate plots
         analyzer.plot_results(results)
         
-        # Print summary statistics
         success_rate = results['fit_success'].mean() * 100
         print(f"\nModel-Free Fitting Results:")
         print(f"  Fit success rate: {success_rate:.1f}%")
@@ -971,7 +930,6 @@ def main():
         print("Please provide a CSV file named 'data_in.csv' with columns:")
         print("R1, R1err, R2, R2err, hetNOE, hetNOEerr, and optionally Residue")
         
-        # Create example data
         example_data = pd.DataFrame({
             'Residue': [f'A{i}' for i in range(1, 11)],
             'R1': np.random.normal(1.5, 0.2, 10),

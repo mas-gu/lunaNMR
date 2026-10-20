@@ -100,7 +100,6 @@ class ProcessingWorker(QObject):
             return False  # Signal to stop
         if failed or (log_msg or '').startswith('Warning:'):
             self.notice.emit(log_msg, bool(failed))
-        # Convert to (current, total, message) format
         total = len(self.nmr_files) if self.nmr_files else 100
         current = int(progress_pct * total / 100)
         self.progress.emit(current, total, log_msg or task_desc)
@@ -114,7 +113,6 @@ class ProcessingWorker(QObject):
             import os
             from datetime import datetime
 
-            # Create processor with parameters
             processor = MultiSpectrumProcessor(self.voigt_params)
             self.processor = processor
 
@@ -134,7 +132,6 @@ class ProcessingWorker(QObject):
             else:
                 output_folder = None
 
-            # Process series using correct method name
             batch_results = processor.process_nmr_series(
                 nmr_files=self.nmr_files,
                 reference_peaks=self.reference_peaks,
@@ -219,10 +216,8 @@ class SeriesIntegrationDialog(BaseDialog):
         self.first_spectrum_time = None  # Time to complete first spectrum (for ETA)
         self.last_spectrum_start = None  # When current spectrum started
 
-        # Build UI
         self.setup_ui()
 
-        # Populate file list
         self._populate_file_list()
 
         # Center on parent
@@ -303,10 +298,8 @@ class SeriesIntegrationDialog(BaseDialog):
         self.peak_source_group.addButton(self.independent_radio)
         layout.addWidget(self.independent_radio)
 
-        # Default selection: Cascade mode
         self.cascade_radio.setChecked(True)
 
-        # Connect signals for terminal feedback
         self.cascade_radio.toggled.connect(self._on_peak_source_cascade)
         self.detected_radio.toggled.connect(self._on_peak_source_detected)
         self.independent_radio.toggled.connect(self._on_peak_source_independent)
@@ -636,7 +629,6 @@ class SeriesIntegrationDialog(BaseDialog):
         # Get NMR files (unsorted - will be sorted by _refresh_file_list_display)
         self.nmr_files = self._get_nmr_files(nmr_folder)
 
-        # Update info label
         self.file_info_label.setText(f"{len(self.nmr_files)} files found in {os.path.basename(nmr_folder)}")
 
         # Refresh display with correct ordering (by delay if checkbox enabled)
@@ -741,7 +733,6 @@ class SeriesIntegrationDialog(BaseDialog):
             without_value = sorted((f for f in self.nmr_files if f not in placed), key=natural_sort_key)
             self.nmr_files = [f for f, _, _ in files_with_sequence] + without_value
 
-            # Populate list with the extracted value
             for filepath, value, sequence in files_with_sequence:
                 basename = os.path.basename(filepath)
                 col_name = extractor.get_column_name(value, sequence)
@@ -754,13 +745,10 @@ class SeriesIntegrationDialog(BaseDialog):
                 item.setData(Qt.UserRole, filepath)
                 self.file_list.addItem(item)
 
-            # Update delay info label
             self._update_delay_info()
         else:
-            # Sort alphabetically (natural sort)
             self.nmr_files = sorted(self.nmr_files, key=natural_sort_key)
 
-            # Populate list without delay info
             for filepath in self.nmr_files:
                 item = QListWidgetItem(os.path.basename(filepath))
                 item.setData(Qt.UserRole, filepath)
@@ -787,24 +775,20 @@ class SeriesIntegrationDialog(BaseDialog):
         """
         from PySide6.QtWidgets import QInputDialog
 
-        # Generate suggested name from folder
         suggested_name = "Series_1"
         if self.main_window and hasattr(self.main_window, 'current_nmr_folder'):
             folder = self.main_window.current_nmr_folder
             if folder:
                 suggested_name = os.path.basename(folder)
 
-        # Check for existing series to avoid duplicates
         existing_series = getattr(self.main_window, 'saved_series', {}) if self.main_window else {}
         if suggested_name in existing_series:
-            # Append number to make unique
             base_name = suggested_name
             counter = 2
             while f"{base_name}_{counter}" in existing_series:
                 counter += 1
             suggested_name = f"{base_name}_{counter}"
 
-        # Show input dialog
         name, ok = QInputDialog.getText(
             self,
             "Series Name",
@@ -821,7 +805,6 @@ class SeriesIntegrationDialog(BaseDialog):
         for char in invalid_chars:
             name = name.replace(char, '_')
 
-        # Check if name already exists
         if name in existing_series:
             result = QMessageBox.question(
                 self,
@@ -838,7 +821,6 @@ class SeriesIntegrationDialog(BaseDialog):
 
     def _start_processing(self):
         """Start series processing."""
-        # Validate
         if not self.nmr_files:
             QMessageBox.warning(self, "No Files", "No NMR files found. Select a folder first.")
             return
@@ -854,7 +836,6 @@ class SeriesIntegrationDialog(BaseDialog):
 
         self.current_series_name = series_name
 
-        # Get peak source
         peak_source_mode = "detected"
         reference_peaks = None
 
@@ -923,14 +904,12 @@ class SeriesIntegrationDialog(BaseDialog):
         else:
             self._log(f"Peak List mode: Using contour_min={peak_list_contour_min:.5f} (per-spectrum threshold)")
 
-        # Get parameters
         voigt_params = self._get_voigt_params()
 
         # Get x-axis extraction options (off / time / titration)
         extract_delays = self._xaxis_enabled()
         series_mode = self._series_mode()
 
-        # Update UI
         self.start_btn.setEnabled(False)
         self.close_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
@@ -938,7 +917,6 @@ class SeriesIntegrationDialog(BaseDialog):
         self.status_label.setText("Starting...")
         self.log_text.clear()
 
-        # Initialize timing and counters
         self.start_time = datetime.now()
         self.completed_tasks = 0
         self.failed_tasks = 0
@@ -958,7 +936,6 @@ class SeriesIntegrationDialog(BaseDialog):
         self._log(self.tracking_statement)
         self._log("Adaptive radius search: off for a series")
 
-        # Create worker and thread
         self.thread = QThread()
         self.worker = ProcessingWorker(
             self.nmr_files, reference_peaks, peak_source_mode, voigt_params,
@@ -972,7 +949,6 @@ class SeriesIntegrationDialog(BaseDialog):
         )
         self.worker.moveToThread(self.thread)
 
-        # Connect signals
         self.thread.started.connect(self.worker.run)
         self.worker.progress.connect(self._on_progress)
         self.worker.notice.connect(self._on_notice)
@@ -984,7 +960,6 @@ class SeriesIntegrationDialog(BaseDialog):
         self.worker.cancelled.connect(self.thread.quit)
         self.thread.finished.connect(lambda: self.close_btn.setEnabled(True))
 
-        # Start
         self.thread.start()
 
     def _tracking_statement(self, peak_source_mode: str) -> str:
@@ -1042,11 +1017,9 @@ class SeriesIntegrationDialog(BaseDialog):
             spectrum_idx = int(spectrum_match.group(1))
             total_spectra = int(spectrum_match.group(2))
         else:
-            # Fallback to passed values
             spectrum_idx = current + 1  # current is 0-based from callback
             total_spectra = total if total > 0 else len(self.nmr_files)
 
-        # Track spectrum changes for ETA calculation
         if spectrum_idx != self.current_spectrum_idx:
             now = datetime.now()
 
@@ -1054,12 +1027,10 @@ class SeriesIntegrationDialog(BaseDialog):
             if spectrum_idx == 2 and self.last_spectrum_start:
                 self.first_spectrum_time = (now - self.last_spectrum_start).total_seconds()
 
-            # Update tracking
             self.current_spectrum_idx = spectrum_idx
             self.last_spectrum_start = now
             self.total_spectra = total_spectra
 
-        # Calculate progress: completed spectra / total
         # spectrum_idx is 1-based and represents current (in-progress), so completed = idx - 1
         completed = spectrum_idx - 1
         if total_spectra > 0:
@@ -1075,7 +1046,6 @@ class SeriesIntegrationDialog(BaseDialog):
         status = f"Processing: {self.current_spectrum_name}" if self.current_spectrum_name else f"Spectrum {spectrum_idx}/{total_spectra}"
         self.status_label.setText(status)
 
-        # Update statistics with ETA
         self._update_statistics(spectrum_idx, total_spectra)
 
         # Log significant messages only (not every progress tick)
@@ -1098,14 +1068,12 @@ class SeriesIntegrationDialog(BaseDialog):
         self.cancel_btn.setEnabled(False)
         self.progress_bar.setValue(100)
 
-        # Calculate total time
         if self.start_time:
             total_time = datetime.now() - self.start_time
             total_time_str = str(total_time).split('.')[0]
         else:
             total_time_str = "N/A"
 
-        # Handle both dict format and BatchResults object
         if hasattr(batch_results, 'get_summary'):
             summary = batch_results.get_summary()
         elif isinstance(batch_results, dict):
@@ -1141,7 +1109,6 @@ class SeriesIntegrationDialog(BaseDialog):
             return
 
         self.batch_results = batch_results
-        # Update final stats
         self.stats_label.setText(
             f"Completed in: {total_time_str}\n"
             f"Successful: {summary.get('successful', 0)} | Failed: {summary.get('failed', 0)}"
@@ -1158,9 +1125,7 @@ class SeriesIntegrationDialog(BaseDialog):
         if self.tracking_statement:
             self._log(f"  {self.tracking_statement}")
 
-        # Store results in main window
         if self.main_window:
-            # Store as current batch_results (for backward compatibility)
             self.main_window.batch_results = batch_results
 
             # Also store in saved_series dict with the series name
@@ -1169,7 +1134,6 @@ class SeriesIntegrationDialog(BaseDialog):
 
             series_name = self.current_series_name or "Unnamed_Series"
 
-            # Add metadata to batch_results
             if hasattr(batch_results, 'metadata'):
                 batch_results.metadata['series_name'] = series_name
                 batch_results.metadata['spectrum_count'] = len(batch_results.results) if hasattr(batch_results, 'results') else 0
@@ -1179,7 +1143,6 @@ class SeriesIntegrationDialog(BaseDialog):
 
         self.processing_complete.emit(batch_results)
 
-        # Enable results viewer buttons
         self.browse_results_btn.setEnabled(True)
         self.overlay_viewer_btn.setEnabled(True)
 
@@ -1221,7 +1184,6 @@ class SeriesIntegrationDialog(BaseDialog):
                 "No series results available.")
             return
 
-        # Get series processor and data folder
         series_processor = getattr(self.main_window, 'series_processor', None) if self.main_window else None
         original_data_folder = getattr(self.main_window, 'current_nmr_folder', None) if self.main_window else None
 
@@ -1254,13 +1216,11 @@ class SeriesIntegrationDialog(BaseDialog):
             metadata = self.batch_results.get('metadata', {})
             data_folder = metadata.get('data_folder')
 
-        # Fallback to main_window.current_nmr_folder if not in metadata
         if not data_folder:
             data_folder = getattr(self.main_window, 'current_nmr_folder', None) if self.main_window else None
 
         self._log(f"Data folder for spectrum paths: {data_folder}")
 
-        # Get all results as list
         all_results = []
         if hasattr(self.batch_results, 'results'):
             for name, result in self.batch_results.results.items():
@@ -1291,7 +1251,6 @@ class SeriesIntegrationDialog(BaseDialog):
                 if parsed:
                     value, sequence = parsed
                     return (value, sequence, str(name))
-                # Try extracting from filename pattern (mode-aware)
                 value = extractor.extract_value(str(name))
                 if value is not None:
                     return (value, 1, str(name))
@@ -1303,7 +1262,6 @@ class SeriesIntegrationDialog(BaseDialog):
             # Sort by spectrum name using natural sort (8ms < 54ms < 102ms, not alphabetical)
             all_results.sort(key=lambda x: natural_sort_key(x.get('spectrum_name', '')))
 
-        # Get file manager from main window
         file_manager = getattr(self.main_window, 'file_manager', None) if self.main_window else None
 
         # Output folder (for saving manual position corrections back to the CSVs)
@@ -1340,7 +1298,6 @@ class SeriesIntegrationDialog(BaseDialog):
         elapsed = datetime.now() - self.start_time
         elapsed_str = str(elapsed).split('.')[0]  # Remove microseconds
 
-        # Calculate ETA based on first spectrum time
         # ETA = first_spectrum_time * 4 * remaining_spectra (rough estimate)
         completed = current_spectrum - 1  # current is 1-based, in-progress
         remaining = total_spectra - completed
@@ -1377,7 +1334,6 @@ class SeriesIntegrationDialog(BaseDialog):
                              peak.get('Assignment') or
                              f'Peak_{i+1}')
 
-                # Get positions - try multiple key variants
                 position_x = (peak.get('peak_x') or
                              peak.get('ppm_x') or
                              peak.get('Position_X') or

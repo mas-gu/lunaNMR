@@ -162,10 +162,10 @@ def load_titration_tidy(csv_path):
     # not a measured shift, so only the ppm columns go; the intensity does not depend
     # on it (lunaNMR.utils.quality_categories.usable_points has the measurement).
     def _flag(column):
-        # fillna(False), not truthiness: a legacy CSV has no such column at all and a
-        # legacy ROW carries NaN. Absent is not the same as pinned, and refusing every
-        # series written before these existed would be worse than the risk. Re-run
-        # the series to get the filter.
+        # fillna(False), not truthiness: a CSV written before the flags has no such
+        # column at all and a ROW from before them carries NaN. Absent is not the same
+        # as pinned, and refusing every series written before these existed would be
+        # worse than the risk. Re-run the series to get the filter.
         if column not in df.columns:
             return pd.Series(False, index=df.index)
         return df[column].fillna(False).astype(bool)

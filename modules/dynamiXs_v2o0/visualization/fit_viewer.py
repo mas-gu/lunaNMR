@@ -22,7 +22,6 @@ from PySide6.QtCore import Qt, Signal
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 
-# Import GUI components
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
 from constants import (
@@ -73,7 +72,7 @@ class FitViewer(QMainWindow):
         parent : QWidget, optional
             Parent widget
         json_folder : str, optional
-            Path to JSON data folder (legacy single folder)
+            Path to JSON data folder (single folder)
         json_folders : list, optional
             List of JSON data folder paths (for multi-experiment support)
         source_series_map : dict, optional
@@ -112,7 +111,6 @@ class FitViewer(QMainWindow):
         self.show_t1 = True
         self.show_t2 = True
 
-        # Build UI
         self._create_ui()
 
         # Load the run's files, else every fit in the folders
@@ -166,13 +164,11 @@ class FitViewer(QMainWindow):
         title_label.setFont(get_font(18, bold=True))
         layout.addWidget(title_label)
 
-        # Plot area
         plot_frame = QFrame()
         plot_frame.setStyleSheet(f"background-color: {FRAME_BG_COLOR}; border-radius: 8px;")
         plot_layout = QVBoxLayout(plot_frame)
         plot_layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
 
-        # Create matplotlib figure (4x1 layout)
         self.figure = Figure(figsize=(10, 12), facecolor=PANEL_BG_COLOR)
         self.axes = []
 
@@ -454,7 +450,6 @@ class FitViewer(QMainWindow):
                     self.json_paths[file_key] = json_file
                     self.exclusions[file_key] = load_outliers(json_file)
 
-                    # Collect residues
                     for fit in data['fits']:
                         residues_set.add(fit['residue'])
 
@@ -466,14 +461,11 @@ class FitViewer(QMainWindow):
                 self._populate_residue_list()
                 return
 
-            # Sort residues
             self.available_residues = sorted(list(residues_set), key=self._residue_sort_key)
 
-            # Update UI
             self._update_field_controls()
             self._populate_residue_list()
 
-            # Show status
             n_files = len(self.data)
             n_residues = len(self.available_residues)
             show_info(self, "Data Loaded",
@@ -506,7 +498,6 @@ class FitViewer(QMainWindow):
         self.field2_radio.setEnabled(has_field2)
         self.overlay_radio.setEnabled(has_field1 and has_field2)
 
-        # Set default selection
         if has_field1 and has_field2:
             self.overlay_radio.setChecked(True)
             self.field_mode = "overlay"
@@ -522,19 +513,16 @@ class FitViewer(QMainWindow):
         self.residue_list.clear()
 
         if not self.available_residues:
-            # Show placeholder item
             placeholder = QListWidgetItem("No data available")
             placeholder.setFlags(Qt.NoItemFlags)  # Not selectable
             self.residue_list.addItem(placeholder)
             return
 
-        # Add residue items
         for residue in self.available_residues:
             item = QListWidgetItem(residue)
             item.setData(Qt.UserRole, residue)
             self.residue_list.addItem(item)
 
-        # Select first residue by default
         if self.available_residues:
             self.residue_list.setCurrentRow(0)
 
@@ -569,7 +557,6 @@ class FitViewer(QMainWindow):
         self.show_t1 = self.t1_checkbox.isChecked()
         self.show_t2 = self.t2_checkbox.isChecked()
 
-        # Refresh current selection
         current_item = self.residue_list.currentItem()
         if current_item:
             residue = current_item.data(Qt.UserRole)
@@ -622,7 +609,6 @@ class FitViewer(QMainWindow):
         # Extract fit data for ALL residues (so viewer can update when switching peaks)
         all_fit_data = self._get_all_fit_data(data_key)
 
-        # Emit signal for handling by parent (DynamiXsDialog)
         self.inspect_peak_requested.emit(str(residue), series_name, all_fit_data)
 
     def _get_fit_data_for_residue(self, residue: str, data_key: str) -> dict:
@@ -650,7 +636,6 @@ class FitViewer(QMainWindow):
         fits = data_entry.get('fits', [])
         metadata = data_entry.get('metadata', {})
 
-        # Find fit for this residue
         fit_entry = None
         for fit in fits:
             if fit.get('residue') == residue:
@@ -756,7 +741,6 @@ class FitViewer(QMainWindow):
         msg.setText("Which NMR series do you want to inspect?")
         msg.setInformativeText("Select the series for viewing the underlying Voigt fits.")
 
-        # Create buttons for each series
         buttons = {}
         for series_name in available_series:
             label = series_labels.get(series_name, series_name)
@@ -784,7 +768,7 @@ class FitViewer(QMainWindow):
         return None
 
     def _update_plots(self):
-        """Update plots with current selection (legacy method kept for compatibility)"""
+        """Update plots for the selected residue"""
         current_item = self.residue_list.currentItem()
         if current_item:
             residue = current_item.data(Qt.UserRole)
@@ -797,7 +781,6 @@ class FitViewer(QMainWindow):
         self.axes = []
         self._pick_registry = {}  # rebuilt on every redraw
 
-        # Determine plot count
         plots = []
         for residue in sorted(residues, key=self._residue_sort_key):
             if self.t1_checkbox.isChecked():
@@ -810,12 +793,10 @@ class FitViewer(QMainWindow):
             self._show_blank_state()
             return
 
-        # Create subplots (4x1 layout)
         for idx, (residue, meas_type) in enumerate(plots):
             ax = self.figure.add_subplot(n_plots, 1, idx + 1)
             self.axes.append(ax)
 
-            # Plot data
             self._plot_single_fit(ax, residue, meas_type)
 
         self.figure.tight_layout()
@@ -835,7 +816,6 @@ class FitViewer(QMainWindow):
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
-        # Get data key
         data_key = f"{field}_{meas_type}"
 
         if data_key not in self.data:
@@ -845,7 +825,6 @@ class FitViewer(QMainWindow):
             ax.axis('off')
             return
 
-        # Find residue in data
         fit_data = None
         for fit in self.data[data_key]['fits']:
             if fit['residue'] == residue:
@@ -859,7 +838,6 @@ class FitViewer(QMainWindow):
             ax.axis('off')
             return
 
-        # Extract data
         metadata = self.data[data_key]['metadata']
         time_points = metadata['time_points']
         intensities = fit_data['intensities']
@@ -868,7 +846,6 @@ class FitViewer(QMainWindow):
         t_value = fit_data['t2']
         t_error = fit_data['t2_err']
 
-        # Plot with zorder for proper layering
         self._plot_residue_points(
             ax, data_key, residue, color='#2196F3', label='Data',
             time_points=time_points, intensities=intensities,
@@ -898,7 +875,6 @@ class FitViewer(QMainWindow):
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
 
-        # Get data for both fields
         field1_key = f"field1_{meas_type}"
         field2_key = f"field2_{meas_type}"
 
@@ -912,7 +888,6 @@ class FitViewer(QMainWindow):
             ax.axis('off')
             return
 
-        # Find residue data
         fit1 = None
         fit2 = None
 
@@ -939,7 +914,6 @@ class FitViewer(QMainWindow):
         color_field1 = '#2196F3'  # Blue
         color_field2 = '#FF9800'  # Orange
 
-        # Plot Field 1 (blue)
         annotations = []
         time_units = "ms"
 
@@ -961,7 +935,6 @@ class FitViewer(QMainWindow):
             annotations.append(f"{meas_type} ({metadata1['field_freq']} MHz) = {fit1['t2']:.2f} ± {fit1['t2_err']:.2f} {metadata1['time_units']}")
             time_units = metadata1['time_units']
 
-        # Plot Field 2 (orange)
         if fit2:
             metadata2 = self.data[field2_key]['metadata']
             time_points2 = metadata2['time_points']
@@ -1168,7 +1141,7 @@ def open_fit_viewer(parent=None, json_folder=None, json_folders=None):
     parent : QWidget, optional
         Parent widget
     json_folder : str, optional
-        Path to JSON data folder (legacy single folder)
+        Path to JSON data folder (single folder)
     json_folders : list, optional
         List of JSON data folder paths (for multi-experiment support)
 

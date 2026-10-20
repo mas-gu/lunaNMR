@@ -70,14 +70,11 @@ class SpectrumBrowserDialog(BaseDialog):
         self.original_data_folder = original_data_folder
         self.selected_spectrum = None
 
-        # Sort state
         self.sort_column = 1  # Default sort by spectrum name
         self.sort_ascending = True
 
-        # Build UI
         self.setup_ui()
 
-        # Populate list
         self.populate_spectrum_list()
 
         # Center on parent
@@ -126,7 +123,6 @@ class SpectrumBrowserDialog(BaseDialog):
 
         layout.addLayout(title_layout)
 
-        # Filter section
         filter_group = self.create_filter_section()
         layout.addWidget(filter_group)
 
@@ -169,7 +165,6 @@ class SpectrumBrowserDialog(BaseDialog):
         layout.setSpacing(SPACING_MD)
         layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
 
-        # Search box
         layout.addWidget(QLabel("Search:"))
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Filter by name...")
@@ -230,14 +225,12 @@ class SpectrumBrowserDialog(BaseDialog):
         layout = QVBoxLayout()
         layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
 
-        # Create tree widget
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels([
             "Status", "Spectrum", "Type", "Detected", "Total",
             "Detection Rate", "Quality", "Processing Time"
         ])
 
-        # Configure columns
         header = self.tree.header()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Status
         header.setSectionResizeMode(1, QHeaderView.Stretch)  # Spectrum name
@@ -248,11 +241,9 @@ class SpectrumBrowserDialog(BaseDialog):
         header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Quality
         header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # Processing Time
 
-        # Enable sorting
         self.tree.setSortingEnabled(True)
         self.tree.sortByColumn(1, Qt.AscendingOrder)
 
-        # Connect signals
         self.tree.itemDoubleClicked.connect(self.on_spectrum_double_click)
         self.tree.itemClicked.connect(self.on_spectrum_select)
 
@@ -286,7 +277,6 @@ class SpectrumBrowserDialog(BaseDialog):
         layout = QHBoxLayout()
         layout.setSpacing(SPACING_SM)
 
-        # Open Spectrum Viewer button (primary)
         open_viewer_btn = QPushButton("Open Spectrum Viewer")
         open_viewer_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         open_viewer_btn.setStyleSheet(f"""
@@ -324,7 +314,6 @@ class SpectrumBrowserDialog(BaseDialog):
         quick_analysis_btn.clicked.connect(self.show_quick_analysis)
         layout.addWidget(quick_analysis_btn)
 
-        # Refresh button
         refresh_btn = QPushButton("Refresh List")
         refresh_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         refresh_btn.setStyleSheet(f"""
@@ -345,7 +334,6 @@ class SpectrumBrowserDialog(BaseDialog):
 
         layout.addStretch()
 
-        # Close button
         close_btn = QPushButton("Close")
         close_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         close_btn.setStyleSheet(f"""
@@ -377,9 +365,7 @@ class SpectrumBrowserDialog(BaseDialog):
             logger.warning("No batch results to display")
             return
 
-        # Add spectrum data
         for spectrum_name, result in self.batch_results.results.items():
-            # Calculate quality score
             quality_score = self.calculate_quality_score(result)
             quality_text = self.get_quality_text(quality_score)
 
@@ -396,7 +382,6 @@ class SpectrumBrowserDialog(BaseDialog):
             # Detection rate
             detection_rate = result.get('detection_rate', 0)
 
-            # Create item
             item = QTreeWidgetItem([
                 status_icon,
                 spectrum_name,
@@ -408,7 +393,6 @@ class SpectrumBrowserDialog(BaseDialog):
                 proc_time_str
             ])
 
-            # Store result data for later access
             item.setData(0, Qt.UserRole, result)
             item.setData(1, Qt.UserRole, spectrum_name)
 
@@ -498,10 +482,8 @@ class SpectrumBrowserDialog(BaseDialog):
             quality = item.text(6)
             status = "Success" if item.text(0) == "✓" else "Failed"
 
-            # Check all filters
             show = True
 
-            # Search filter
             if search_text and search_text not in spectrum_name:
                 show = False
 
@@ -548,7 +530,6 @@ class SpectrumBrowserDialog(BaseDialog):
             )
             return
 
-        # Get result data
         result_data = self.batch_results.results.get(self.selected_spectrum)
         if not result_data:
             QMessageBox.warning(
@@ -558,14 +539,12 @@ class SpectrumBrowserDialog(BaseDialog):
             )
             return
 
-        # Get spectrum file path
         spectrum_file_path = result_data.get('spectrum_file', '')
         if not spectrum_file_path and self.original_data_folder:
             # Try to construct path from folder and name
             import os
             spectrum_file_path = os.path.join(self.original_data_folder, self.selected_spectrum)
 
-        # Open SpectrumViewerDialog
         viewer = SpectrumViewerDialog(
             parent=self,
             spectrum_name=self.selected_spectrum,
@@ -575,7 +554,6 @@ class SpectrumBrowserDialog(BaseDialog):
         )
         viewer.show()
 
-        # Emit signal
         self.spectrum_selected.emit(self.selected_spectrum)
 
     def show_quick_analysis(self):
@@ -591,12 +569,10 @@ class SpectrumBrowserDialog(BaseDialog):
             )
             return
 
-        # Get result data
         result_data = self.batch_results.results.get(self.selected_spectrum)
         if not result_data:
             return
 
-        # Build analysis summary
         summary = f"Quick Analysis: {self.selected_spectrum}\n"
         summary += "=" * 50 + "\n\n"
 

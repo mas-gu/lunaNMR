@@ -3,9 +3,6 @@ Utility Classes and Managers for LunaNMR
 
 This module contains utility classes for configuration management,
 file handling, parameter management, and optimization.
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 try:
@@ -25,11 +22,6 @@ except ImportError:
 
 try:
     from .global_optimization_manager import GlobalOptimizationManager
-except ImportError:
-    pass
-
-try:
-    from .font_config import FontManager, get_font_manager, configure_emoji_support, get_display_text
 except ImportError:
     pass
 
@@ -76,10 +68,6 @@ __all__ = [
     'FileManager',
     'ParameterManager',
     'GlobalOptimizationManager',
-    'FontManager',
-    'get_font_manager',
-    'configure_emoji_support',
-    'get_display_text',
     'DelayExtractor',
     'RelaxationDataBridge',
     'OutputManager',

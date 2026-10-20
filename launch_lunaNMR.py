@@ -17,7 +17,6 @@ import os
 import matplotlib
 
 matplotlib.use("QtAgg", force=True)
-#print(f"🖼️ Matplotlib backend forced to: {matplotlib.get_backend()}")
 
 # Keep text EDITABLE in exported vector figures (so they can be tweaked in Illustrator
 # etc.): SVG keeps labels as <text> rather than outlined paths; PDF embeds TrueType so
@@ -49,7 +48,6 @@ def setup_paths():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(current_dir)
 
-    # Add directories to Python path
     sys.path.insert(0, current_dir)
     sys.path.insert(0, parent_dir)
 
@@ -77,10 +75,8 @@ def main():
     # The terminal the app is started from shows lunaNMR's INFO records
     logging.basicConfig(level=logging.INFO)
 
-    # Setup paths
     current_dir, parent_dir = setup_paths()
 
-    # Check dependencies
     missing = check_dependencies()
     if missing:
         error_msg = f"Missing required modules: {', '.join(missing)}\n\nPlease install with:\npip install {' '.join(missing)}"
@@ -95,7 +91,6 @@ def main():
 
         return False
 
-    # Launch LunaNMR
     try:
         print("Launching LunaNMR...")
         success = launch_lunaNMR()
@@ -128,12 +123,12 @@ def main():
 if __name__ == "__main__":
     try:
         success = main()
-        print(f"🏁 Launch completed with {'success' if success else 'errors'}")
+        print(f"Launch completed with {'success' if success else 'errors'}")
     except KeyboardInterrupt:
-        print("\n⏹️ Launch interrupted by user")
+        print("\nLaunch interrupted by user")
         success = True  # User interrupt is not an error
     except Exception as e:
-        print(f"💥 Critical launcher error: {e}")
+        print(f"Critical launcher error: {e}")
         import traceback
 
         traceback.print_exc()
@@ -155,10 +150,3 @@ if __name__ == "__main__":
             os._exit(0 if success else 1)
         else:
             sys.exit(0 if success else 1)
-
-        # if platform.system() == "Linux":
-        #    import os
-        #    # Force clean exit
-        #    os._exit(0 if success else 1)
-        # else:
-        #    sys.exit(0 if success else 1)

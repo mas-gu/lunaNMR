@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QFont, QFontDatabase
 
-# Import design constants
 from constants import (
     BG_COLOR, PANEL_BG_COLOR, FRAME_BG_COLOR,
     PRIMARY_TEXT, SECONDARY_TEXT, DISABLED_TEXT,
@@ -39,9 +38,7 @@ from constants import (
 )
 
 
-# =============================================================================
 # STYLESHEET LOADING
-# =============================================================================
 
 def load_stylesheet(app: QApplication) -> bool:
     """
@@ -64,9 +61,7 @@ def load_stylesheet(app: QApplication) -> bool:
         return False
 
 
-# =============================================================================
 # FONT UTILITIES
-# =============================================================================
 
 def get_font(size: int = FONT_SIZE_BODY, bold: bool = False) -> QFont:
     """
@@ -98,9 +93,7 @@ def get_monospace_font(size: int = FONT_SIZE_MONOSPACE) -> QFont:
     return QFont("Courier New", size)
 
 
-# =============================================================================
 # CUSTOM COMPONENTS
-# =============================================================================
 
 class CollapsibleGroupBox(QFrame):
     """
@@ -133,7 +126,6 @@ class CollapsibleGroupBox(QFrame):
         self._collapsed = initially_collapsed
         self._collapsible = collapsible
 
-        # Set up styling
         self.setProperty("class", "panel")
 
         # Main layout
@@ -149,7 +141,6 @@ class CollapsibleGroupBox(QFrame):
             header_layout.setContentsMargins(0, 0, 0, 0)
             header_layout.setSpacing(SPACING_SM)
 
-            # Collapse button (if collapsible)
             if collapsible:
                 self._collapse_btn = QPushButton("▼" if not initially_collapsed else "▶")
                 self._collapse_btn.setProperty("class", "icon")
@@ -174,7 +165,6 @@ class CollapsibleGroupBox(QFrame):
         self._content_layout.setSpacing(SPACING_SM)
         self._layout.addWidget(self._content)
 
-        # Apply initial collapsed state
         if initially_collapsed:
             self._content.setVisible(False)
 
@@ -237,9 +227,7 @@ class StyledGroupBox(QGroupBox):
         self.setFont(get_font(FONT_SIZE_SECTION_LABEL, bold=True))
 
 
-# =============================================================================
 # BUTTON FACTORIES
-# =============================================================================
 
 def create_primary_button(
     text: str,
@@ -440,9 +428,7 @@ def create_icon_button(
     return btn
 
 
-# =============================================================================
 # LABEL FACTORIES
-# =============================================================================
 
 def create_label(
     text: str,
@@ -511,9 +497,7 @@ def create_secondary_label(text: str) -> QLabel:
     return create_label(text, "secondary", FONT_SIZE_SMALL)
 
 
-# =============================================================================
 # INPUT FACTORIES
-# =============================================================================
 
 def create_line_edit(
     text: str = "",
@@ -752,9 +736,7 @@ def create_radio_button(
     return radio
 
 
-# =============================================================================
 # LAYOUT UTILITIES
-# =============================================================================
 
 def create_h_layout(
     spacing: int = SPACING_SM,
@@ -836,9 +818,7 @@ def create_scroll_area(widget: QWidget) -> QScrollArea:
     return scroll
 
 
-# =============================================================================
 # DIALOG UTILITIES
-# =============================================================================
 
 def show_info(parent: QWidget, title: str, message: str):
     """Show an information message box."""
@@ -869,9 +849,7 @@ def ask_yes_no(parent: QWidget, title: str, message: str) -> bool:
     return result == QMessageBox.Yes
 
 
-# =============================================================================
 # NAMING A SAVED ANALYSIS
-# =============================================================================
 
 def unique_name(base: str, existing) -> str:
     """`base`, or the first of base_2, base_3, ... not already in `existing`."""
@@ -985,9 +963,7 @@ def open_directory_dialog(
     return QFileDialog.getExistingDirectory(parent, title, directory)
 
 
-# =============================================================================
 # SPECTRA INPUT WIDGET (LunaNMR Integration)
-# =============================================================================
 
 class SpectraInputWidget(QFrame):
     """
@@ -999,9 +975,9 @@ class SpectraInputWidget(QFrame):
     Modes:
     - mode='full': Full dual-field support with all experiments (T1, T2, hetNOE) - for Model-Free
     - mode='t1t2': Multi-field support for T1/T2 only (no hetNOE) - for T1/T2 Fitting
-    - mode='single': Simple single-folder input - legacy mode
+    - mode='single': Simple single-folder input
 
-    Legacy parameter single_experiment_mode=True maps to mode='single'.
+    single_experiment_mode=True maps to mode='single'.
     """
 
     folders_changed = Signal()
@@ -1019,7 +995,6 @@ class SpectraInputWidget(QFrame):
                  mode: str = None):
         super().__init__(parent)
 
-        # Determine mode
         if mode is not None:
             self._mode = mode
         elif single_experiment_mode:
@@ -1074,7 +1049,7 @@ class SpectraInputWidget(QFrame):
         main_layout.addWidget(peak_group)
 
         if self._mode == 'single':
-            # Simple single-folder mode (legacy)
+            # Simple single-folder mode
             self._setup_single_mode(main_layout)
         elif self._mode == 't1t2':
             # Multi-field T1/T2 mode (no hetNOE)
@@ -1149,7 +1124,6 @@ class SpectraInputWidget(QFrame):
         # --- Field 2 Section (Optional) ---
         field2_group = CollapsibleGroupBox("Field 2 Data (Optional)", collapsible=True, initially_collapsed=True)
 
-        # Enable toggle and frequency
         enable_row = QHBoxLayout()
         enable_row.setSpacing(SPACING_SM)
 
@@ -1233,7 +1207,6 @@ class SpectraInputWidget(QFrame):
         # --- Field 2 Section (Optional) ---
         field2_group = CollapsibleGroupBox("Field 2 Data (Optional - for dual-field)", collapsible=True, initially_collapsed=True)
 
-        # Enable toggle and frequency in header
         enable_row = QHBoxLayout()
         enable_row.setSpacing(SPACING_SM)
 
@@ -1444,7 +1417,6 @@ class SpectraInputWidget(QFrame):
                 widgets['status'].setText("Found")
                 widgets['status'].setStyleSheet(f"color: {SUCCESS_GREEN};")
 
-                # Format details
                 if experiment_type in ['hetNOE_sat', 'hetNOE_unsat']:
                     details = f"{len(result)} spectrum"
                 else:
@@ -1456,7 +1428,6 @@ class SpectraInputWidget(QFrame):
                 # Folder exists but no NMR files with delays
                 # For hetNOE, this is OK (no delay expected)
                 if experiment_type in ['hetNOE_sat', 'hetNOE_unsat']:
-                    # Count any NMR files
                     nmr_files = [f for f in os.listdir(folder_path)
                                  if os.path.splitext(f)[1].lower() in
                                  {'.ft', '.ucsf', '.pipe', '.2rr', '.2ii'}]
@@ -1485,9 +1456,7 @@ class SpectraInputWidget(QFrame):
         if experiment_type in delays_dict:
             del delays_dict[experiment_type]
 
-    # -------------------------------------------------------------------------
     # Public API
-    # -------------------------------------------------------------------------
 
     def get_peak_list_path(self) -> str:
         """Get the selected peak list path."""
@@ -1543,10 +1512,8 @@ class SpectraInputWidget(QFrame):
         """Check if all data is available for dual-field Model-Free analysis."""
         if not self._field2_enabled:
             return False
-        # Check Field 1
         if not self.is_ready_for_model_free():
             return False
-        # Check Field 2
         has_t1 = 'T1' in self._field2_experiments
         has_t2 = 'T2' in self._field2_experiments
         has_noe_sat = 'hetNOE_sat' in self._field2_experiments
@@ -1597,12 +1564,3 @@ class SpectraInputWidget(QFrame):
         it contains the spectra. Returns empty string if not set.
         """
         return self._field1_folder
-
-    # Legacy compatibility methods
-    def get_experiment_folders(self) -> dict:
-        """Get Field 1 experiment folders (legacy compatibility)."""
-        return self.get_field1_experiments()
-
-    def get_delay_summary(self) -> dict:
-        """Get Field 1 delay summaries (legacy compatibility)."""
-        return self.get_field1_delays()

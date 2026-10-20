@@ -3,9 +3,6 @@ Specialized Integrators for LunaNMR
 
 This module contains specialized integration classes for
 different types of NMR data processing workflows.
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 try:

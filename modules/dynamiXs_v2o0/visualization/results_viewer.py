@@ -21,7 +21,6 @@ from PySide6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 
-# Import GUI components
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
 from constants import (
@@ -73,7 +72,6 @@ class ResultsViewer(QMainWindow):
         self.setMinimumSize(1400, 900)
         self.setStyleSheet(f"background-color: {BG_COLOR}; color: {PRIMARY_TEXT};")
 
-        # Store parameters
         self.results_file = results_file
         self.field1_freq = field1_freq
         self.field2_freq = field2_freq
@@ -93,12 +91,10 @@ class ResultsViewer(QMainWindow):
         self.show_all_btn = None
         self.error_checkbox = None
 
-        # Load results if file provided
         if results_file:
             self._load_results()
             self._detect_dual_field()
 
-        # Build UI
         self._create_ui()
 
         # Initial blank state
@@ -140,16 +136,12 @@ class ResultsViewer(QMainWindow):
             print(f"Loaded results: {len(self.df)} residues")
             print(f"Columns: {list(self.df.columns)}")
 
-            # Detect if dual-field data is present
             self._detect_dual_field()
 
-            # Update field controls visibility
             self._update_field_controls()
 
-            # Update parameter buttons availability
             self._update_parameter_buttons()
 
-            # Show blank state (waiting for parameter selection)
             self._show_blank_state()
 
             show_info(
@@ -179,10 +171,8 @@ class ResultsViewer(QMainWindow):
         if self.field_section is None:
             return
 
-        # Update visibility
         self.field_section.setVisible(self.is_dual_field)
 
-        # Update field labels if visible
         if self.is_dual_field and hasattr(self, 'field1_radio'):
             self.field1_radio.setText(f"Field 1 ({self.field1_freq} MHz)")
             self.field2_radio.setText(f"Field 2 ({self.field2_freq} MHz)")
@@ -214,7 +204,6 @@ class ResultsViewer(QMainWindow):
         # Control panel
         self._create_control_panel(main_layout)
 
-        # Plot area
         self._create_plot_area(main_layout)
 
     def _create_header(self, parent_layout):
@@ -229,12 +218,10 @@ class ResultsViewer(QMainWindow):
 
         header_layout.addStretch()
 
-        # Load CSV button
         load_csv_btn = create_primary_button("Load CSV File", clicked=self._load_csv_file)
         load_csv_btn.setFixedWidth(120)
         header_layout.addWidget(load_csv_btn)
 
-        # Close button
         close_btn = create_secondary_button("Close", clicked=self.close)
         close_btn.setFixedWidth(80)
         header_layout.addWidget(close_btn)
@@ -265,7 +252,6 @@ class ResultsViewer(QMainWindow):
         param_label.setFont(get_font(FONT_SIZE_SECTION_LABEL, bold=True))
         param_layout.addWidget(param_label)
 
-        # Show All button
         self.show_all_btn = create_primary_button("Show All", clicked=self._show_all_parameters)
         self.show_all_btn.setFixedWidth(100)
         param_layout.addWidget(self.show_all_btn)
@@ -297,7 +283,6 @@ class ResultsViewer(QMainWindow):
                 btn.setFixedWidth(100)
                 btn.setCheckable(True)
 
-                # Check if parameter exists in dataframe
                 if self._find_column_with_field(param):
                     btn.setEnabled(True)
                 else:
@@ -376,7 +361,6 @@ class ResultsViewer(QMainWindow):
         plot_layout = QVBoxLayout(plot_frame)
         plot_layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
 
-        # Create matplotlib figure
         self.figure = Figure(figsize=(14, 7), facecolor=PANEL_BG_COLOR)
         self.ax = self.figure.add_subplot(111)
 
@@ -385,7 +369,6 @@ class ResultsViewer(QMainWindow):
         self.ax.spines['top'].set_visible(False)
         self.ax.spines['right'].set_visible(False)
 
-        # Create canvas
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         plot_layout.addWidget(self.canvas)
@@ -488,16 +471,13 @@ class ResultsViewer(QMainWindow):
                                    if self._get_param_group(p) == param_group]
             self.selected_params.append(param)
 
-        # Update button visual states
         for p, btn in self.parameter_buttons.items():
             btn.setChecked(p in self.selected_params)
 
-        # Reset Show All button
         self.show_all_btn.setProperty("class", "primary")
         self.show_all_btn.style().unpolish(self.show_all_btn)
         self.show_all_btn.style().polish(self.show_all_btn)
 
-        # Update plot
         if self.selected_params:
             self.current_parameter = self.selected_params[0]
             self._update_plot_stacked()
@@ -516,7 +496,6 @@ class ResultsViewer(QMainWindow):
         self.current_parameter = "ALL"
         self.selected_params = []
 
-        # Reset parameter button states
         for btn in self.parameter_buttons.values():
             btn.setChecked(False)
 

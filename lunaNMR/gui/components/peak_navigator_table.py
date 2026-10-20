@@ -102,20 +102,17 @@ class PeakNavigatorTable(QWidget):
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["Assignment", "X (1H)", "Y", "R²"])
 
-        # Configure table behavior
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
-        # Configure columns
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Assignment
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # X
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Y
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # R²
 
-        # Connect selection signal
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
 
         layout.addWidget(self.table)
@@ -133,7 +130,6 @@ class PeakNavigatorTable(QWidget):
         self.prev_btn.setEnabled(False)
         btn_layout.addWidget(self.prev_btn)
 
-        # Next button (symbol only)
         self.next_btn = QPushButton("▶")
         self.next_btn.setToolTip("Next peak")
         self.next_btn.setStyleSheet(self._get_compact_button_style())
@@ -228,17 +224,14 @@ class PeakNavigatorTable(QWidget):
         self.peaks = fitted_peaks or []
         self.selected_index = None
 
-        # Clear and populate table
         self.table.setRowCount(0)
         self.table.setRowCount(len(self.peaks))
 
         for row, peak in enumerate(self.peaks):
             self._populate_row(row, peak)
 
-        # Update status
         self.status_label.setText(f"Detected Peaks: {len(self.peaks)} peaks")
 
-        # Update button states
         has_multiple = len(self.peaks) > 1
         self.prev_btn.setEnabled(has_multiple)
         self.next_btn.setEnabled(has_multiple)
@@ -258,7 +251,6 @@ class PeakNavigatorTable(QWidget):
         # Quality indicator and color, as the peak's spectrum marker is coloured
         quality_indicator, row_color = navigator_row_display(peak_quality_label(peak))
 
-        # Create table items
         assignment_item = QTableWidgetItem(f"{quality_indicator} {assignment}")
         x_item = QTableWidgetItem(f"{float(x_ppm):.3f}")
         y_item = QTableWidgetItem(f"{float(y_ppm):.2f}")
@@ -269,12 +261,10 @@ class PeakNavigatorTable(QWidget):
         y_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         r2_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Apply background color
         if row_color:
             for item in [assignment_item, x_item, y_item, r2_item]:
                 item.setBackground(row_color)
 
-        # Set items in table
         self.table.setItem(row, 0, assignment_item)
         self.table.setItem(row, 1, x_item)
         self.table.setItem(row, 2, y_item)

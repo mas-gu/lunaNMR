@@ -4,9 +4,6 @@ Fitting Wrapper for T1/T2 Exponential Decay Analysis
 
 This module provides a high-level wrapper around the existing fit_Tx_NMRRE.py
 scripts to enable programmatic fitting without command-line interaction.
-
-Author: DynamiXs Development Team
-Date: 2025-01-23
 """
 
 import sys
@@ -73,7 +70,7 @@ def fit_relaxation_data(input_csv: str,
     try:
         # Try multicore version first (5-8x faster)
         from fitmulti__Tx_NMRRE import run_analysis_with_params
-        print(f"  ⚡ Using multicore fitting ({experiment_type})")
+        print(f"  Using multicore fitting ({experiment_type})")
     except ImportError:
         # Fallback to single-core version if multicore not available
         try:
@@ -85,7 +82,6 @@ def fit_relaxation_data(input_csv: str,
                 f"Ensure fit_Tx_NMRRE.py or fitmulti__Tx_NMRRE.py exists. Error: {e}"
             )
 
-    # Create output file paths
     if output_prefix is None:
         # A folder of this fit's own, so no two unprefixed fits of one type share a file.
         output_prefix = str(Path(tempfile.mkdtemp(prefix='dynamixs_fit_'))
@@ -93,7 +89,6 @@ def fit_relaxation_data(input_csv: str,
 
     results_file = f"{output_prefix}_fit_results.txt"
 
-    # Prepare parameters dictionary for the fitting function
     params = {
         'input_csv_file': input_csv,
         'output_prefix': output_prefix,
@@ -111,7 +106,6 @@ def fit_relaxation_data(input_csv: str,
         'field_freq': field_freq
     }
 
-    # Run the fitting analysis
     run_analysis_with_params(params)
 
     # Parse the results file to extract fitted parameters
@@ -143,7 +137,6 @@ def _parse_fit_results_file(results_file: str, param_name: str = 'T1') -> Dict[s
     if not Path(results_file).exists():
         raise FileNotFoundError(f"Results file not found: {results_file}")
 
-    # Read tab-delimited file
     df = pd.read_csv(results_file, sep='\t')
 
     fitted_params = {}
@@ -153,7 +146,6 @@ def _parse_fit_results_file(results_file: str, param_name: str = 'T1') -> Dict[s
         success = row['Success']
 
         if success == 'Yes':
-            # Extract the relaxation time and error
             value = float(row[param_name])
             error = float(row[f'{param_name}_err'])
 

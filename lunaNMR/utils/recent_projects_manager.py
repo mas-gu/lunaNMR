@@ -40,7 +40,6 @@ class RecentProjectsManager:
         if isinstance(paths_str, str):
             paths_str = [paths_str] if paths_str else []
 
-        # Convert to Path objects and filter non-existent
         paths = []
         for p in paths_str:
             if p:
@@ -62,19 +61,16 @@ class RecentProjectsManager:
         """
         project_path = Path(project_path).resolve()
 
-        # Get current list
         current = self.get_recent_projects()
 
         # Remove if already present (will re-add at front)
         current = [p for p in current if p.resolve() != project_path]
 
-        # Add at front
         current.insert(0, project_path)
 
         # Trim to max size
         current = current[:self.MAX_RECENT]
 
-        # Save as strings
         paths_str = [str(p) for p in current]
         self._settings.setValue(self.SETTINGS_KEY, paths_str)
         self._settings.sync()

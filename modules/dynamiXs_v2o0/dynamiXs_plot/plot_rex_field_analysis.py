@@ -54,7 +54,6 @@ def detect_field_frequencies(df):
         ('800', '900'): (800, 900),
     }
 
-    # Check if there's metadata in the dataframe
     # (This is dataset-specific, adjust as needed)
 
     return None, None  # Default: cannot auto-detect
@@ -85,16 +84,13 @@ def load_and_validate_csv(csv_file, rex_col_f1='Rex_f1', rex_col_f2='Rex_f2'):
     except Exception as e:
         raise ValueError(f"Error reading CSV file: {e}")
 
-    # Check for required columns
     if rex_col_f1 not in df.columns:
-        # Try alternative naming
         if 'Rex_field1' in df.columns:
             rex_col_f1 = 'Rex_field1'
         else:
             raise ValueError(f"Required column '{rex_col_f1}' not found in CSV. Available columns: {list(df.columns)}")
 
     if rex_col_f2 not in df.columns:
-        # Try alternative naming
         if 'Rex_field2' in df.columns:
             rex_col_f2 = 'Rex_field2'
         else:
@@ -132,7 +128,6 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
     title_prefix : str
         Prefix for plot titles (e.g., dataset name)
     """
-    # Filter out NaN values
     good_data = df[[rex_col_f1, rex_col_f2]].dropna()
 
     if len(good_data) == 0:
@@ -144,12 +139,9 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
     print(f"  Rex_f1 range: [{good_data[rex_col_f1].min():.2f}, {good_data[rex_col_f1].max():.2f}] s⁻¹")
     print(f"  Rex_f2 range: [{good_data[rex_col_f2].min():.2f}, {good_data[rex_col_f2].max():.2f}] s⁻¹")
 
-    # Create figure with 2 subplots
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # =================================================================
     # LEFT PLOT: Rex Field Dependence
-    # =================================================================
     ax_dep = axes[0]
 
     # Scatter plot
@@ -171,16 +163,13 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
     ax_dep.grid(True, alpha=0.3)
     ax_dep.legend()
 
-    # =================================================================
     # RIGHT PLOT: Rex Field Scaling (with Option 3 filtering)
-    # =================================================================
     ax_scale = axes[1]
 
     # Calculate expected field ratio squared
     field_ratio = (field2_freq / field1_freq)**2
 
     # Option 3: Filter by minimum threshold + outlier removal
-    # Filter by minimum threshold at both fields
     mask = (good_data[rex_col_f1] > min_rex) & (good_data[rex_col_f2] > min_rex)
     filtered_rex_data = good_data[mask].copy()
 
@@ -201,7 +190,6 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
         print(f"  Final data points plotted: {len(final_filtered_data)}/{len(good_data)}")
 
         if len(final_filtered_data) > 0:
-            # Calculate statistics
             mean_ratio = final_rex_ratio.mean()
             std_ratio = final_rex_ratio.std()
 
@@ -210,7 +198,6 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
             print(f"    Std: {std_ratio:.2f}")
             print(f"    Range: [{final_rex_ratio.min():.2f}, {final_rex_ratio.max():.2f}]")
 
-        # Plot filtered data
         ax_scale.scatter(np.full(len(final_filtered_data), field_ratio), final_rex_ratio,
                         alpha=0.6, s=50, color='steelblue', edgecolors='black', linewidth=0.5)
 
@@ -218,7 +205,6 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
         ax_scale.axhline(y=field_ratio, color='red', linestyle='--', linewidth=2,
                         label=f'Expected ratio = {field_ratio:.2f}')
 
-        # Add info about filtering
         n_total = len(good_data)
         n_filtered = len(final_filtered_data)
         info_text = f'n = {n_filtered}/{n_total}\n(Rex > {min_rex} s⁻¹)'
@@ -226,7 +212,6 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
                      transform=ax_scale.transAxes, verticalalignment='top',
                      bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), fontsize=10)
 
-        # Set y-axis limits to show reasonable range
         y_margin = 0.2 * field_ratio
         y_min = max(0, field_ratio - y_margin)
         y_max = field_ratio + y_margin
@@ -264,7 +249,6 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
 
     plt.tight_layout()
 
-    # Save or show
     if output_file:
         try:
             plt.savefig(output_file, dpi=300, bbox_inches='tight', fonttype=42)
@@ -313,7 +297,6 @@ Examples:
 
     args = parser.parse_args()
 
-    # Load and validate CSV
     try:
         df, rex_col_f1, rex_col_f2 = load_and_validate_csv(
             args.csv_file, args.rex_col_f1, args.rex_col_f2
@@ -322,7 +305,6 @@ Examples:
         print(f"Error: {e}")
         sys.exit(1)
 
-    # Create plots
     plot_rex_field_analysis(
         df=df,
         field1_freq=args.field1,

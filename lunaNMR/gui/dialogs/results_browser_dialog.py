@@ -65,10 +65,8 @@ class ResultsBrowserDialog(BaseDialog):
         self.batch_results = batch_results
         self.main_window = main_window
 
-        # Setup UI
         self.setup_ui()
 
-        # Populate with data
         self.populate_data()
 
         # Center on parent
@@ -121,7 +119,6 @@ class ResultsBrowserDialog(BaseDialog):
             }}
         """)
 
-        # Create tabs
         self.overview_tab = self.create_overview_tab()
         self.tracking_tab = self.create_tracking_tab()
         self.evolution_tab = self.create_evolution_tab()
@@ -386,13 +383,10 @@ class ResultsBrowserDialog(BaseDialog):
 
         results = self.batch_results.results
 
-        # Populate overview tab
         self.populate_overview(results)
 
-        # Populate peak combos
         self.populate_peak_combos(results)
 
-        # Populate spectrum combo
         self.populate_spectrum_combo(results)
 
     def populate_overview(self, results: Dict):
@@ -401,7 +395,6 @@ class ResultsBrowserDialog(BaseDialog):
         successful = sum(1 for d in results.values() if d.get('status') == 'success')
         failed = total_spectra - successful
 
-        # Collect stats
         all_r_squared = []
         all_detection_rates = []
         total_peaks = 0
@@ -418,7 +411,6 @@ class ResultsBrowserDialog(BaseDialog):
         avg_r2 = sum(all_r_squared) / len(all_r_squared) if all_r_squared else 0
         avg_detection = sum(all_detection_rates) / len(all_detection_rates) if all_detection_rates else 0
 
-        # Update labels
         self.total_spectra_label.setText(f"Total Spectra: {total_spectra}")
         self.successful_spectra_label.setText(f"Successful: {successful}")
         self.failed_spectra_label.setText(f"Failed: {failed}")
@@ -433,7 +425,6 @@ class ResultsBrowserDialog(BaseDialog):
             self.failed_spectra_label.setStyleSheet(
                 f"font-size: {FONT_SIZE_BODY}pt; color: {ERROR_RED}; padding: 2px;")
 
-        # Draw quality distribution chart
         self.draw_quality_chart(all_r_squared)
 
     def draw_quality_chart(self, r_squared_values: List[float]):
@@ -456,7 +447,6 @@ class ResultsBrowserDialog(BaseDialog):
 
     def populate_peak_combos(self, results: Dict):
         """Populate peak selection combo boxes."""
-        # Get unique assignments across all spectra
         assignments = set()
 
         for spectrum_name, data in results.items():
@@ -467,10 +457,8 @@ class ResultsBrowserDialog(BaseDialog):
                     if assignment:
                         assignments.add(assignment)
 
-        # Sort assignments
         sorted_assignments = sorted(assignments)
 
-        # Update both combos
         self.peak_combo.clear()
         self.peak_combo.addItems(sorted_assignments)
 
@@ -493,10 +481,8 @@ class ResultsBrowserDialog(BaseDialog):
 
         results = self.batch_results.results
 
-        # Clear table
         self.tracking_table.setRowCount(0)
 
-        # Find this peak across all spectra
         for spectrum_name in sorted(results.keys()):
             data = results[spectrum_name]
             fitted = data.get('fitted_results', [])
@@ -511,11 +497,9 @@ class ResultsBrowserDialog(BaseDialog):
                         # Spectrum name
                         self.tracking_table.setItem(row, 0, QTableWidgetItem(spectrum_name))
 
-                        # Position F2
                         pos_f2 = peak.get('pos_f2') or peak.get('Position_X', 0)
                         self.tracking_table.setItem(row, 1, QTableWidgetItem(f"{pos_f2:.4f}"))
 
-                        # Position F1
                         pos_f1 = peak.get('pos_f1') or peak.get('Position_Y', 0)
                         self.tracking_table.setItem(row, 2, QTableWidgetItem(f"{pos_f1:.3f}"))
 
@@ -547,7 +531,6 @@ class ResultsBrowserDialog(BaseDialog):
 
         results = self.batch_results.results
 
-        # Collect data series
         spectra_names = []
         values = []
 
@@ -569,7 +552,6 @@ class ResultsBrowserDialog(BaseDialog):
                     peak_assignment = peak.get('assignment') or peak.get('Assignment', '')
                     if peak_assignment == assignment:
                         spectra_names.append(spectrum_name)
-                        # Handle alternate key names
                         if key == 'pos_f2':
                             val = peak.get('pos_f2') or peak.get('Position_X', 0)
                         elif key == 'pos_f1':
@@ -579,7 +561,6 @@ class ResultsBrowserDialog(BaseDialog):
                         values.append(val)
                         break
 
-        # Draw evolution plot
         self.draw_evolution_plot(spectra_names, values, property_name, assignment)
 
     def draw_evolution_plot(self, spectra: List[str], values: List[float],
@@ -615,7 +596,6 @@ class ResultsBrowserDialog(BaseDialog):
         results = self.batch_results.results
         data = results.get(spectrum_name, {})
 
-        # Update info labels
         status = data.get('status', 'unknown')
         status_color = SUCCESS_GREEN if status == 'success' else ERROR_RED
         self.spectrum_status_label.setText(f"Status: {status}")
@@ -635,7 +615,6 @@ class ResultsBrowserDialog(BaseDialog):
         avg_r2 = sum(r2_values) / len(r2_values) if r2_values else 0
         self.spectrum_avg_r2_label.setText(f"Avg R²: {avg_r2:.4f}")
 
-        # Populate details table
         self.details_table.setRowCount(0)
 
         for peak in fitted:
@@ -649,11 +628,9 @@ class ResultsBrowserDialog(BaseDialog):
             assignment = peak.get('assignment') or peak.get('Assignment', '-')
             self.details_table.setItem(row, 0, QTableWidgetItem(str(assignment)))
 
-            # Position F2
             pos_f2 = peak.get('pos_f2') or peak.get('Position_X', 0)
             self.details_table.setItem(row, 1, QTableWidgetItem(f"{pos_f2:.4f}"))
 
-            # Position F1
             pos_f1 = peak.get('pos_f1') or peak.get('Position_Y', 0)
             self.details_table.setItem(row, 2, QTableWidgetItem(f"{pos_f1:.3f}"))
 

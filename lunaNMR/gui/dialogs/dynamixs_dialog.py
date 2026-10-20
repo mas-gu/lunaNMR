@@ -13,7 +13,6 @@ from PySide6.QtCore import Signal, Qt
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
 
-# Add DynamiXs module to path for imports
 _dynamixs_path = Path(__file__).parent.parent.parent.parent / "modules" / "dynamiXs_v2o0"
 if str(_dynamixs_path) not in sys.path:
     sys.path.insert(0, str(_dynamixs_path))
@@ -69,7 +68,6 @@ class DynamiXsDialog(BaseDialog):
             modal=False
         )
 
-        # Store reference to main window
         self.main_window = main_window
 
         # Current working directory
@@ -91,10 +89,8 @@ class DynamiXsDialog(BaseDialog):
         # Analysis metadata (source_series, analysis_type, created_at, etc.)
         self._analysis_metadata = {}
 
-        # Setup UI
         self._setup_ui()
 
-        # Restore state if available
         if main_window:
             if hasattr(main_window, 'dynamixs_state') and main_window.dynamixs_state:
                 self.set_state(main_window.dynamixs_state)
@@ -114,15 +110,12 @@ class DynamiXsDialog(BaseDialog):
         self.page_notice.hide()
         layout.addWidget(self.page_notice)
 
-        # Create stacked widget for page navigation
         self.stack = QStackedWidget()
         self.stack.currentChanged.connect(self.page_notice.hide)
 
-        # Create main menu page
         self.main_menu_page = self._create_main_menu_page()
         self.stack.addWidget(self.main_menu_page)
 
-        # Create all analysis pages (reusing existing classes)
         # Pass 'self' as main_window since we provide the same navigation interface
         self.t1t2_page = T1T2FittingPage(self)
         self.spectral_page = SpectralDensityPage(self)
@@ -143,7 +136,6 @@ class DynamiXsDialog(BaseDialog):
         layout.addWidget(self.stack)
         self.setLayout(layout)
 
-        # Show main menu initially
         self.show_main_menu()
 
     def _create_main_menu_page(self) -> QWidget:
@@ -252,9 +244,7 @@ class DynamiXsDialog(BaseDialog):
 
         return page
 
-    # -------------------------------------------------------------------------
     # Navigation Methods (same interface as DynamiXsMainWindow)
-    # -------------------------------------------------------------------------
 
     def show_main_menu(self):
         """Show the main menu page."""
@@ -302,11 +292,9 @@ class DynamiXsDialog(BaseDialog):
         # Always include current analysis name
         metadata['analysis_name'] = self.current_analysis_name
 
-        # Ensure created_at is set
         if 'created_at' not in metadata and self.current_analysis_name:
             metadata['created_at'] = datetime.now().isoformat()
 
-        # Determine analysis type from current page
         current_widget = self.stack.currentWidget()
         if current_widget == self.t1t2_page:
             metadata['analysis_type'] = 't1t2'
@@ -359,7 +347,6 @@ class DynamiXsDialog(BaseDialog):
 
         file_path = os.path.normpath(file_path)
 
-        # Check for series_results folder pattern
         if 'series_results' in file_path:
             parts = file_path.split(os.sep)
             try:
@@ -370,10 +357,8 @@ class DynamiXsDialog(BaseDialog):
             except ValueError:
                 pass
 
-        # Check against saved series names if available
         if self.main_window and hasattr(self.main_window, 'saved_series'):
             for series_name in self.main_window.saved_series.keys():
-                # Check if series name appears in path
                 if series_name in file_path:
                     return series_name
 
@@ -413,9 +398,7 @@ class DynamiXsDialog(BaseDialog):
             if self.dir_label:
                 self.dir_label.setText(f"Working Directory: {self.current_dir}")
 
-    # -------------------------------------------------------------------------
     # State Management (for project save/load)
-    # -------------------------------------------------------------------------
 
     def get_state(self) -> Dict[str, Any]:
         """Collect state from all pages for project save.
@@ -511,9 +494,7 @@ class DynamiXsDialog(BaseDialog):
         if 'hetnoe' in refs:
             self.hetnoe_page.set_file_refs(refs['hetnoe'])
 
-    # -------------------------------------------------------------------------
     # Named analyses (project save/reopen, parity with the Kd module)
-    # -------------------------------------------------------------------------
 
     _ANALYSIS_TYPE_LABELS = {
         't1t2': 'T1T2', 'methyl_t2': 'methylT2',
@@ -648,9 +629,7 @@ class DynamiXsDialog(BaseDialog):
             if page_key:
                 self._run_names[page_key] = name
 
-    # -------------------------------------------------------------------------
     # Methyl T2 Page State Helpers
-    # -------------------------------------------------------------------------
 
     def _get_methyl_t2_state(self) -> Dict[str, Any]:
         """Extract state from Methyl T2 fitting page using session state API."""
@@ -681,9 +660,7 @@ class DynamiXsDialog(BaseDialog):
             if hasattr(page, 'file_drop'):
                 page.file_drop.setText(os.path.basename(refs['input_file']))
 
-    # -------------------------------------------------------------------------
     # T1/T2 Page State Helpers
-    # -------------------------------------------------------------------------
 
     def _get_t1t2_state(self) -> Dict[str, Any]:
         """Extract state from T1/T2 fitting page using session state API."""
@@ -719,7 +696,7 @@ class DynamiXsDialog(BaseDialog):
         if hasattr(page, 'field2_t1rho_file') and page.field2_t1rho_file:
             refs['field2_t1rho_file'] = page.field2_t1rho_file
 
-        # T1rho specific files (legacy)
+        # T1rho specific files
         if hasattr(page, 'peak_list_file') and page.peak_list_file:
             refs['peak_list_file'] = page.peak_list_file
 
@@ -763,9 +740,7 @@ class DynamiXsDialog(BaseDialog):
             if hasattr(page, 'peak_list_display'):
                 page.peak_list_display.setText(os.path.basename(refs['peak_list_file']))
 
-    # -------------------------------------------------------------------------
     # Spectral Density Page State Helpers
-    # -------------------------------------------------------------------------
 
     def _get_spectral_state(self) -> Dict[str, Any]:
         """Extract state from Spectral Density page using session state API."""
@@ -807,9 +782,7 @@ class DynamiXsDialog(BaseDialog):
                 import os
                 page.file2_display.setText(os.path.basename(refs['input_file2']))
 
-    # -------------------------------------------------------------------------
     # Integrated Analysis Page State Helpers
-    # -------------------------------------------------------------------------
 
     def _get_integrated_state(self) -> Dict[str, Any]:
         """Extract state from Integrated Analysis page using session state API."""
@@ -892,9 +865,7 @@ class DynamiXsDialog(BaseDialog):
             if hasattr(page, 'field2_noe_unsat_display'):
                 page.field2_noe_unsat_display.setText(os.path.basename(refs['field2_noe_unsat']))
 
-    # -------------------------------------------------------------------------
     # Result Files Management
-    # -------------------------------------------------------------------------
 
     def get_output_directories(self) -> Dict[str, str]:
         """Get output directories that may contain result files.
@@ -932,7 +903,6 @@ class DynamiXsDialog(BaseDialog):
         for page_name, output_dir in output_dirs.items():
             if output_dir and os.path.isdir(output_dir):
                 files = []
-                # Collect CSV and TXT result files
                 files.extend(glob.glob(os.path.join(output_dir, "*.csv")))
                 files.extend(glob.glob(os.path.join(output_dir, "*.txt")))
                 # Filter to only include actual result files (not input files)
@@ -965,9 +935,7 @@ class DynamiXsDialog(BaseDialog):
             if hasattr(self.integrated_page, 'outdir_display'):
                 self.integrated_page.outdir_display.setText(os.path.basename(output_dir))
 
-    # -------------------------------------------------------------------------
     # Dialog Event Handlers
-    # -------------------------------------------------------------------------
 
     def closeEvent(self, event):
         """Save state when dialog closes."""
@@ -976,9 +944,7 @@ class DynamiXsDialog(BaseDialog):
             self.main_window.dynamixs_file_refs = self.get_file_refs()
         super().closeEvent(event)
 
-    # -------------------------------------------------------------------------
     # Inspect Peak Integration (FitViewer → MultiSpectrumViewer)
-    # -------------------------------------------------------------------------
 
     def connect_fit_viewer_signals(self, fit_viewer):
         """Connect FitViewer's inspect_peak_requested signal to handler.
@@ -1015,7 +981,6 @@ class DynamiXsDialog(BaseDialog):
             )
             return
 
-        # Get series data from main_window
         if not self.main_window or not hasattr(self.main_window, 'saved_series'):
             QMessageBox.warning(
                 self,
@@ -1050,7 +1015,6 @@ class DynamiXsDialog(BaseDialog):
         Returns:
             Series name or None if not found
         """
-        # Try T1T2FittingPage's source_series_map first (from drag-and-drop)
         if hasattr(self, 't1t2_page') and hasattr(self.t1t2_page, 'source_series_map'):
             source_map = self.t1t2_page.source_series_map
             for field in ['field1', 'field2']:
@@ -1068,9 +1032,7 @@ class DynamiXsDialog(BaseDialog):
                     if series_name:
                         return series_name
 
-        # Try IntegratedAnalysisPage (Model Free)
         if hasattr(self, 'integrated_page'):
-            # Check source_series_map
             if hasattr(self.integrated_page, 'source_series_map'):
                 source_map = self.integrated_page.source_series_map
                 for field in ['field1', 'field2']:
@@ -1078,7 +1040,6 @@ class DynamiXsDialog(BaseDialog):
                     if key in source_map:
                         return source_map[key]
 
-            # Try detecting from file paths
             for field in ['field1', 'field2']:
                 file_attr = f"{field}_{experiment_type}_file"
                 file_path = getattr(self.integrated_page, file_attr, None)
@@ -1114,7 +1075,6 @@ class DynamiXsDialog(BaseDialog):
                 )
                 return
 
-            # Get file_manager from main_window if available
             file_manager = None
             if self.main_window and hasattr(self.main_window, 'file_manager'):
                 file_manager = self.main_window.file_manager
@@ -1160,7 +1120,6 @@ class DynamiXsDialog(BaseDialog):
             metadata = batch_results.get('metadata', {})
             data_folder = metadata.get('data_folder')
 
-        # Fallback to main_window.current_nmr_folder if not in metadata
         if not data_folder and self.main_window:
             data_folder = getattr(self.main_window, 'current_nmr_folder', None)
 
@@ -1170,7 +1129,6 @@ class DynamiXsDialog(BaseDialog):
                 if not isinstance(result_data, dict):
                     continue
 
-                # Skip failed spectra
                 if not result_data.get('success', True):
                     continue
 
@@ -1213,7 +1171,6 @@ class DynamiXsDialog(BaseDialog):
         normalized = {}
         # Keys that should be scalar floats
         scalar_keys = {
-            # Position keys (various naming conventions)
             'pos_f1', 'pos_f2', 'position_x', 'position_y',
             'center_x', 'center_y', 'peak_x', 'peak_y',
             'ppm_x', 'ppm_y', 'Position_X', 'Position_Y',
@@ -1238,7 +1195,6 @@ class DynamiXsDialog(BaseDialog):
                 # Recursively normalize nested dicts (like 'all_peaks', 'region_2d')
                 normalized[key] = self._normalize_peak_data(value)
             elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
-                # Normalize list of peak dicts (like 'all_peaks')
                 normalized[key] = [self._normalize_peak_data(p) for p in value]
             else:
                 normalized[key] = value

@@ -3,9 +3,6 @@ Spectrum Processors for LunaNMR
 
 This module contains various spectrum processing classes for
 different types of NMR data analysis workflows.
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 try:

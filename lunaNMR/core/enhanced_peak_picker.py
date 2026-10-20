@@ -14,16 +14,12 @@ Key features:
 - Overlapping peak detection and separation
 - Peak validation based on NMR-specific criteria
 - Integration with enhanced Voigt fitting
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter, maximum_filter
 
-# Import enhanced fitter
 try:
     from lunaNMR.core.enhanced_voigt_fitter import EnhancedVoigtFitter
     ENHANCED_FITTING_AVAILABLE = True
@@ -100,7 +96,6 @@ class EnhancedPeakPicker:
                 h, w = data_2d.shape
                 corner_size = min(max(10, h//20), 50)  # Adaptive corner size
 
-                # Extract corners
                 corners = [
                     data_2d[:corner_size, :corner_size],
                     data_2d[:corner_size, -corner_size:],
@@ -124,7 +119,6 @@ class EnhancedPeakPicker:
                     noise_level = np.std(corner_data)
 
             elif method == 'percentile':
-                # Use low percentile as noise estimate
                 noise_level = np.percentile(np.abs(data_2d), self.detection_parameters['noise_estimation_percentile'])
 
             elif method == 'mad':
@@ -134,7 +128,6 @@ class EnhancedPeakPicker:
                 noise_level = mad * 1.4826  # Scale factor for normal distribution
 
             else:
-                # Fallback to simple std of corners
                 h, w = data_2d.shape
                 corners = np.concatenate([
                     data_2d[:h//10, :w//10].flatten(),
@@ -171,12 +164,10 @@ class EnhancedPeakPicker:
         """
         Calculate adaptive smoothing parameter based on data noise and complexity
         """
-        # Estimate noise level
         noise_level = self.estimate_noise_level(data_2d)
         data_max = np.max(data_2d)
         data_range = data_max - np.min(data_2d)
 
-        # Calculate SNR estimate
         snr_estimate = data_max / (noise_level + 1e-10)
 
         # Adaptive smoothing based on data quality
@@ -199,7 +190,6 @@ class EnhancedPeakPicker:
 
         adaptive_sigma *= complexity_factor
 
-        # Ensure reasonable bounds
         adaptive_sigma = max(0.3, min(3.0, adaptive_sigma))
 
         return adaptive_sigma
@@ -211,16 +201,13 @@ class EnhancedPeakPicker:
         if nucleus_type is None:
             nucleus_type = self.detect_nucleus_type([ppm_x_axis[0], ppm_x_axis[-1]])
 
-        # Get nucleus-specific parameters
         nmr_params = self.nmr_ranges.get(nucleus_type, self.nmr_ranges['1H'])
 
         # Preprocess data
         smoothed_data = self.preprocess_data_for_detection(data_2d)
 
-        # Estimate noise level
         noise_level = self.estimate_noise_level(data_2d)
 
-        # Calculate adaptive dynamic thresholds
         min_snr = nmr_params['min_snr']
         height_threshold = noise_level * min_snr
 
@@ -232,23 +219,17 @@ class EnhancedPeakPicker:
         # Use the higher of SNR-based and percentile-based thresholds
         final_threshold = max(height_threshold, percentile_threshold * 0.1)
 
-        # Find local maxima using maximum filter
         neighborhood_size = max(3, min(data_2d.shape) // 50)  # Adaptive neighborhood
         local_max_mask = (smoothed_data == maximum_filter(smoothed_data, size=neighborhood_size))
 
-        # Apply adaptive intensity and prominence thresholds
         intensity_mask = smoothed_data > final_threshold
 
-        # Calculate adaptive prominence threshold
         adaptive_prominence = self.get_adaptive_prominence_threshold(smoothed_data, noise_level)
 
-        # Apply prominence filtering to local maxima
         prominence_mask = self.apply_adaptive_prominence_filter(smoothed_data, local_max_mask, adaptive_prominence)
 
-        # Combine all filters
         peak_candidates = local_max_mask & intensity_mask & prominence_mask
 
-        # Extract peak positions
         peak_indices = np.where(peak_candidates)
 
         if len(peak_indices[0]) == 0:
@@ -257,7 +238,6 @@ class EnhancedPeakPicker:
         # Convert to peak list with coordinates and intensities
         initial_peaks = []
         for i, (y_idx, x_idx) in enumerate(zip(peak_indices[0], peak_indices[1])):
-            # Calculate centroid position (geometric center) if enabled
             if self.detection_parameters.get('use_centroid', True):
                 centroid_method = self.detection_parameters.get('centroid_method', 'top_contour')
 
@@ -279,7 +259,6 @@ class EnhancedPeakPicker:
                 ppm_x = centroid_x
                 ppm_y = centroid_y
             else:
-                # Use pixel maximum (original behavior)
                 ppm_x = ppm_x_axis[x_idx]
                 ppm_y = ppm_y_axis[y_idx]
 
@@ -297,7 +276,6 @@ class EnhancedPeakPicker:
             }
             initial_peaks.append(peak_info)
 
-        # Sort by intensity (highest first)
         initial_peaks.sort(key=lambda x: x['intensity'], reverse=True)
 
         return initial_peaks
@@ -327,7 +305,6 @@ class EnhancedPeakPicker:
         """
         import numpy as np
 
-        # Extract local region around peak
         y_start = max(0, y_idx - window_size)
         y_end = min(data_2d.shape[0], y_idx + window_size + 1)
         x_start = max(0, x_idx - window_size)
@@ -337,20 +314,15 @@ class EnhancedPeakPicker:
         local_y_ppm = ppm_y_axis[y_start:y_end]
         local_x_ppm = ppm_x_axis[x_start:x_end]
 
-        # Use only positive intensities for centroid calculation
         local_data = np.maximum(local_data, 0)
 
-        # Calculate total intensity
         total_intensity = np.sum(local_data)
 
         if total_intensity == 0:
-            # Fallback to pixel position if no signal
             return ppm_x_axis[x_idx], ppm_y_axis[y_idx]
 
-        # Create 2D grids for centroid calculation
         y_grid, x_grid = np.meshgrid(local_y_ppm, local_x_ppm, indexing='ij')
 
-        # Calculate weighted average (center of mass)
         centroid_y = np.sum(y_grid * local_data) / total_intensity
         centroid_x = np.sum(x_grid * local_data) / total_intensity
 
@@ -387,12 +359,10 @@ class EnhancedPeakPicker:
         """
         import numpy as np
 
-        # Get original position
         original_x = ppm_x_axis[x_idx]
         original_y = ppm_y_axis[y_idx]
         peak_max = data_2d[y_idx, x_idx]
 
-        # Define search window based on max_shift constraints
         x_ppm_per_pixel = abs(ppm_x_axis[1] - ppm_x_axis[0]) if len(ppm_x_axis) > 1 else 0.004
         y_ppm_per_pixel = abs(ppm_y_axis[1] - ppm_y_axis[0]) if len(ppm_y_axis) > 1 else 0.08
 
@@ -404,10 +374,8 @@ class EnhancedPeakPicker:
         y_start = max(0, y_idx - search_radius_y)
         y_end = min(data_2d.shape[0], y_idx + search_radius_y + 1)
 
-        # Extract search region
         search_region = data_2d[y_start:y_end, x_start:x_end]
 
-        # Define intensity range for "top contour"
         # intensity_band = 0.05 means use pixels with 95%-105% of maximum
         intensity_min = peak_max * (1.0 - intensity_band)
         intensity_max = peak_max * (1.0 + intensity_band)  # Allow slight overshoot due to noise
@@ -426,20 +394,16 @@ class EnhancedPeakPicker:
 
         intensities = data_2d[global_y_indices, global_x_indices]
 
-        # Convert to ppm coordinates
         ppm_x_vals = ppm_x_axis[global_x_indices]
         ppm_y_vals = ppm_y_axis[global_y_indices]
 
-        # Calculate intensity-weighted geometric center
         total_intensity = np.sum(intensities)
         center_x = np.sum(ppm_x_vals * intensities) / total_intensity
         center_y = np.sum(ppm_y_vals * intensities) / total_intensity
 
-        # Apply safety constraint: limit maximum shift
         shift_x = center_x - original_x
         shift_y = center_y - original_y
 
-        # Clip shifts to maximum allowed values
         shift_x = np.clip(shift_x, -max_shift_x, max_shift_x)
         shift_y = np.clip(shift_y, -max_shift_y, max_shift_y)
 
@@ -477,19 +441,16 @@ class EnhancedPeakPicker:
         5. Optional fit-based validation
         6. Final quality assessment
         """
-        # Step 1: Initial detection
         initial_peaks = self.detect_peaks_2d_initial(data_2d, ppm_x_axis, ppm_y_axis, nucleus_type)
 
         if len(initial_peaks) == 0:
             return []
 
-        # Step 2: Hierarchical intensity-based detection
         hierarchical_peaks = self.hierarchical_peak_refinement(initial_peaks, data_2d)
 
         # Step 3: Enhanced SNR filtering with adaptive thresholds
         snr_filtered = self.filter_peaks_by_snr_adaptive(hierarchical_peaks, data_2d)
 
-        # Step 4: Enhanced overlapping peak detection
         overlap_analyzed = self.detect_overlapping_peaks_enhanced(snr_filtered, data_2d)
 
         # Step 5: Optional fit validation with enhanced criteria
@@ -508,19 +469,15 @@ class EnhancedPeakPicker:
         else:
             final_peaks = overlap_analyzed
 
-        # Step 6: Final quality assessment and sorting
         for peak in final_peaks:
-            # Calculate composite quality score
             snr_score = min(peak.get('snr', 0) / 10, 1.0)  # Normalize to 0-1
             fit_score = peak.get('fit_quality', 0)
             overlap_penalty = 0.8 if peak.get('overlapping', False) else 1.0
 
             peak['quality_score'] = (snr_score * 0.4 + fit_score * 0.6) * overlap_penalty
 
-        # Sort by quality score
         final_peaks.sort(key=lambda x: x['quality_score'], reverse=True)
 
-        # Store detection statistics
         self.last_detection_stats = {
             'initial_peaks': len(initial_peaks),
             'after_snr_filter': len(snr_filtered),
@@ -589,7 +546,6 @@ class EnhancedPeakPicker:
 
         adaptive_prominence = prominence_factor * range_factor
 
-        # Ensure reasonable bounds
         adaptive_prominence = max(0.02, min(0.5, adaptive_prominence))  # 2% to 50%
 
         return adaptive_prominence
@@ -598,19 +554,16 @@ class EnhancedPeakPicker:
         """
         Apply adaptive prominence filtering to local maxima
         """
-        # Get coordinates of local maxima
         max_coords = np.where(local_max_mask)
 
         if len(max_coords[0]) == 0:
             return local_max_mask
 
-        # Calculate prominence for each local maximum
         prominence_mask = np.zeros_like(data, dtype=bool)
 
         for i, (y, x) in enumerate(zip(max_coords[0], max_coords[1])):
             peak_value = data[y, x]
 
-            # Define local neighborhood for prominence calculation
             neighborhood_size = 5
             y_start = max(0, y - neighborhood_size)
             y_end = min(data.shape[0], y + neighborhood_size + 1)
@@ -619,14 +572,11 @@ class EnhancedPeakPicker:
 
             local_region = data[y_start:y_end, x_start:x_end]
 
-            # Calculate prominence as difference from local minimum
             local_min = np.min(local_region)
             prominence = peak_value - local_min
 
-            # Calculate relative prominence
             relative_prominence = prominence / peak_value if peak_value > 0 else 0
 
-            # Apply adaptive threshold
             if relative_prominence >= prominence_threshold:
                 prominence_mask[y, x] = True
 
@@ -636,7 +586,6 @@ class EnhancedPeakPicker:
         """
         Calculate adaptive distance threshold for shadow peak detection
         """
-        # Get nucleus-specific parameters
         nmr_params = self.nmr_ranges.get(nucleus_type, self.nmr_ranges['1H'])
         typical_width = nmr_params['typical_width']
 
@@ -656,7 +605,6 @@ class EnhancedPeakPicker:
         # Complexity-based adjustment
         complexity_factor = max(0.5, min(2.0, data_complexity))
 
-        # Calculate adaptive distance
         adaptive_distance = base_distance * nucleus_factor * complexity_factor
         adaptive_distance = max(typical_width * 0.5, min(typical_width * 5.0, adaptive_distance))
 
@@ -722,7 +670,6 @@ class EnhancedPeakPicker:
             else:
                 return np.std(local_region) * 0.5  # Conservative estimate
         except Exception:
-            # Fallback to global noise estimate
             return np.std(data_2d) * 0.1
 
     def export_peaks_to_dataframe(self, peaks):
@@ -730,7 +677,6 @@ class EnhancedPeakPicker:
         if not peaks:
             return pd.DataFrame()
 
-        # Extract key information for each peak
         peak_data = []
         for i, peak in enumerate(peaks):
             row = {
@@ -747,7 +693,6 @@ class EnhancedPeakPicker:
                 'Validation': peak.get('fit_validation', 'not_performed')
             }
 
-            # Add fit parameters if available
             if 'x_fit_result' in peak:
                 x_fit = peak['x_fit_result']
                 row.update({
@@ -772,8 +717,7 @@ class EnhancedPeakPicker:
 
 
 if __name__ == "__main__":
-    # Test the enhanced peak picker
-    print("🧪 Testing Enhanced Peak Picker")
+    print("Testing Enhanced Peak Picker")
     print("=" * 40)
 
     # Create synthetic 2D NMR data with multiple peaks
@@ -788,20 +732,17 @@ if __name__ == "__main__":
     peak2 = 800 * np.exp(-((X - 7.5)**2 / 0.015**2 + (Y - 125)**2 / 1.5**2))
     peak3 = 600 * np.exp(-((X - 8.5)**2 / 0.02**2 + (Y - 115)**2 / 3**2))
 
-    # Add noise and baseline
     noise = np.random.normal(0, 100, X.shape)
     baseline = 200
 
     synthetic_data = peak1 + peak2 + peak3 + noise + baseline
 
-    # Test peak detection
     picker = EnhancedPeakPicker()
     peaks = picker.comprehensive_peak_detection(synthetic_data, x_ppm, y_ppm, '1H', validate_fits=False)
 
-    print(f"✅ Detected {len(peaks)} peaks")
+    print(f"Detected {len(peaks)} peaks")
     for i, peak in enumerate(peaks[:3]):  # Show first 3 peaks
         print(f"   Peak {i+1}: ({peak['ppm_x']:.3f}, {peak['ppm_y']:.1f}) ppm, SNR={peak['snr']:.1f}")
 
-    # Test DataFrame export
     df = picker.export_peaks_to_dataframe(peaks)
-    print(f"✅ Exported to DataFrame: {len(df)} rows × {len(df.columns)} columns")
+    print(f"Exported to DataFrame: {len(df)} rows × {len(df.columns)} columns")

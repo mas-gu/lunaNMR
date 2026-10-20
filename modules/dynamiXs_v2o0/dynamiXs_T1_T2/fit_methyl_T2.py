@@ -300,8 +300,8 @@ def fit_single_residue_methyl(x, y, residue_name,
         t2_a = T2_mono
         t2_b = T2_mono
         dT2 = 0.0
-        # Bi-exp covariance no longer applies — secondary errs derived below
-        # will fall back to NaN, which we override appropriately.
+        # The bi-exp covariance does not apply to this mono-exp refit; the
+        # secondary errors derived below fall back to NaN and are overridden.
         covar, var_names = None, None
 
     t2_a_err, t2_b_err, eta_err = _derive_secondary_errors(

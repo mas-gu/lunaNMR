@@ -21,15 +21,10 @@ Usage:
     from lunaNMR.gui.styles.design_system import (
         BG_COLOR, PRIMARY_BUTTON_BG, SPACING_MD
     )
-
-Author: Guillaume Mas
-Date: 2025
 """
 
-# ============================================================================
 # BACKGROUND COLORS
 # Apple-style layered backgrounds with subtle warmth
-# ============================================================================
 
 BG_COLOR = "#FAFAFA"  # Main window background - softer white with subtle warmth
 """Main window background color. Use for the primary application window."""
@@ -41,10 +36,8 @@ FRAME_BG_COLOR = "#FFFFFF"  # Card/container backgrounds - pure white for contra
 """Card and container background. Use for data display areas and text boxes."""
 
 
-# ============================================================================
 # TEXT COLORS
 # Softer than pure black for better readability and reduced eye strain
-# ============================================================================
 
 PRIMARY_TEXT = "#1C1C1E"  # Primary content text (softer than pure black)
 """Primary text color. Use for main labels, titles, and important content."""
@@ -59,10 +52,8 @@ LABEL_TEXT = "#1C1C1E"  # Label text
 """Label text color. Same as primary text for consistency."""
 
 
-# ============================================================================
 # BUTTON COLORS - PRIMARY ACTIONS
 # For main actions (Load Data, Fit All Peaks, Start Integration)
-# ============================================================================
 
 PRIMARY_BUTTON_BG = "#5B9EE5"  # Softer, more pleasant blue
 """Primary button background. Use for main action buttons."""
@@ -74,12 +65,10 @@ PRIMARY_BUTTON_TEXT = "#FFFFFF"  # White text
 """Primary button text color. Always white for maximum contrast."""
 
 
-# ============================================================================
 # BUTTON COLORS - SECONDARY/UTILITY ACTIONS
 # For supporting actions (Browse, Refresh, Clear, Cancel)
 # IMPORTANT: Secondary buttons MUST include a 1px border to prevent
 # grey-on-grey edge artifacts on light backgrounds
-# ============================================================================
 
 SECONDARY_BUTTON_BG = "#E5E5EA"  # Light grey
 """Secondary button background. Use for utility buttons."""
@@ -94,10 +83,8 @@ SECONDARY_BUTTON_BORDER = "#C8C8CD"  # Subtle border
 """Secondary button border color. REQUIRED to prevent edge artifacts."""
 
 
-# ============================================================================
 # BUTTON COLORS - DESTRUCTIVE ACTIONS
 # For dangerous actions (Clear All, Reset, Delete)
-# ============================================================================
 
 DESTRUCTIVE_BUTTON_BG = "#E8554E"  # Softer, less aggressive red
 """Destructive button background. Use for delete/clear/reset actions."""
@@ -109,10 +96,8 @@ DESTRUCTIVE_BUTTON_TEXT = "#FFFFFF"  # White text
 """Destructive button text color. Always white for maximum contrast."""
 
 
-# ============================================================================
 # ACCENT COLORS
 # For status indicators, messages, and contextual highlights
-# ============================================================================
 
 SUCCESS_GREEN = "#34C759"  # Successful operations, progress bars
 """Success color. Use for completed operations and positive feedback."""
@@ -131,10 +116,8 @@ NEGATIVE_CONTOUR_COLOR = "#E8554E"  # Negative peaks in a colourmapped spectrum
 Views that draw a spectrum in one colour keep that colour and rely on the dashing."""
 
 
-# ============================================================================
 # BORDER & SEPARATOR COLORS
 # Subtle divisions and boundaries
-# ============================================================================
 
 BORDER_COLOR = "#D1D1D6"  # Light grey borders
 """Border color. Use for widget borders and boundaries."""
@@ -143,10 +126,8 @@ SEPARATOR_COLOR = "#E5E5EA"  # Separators and dividers
 """Separator color. Use for dividing lines and section breaks."""
 
 
-# ============================================================================
 # CORNER RADIUS VALUES
 # Different radii for different UI element types to establish hierarchy
-# ============================================================================
 
 BUTTON_CORNER_RADIUS = 10  # Buttons
 """Button corner radius in pixels. Standard for all button types."""
@@ -161,11 +142,9 @@ CARD_CORNER_RADIUS = 8  # Smaller UI cards/elements
 """Card corner radius in pixels. For small UI cards and elements."""
 
 
-# ============================================================================
 # SPACING SYSTEM
 # 8pt grid system for consistent visual rhythm and alignment
 # All spacing should use these multiples of 8 pixels
-# ============================================================================
 
 SPACING_XS = 4  # Tight spacing (label-to-field, within components)
 """Extra-small spacing (4px). Use for tight label-to-field spacing."""
@@ -183,11 +162,9 @@ SPACING_XL = 32  # Window padding, large separations
 """Extra-large spacing (32px). Use for window padding and large separations."""
 
 
-# ============================================================================
 # TYPOGRAPHY SYSTEM
 # Font sizes and weights for consistent text hierarchy
 # Note: Qt uses point sizes, not pixel sizes
-# ============================================================================
 
 # Font Sizes (in points)
 FONT_SIZE_LARGE_HEADER = 14  # Section titles, main controls
@@ -219,10 +196,8 @@ FONT_WEIGHT_BOLD = 75  # Bold weight
 """Bold font weight. For headers and emphasis."""
 
 
-# ============================================================================
 # BUTTON SIZING
 # Standard button dimensions following 8pt grid
-# ============================================================================
 
 # Button widths (in pixels)
 BUTTON_WIDTH_ICON = 36  # Icon-only buttons
@@ -254,26 +229,8 @@ BUTTON_HEIGHT_DIALOG = 40  # Dialog button height
 """Dialog button height (40px). For modal dialog buttons."""
 
 
-# ============================================================================
-# LEGACY COMPATIBILITY
-# Aliases for backward compatibility during migration
-# These will be phased out in future versions
-# ============================================================================
-
-BUTTON_FG_COLOR = SECONDARY_BUTTON_BG
-"""DEPRECATED: Use SECONDARY_BUTTON_BG instead."""
-
-BUTTON_HOVER_COLOR = SECONDARY_BUTTON_HOVER
-"""DEPRECATED: Use SECONDARY_BUTTON_HOVER instead."""
-
-BUTTON_TEXT_COLOR = SECONDARY_BUTTON_TEXT
-"""DEPRECATED: Use SECONDARY_BUTTON_TEXT instead."""
-
-
-# ============================================================================
 # COLOR UTILITY FUNCTIONS
 # Helper functions for color manipulation
-# ============================================================================
 
 def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     """
@@ -331,10 +288,7 @@ def color_with_alpha(hex_color: str, alpha: float) -> str:
     return f"rgba({r}, {g}, {b}, {alpha})"
 
 
-# ============================================================================
 # DESIGN SYSTEM VALIDATION
-# Ensure all constants follow design principles
-# ============================================================================
 
 def validate_design_system():
     """
@@ -343,13 +297,11 @@ def validate_design_system():
 
     This is primarily for testing and development purposes.
     """
-    # Validate spacing follows 8pt grid
     spacing_values = [SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL]
     for i, spacing in enumerate(spacing_values):
         if spacing % 4 != 0:
             raise ValueError(f"Spacing value {spacing} does not follow 4px grid")
 
-    # Validate corner radii are reasonable
     radii = [BUTTON_CORNER_RADIUS, FRAME_CORNER_RADIUS, DIALOG_CORNER_RADIUS, CARD_CORNER_RADIUS]
     for radius in radii:
         if radius < 0 or radius > 20:
@@ -371,7 +323,6 @@ def validate_design_system():
 
 
 if __name__ == "__main__":
-    # Run validation when module is executed directly
     try:
         validate_design_system()
         print("✓ Design system validation passed")

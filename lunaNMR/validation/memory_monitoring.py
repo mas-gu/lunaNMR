@@ -4,9 +4,6 @@ Memory Monitoring Utilities for Parallel Processing
 
 This module provides tools to monitor memory usage and verify
 proper cleanup of shared memory blocks during parallel processing.
-
-Author: Claude Code
-Date: 2025-09-19
 """
 
 import psutil
@@ -46,7 +43,7 @@ class MemoryMonitor:
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
 
-        print("🔍 Memory monitoring started")
+        print("Memory monitoring started")
 
     def stop_monitoring(self):
         """Stop memory monitoring"""
@@ -54,7 +51,7 @@ class MemoryMonitor:
         if self.monitor_thread:
             self.monitor_thread.join(timeout=5)
 
-        print("⏹️ Memory monitoring stopped")
+        print("Memory monitoring stopped")
 
     def _monitor_loop(self):
         """Main monitoring loop"""
@@ -62,14 +59,11 @@ class MemoryMonitor:
 
         while self.monitoring:
             try:
-                # Get memory info
                 memory_info = process.memory_info()
                 memory_percent = process.memory_percent()
 
-                # Get system memory
                 system_memory = psutil.virtual_memory()
 
-                # Count shared memory blocks
                 shared_memory_count = self._count_shared_memory_blocks()
 
                 sample = {
@@ -92,7 +86,7 @@ class MemoryMonitor:
                 time.sleep(self.sample_interval)
 
             except Exception as e:
-                print(f"⚠️ Memory monitoring error: {e}")
+                print(f"⚠ Memory monitoring error: {e}")
                 time.sleep(self.sample_interval)
 
     def _count_shared_memory_blocks(self):
@@ -156,7 +150,6 @@ class MemoryMonitor:
         stats = self.get_memory_statistics()
         current_usage = self.get_current_memory_usage()
 
-        # Calculate memory growth trend
         first_half = self.memory_samples[:len(self.memory_samples)//2]
         second_half = self.memory_samples[len(self.memory_samples)//2:]
 
@@ -166,7 +159,6 @@ class MemoryMonitor:
         memory_growth = second_half_avg - first_half_avg
         growth_percent = (memory_growth / first_half_avg) * 100 if first_half_avg > 0 else 0
 
-        # Check for shared memory block accumulation
         first_shm_avg = sum(s['shared_memory_blocks'] for s in first_half) / len(first_half)
         second_shm_avg = sum(s['shared_memory_blocks'] for s in second_half) / len(second_half)
         shm_growth = second_shm_avg - first_shm_avg
@@ -204,7 +196,7 @@ class MemoryMonitor:
         """
         Force garbage collection and test cleanup effectiveness
         """
-        print("🧹 Forcing garbage collection...")
+        print("Forcing garbage collection...")
 
         before_stats = self.get_current_memory_usage()
 
@@ -225,10 +217,10 @@ class MemoryMonitor:
         """Print comprehensive memory report"""
         stats = self.get_memory_statistics()
         if not stats:
-            print("❌ No memory statistics available")
+            print("No memory statistics available")
             return
 
-        print("\n📊 Memory Usage Report")
+        print("\nMemory Usage Report")
         print("=" * 50)
         print("RSS Memory:")
         print(f"  Current: {stats['rss_current_mb']:.1f}MB")
@@ -245,21 +237,20 @@ class MemoryMonitor:
         print(f"  Duration: {stats['monitoring_duration']:.1f}s")
         print(f"  Samples:  {stats['sample_count']}")
 
-        # Check for leaks
         leak_check = self.check_memory_leaks()
         if leak_check.get('has_potential_leaks', False):
-            print("\n⚠️ Potential Memory Issues:")
+            print("\n⚠ Potential Memory Issues:")
             for indicator in leak_check['leak_indicators']:
                 print(f"  - {indicator}")
         else:
-            print("\n✅ No significant memory leaks detected")
+            print("\nNo significant memory leaks detected")
 
 
 def test_parallel_processor_memory():
     """
     Test function to verify ParallelVoigtProcessor memory management
     """
-    print("🧪 Testing ParallelVoigtProcessor memory management")
+    print("Testing ParallelVoigtProcessor memory management")
 
     # This would be called from a test script that imports the actual classes
     monitor = MemoryMonitor(sample_interval=0.5)
@@ -270,11 +261,9 @@ def test_parallel_processor_memory():
         print("⏳ Simulating parallel processing...")
         time.sleep(10)
 
-        # Test cleanup
         monitor.force_cleanup_test()
         time.sleep(2)
 
-        # Generate report
         monitor.print_memory_report()
 
     finally:

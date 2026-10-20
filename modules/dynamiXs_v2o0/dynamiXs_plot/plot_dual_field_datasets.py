@@ -36,7 +36,6 @@ import matplotlib.patches as mpatches
 import matplotlib.path as mpath
 import colorsys
 
-# Configure matplotlib for Adobe Illustrator compatibility
 # Keep text as editable text objects rather than converting to paths
 matplotlib.rcParams['pdf.fonttype'] = 42  # TrueType fonts
 matplotlib.rcParams['ps.fonttype'] = 42   # PostScript compatibility
@@ -58,16 +57,12 @@ def adjust_color(hex_color, lighten_amount=0.8, desaturate_amount=0.3):
     hex_color = hex_color.lstrip('#')
     r, g, b = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
 
-    # Convert RGB to HLS
     h, l, s = colorsys.rgb_to_hls(r, g, b)
 
-    # Adjust lightness
     l = min(1.0, l + lighten_amount * (1.0 - l))
 
-    # Adjust saturation (reduce toward 0)
     s = max(0.0, s * (1.0 - desaturate_amount))
 
-    # Convert back to RGB
     r, g, b = colorsys.hls_to_rgb(h, l, s)
     return '#{0:02x}{1:02x}{2:02x}'.format(int(r * 255), int(g * 255), int(b * 255))
 
@@ -94,7 +89,6 @@ def load_secondary_structure(ss_file):
         print(f"Loaded secondary structure from: {ss_file}")
         print(f"Secondary structure length: {len(ss_string)}")
         
-        # Convert string to spans
         ss_map = []
         current_type = None
         current_start = None
@@ -109,17 +103,14 @@ def load_secondary_structure(ss_file):
                 ss_type = 'loop'
             
             if ss_type != current_type:
-                # Close previous span if any
                 if current_type is not None:
                     ss_map.append({
                         "type": current_type,
                         "span": (current_start + 1, i)  # Convert to 1-based indexing
                     })
-                # Start new span
                 current_type = ss_type
                 current_start = i
         
-        # Append last span
         if current_type is not None:
             ss_map.append({
                 "type": current_type,
@@ -229,7 +220,6 @@ def draw_secondary_structure(target_ax, range, secondary_structure_map: list) ->
     sheet_color = "#1e90ff"
     sheet_edge_color = "black"
     
-    # Draw backbone
     draw_rect(target_ax, girth=0.05, range=target_ax.get_xlim(), color="gray")
 
     for secondary_structure in secondary_structure_map:
@@ -317,15 +307,12 @@ def apply_ylimits(ax, column, ylimit_config):
     if not ylimit_config or "ylimits" not in ylimit_config:
         return  # Use matplotlib auto-scaling
     
-    # Extract base column name for lookup
     base_column = extract_base_column_name(column)
     
-    # Try exact match first, then base column
     limits = ylimit_config["ylimits"].get(column)  # Exact match (e.g., R1_f1)
     if not limits:
         limits = ylimit_config["ylimits"].get(base_column)  # Base match (e.g., R1)
     
-    # Also check field_specific
     if not limits and "field_specific" in ylimit_config:
         limits = ylimit_config["field_specific"].get(column)
     
@@ -394,27 +381,22 @@ def create_complete_residue_data(df, data_column, error_column=None):
     dict : Contains complete residue data
     """
     if 'Residue' not in df.columns or data_column not in df.columns:
-        # Fallback to index if no Residue column
         residues = df.index.values
         data = df[data_column].values
         errors = df[error_column].values if error_column and error_column in df.columns else None
         return {'residues': residues, 'data': data, 'errors': errors}
     
-    # Get actual residues and data
     actual_residues = df['Residue'].values
     actual_data = df[data_column].values
     actual_errors = df[error_column].values if error_column and error_column in df.columns else None
     
-    # Create complete residue range starting from 1
     min_res = 1  # Always start from residue 1
     max_res = int(max(actual_residues))
     complete_residues = np.arange(min_res, max_res + 1)
     
-    # Initialize complete data arrays with NaN
     complete_data = np.full(len(complete_residues), np.nan)
     complete_errors = np.full(len(complete_residues), np.nan) if actual_errors is not None else None
     
-    # Fill in existing data
     for i, res in enumerate(actual_residues):
         idx = int(res) - min_res  # min_res is now always 1
         if 0 <= idx < len(complete_residues):
@@ -447,7 +429,6 @@ def plot_missing_residues_bars(ax, residue_data, color='lightgrey', alpha=0.3):
     residues = residue_data['residues']
     data = residue_data['data']
     
-    # Find missing residues (NaN values)
     missing_mask = np.isnan(data)
     missing_residues = residues[missing_mask]
     
@@ -470,7 +451,6 @@ def plot_missing_residues_bars(ax, residue_data, color='lightgrey', alpha=0.3):
 
 def get_available_columns(df):
     """Get available data columns for plotting"""
-    # Define standard column groups
     relaxation_cols = ['R1_f1', 'R2_f1', 'hetNOE_f1', 'R1_f2', 'R2_f2', 'hetNOE_f2']
     spectral_density_cols = ['J0_f1', 'JwN_f1', 'JwH_f1', 'J0_f2', 'JwN_f2', 'JwH_f2']
     model_free_cols = ['S2', 'te', 'Rex_f1', 'Rex_f2']
@@ -503,9 +483,7 @@ def plot_selected_data(datasets, column, field='f1', output_file=None, ylimit_co
     """
     n_datasets = len(datasets)
     
-    # Add space for secondary structure if provided
     if ss_map:
-        # Create layout with SS panel at top
         height_ratios = [1, 4]  # SS panel + data panel
         fig, axes = plt.subplots(2, n_datasets, figsize=(8*n_datasets, 7),
                                 gridspec_kw={'height_ratios': height_ratios})
@@ -530,7 +508,6 @@ def plot_selected_data(datasets, column, field='f1', output_file=None, ylimit_co
             fig, axes = plt.subplots(1, n_datasets, figsize=(8*n_datasets, 6))
             data_axes = list(axes) if n_datasets == 2 else axes
     
-    # Plot each dataset
     for i, (df, label) in enumerate(datasets):
         ax = data_axes[i]
         
@@ -546,7 +523,6 @@ def plot_selected_data(datasets, column, field='f1', output_file=None, ylimit_co
             plot_column = column
             error_column = f"{column}_err"
         
-        # Check if column exists
         if plot_column not in df.columns:
             print(f"Warning: Column '{plot_column}' not found in dataset '{label}'")
             continue
@@ -557,7 +533,6 @@ def plot_selected_data(datasets, column, field='f1', output_file=None, ylimit_co
         y_data = residue_data['data']
         y_err = residue_data['errors']
         
-        # Draw secondary structure if provided
         if ss_map:
             residue_range = (residues.min(), residues.max())
             draw_secondary_structure(ss_axes[i], residue_range, ss_map)
@@ -566,7 +541,6 @@ def plot_selected_data(datasets, column, field='f1', output_file=None, ylimit_co
         # Plot grey bars for missing residues first (so they appear behind data)
         plot_missing_residues_bars(ax, residue_data)
         
-        # Plot data (only non-NaN values)
         valid_mask = ~np.isnan(y_data)
         if np.any(valid_mask):
             valid_residues = residues[valid_mask]
@@ -579,13 +553,11 @@ def plot_selected_data(datasets, column, field='f1', output_file=None, ylimit_co
             else:
                 ax.plot(valid_residues, valid_y_data, 'o', alpha=0.7, label=label)
         
-        # Set labels and title
         ax.set_xlabel('Residue')
         ax.set_ylabel(get_ylabel(plot_column))
         ax.set_title(f'{get_plot_title(plot_column)} - {label}')
         ax.grid(True, alpha=0.3)
         
-        # Apply y-limits from configuration
         apply_ylimits(ax, plot_column, ylimit_config)
     
     plt.tight_layout()
@@ -623,9 +595,7 @@ def plot_multiple_columns(datasets, columns, field='f1', output_file=None, ylimi
     n_plots = len(columns)
     n_datasets = len(datasets)
     
-    # Add space for secondary structure if provided
     if ss_map:
-        # Create layout with SS panel at top
         height_ratios = [1] + [4] * n_plots  # SS panel + data panels
         fig, axes = plt.subplots(n_plots + 1, 1, figsize=(8, 4*n_plots + 1),
                                 gridspec_kw={'height_ratios': height_ratios})
@@ -634,9 +604,7 @@ def plot_multiple_columns(datasets, columns, field='f1', output_file=None, ylimi
         if n_plots == 0:
             axes = [axes]
         
-        # Draw secondary structure in top panel
         if len(datasets) > 0:
-            # Use first dataset to determine residue range
             df_sample = datasets[0][0]
             if 'Residue' in df_sample.columns:
                 residue_range = (df_sample['Residue'].min(), df_sample['Residue'].max())
@@ -646,7 +614,6 @@ def plot_multiple_columns(datasets, columns, field='f1', output_file=None, ylimi
             draw_secondary_structure(axes[0], residue_range, ss_map)
             axes[0].set_title('Secondary Structure')
         
-        # Adjust data panel indices
         data_axes = axes[1:]
     else:
         # Original layout without SS
@@ -658,11 +625,9 @@ def plot_multiple_columns(datasets, columns, field='f1', output_file=None, ylimi
         
         data_axes = axes
     
-    # Plot each column
     for i, column in enumerate(columns):
         ax = data_axes[i]
         
-        # Determine field for this specific column
         field_independent_cols = ['S2', 'te', 'tc'] #'tau_e', 
         rex_cols = ['Rex']  # Rex has field-dependent versions
         
@@ -675,7 +640,6 @@ def plot_multiple_columns(datasets, columns, field='f1', output_file=None, ylimi
         else:
             current_field = field
         
-        # Handle both fields plotting
         if current_field == 'both' and column not in field_independent_cols:
             # Plot both f1 and f2 for field-dependent columns
             field_colors = {'f1': 'blue', 'f2': 'red'}
@@ -686,7 +650,6 @@ def plot_multiple_columns(datasets, columns, field='f1', output_file=None, ylimi
                     plot_column = f"{column}_{field_suffix}"
                     error_column = f"{plot_column}_err"
                     
-                    # Check if column exists
                     if plot_column not in df.columns:
                         print(f"Warning: Column '{plot_column}' not found in dataset '{label}'")
                         continue
@@ -697,7 +660,6 @@ def plot_multiple_columns(datasets, columns, field='f1', output_file=None, ylimi
                     y_data = residue_data['data']
                     y_err = residue_data['errors']
                     
-                    # Create label for legend
                     if n_datasets > 1:
                         plot_label = f"{label} {field_suffix}"
                     else:
@@ -707,7 +669,6 @@ def plot_multiple_columns(datasets, columns, field='f1', output_file=None, ylimi
                     if field_suffix == 'f1':  # Only plot grey bars once per axis
                         plot_missing_residues_bars(ax, residue_data)
                     
-                    # Plot data (only non-NaN values)
                     valid_mask = ~np.isnan(y_data)
                     if np.any(valid_mask):
                         valid_residues = residues[valid_mask]
@@ -738,7 +699,6 @@ def plot_multiple_columns(datasets, columns, field='f1', output_file=None, ylimi
                     plot_column = column
                     error_column = f"{column}_err"
                 
-                # Check if column exists
                 if plot_column not in df.columns:
                     print(f"Warning: Column '{plot_column}' not found in dataset '{label}'")
                     continue
@@ -753,13 +713,11 @@ def plot_multiple_columns(datasets, columns, field='f1', output_file=None, ylimi
                 if j == 0:  # Only plot grey bars once per axis
                     plot_missing_residues_bars(ax, residue_data)
                 
-                # Use different markers for multiple datasets
                 markers = ['o', 's', '^', 'v', 'D']
                 colors = ['blue', 'red', 'green', 'orange', 'purple']
                 marker = markers[j % len(markers)]
                 color = colors[j % len(colors)]
                 
-                # Plot data (only non-NaN values)
                 valid_mask = ~np.isnan(y_data)
                 if np.any(valid_mask):
                     valid_residues = residues[valid_mask]
@@ -773,7 +731,6 @@ def plot_multiple_columns(datasets, columns, field='f1', output_file=None, ylimi
                         ax.plot(valid_residues, valid_y_data, marker, alpha=0.7, color=color,
                                label=label if n_datasets > 1 else None)
         
-        # Set labels and title
         ax.set_xlabel('Residue' if i == n_plots-1 else '')  # Only label bottom plot
         
         # Get ylabel - use the column name without field suffix for 'both' mode
@@ -781,20 +738,16 @@ def plot_multiple_columns(datasets, columns, field='f1', output_file=None, ylimi
             ax.set_ylabel(get_ylabel(column))
             ax.set_title(f'{get_plot_title(column)} - Both Fields')
         else:
-            # Use the actual plot_column for single field
             ylabel_col = plot_column if 'plot_column' in locals() else column
             ax.set_ylabel(get_ylabel(ylabel_col))
             ax.set_title(get_plot_title(ylabel_col))
         
         ax.grid(True, alpha=0.3)
         
-        # Add legend when needed
         if (current_field == 'both') or (n_datasets > 1 and i == 0):
             ax.legend()
         
-        # Apply y-limits from configuration
         if len(datasets) > 0:
-            # Use the actual plot_column for y-limits
             plot_column_for_limits = plot_column if 'plot_column' in locals() else column
             apply_ylimits(ax, plot_column_for_limits, ylimit_config)
     
@@ -850,30 +803,10 @@ def get_plot_title(column):
             return title
     return column
 
-def set_ylimits(ax, column, data):
-    """Set reasonable y-limits based on data type (legacy function for compatibility)"""
-    if 'R1' in column:
-        ax.set_ylim(0, max(3, data.max() * 1.1))
-    elif 'R2' in column:
-        ax.set_ylim(0, max(30, data.max() * 1.1))
-    elif 'hetNOE' in column:
-        ax.set_ylim(0, 1.2)
-    elif 'J0' in column:
-        ax.set_ylim(0, data.max() * 1.2)
-    elif 'JwN' in column or 'JwH' in column:
-        ax.set_ylim(0, data.max() * 1.2)
-    elif 'S2' in column:
-        ax.set_ylim(0, 1)
-    elif 'te' in column: #tau_e
-        ax.set_ylim(0, data.max() * 1.2)
-    elif 'Rex' in column:
-        ax.set_ylim(0, data.max() * 1.2)
-
 def interactive_mode():
     """Run script in interactive mode"""
     print("=== Dual-Field NMR Data Plotting Tool (with Y-limits Configuration and Secondary Structure) ===\n")
     
-    # Get input files
     datasets = []
     while True:
         file_path = input(f"Enter CSV file path for dataset {len(datasets)+1} (or 'done' to finish): ").strip()
@@ -899,15 +832,12 @@ def interactive_mode():
         print("No datasets loaded. Exiting.")
         return
     
-    # Get y-limits configuration
     config_file = input("Enter y-limits config file (optional, press Enter to skip): ").strip()
     ylimit_config = load_ylimit_config(config_file) if config_file else None
     
-    # Get secondary structure file
     ss_file = input("Enter secondary structure file (optional, press Enter to skip): ").strip()
     ss_map = load_secondary_structure(ss_file) if ss_file else None
     
-    # Show available columns
     print("Available columns in first dataset:")
     available = get_available_columns(datasets[0][0])
     
@@ -923,13 +853,11 @@ def interactive_mode():
     for col in available['model_free']:
         print(f"  {col}")
     
-    # Get column selection - allow multiple columns
     print("\nSelect columns to plot (comma-separated):")
     print("Examples: R1,R2,hetNOE,J0,JwN,JwH,Rex,S2,te")
     column_input = input("Enter column names: ").strip()
     columns = [col.strip() for col in column_input.split(',')]
     
-    # Get field selection for field-dependent columns
     field_independent_cols = ['S2', 'te', 'tc'] #'tau_e'
     rex_cols = ['Rex']  # Rex is field-dependent
     has_field_dependent = any(col not in field_independent_cols 
@@ -943,7 +871,6 @@ def interactive_mode():
     else:
         field = 'auto'
     
-    # Get output file
     output_file = input("Enter output filename (optional, press Enter for screen display): ").strip()
     if not output_file:
         output_file = None
@@ -973,7 +900,6 @@ def main():
     
     args = parser.parse_args()
     
-    # Handle example config creation
     if args.create_example_config:
         create_example_config()
         return
@@ -982,13 +908,10 @@ def main():
         interactive_mode()
         return
     
-    # Load y-limits configuration
     ylimit_config = load_ylimit_config(args.ylim_config) if args.ylim_config else None
     
-    # Load secondary structure
     ss_map = load_secondary_structure(args.ss_file) if args.ss_file else None
     
-    # Load datasets
     datasets = []
     for i, file_path in enumerate(args.files):
         if not os.path.exists(file_path):
@@ -1017,7 +940,6 @@ def main():
                     print(f"  {col}")
         return
     
-    # Parse multiple columns
     columns = [col.strip() for col in args.column.split(',')]
     
     # Auto-detect field handling
@@ -1028,7 +950,6 @@ def main():
     
     field = args.field if has_field_dependent else 'auto'
     
-    # Create plot
     if len(columns) == 1:
         plot_selected_data(datasets, columns[0], field, args.output, ylimit_config, ss_map)
     else:

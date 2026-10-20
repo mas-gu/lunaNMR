@@ -57,10 +57,8 @@ class ConfigurationDialog(BaseDialog):
 
         self.main_window = main_window
 
-        # Build UI
         self.setup_ui()
 
-        # Update display with current settings
         self.update_config_display()
 
         # Center on parent
@@ -97,7 +95,6 @@ class ConfigurationDialog(BaseDialog):
         settings_group = self.create_settings_section()
         layout.addWidget(settings_group, stretch=1)
 
-        # Close button
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
@@ -155,7 +152,6 @@ class ConfigurationDialog(BaseDialog):
         layout.setSpacing(SPACING_SM)
         layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
 
-        # Save Configuration button (primary)
         save_button = QPushButton("Save Configuration")
         save_button.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         save_button.setStyleSheet(f"""
@@ -174,7 +170,6 @@ class ConfigurationDialog(BaseDialog):
         save_button.clicked.connect(self.save_config)
         layout.addWidget(save_button)
 
-        # Load Configuration button (secondary)
         load_button = QPushButton("Load Configuration")
         load_button.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         load_button.setStyleSheet(f"""
@@ -193,7 +188,6 @@ class ConfigurationDialog(BaseDialog):
         load_button.clicked.connect(self.load_config)
         layout.addWidget(load_button)
 
-        # Reset to Defaults button (destructive)
         reset_button = QPushButton("Reset to Defaults")
         reset_button.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         reset_button.setStyleSheet(f"""
@@ -274,7 +268,6 @@ class ConfigurationDialog(BaseDialog):
 
         mw = self.main_window
 
-        # Build configuration info string (matching v0.9 format)
         config_info = "Configuration Status:\n\n"
 
         # Detection Parameters
@@ -294,7 +287,6 @@ class ConfigurationDialog(BaseDialog):
         config_info += f"  Fix Linewidths: {getattr(mw, 'fix_linewidths', False)}\n"
         config_info += "\n"
 
-        # Display Options
         config_info += "Display Options:\n"
         config_info += f"  Show Detected: {getattr(mw, 'show_detected', True)}\n"
         config_info += f"  Show Assigned: {getattr(mw, 'show_assigned', True)}\n"
@@ -433,17 +425,14 @@ class ConfigurationDialog(BaseDialog):
         mw = self.main_window
         config = mw.config_manager.config
 
-        # Get processing parameters from config
         proc_params = config.get('processing_parameters', {})
         series_opts = config.get('series_options', {})
 
-        # Update main window attributes from config
         mw.search_window_x = proc_params.get('search_window_x', 0.08)
         mw.search_window_y = proc_params.get('search_window_y', 0.8)
         mw.fix_positions = proc_params.get('fix_positions', False)
         mw.use_parallel_processing = series_opts.get('parallel_processing', False)
 
-        # Update GUI controls if they exist
         try:
             # Expert panel controls
             if hasattr(mw, 'expert_search_x_spin'):
@@ -455,7 +444,6 @@ class ConfigurationDialog(BaseDialog):
             if hasattr(mw, 'expert_parallel_check'):
                 mw.expert_parallel_check.setChecked(mw.use_parallel_processing)
 
-            # Update integrator if available
             if hasattr(mw, 'integrator') and mw.integrator:
                 mw.integrator.set_search_window(mw.search_window_x, mw.search_window_y)
 

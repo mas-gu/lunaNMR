@@ -29,15 +29,12 @@ sys.path.insert(0, str(current_dir))
 def main():
     """Launch the DynamiXs GUI application."""
     try:
-        # Import Qt modules
         from PySide6.QtWidgets import QApplication
         from PySide6.QtCore import Qt
 
-        # Import our modules
         from gui_components import load_stylesheet
         from dynamiXs_gui import DynamiXsMainWindow
 
-        # Create the application
         app = QApplication(sys.argv)
 
         # Pin a light palette so QSS contrast holds under macOS Dark Mode.
@@ -46,19 +43,15 @@ def main():
         app.setStyle("Fusion")
         app.setPalette(app.style().standardPalette())
 
-        # Set application metadata
         app.setApplicationName("DynamiXs")
         app.setApplicationVersion("2.0")
         app.setOrganizationName("LunaNMR")
 
-        # Load the stylesheet
         load_stylesheet(app)
 
-        # Create and show the main window
         window = DynamiXsMainWindow()
         window.show()
 
-        # Start the event loop
         sys.exit(app.exec())
 
     except ImportError as e:

@@ -9,17 +9,13 @@ Classes:
 - ConfigurationManager: Main configuration management
 - UserPreferences: User interface preferences
 - ProcessingParameters: NMR processing parameters
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import os
 import json
 from pathlib import Path
 from datetime import datetime
-#import tkinter as tk
-from lunaNMR.utils.output_manager import log_info, log_warning, log_error
+from lunaNMR.utils.output_manager import log_warning, log_error
 
 class ConfigurationManager:
     """Main configuration management system"""
@@ -30,10 +26,8 @@ class ConfigurationManager:
         self.config_file = os.path.join(self.config_folder, "config.json")
         self.recent_files_file = os.path.join(self.config_folder, "recent_files.json")
 
-        # Ensure config folder exists
         os.makedirs(self.config_folder, exist_ok=True)
 
-        # Default configuration
         self.default_config = {
             "version": "1.0.0",
             "last_updated": None,
@@ -81,23 +75,9 @@ class ConfigurationManager:
                 "last_nmr_folder": "",
                 "last_peak_folder": "",
                 "last_output_folder": ""
-            },
-            "overlap_resolution": {
-                "enabled": False,  # Default OFF for backward compatibility
-                "auto_detect": True,
-                "detection_threshold": 0.5,  # ppm separation threshold
-                "staged_fitting": True,
-                "jackknife_validation": True,
-                "correlation_analysis": True,
-                "n_resamples": 50,
-                "max_peaks": 10,
-                "model_selection_criterion": "BIC",
-                "cv_threshold": 0.2,
-                "amplitude_correlation_threshold": 0.7
             }
         }
 
-        # Load existing configuration
         self.config = self.load_config()
 
     def _get_config_folder(self):
@@ -182,7 +162,6 @@ class ConfigurationManager:
                 config_section[key] = {}
             config_section = config_section[key]
 
-        # Set the value
         config_section[keys[-1]] = value
 
     def reset_to_defaults(self, section=None):
@@ -209,7 +188,6 @@ class ConfigurationManager:
             with open(file_path, 'r', encoding='utf-8') as f:
                 imported_config = json.load(f)
 
-            # Merge with current config
             self.config = self._merge_configs(self.config, imported_config)
             return True
 
@@ -248,11 +226,9 @@ class ConfigurationManager:
 
         file_path = os.path.abspath(file_path)
 
-        # Remove if already exists
         if file_path in recent[key]:
             recent[key].remove(file_path)
 
-        # Add to beginning
         recent[key].insert(0, file_path)
 
         # Limit size
@@ -261,42 +237,6 @@ class ConfigurationManager:
             recent[key] = recent[key][:max_recent]
 
         self.save_recent_files(recent)
-
-    def load_overlap_config(self):
-        """
-        Load overlap resolution configuration
-
-        Returns:
-            Dictionary with overlap resolution settings
-        """
-        return self.config.get('overlap_resolution', {
-            'enabled': False,
-            'auto_detect': True,
-            'detection_threshold': 0.5,
-            'staged_fitting': True,
-            'jackknife_validation': True,
-            'correlation_analysis': True,
-            'n_resamples': 50,
-            'max_peaks': 10,
-            'model_selection_criterion': 'BIC',
-            'cv_threshold': 0.2,
-            'amplitude_correlation_threshold': 0.7
-        })
-
-    def enable_overlap_resolution(self, enable=True):
-        """
-        Quick enable/disable overlap resolution
-
-        Args:
-            enable: True to enable, False to disable
-        """
-        if 'overlap_resolution' not in self.config:
-            self.config['overlap_resolution'] = self.load_overlap_config()
-
-        self.config['overlap_resolution']['enabled'] = enable
-        self.save_config()
-        status = 'enabled' if enable else 'disabled'
-        log_info(f"Overlap resolution {status}")
 
 class UserPreferences:
     """User interface preferences manager"""

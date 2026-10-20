@@ -23,9 +23,6 @@ Port Details:
 - TkAgg → FigureCanvasQTAgg
 - 2×2 axes grid using MatplotlibMultiAxesWidget
 - All features from original implementation preserved
-
-Author: Guillaume Mas
-Date: 2025-01-24
 """
 
 from PySide6.QtCore import Signal
@@ -175,7 +172,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             dpi=100
         )
 
-        # Map axes_list indices to logical positions
         # axes_list[0] = top-left    (ax_x)
         # axes_list[1] = top-right   (ax_y)
         # axes_list[2] = bottom-left (ax_2d)
@@ -202,7 +198,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.auto_z_min = None
         self.auto_z_max = None
 
-        # Store current result for refresh operations
         self.current_result = None
         self.ax_data = None
         self.ax_resid = None
@@ -265,7 +260,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.preserved_azim = 45  # Default azimuth
         self.preserved_roll = 0   # Default roll
 
-        # Initialize with placeholder message
         self._plot_no_data()
 
     # ===== Feature Control Methods =====
@@ -361,7 +355,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         if self.auto_z_min is None or self.auto_z_max is None:
             return  # No auto-limits stored yet
 
-        # Calculate scaled limits
         z_center = (self.auto_z_max + self.auto_z_min) / 2
         z_half_range = (self.auto_z_max - self.auto_z_min) / 2
 
@@ -369,14 +362,11 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         new_z_min = z_center - scaled_half_range
         new_z_max = z_center + scaled_half_range
 
-        # Update data panel
         self.ax_data.set_zlim(new_z_min, new_z_max)
 
-        # Update residuals panel if in separate mode
         if self.residual_mode == 'separate' and self.ax_resid is not None:
             self.ax_resid.set_zlim(new_z_min, new_z_max)
 
-        # Redraw canvas
         self.canvas.draw_idle()
 
     def set_fixed_z_limits(self, z_min: float, z_max: float):
@@ -441,7 +431,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         Args:
             message: Text message to display
         """
-        # Clear all axes
         for ax in self.axes_list:
             ax.clear()
             ax.text(0.5, 0.5, message,
@@ -489,11 +478,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         if fitted is None:
             return
 
-        # Find nearest indices
         f2_idx = np.argmin(np.abs(f2_ppm - x_ppm))
         f1_idx = np.argmin(np.abs(f1_ppm - y_ppm))
 
-        # Extract 1D slices
         f1_exp_slice = experimental[:, f2_idx]  # Vertical slice at x_ppm
         f1_fit_slice = fitted[:, f2_idx]
 
@@ -507,14 +494,12 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.ax_f1_cross.plot(f1_ppm, f1_fit_slice, '-',
                               color='red', linewidth=2, label='Fit')
 
-        # Add individual peak components if available
         individual_surfaces = result.get('individual_surfaces', [])
         all_peaks = result.get('all_peaks', [])
         if individual_surfaces:
             colors = COMPONENT_COLOURS
             for i, surf in enumerate(individual_surfaces):
                 component_slice = surf[:, f2_idx]
-                # Use assignment-based color for consistency across spectra
                 peak_assignment = all_peaks[i].get('assignment', f'Peak {i+1}') if i < len(all_peaks) else f'Peak {i+1}'
                 color = self._get_peak_color(peak_assignment, colors)
                 self.ax_f1_cross.plot(f1_ppm, component_slice, '--',
@@ -539,7 +524,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             colors = COMPONENT_COLOURS
             for i, surf in enumerate(individual_surfaces):
                 component_slice = surf[f1_idx, :]
-                # Use assignment-based color for consistency across spectra
                 peak_assignment = all_peaks[i].get('assignment', f'Peak {i+1}') if i < len(all_peaks) else f'Peak {i+1}'
                 color = self._get_peak_color(peak_assignment, colors)
                 self.ax_f2_cross.plot(f2_ppm, component_slice, '--',
@@ -553,7 +537,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.ax_f2_cross.legend(fontsize=6, loc='best')
         self.ax_f2_cross.grid(True, alpha=0.3)
 
-        # Redraw canvas
         self.canvas.draw_idle()
 
     def plot_voigt_analysis(self, voigt_result):
@@ -562,15 +545,11 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             self._plot_no_data()
             return
 
-        # Extract data
         method = voigt_result.get('method', '')
 
-        # Check if this is 2D simultaneous fitting
         if '2d_simultaneous' in method and 'region_2d' in voigt_result:
-            # Use 2D contour visualization
             self._plot_2d_contour(voigt_result)
         else:
-            # Use traditional 1D cross-section visualization
             self._plot_1d_fits(voigt_result)
 
     def plot_voigt_analysis_3d(self, voigt_result):
@@ -579,17 +558,14 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
         This is the main entry point for 3D visualization
         """
-        # Clear figure at start
         self.figure.clear()
 
         if not voigt_result:
             self._plot_no_data_3d()
             return
 
-        # Extract data
         method = voigt_result.get('method', '')
 
-        # Check if this is 2D simultaneous fitting
         if '2d_simultaneous' in method and 'region_2d' in voigt_result:
             # Use 3D surface visualization for 2D simultaneous fits
             self._plot_2d_surface_3d(voigt_result)
@@ -610,15 +586,12 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         assignment = voigt_result.get('assignment', 'Unknown')
         quality = voigt_result.get('fitting_quality', 'Unknown')
 
-        # Plot X-dimension fit (top)
         self._plot_1d_fit(ax_x, x_fit, '¹H Chemical Shift (ppm)',
                          f'X-Dimension Fit - {assignment}')
 
-        # Plot Y-dimension fit (bottom)
         self._plot_1d_fit(ax_y, y_fit, indirect_axis_label(),
                          f'Y-Dimension Fit - {assignment}')
 
-        # Set overall title
         self.figure.suptitle(f'Voigt Profile Analysis: {assignment} (Quality: {quality})',
                             fontsize=10, fontweight='bold')
 
@@ -638,14 +611,11 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         fitted_curve = fit_data.get('fitted_curve', None)
         r_squared = fit_data.get('r_squared_local', fit_data.get('r_squared', 0))
 
-        # Plot experimental data
         ax.plot(ppm_scale, cross_section, 'b-', linewidth=2, alpha=0.7, label='Experimental')
 
-        # Plot fitted curve
         if fitted_curve is not None:
             ax.plot(ppm_scale, fitted_curve, 'r-', linewidth=2, label='Voigt Fit')
 
-            # Calculate and plot residuals
             residuals = cross_section - fitted_curve
             ax.plot(ppm_scale, residuals + np.min(cross_section)*0.9, 'g--',
                    alpha=0.6, label='Residuals')
@@ -676,7 +646,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         [0,0] Experimental 2D Data    [0,1] Fitted 2D Surface
         [1,0] 2D Residuals            [1,1] Parameters Table
         """
-        # Extract data
         region_2d = voigt_result.get('region_2d')
         fitted_surface = voigt_result.get('fitted_2d_surface')
         all_peaks = voigt_result.get('all_peaks', [])
@@ -701,15 +670,12 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         f2_ppm = region_2d['f2_ppm']
         experimental = region_2d['intensity']
 
-        # Calculate residuals
         residuals = experimental - fitted_surface
 
-        # Determine contour levels
         vmin = min(np.min(experimental), np.min(fitted_surface))
         vmax = max(np.max(experimental), np.max(fitted_surface))
         levels = np.linspace(vmin + (vmax - vmin) * 0.2, vmax, 20)
 
-        # Clear and create 2x2 grid
         self.figure.clear()
         gs = self.figure.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
         ax_exp = self.figure.add_subplot(gs[0, 0])
@@ -729,7 +695,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         ax_exp.invert_yaxis()
         ax_exp.grid(True, alpha=0.3)
 
-        # Mark peak positions
         for i, peak in enumerate(all_peaks):
             pos_f2 = _to_scalar(peak['pos_f2'])
             pos_f1 = _to_scalar(peak['pos_f1'])
@@ -750,7 +715,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             ]
 
         if individual_surfaces is not None and len(individual_surfaces) > 0:
-            # Calculate global contour levels
             baseline = region_2d['intensity'].min()
             all_peaks_with_baseline = [surf + baseline for surf in individual_surfaces]
 
@@ -758,9 +722,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             global_max = max(np.max(surf) for surf in all_peaks_with_baseline)
             global_levels = np.linspace(global_min + (global_max - global_min) * 0.4, global_max, 15)
 
-            # Plot each peak with same global levels
             for i, (peak_with_baseline, peak) in enumerate(zip(all_peaks_with_baseline, all_peaks)):
-                # Use assignment-based color for consistency across spectra
                 peak_assignment = peak.get('assignment', f'Peak {i+1}')
                 color = self._get_peak_color(peak_assignment, colors)
                 ax_fit.contour(f2_ppm, f1_ppm, peak_with_baseline, levels=global_levels,
@@ -781,11 +743,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         ax_fit.invert_yaxis()
         ax_fit.grid(True, alpha=0.3)
 
-        # Mark peak positions with matching colors
         for i, peak in enumerate(all_peaks):
             peak_assignment = peak.get('assignment', f'Peak {i+1}')
             if individual_surfaces is not None and len(individual_surfaces) > 0:
-                # Use assignment-based color for consistency across spectra
                 color = self._get_peak_color(peak_assignment, colors)
             else:
                 color = 'blue'
@@ -801,7 +761,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         relative_residuals = 100 * residuals / np.max(experimental)
         quality_map = np.abs(relative_residuals)
 
-        # Define custom colormap
         colors_quality = ['#2ecc71', '#f1c40f', '#e74c3c']  # green, yellow, red
         boundaries = [0, 10, 20, 100]
         cmap_quality = ListedColormap(colors_quality)
@@ -810,7 +769,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         ax_res.contourf(f2_ppm, f1_ppm, quality_map,
                        levels=boundaries, cmap=cmap_quality, norm=norm, alpha=0.7)
 
-        # Add peak positions for reference
         for i, peak in enumerate(all_peaks):
             ax_res.plot(_to_scalar(peak['pos_f2']), _to_scalar(peak['pos_f1']), 'k+', markersize=8, markeredgewidth=1.5)
 
@@ -821,7 +779,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         ax_res.invert_yaxis()
         ax_res.grid(True, alpha=0.3)
 
-        # Add legend for quality regions
         legend_elements = [
             Patch(facecolor='#2ecc71', alpha=0.7, label='Good (<10%)'),
             Patch(facecolor='#f1c40f', alpha=0.7, label='Moderate (10-20%)'),
@@ -832,7 +789,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         # Plot 4: Parameters Table (bottom right)
         ax_table.axis('off')
 
-        # Create table text
         table_text = "Fitted Parameters\n" + "="*30 + "\n\n"
 
         for i, peak in enumerate(all_peaks):
@@ -856,12 +812,10 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
                      fontsize=8, fontfamily='monospace', verticalalignment='top',
                      bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9, edgecolor='gray'))
 
-        # Add overall statistics at top
         stats_text = f"Quality: {quality}\nR² = {r_squared:.4f}\n{len(all_peaks)} peaks (simultaneous fit)"
         ax_table.text(0.5, 0.98, stats_text, ha='center', va='top',
                      fontsize=9, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
-        # Set overall title
         self.figure.suptitle(f'2D Simultaneous Voigt Fitting: {assignment}',
                             fontsize=10, fontweight='bold')
 
@@ -878,10 +832,8 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         - Residual mode (separate panel or overlay)
         - Intensity scaling
         """
-        # Store result for refresh operations
         self.current_result = voigt_result
 
-        # Extract 2D data
         region_2d = voigt_result.get('region_2d')
         fitted_surface_original = voigt_result.get('fitted_2d_surface')
         individual_surfaces_original = voigt_result.get('individual_surfaces', None)
@@ -946,7 +898,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
                 peak_surface = fitted_intensity * fade_f1 * fade_f2 / (sigma_f1 * sigma_f2 * 2.0 * np.pi)
 
-                # Apply elliptical clipping
                 ellipse_distance_sq = ((region_2d['f1_grid'] - pos_f1) / radF1_display) ** 2 + \
                                       ((region_2d['f2_grid'] - pos_f2) / radF2_display) ** 2
                 ellipse_mask = ellipse_distance_sq <= 1.0
@@ -961,7 +912,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         experimental = region_2d['intensity']
         residuals = experimental - (fitted_surface + baseline)
 
-        # Create 2D meshgrids for 3D plotting
         F2_ppm, F1_ppm = np.meshgrid(f2_ppm, f1_ppm)
 
         # Save current view orientation before clearing
@@ -971,11 +921,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             if hasattr(self.ax_data, 'roll'):
                 self.preserved_roll = self.ax_data.roll
 
-        # Clear figure completely
         self.figure.clear()
         self.canvas.draw_idle()
 
-        # Determine layout based on features
         if self.show_cross_sections:
             if self.residual_mode == 'separate':
                 gs = self.figure.add_gridspec(3, 2, height_ratios=[2, 2, 1.5], hspace=0.3, wspace=0.2)
@@ -987,14 +935,12 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             else:
                 gs = self.figure.add_gridspec(1, 1)
 
-        # Create axes
         ax_data = self.figure.add_subplot(
             gs[0, 0] if self.show_cross_sections or self.residual_mode == 'separate' else gs[0],
             projection='3d'
         )
         self.ax_data = ax_data
 
-        # Get current color scheme
         scheme = self.color_presets[self.current_color_scheme]
 
         # The cage, stripped back to what carries depth - unfilled panes, no grid,
@@ -1029,7 +975,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         else:
             individual_alpha = 0.7
 
-        # Plot experimental data wireframe if enabled
         if self.show_experimental:
             ax_data.plot_wireframe(F2_ppm, F1_ppm, experimental,
                                    color=scheme['experimental']['color'],
@@ -1048,7 +993,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         # Overlay individual fitted peaks if enabled
         if self.show_individual_peaks and individual_surfaces is not None and len(individual_surfaces) > 0:
             for i, (surf, peak) in enumerate(zip(individual_surfaces, all_peaks)):
-                # Use assignment-based color for consistency across spectra
                 peak_assignment = peak.get('assignment', f'Peak {i+1}')
                 color = self._get_peak_color(peak_assignment, colors)
 
@@ -1074,7 +1018,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             theta = np.linspace(0, 2*np.pi, 100)
 
             for i, peak in enumerate(all_peaks):
-                # Use assignment-based color for consistency across spectra
                 peak_assignment = peak.get('assignment', f'Peak {i+1}')
                 color = self._get_peak_color(peak_assignment, colors)
 
@@ -1094,19 +1037,16 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             label_positions = []
 
             for i, (surf, peak) in enumerate(zip(individual_surfaces, all_peaks)):
-                # Use assignment-based color for consistency across spectra
                 peak_assignment = peak.get('assignment', f'Peak {i+1}')
                 color = self._get_peak_color(peak_assignment, colors)
 
                 pos_f2 = _to_scalar(peak['pos_f2'])
                 pos_f1 = _to_scalar(peak['pos_f1'])
 
-                # Find Z-height at peak maximum
                 f2_idx = np.argmin(np.abs(f2_ppm - pos_f2))
                 f1_idx = np.argmin(np.abs(f1_ppm - pos_f1))
                 max_z = fitted_surface[f1_idx, f2_idx]
 
-                # Position label 15% above peak maximum
                 label_z = max_z * 1.15
                 label_x = pos_f2
                 label_y = pos_f1
@@ -1122,11 +1062,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
                 label_positions.append((label_x, label_y, label_z))
 
-                # Draw arrow from label to peak
                 ax_data.plot([label_x, pos_f2], [label_y, pos_f1], [label_z, max_z],
                             color=color, linewidth=2, alpha=0.8, linestyle='-')
 
-                # Add 3D text label
                 ax_data.text(label_x, label_y, label_z,
                             peak_assignment,
                             color=color,
@@ -1154,7 +1092,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
             residual_heights = residual_baseline + (normalized_residuals + 1) * 0.5 * residual_range
 
-            # Use custom colormap with LunaNMR colors
             colors_custom = [
                 (0.357, 0.620, 0.898),  # Bright blue
                 (1.0, 1.0, 1.0),        # White
@@ -1174,7 +1111,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
                 shade=False
             )
 
-        # Configure axes
         ax_data.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
         ax_data.set_ylabel(indirect_axis_label(), fontsize=9)
         ax_data.set_zlabel('Intensity', fontsize=9)
@@ -1189,11 +1125,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         # Z-axis height reduced by 30%
         ax_data.set_box_aspect([1, 1, 1.05])
 
-        # Add legend (limit to 6 peaks)
         if len(all_peaks) <= 6 and (self.show_experimental or self.show_fitted or self.show_individual_peaks):
             ax_data.legend(loc='upper right', fontsize=7, framealpha=0.9)
 
-        # Calculate and store auto Z-axis scale
         z_max_data = np.max(experimental)
         z_min_data = np.min(experimental)
         self.auto_z_min = z_min_data
@@ -1215,7 +1149,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         if self.residual_mode == 'separate' and self.show_residuals and self.ax_resid is not None:
             z_max_resid = np.max(np.abs(residuals))
 
-            # Create custom colormap
             colors_custom = [
                 (0.357, 0.620, 0.898),  # Bright blue
                 (1.0, 1.0, 1.0),        # White
@@ -1228,11 +1161,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
                                                     vmin=-z_max_resid, vmax=z_max_resid,
                                                     antialiased=True)
 
-            # Add colorbar
             cbar = self.figure.colorbar(surf_resid, ax=self.ax_resid, shrink=0.6, aspect=10)
             cbar.set_label('Residuals', fontsize=8)
 
-            # Configure axes
             self.ax_resid.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
             self.ax_resid.set_ylabel(indirect_axis_label(), fontsize=9)
             self.ax_resid.set_zlabel('Residuals', fontsize=9)
@@ -1262,7 +1193,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             peak_y = voigt_result.get('peak_y', f1_ppm[len(f1_ppm)//2])
             self.update_cross_sections(peak_x, peak_y, voigt_result)
 
-            # Connect click event
             if self.click_event_cid is not None:
                 self.canvas.mpl_disconnect(self.click_event_cid)
 
@@ -1270,7 +1200,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
                 if event.inaxes == ax_data or (self.ax_resid and event.inaxes == self.ax_resid):
                     if event.xdata and event.ydata:
                         self.update_cross_sections(event.xdata, event.ydata, voigt_result)
-                        # Emit Qt signal for external handlers
                         self.plot_clicked.emit(event.xdata, event.ydata)
 
             self.click_event_cid = self.canvas.mpl_connect('button_press_event', on_click)
@@ -1279,7 +1208,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
                 self.canvas.mpl_disconnect(self.click_event_cid)
                 self.click_event_cid = None
 
-        # Set overall figure title
         self.figure.suptitle(f'3D Voigt Analysis: {assignment}',
                             fontsize=12, fontweight='bold')
 
@@ -1327,14 +1255,12 @@ detailed 1D cross-section visualization.
         """Plot message when no data is available"""
         self.clear_all()
 
-        # Use first axes for message
         ax = self.axes_list[0]
         ax.text(0.5, 0.5, 'No Voigt analysis data\nFit a peak to view results',
                transform=ax.transAxes, ha='center', va='center',
                fontsize=10, bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray"))
         ax.axis('off')
 
-        # Hide other axes
         for ax in self.axes_list[1:]:
             ax.axis('off')
 

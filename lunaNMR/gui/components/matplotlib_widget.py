@@ -28,9 +28,6 @@ Usage:
     # Or use convenience methods
     plot_widget.clear()
     plot_widget.refresh()
-
-Author: Guillaume Mas
-Date: 2025-01-24
 """
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QSizePolicy
@@ -87,32 +84,25 @@ class MatplotlibWidget(QWidget):
 
         self.tight_layout = tight_layout
 
-        # Create matplotlib figure with design system colors
         self.figure = Figure(figsize=figsize, dpi=dpi)
         self._apply_design_system_colors()
 
-        # Create Qt canvas
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # Create primary axes
         self.axes = self.figure.add_subplot(111)
 
-        # Setup layout
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(SPACING_SM)
 
-        # Add toolbar if requested
         self.toolbar = None
         if toolbar:
             self.toolbar = NavigationToolbar2QT(self.canvas, self)
             self.layout.addWidget(self.toolbar)
 
-        # Add canvas
         self.layout.addWidget(self.canvas)
 
-        # Apply tight layout if requested
         if self.tight_layout:
             self.figure.tight_layout()
 
@@ -123,16 +113,13 @@ class MatplotlibWidget(QWidget):
         Sets appropriate background colors for the figure and plot area
         to match the LunaNMR design system.
         """
-        # Convert hex colors to matplotlib format
         panel_bg = self._hex_to_mpl_color(PANEL_BG_COLOR)
         frame_bg = self._hex_to_mpl_color(FRAME_BG_COLOR)
         text_color = self._hex_to_mpl_color(PRIMARY_TEXT)
 
-        # Set figure and axes backgrounds
         self.figure.patch.set_facecolor(panel_bg)
         self.figure.patch.set_alpha(1.0)
 
-        # Set text color
         from matplotlib import rcParams
         rcParams['text.color'] = text_color
         rcParams['axes.labelcolor'] = text_color
@@ -303,7 +290,6 @@ class MatplotlibMultiAxesWidget(MatplotlibWidget):
         # Clear the default single axes
         self.figure.clear()
 
-        # Create subplot grid
         self.nrows = nrows
         self.ncols = ncols
         self.axes_list = []
@@ -313,10 +299,8 @@ class MatplotlibMultiAxesWidget(MatplotlibWidget):
             ax.set_facecolor(self._hex_to_mpl_color(FRAME_BG_COLOR))
             self.axes_list.append(ax)
 
-        # Set primary axes to first subplot
         self.axes = self.axes_list[0] if self.axes_list else None
 
-        # Apply sharing if requested
         if sharex or sharey:
             for ax in self.axes_list[1:]:
                 if sharex:
@@ -324,7 +308,6 @@ class MatplotlibMultiAxesWidget(MatplotlibWidget):
                 if sharey:
                     ax.sharey(self.axes_list[0])
 
-        # Apply tight layout
         self.figure.tight_layout()
 
     def clear_all(self):

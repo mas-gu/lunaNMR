@@ -9,9 +9,6 @@ PS2D-Style High-Performance Voigt Fitter for LunaNMR
 3. Additive Levenberg-Marquardt damping - better convergence
 4. Exact Faddeeva-based Voigt profiles - matches  math
 5. Analytical derivatives for intensity - zero numerical error
-
-Date: 2025-10-03
-Version: 1.0 - 
 """
 
 import functools
@@ -26,8 +23,6 @@ from typing import Dict, Tuple
 try:
     import numba
     NUMBA_AVAILABLE = True
-    NUMBA_VERSION = numba.__version__
-    #print(f"✅ Numba {NUMBA_VERSION} loaded - 3-5× faster 2D fitting enabled", file=sys.stderr)
 except ImportError:
     NUMBA_AVAILABLE = False
 
@@ -71,9 +66,6 @@ else:
         return func
 
 
-# ============================================================================
-# ============================================================================
-
 SQRT_2 = 1.4142135624  
 SQRT_2PI = np.sqrt(2.0 * np.pi)
 SQRT_8LN2 = np.sqrt(8.0 * np.log(2.0))
@@ -95,9 +87,7 @@ PROGRESS_PRINT_INTERVAL = 200  # Print progress every N iterations (was 50)
 DERIV_STEP_MULTIPLIER = 1.00001
 
 
-# ============================================================================
 # VOIGT PROFILE COMPUTATION
-# ============================================================================
 
 @jit_decorator
 def voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
@@ -134,7 +124,6 @@ def voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
     - 2D Voigt = V_F1 × V_F2 × intensity
     """
 
-    # Convert FWHM to sigma/gamma 
     sigma_f1 = lw_gauss_f1 / SQRT_8LN2
     sigma_f2 = lw_gauss_f2 / SQRT_8LN2
     gamma_f1 = lw_lorentz_f1 / 2.0
@@ -148,7 +137,6 @@ def voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
     z1 = ((pos_f1 - f1) + 1j * gamma_f1) / (sigma_f1 * SQRT_2)
     z2 = ((pos_f2 - f2) + 1j * gamma_f2) / (sigma_f2 * SQRT_2)
 
-    # Compute Faddeeva function w(z)
     fade_f1 = np.real(wofz(z1))
     fade_f2 = np.real(wofz(z2))
 
@@ -193,15 +181,12 @@ def multi_voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
     - a[7+i*8] = spare (unused)
     """
 
-    # Initialize result array with zeros
     result = np.zeros_like(f1, dtype=np.float64)
 
     # Parameter stride: 8 values per peak
     NPAR_VOIGT = 8
 
-    # Loop through peaks and sum contributions 
     for i in range(n_peaks):
-        # Extract parameters for peak i
         offset = i * NPAR_VOIGT
         pos_f1 = params[offset + 0]
         lw_lor_f1 = params[offset + 1]
@@ -212,7 +197,6 @@ def multi_voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
         intensity = params[offset + 6]
         # spare = params[offset + 7]  # Unused
 
-        # Compute single peak contribution using existing function
         peak_contribution = voigt_profile_2d(
             f1, f2,
             pos_f1, lw_lor_f1,
@@ -221,7 +205,6 @@ def multi_voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
             intensity
         )
 
-        # Add to sum 
         result += peak_contribution
 
     return result
@@ -277,7 +260,6 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
             logging.getLogger(__name__).debug(f"Analytical Jacobian failed, using numerical: {e}")
 
     # Numerical fallback
-    # Flatten grids for easier indexing
     f1_flat = f1.ravel()
     f2_flat = f2.ravel()
     n_points = len(f1_flat)
@@ -286,11 +268,9 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
     NPAR_VOIGT = 8
     n_params = n_peaks * NPAR_VOIGT
 
-    # Initialize Jacobian
     jac = np.zeros((n_points, n_params))
 
-    # Compute individual peak contributions ONCE (Faddeeva caching - 2025-10-08)
-    # Previous code computed full profile once + each peak individually (2×n_peaks calls)
+    # Compute individual peak contributions ONCE (Faddeeva caching)
     # Now compute each peak once, sum for y_base, reuse for intensity derivatives
     y_individual_peaks = []
     y_base = np.zeros(n_points)
@@ -305,7 +285,6 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
         y_individual_peaks.append(y_peak)
         y_base += y_peak
 
-    # Loop through all peaks and their parameters
     for peak_idx in range(n_peaks):
         offset = peak_idx * NPAR_VOIGT
 
@@ -324,7 +303,6 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
             global_idx = offset + param_idx
             local_idx = param_idx  # Index within single peak params
 
-            # Save original value to restore after perturbation
             original_value = single_peak_params_perturbed[local_idx]
 
             # Use relative step size for numerical derivative
@@ -365,7 +343,6 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
                 single_peak_params_perturbed[6] = -INTENSITY_THRESHOLD
             step_size = INTENSITY_THRESHOLD
 
-            # Compute perturbed single peak only
             y_perturbed_single = multi_voigt_profile_2d(
                 f1.reshape(f1.shape), f2.reshape(f2.shape),
                 single_peak_params_perturbed, n_peaks=1
@@ -375,7 +352,6 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
             y_perturbed = y_base - y_individual_peaks[peak_idx] + y_perturbed_single
             jac[:, intensity_idx] = (y_perturbed - y_base) / step_size
 
-            # Restore original value
             single_peak_params_perturbed[6] = original_intensity
 
         # Spare parameter (index 7): always zero derivative (unused parameter)
@@ -385,10 +361,7 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
     return jac
 
 
-# ============================================================================
-# ============================================================================
 # LEVENBERG-MARQUARDT WITH ADDITIVE DAMPING 
-# ============================================================================
 
 class Ps2dStyleLevenbergMarquardt:
     """
@@ -469,9 +442,7 @@ class Ps2dStyleLevenbergMarquardt:
 
         params = np.array(p0, dtype=np.float64)
 
-        # ═══════════════════════════════════════════════════════════════════
-        # PARAMETER NORMALIZATION (2025-11-20)
-        # ═══════════════════════════════════════════════════════════════════
+        # PARAMETER NORMALIZATION
         # Scale all parameters to O(1) for numerical stability.
         # Improves Hessian condition number from ~10¹⁰ to ~10³-10⁴.
         #
@@ -482,15 +453,12 @@ class Ps2dStyleLevenbergMarquardt:
         #
         # All optimization happens in normalized space, then we transform
         # back to physical units at the end.
-        # ═══════════════════════════════════════════════════════════════════
 
         # Compute scales from initial parameter values (avoid division by zero)
         self.scales = np.maximum(np.abs(params), 1e-8)
 
-        # Normalize parameters to O(1)
         params = params / self.scales
 
-        # Normalize bounds if provided
         if bounds is not None:
             bounds_lower = bounds[0] / self.scales
             bounds_upper = bounds[1] / self.scales
@@ -506,7 +474,6 @@ class Ps2dStyleLevenbergMarquardt:
             for param_idx, fixed_value in fixed_params.items():
                 fixed_value_normalized = fixed_value / self.scales[param_idx]
                 fixed_params_normalized[param_idx] = fixed_value_normalized
-                # Apply to params array immediately
                 params[param_idx] = fixed_value_normalized
             fixed_params = fixed_params_normalized
 
@@ -545,7 +512,6 @@ class Ps2dStyleLevenbergMarquardt:
             # Scale Jacobian to normalized space (chain rule: ∂f/∂p_norm = ∂f/∂p_phys × scales)
             J_full = J_full_physical * self.scales[np.newaxis, :]
 
-            # Extract free parameters only
             J = J_full[:, free_indices]
 
             # Build normal equations: α·δa = β
@@ -571,10 +537,8 @@ class Ps2dStyleLevenbergMarquardt:
             if bounds is not None:
                 params_new = np.clip(params_new, bounds[0], bounds[1])
 
-                # CRITICAL FIX: Restore fixed parameters after bounds clipping
-                # This ensures fixed params are ABSOLUTELY fixed, even if bounds would change them
-                # USER EXPECTATION: Fixed parameters are inviolable constraints
-                # Note: fixed_params values are in normalized space (already normalized at start)
+                # Fixed parameters are restored after clipping: a bound must not move
+                # them. fixed_params values are in normalized space.
                 for param_idx, fixed_value in fixed_params.items():
                     params_new[param_idx] = fixed_value
 
@@ -594,7 +558,6 @@ class Ps2dStyleLevenbergMarquardt:
                 chi2_old = chi2
                 stagnant_iterations = 0  # Reset stagnation counter
 
-                # Check convergence 
                 if abs(chi2_new - chi2) < max(self.tol, self.tol * chi2):
                     done_count += 1
                 else:
@@ -638,9 +601,7 @@ class Ps2dStyleLevenbergMarquardt:
         except np.linalg.LinAlgError:
             covariance = np.eye(n_params) * np.inf
 
-        # ═══════════════════════════════════════════════════════════════════
         # DENORMALIZATION: Transform back to physical units
-        # ═══════════════════════════════════════════════════════════════════
         # Parameters: p_physical = p_norm * scales
         params_final = params * self.scales
 

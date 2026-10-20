@@ -9,10 +9,6 @@ PS2D Configuration Management
 
 This module provides centralized configuration for all PS2D 2D fitting parameters.
 Eliminates scattered constants across multiple files and makes nucleus switching trivial.
-
-Date: 2025-10-10
-Version: 1.0 - CENTRALIZED_CONFIG
-Author: Claude Code (architectural refactoring)
 """
 
 from contextlib import contextmanager
@@ -47,9 +43,7 @@ class PS2DConfig:
     # Master parameter dictionary
     NUCLEUS_PARAMS = {
         '15N': {
-            # ================================================================
             # Ellipse radii for data selection
-            # ================================================================
             # Used in fit_overlap_group_2d() for 2D region extraction
             'radF1': 0.4,              # Indirect dimension (15N) - reduced from PS2D 0.6
             'radF2': 0.04,             # Direct dimension (1H) - reduced from PS2D 0.06
@@ -59,9 +53,7 @@ class PS2DConfig:
             'radF1_selector': 0.6,     # ps2d_data_selector default (PS2D original)
             'radF2_selector': 0.06,    # ps2d_data_selector default (PS2D original)
 
-            # ================================================================
             # Overlap detection thresholds (elliptical region radii)
-            # ================================================================
             # Used in identify_overlap_clusters() for hierarchical clustering
             # Each peak has an elliptical region with these radii
             # Overlap distance multiplier controls aggressiveness (1.0 = strict, 2.0 = very aggressive)
@@ -70,9 +62,7 @@ class PS2DConfig:
             'overlap_threshold_y': 0.4,   # 15N dimension - radius of orange circle
             'overlap_distance_multiplier': 1.0,  # Aggressiveness: increase to catch more diagonal overlaps (try 1.5-2.0)
 
-            # ================================================================
             # Linewidth constraints (CRITICAL for convergence)
-            # ================================================================
             # Minimum allowed linewidths prevent collapse to unrealistic values
             # Set to ~50% of typical FWHM for each nucleus
             'min_linewidth_f1': 0.05,     # Minimum 15N linewidth (ppm)
@@ -88,31 +78,23 @@ class PS2DConfig:
             'max_linewidth_f1': 0.8,        # Max 15N linewidth (ppm) - 2× typical
             'max_linewidth_f2': 0.08,       # Max 1H linewidth (ppm) - 2× typical
 
-            # ================================================================
             # Heavy overlap threshold (contaminated cross-sections)
-            # ================================================================
             # When peaks are within this elliptical distance, their 1D cross-sections
             # are contaminated by neighbors, so use typical linewidths instead of measured FWHM
             'heavy_overlap_threshold': 1.5,  # Elliptical distance threshold for contaminated cross-sections
 
-            # ================================================================
             # Too-close threshold (spectral ambiguity requiring constraints)
-            # ================================================================
             # When peaks are within this elliptical distance, apply L/G ratio and
             # intensity ratio constraints to prevent unrealistic decompositions
             'tooclose_threshold': 0.8,       # Elliptical distance threshold for L/G and intensity constraints
 
-            # ================================================================
             # Detection search windows (nucleus-adaptive)
-            # ================================================================
             # Maximum distance from reference peak to search for detected peak
             # 15N: reaches a peak one 15N point (0.074 ppm at 600 MHz) off its reference
             'search_window_f1': 0.3,                # 15N search window (ppm)
             'search_window_f2': SEARCH_WINDOW_PPM,  # 1H search window (ppm)
 
-            # ================================================================
             # Position bounds (fitting movement limits)
-            # ================================================================
             # Maximum distance peaks can move from initial position during fitting
             'pos_margin_f1': 0.02,         # 15N position movement limit (ppm)
             'pos_margin_f2': 0.01,        # 1H position movement limit (ppm)
@@ -123,9 +105,7 @@ class PS2DConfig:
             'titration_pos_margin_f1': 0.3,   # 15N per-step movement limit (ppm)
             'titration_pos_margin_f2': 0.05,  # 1H per-step movement limit (ppm)
 
-            # ================================================================
             # Maximum drift from reference (cascade mode absolute bounds)
-            # ================================================================
             # In cascade mode, peaks can drift from spectrum to spectrum.
             # These limits enforce ABSOLUTE bounds relative to ORIGINAL reference.
             # Set enable_cascade_drift_limit=False in Expert Mode to disable this feature.
@@ -133,21 +113,15 @@ class PS2DConfig:
             'max_drift_f1': 0.025,         # Max 15N drift from original reference (ppm)
             'max_drift_f2': 0.005,         # Max 1H drift from original reference (ppm)
 
-            # ================================================================
             # Cluster size limits
-            # ================================================================
             'max_cluster_size': 20,       # Maximum peaks in overlap group
 
-            # ================================================================
             # Levenberg-Marquardt optimizer settings
-            # ================================================================
             'max_iterations': 500,        # Maximum LM iterations per stage
         },
 
         '13C': {
-            # ================================================================
             # 13C parameters - OPTIMIZED FOR PROPER R² CALCULATION
-            # ================================================================
             # 13C peaks: typical FWHM ~0.04-0.06 ppm (measured from spectrum)
             # Key insight: radF1 must be 3-4× peak width (like 15N) for R² to work
             # radF1/FWHM ratio = 0.15/0.05 = 3.0× (matches 15N's 4.0×)
@@ -181,31 +155,23 @@ class PS2DConfig:
             'max_linewidth_f1': 0.18,       # Max 13C linewidth (ppm) - 3× typical
             'max_linewidth_f2': 0.08,       # Max 1H linewidth (ppm) - 2× typical
 
-            # ================================================================
             # Heavy overlap threshold (contaminated cross-sections)
-            # ================================================================
             # When peaks are within this elliptical distance, their 1D cross-sections
             # are contaminated by neighbors, so use typical linewidths instead of measured FWHM
             'heavy_overlap_threshold': 1.5,  # Elliptical distance threshold for contaminated cross-sections
 
-            # ================================================================
             # Too-close threshold (spectral ambiguity requiring constraints)
-            # ================================================================
             # When peaks are within this elliptical distance, apply L/G ratio and
             # intensity ratio constraints to prevent unrealistic decompositions
             'tooclose_threshold': 0.8,       # Elliptical distance threshold for L/G and intensity constraints
 
-            # ================================================================
             # Detection search windows (nucleus-adaptive)
-            # ================================================================
             # Maximum distance from reference peak to search for detected peak
             # 13C: the 15N window in 13C linewidths, 0.3 x radF1 0.15/0.4, to 0.01 ppm
             'search_window_f1': 0.11,               # 13C search window (ppm)
             'search_window_f2': SEARCH_WINDOW_PPM,  # 1H search window (ppm)
 
-            # ================================================================
             # Position bounds (fitting movement limits)
-            # ================================================================
             # Maximum distance peaks can move from initial position during fitting
             'pos_margin_f1': 0.01,        # 13C position movement limit (ppm)
             'pos_margin_f2': 0.01,        # 1H position movement limit (ppm)
@@ -214,9 +180,7 @@ class PS2DConfig:
             'titration_pos_margin_f1': 0.3,   # 13C per-step movement limit (ppm)
             'titration_pos_margin_f2': 0.05,  # 1H per-step movement limit (ppm)
 
-            # ================================================================
             # Maximum drift from reference (cascade mode absolute bounds)
-            # ================================================================
             # In cascade mode, peaks can drift from spectrum to spectrum.
             # These limits enforce ABSOLUTE bounds relative to ORIGINAL reference.
             # Set enable_cascade_drift_limit=False in Expert Mode to disable this feature.
@@ -327,11 +291,9 @@ class PS2DConfig:
         >>> params['gap_threshold_x']  # Computed property
         0.05
         """
-        # Get base parameters from config dictionary
         result = {k: getattr(self, k)
                   for k in self.NUCLEUS_PARAMS[self.nucleus_type].keys()}
 
-        # Add computed properties
         result['gap_threshold_x'] = self.gap_threshold_x
         result['gap_threshold_y'] = self.gap_threshold_y
 
@@ -355,9 +317,7 @@ class PS2DConfig:
             return 1.0  # Default to no scaling
 
 
-# ============================================================================
 # Global configuration instance (singleton pattern)
-# ============================================================================
 
 _ps2d_config = PS2DConfig('15N')  # Default to 15N
 
@@ -464,9 +424,7 @@ def applied_ps2d_config(values: Optional[Dict[str, Any]]):
         vars(_ps2d_config).update(saved)
 
 
-# ============================================================================
 # Convenience functions for parameter access
-# ============================================================================
 
 def get_ellipse_radii() -> tuple:
     """Get current ellipse radii (radF1, radF2)"""
@@ -500,9 +458,7 @@ def distance_in_linewidths(delta_f2, delta_f1):
     return np.sqrt((delta_f2 / config.radF2)**2 + (delta_f1 / config.radF1)**2)
 
 
-# ============================================================================
 # Module exports
-# ============================================================================
 
 __all__ = [
     'PS2DConfig',
@@ -520,16 +476,13 @@ __all__ = [
 ]
 
 
-# ============================================================================
 # Testing and validation
-# ============================================================================
 
 if __name__ == "__main__":
     print("=" * 70)
     print("PS2D Configuration Module - Test Suite")
     print("=" * 70)
 
-    # Test 1: Default configuration
     print("\n--- Test 1: Default Configuration (15N) ---")
     config_15n = get_ps2d_config()
     print(config_15n)
@@ -537,7 +490,6 @@ if __name__ == "__main__":
     print(f"radF1: {config_15n.radF1}, radF2: {config_15n.radF2}")
     print(f"min_linewidth_f1: {config_15n.min_linewidth_f1}")
 
-    # Test 2: Switch to 13C
     print("\n--- Test 2: Switch to 13C Configuration ---")
     config_13c = set_ps2d_config('13C')
     print(config_13c)
@@ -546,7 +498,6 @@ if __name__ == "__main__":
     print(f"min_linewidth_f1: {config_13c.min_linewidth_f1}")
     print(f"Scaling factor: {config_13c.get_scaling_factor()}")
 
-    # Test 3: Verify scaling relationships
     print("\n--- Test 3: Verify Scaling (15N vs 13C) ---")
     config_15n = PS2DConfig('15N')
     config_13c = PS2DConfig('13C')
@@ -556,19 +507,17 @@ if __name__ == "__main__":
     print(f"overlap_y:  15N={config_15n.overlap_threshold_y:.3f}, 13C={config_13c.overlap_threshold_y:.3f}, ratio={config_13c.overlap_threshold_y/config_15n.overlap_threshold_y:.2f}")
     print(f"min_lw_f1:  15N={config_15n.min_linewidth_f1:.3f}, 13C={config_13c.min_linewidth_f1:.3f}, ratio={config_13c.min_linewidth_f1/config_15n.min_linewidth_f1:.2f}")
 
-    # Test 4: Dictionary export
     print("\n--- Test 4: Dictionary Export ---")
     params_dict = config_13c.to_dict()
     print(f"Exported {len(params_dict)} parameters:")
     for key, value in list(params_dict.items())[:5]:
         print(f"  {key}: {value}")
 
-    # Test 5: Error handling
     print("\n--- Test 5: Error Handling ---")
     try:
         bad_config = PS2DConfig('17O')
     except ValueError as e:
-        print(f"✅ Correctly caught error: {e}")
+        print(f"Correctly caught error: {e}")
 
     print("\n" + "=" * 70)
     print("All tests passed!")

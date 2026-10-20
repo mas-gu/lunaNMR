@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ABOUTME: Peak Navigator component for interactive peak list display and navigation
-# ABOUTME: Qt/PySide6 port from CustomTkinter version with improved signal/slot architecture
+# ABOUTME: Qt table widget emitting selection, prev/next navigation and add/edit/delete signals
 
 import logging
 
@@ -17,9 +17,6 @@ Features:
     - Peak editing capabilities (add, edit, delete, save)
     - Quality indicators (good fit, warning, failed)
     - Signal-based event handling for integration with main GUI
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 from typing import Optional, List, Dict, Any
@@ -85,7 +82,6 @@ class PeakNavigator(QWidget):
         self.navigation_enabled: bool = False
         self.current_navigation_index: Optional[int] = None
 
-        # Setup UI
         self._setup_ui()
 
     def _setup_ui(self):
@@ -106,7 +102,6 @@ class PeakNavigator(QWidget):
         # Control buttons
         self._create_control_buttons(layout)
 
-        # Edit buttons (for detected peaks)
         self._create_edit_buttons(layout)
 
     def _create_header(self, layout: QVBoxLayout):
@@ -145,23 +140,19 @@ class PeakNavigator(QWidget):
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["Assignment", "X (1H)", "Y", "R²"])
 
-        # Configure table behavior
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
-        # Configure columns
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Assignment
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # X
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Y
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # R²
 
-        # Connect selection signal
         self.table.itemSelectionChanged.connect(self._on_peak_selected)
 
-        # Set minimum height
         self.table.setMinimumHeight(400)
 
         layout.addWidget(self.table)
@@ -189,7 +180,6 @@ class PeakNavigator(QWidget):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(SPACING_XS)
 
-        # Refresh button
         self.refresh_btn = self._create_button("🔄", BUTTON_WIDTH_ICON, is_secondary=True)
         self.refresh_btn.clicked.connect(self.refresh_peak_list)
         button_layout.addWidget(self.refresh_btn)
@@ -207,7 +197,6 @@ class PeakNavigator(QWidget):
         self.analyze_btn.clicked.connect(self._analyze_selected_peak)
         button_layout.addWidget(self.analyze_btn)
 
-        # Next button
         self.next_btn = self._create_button("▶", BUTTON_WIDTH_ICON, is_secondary=True)
         self.next_btn.clicked.connect(self._navigate_next)
         self.next_btn.setEnabled(False)
@@ -222,22 +211,18 @@ class PeakNavigator(QWidget):
         edit_layout = QHBoxLayout()
         edit_layout.setSpacing(SPACING_XS)
 
-        # Edit button
         self.edit_btn = self._create_button("✏️", BUTTON_WIDTH_ICON, is_secondary=True)
         self.edit_btn.clicked.connect(self._edit_selected_peak)
         edit_layout.addWidget(self.edit_btn)
 
-        # Delete button
         self.delete_btn = self._create_button("🗑️", BUTTON_WIDTH_ICON, is_destructive=True)
         self.delete_btn.clicked.connect(self._delete_selected_peak)
         edit_layout.addWidget(self.delete_btn)
 
-        # Add button
         self.add_btn = self._create_button("➕", BUTTON_WIDTH_ICON, is_primary=True)
         self.add_btn.clicked.connect(self._add_new_peak)
         edit_layout.addWidget(self.add_btn)
 
-        # Save button
         self.save_btn = self._create_button("💾", BUTTON_WIDTH_ICON, is_primary=True)
         self.save_btn.clicked.connect(self._save_peak_changes)
         edit_layout.addWidget(self.save_btn)
@@ -246,7 +231,6 @@ class PeakNavigator(QWidget):
 
         layout.addLayout(edit_layout)
 
-        # Update button states
         self._update_edit_button_states()
 
     def _create_button(
@@ -273,7 +257,6 @@ class PeakNavigator(QWidget):
         btn.setFixedWidth(width)
         btn.setMinimumHeight(28)
 
-        # Apply styling based on button type
         if is_primary:
             btn.setStyleSheet(f"""
                 QPushButton {{
@@ -331,9 +314,7 @@ class PeakNavigator(QWidget):
 
         return btn
 
-    # ============================================================================
     # Event Handlers
-    # ============================================================================
 
     def _on_peak_type_changed(self, text: str):
         """Handle peak type dropdown selection change."""
@@ -348,7 +329,6 @@ class PeakNavigator(QWidget):
 
         row = selected_rows[0].row()
 
-        # Get peak data
         current_peaks = self._get_current_peak_list()
         if row < 0 or row >= len(current_peaks):
             return
@@ -357,22 +337,17 @@ class PeakNavigator(QWidget):
         if len(peak) < 3:
             return
 
-        # Update state
         self.selected_peak_index = row
         self.current_navigation_index = row
 
-        # Extract coordinates
         assignment = peak[0]
         x_coord = float(peak[1])
         y_coord = float(peak[2])
 
-        # Update status
         self.status_label.setText(f"Selected: {assignment} ({x_coord:.3f}, {y_coord:.1f})")
 
-        # Emit signal for main GUI
         self.peak_selected.emit(row)
 
-        # Update button states
         self._update_edit_button_states()
         self._update_navigation_button_states()
 
@@ -385,7 +360,6 @@ class PeakNavigator(QWidget):
         if not current_peaks or len(current_peaks) <= 1:
             return
 
-        # Get current index
         current_index = self.current_navigation_index
         if current_index is None:
             current_index = self.selected_peak_index if self.selected_peak_index is not None else 0
@@ -403,7 +377,6 @@ class PeakNavigator(QWidget):
         if not current_peaks or len(current_peaks) <= 1:
             return
 
-        # Get current index
         current_index = self.current_navigation_index
         if current_index is None:
             current_index = self.selected_peak_index if self.selected_peak_index is not None else 0
@@ -422,15 +395,12 @@ class PeakNavigator(QWidget):
         if not current_peaks or peak_index < 0 or peak_index >= len(current_peaks):
             return
 
-        # Update navigation state
         self.current_navigation_index = peak_index
         self.selected_peak_index = peak_index
 
-        # Select the row in table
         self.table.selectRow(peak_index)
         self.table.scrollToItem(self.table.item(peak_index, 0))
 
-        # Trigger analysis
         self._analyze_selected_peak()
 
     def _analyze_selected_peak(self):
@@ -443,7 +413,6 @@ class PeakNavigator(QWidget):
             )
             return
 
-        # Emit signal with peak type and index
         self.peak_analysis_requested.emit(self.selected_peak_type, self.selected_peak_index)
 
     def _edit_selected_peak(self):
@@ -464,26 +433,21 @@ class PeakNavigator(QWidget):
             )
             return
 
-        # Get current peak data
         peak = self.detected_peaks[self.selected_peak_index]
         assignment = str(peak[0])
         x_coord = float(peak[1])
         y_coord = float(peak[2])
 
-        # Open edit dialog
         dialog = PeakEditDialog(self, assignment, x_coord, y_coord)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_assignment, new_x, new_y = dialog.get_values()
 
-            # Update peak data
             self.detected_peaks[self.selected_peak_index][0] = new_assignment
             self.detected_peaks[self.selected_peak_index][1] = new_x
             self.detected_peaks[self.selected_peak_index][2] = new_y
 
-            # Refresh display
             self.refresh_peak_list()
 
-            # Emit signal
             new_values = {
                 'assignment': new_assignment,
                 'x_coord': new_x,
@@ -509,7 +473,6 @@ class PeakNavigator(QWidget):
             )
             return
 
-        # Get peak info for confirmation
         peak = self.detected_peaks[self.selected_peak_index]
         assignment = str(peak[0])
 
@@ -523,14 +486,11 @@ class PeakNavigator(QWidget):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            # Store index before clearing
             deleted_index = self.selected_peak_index
 
-            # Remove from list
             del self.detected_peaks[self.selected_peak_index]
             self.selected_peak_index = None
 
-            # Refresh display
             self.refresh_peak_list()
 
             # Emit signal for main window to sync with integrator
@@ -551,7 +511,6 @@ class PeakNavigator(QWidget):
             # Add to reference peaks list (format: [assignment, x, y, height, r_squared])
             self.reference_peaks.append([new_assignment, new_x, new_y, "", None])
 
-            # Switch to reference view and refresh
             self.selected_peak_type = "reference"
             self.refresh_peak_list()
 
@@ -586,7 +545,6 @@ class PeakNavigator(QWidget):
             from datetime import datetime
             from PySide6.QtWidgets import QFileDialog
 
-            # Generate default filename with timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             prefix = "reference_peaks" if is_reference else "detected_peaks"
             default_filename = f"{prefix}_{timestamp}.txt"
@@ -599,10 +557,8 @@ class PeakNavigator(QWidget):
                 if nmr_path and os.path.exists(nmr_path):
                     default_dir = os.path.dirname(nmr_path)
 
-            # Combine directory and filename
             default_path = os.path.join(default_dir, default_filename) if default_dir else default_filename
 
-            # Open file dialog for saving
             filename, _ = QFileDialog.getSaveFileName(
                 self,
                 f"Export {type_label} Peak List",
@@ -613,7 +569,6 @@ class PeakNavigator(QWidget):
             if not filename:
                 return  # User cancelled
 
-            # Prepare peak data for export
             peak_data = []
             for i, peak in enumerate(peaks):
                 assignment = peak[0]
@@ -646,10 +601,8 @@ class PeakNavigator(QWidget):
 
             # Write to file in standard peak list format
             with open(filename, 'w', encoding='utf-8') as f:
-                # Write header
                 f.write("Assignment, Position_X, Position_Y, Height\n")
 
-                # Write peak data
                 for peak in peak_data:
                     assignment = peak['Assignment']
                     x = peak['Position_X']
@@ -681,9 +634,7 @@ class PeakNavigator(QWidget):
                 f"Failed to export peaks:\n{str(e)}"
             )
 
-    # ============================================================================
     # Public API
-    # ============================================================================
 
     def load_reference_peaks(self, peak_data: Any):
         """Load reference peaks data.
@@ -697,7 +648,6 @@ class PeakNavigator(QWidget):
             return
 
         try:
-            # Handle pandas DataFrame
             if hasattr(peak_data, 'iloc') and hasattr(peak_data, 'columns'):
                 for i, row in peak_data.iterrows():
                     assignment = row.get('Assignment', f"Ref{i+1}")
@@ -709,8 +659,7 @@ class PeakNavigator(QWidget):
                     self.reference_peaks.append([assignment, x_coord, y_coord, height, r_squared,
                                                  peak_quality_label(row)])
 
-            # Handle numpy array or list
-            # v0.9 format from main_window: [assignment, x_coord, y_coord, height, peak_id]
+            # [assignment, x_coord, y_coord, height, peak_id]
             elif hasattr(peak_data, 'shape') or isinstance(peak_data, (list, tuple)):
                 for i, peak in enumerate(peak_data):
                     if len(peak) >= 3:
@@ -731,7 +680,6 @@ class PeakNavigator(QWidget):
         except Exception as e:
             print(f"Peak Navigator: Error loading reference peaks: {e}")
 
-        # Refresh if currently showing reference peaks
         if self.selected_peak_type == "reference":
             self.refresh_peak_list()
 
@@ -749,7 +697,6 @@ class PeakNavigator(QWidget):
             return
 
         try:
-            # Handle list of dictionaries (fit results format)
             if isinstance(fitted_peaks, list) and fitted_peaks and isinstance(fitted_peaks[0], dict):
                 for i, peak in enumerate(fitted_peaks):
                     # Support multiple key formats for coordinates
@@ -764,7 +711,6 @@ class PeakNavigator(QWidget):
                         self.detected_peaks.append([assignment, float(x_coord), float(y_coord), height, i, r_squared,
                                                     peak_quality_label(peak)])
 
-            # Handle pandas DataFrame
             elif hasattr(fitted_peaks, 'iloc') and hasattr(fitted_peaks, 'columns'):
                 for i, row in fitted_peaks.iterrows():
                     assignment = row.get('Assignment', f"Det{i+1}")
@@ -789,14 +735,11 @@ class PeakNavigator(QWidget):
 
     def refresh_peak_list(self):
         """Refresh the peak list display."""
-        # Clear table
         self.table.setRowCount(0)
 
-        # Get current peak list
         current_peaks = self._get_current_peak_list()
         peak_type_name = "Reference Peaks" if self.selected_peak_type == "reference" else "Detected Peaks"
 
-        # Populate table
         for i, peak in enumerate(current_peaks):
             if len(peak) < 3:
                 continue
@@ -820,11 +763,9 @@ class PeakNavigator(QWidget):
             quality_symbol, row_color = navigator_row_display(quality)
             assignment_display = f"{quality_symbol} {assignment}" if quality_symbol else assignment
 
-            # Insert row
             row = self.table.rowCount()
             self.table.insertRow(row)
 
-            # Create items
             assignment_item = QTableWidgetItem(assignment_display)
             x_item = QTableWidgetItem(f"{x_coord:.2f}")
             y_item = QTableWidgetItem(f"{y_coord:.1f}")
@@ -839,17 +780,14 @@ class PeakNavigator(QWidget):
                 for item in [assignment_item, x_item, y_item, r2_item]:
                     item.setBackground(row_color)
 
-            # Add items to table
             self.table.setItem(row, 0, assignment_item)
             self.table.setItem(row, 1, x_item)
             self.table.setItem(row, 2, y_item)
             self.table.setItem(row, 3, r2_item)
 
-        # Update status
         count = len(current_peaks)
         self.status_label.setText(f"{peak_type_name}: {count} peak{'s' if count != 1 else ''}")
 
-        # Update button states
         self._update_edit_button_states()
         self._update_navigation_button_states()
 
@@ -862,7 +800,6 @@ class PeakNavigator(QWidget):
         if not fitted_results:
             return
 
-        # Create mapping of assignments to results
         height_map = {}
         status_map = {}
 
@@ -881,7 +818,6 @@ class PeakNavigator(QWidget):
                     'height_available': bool(height)
                 }
 
-        # Update detected peaks
         for i, peak in enumerate(self.detected_peaks):
             assignment = str(peak[0])
             if assignment in height_map:
@@ -900,7 +836,6 @@ class PeakNavigator(QWidget):
                     display_height = height_value
 
                 # Update peak data: [assignment, x, y, height, peak_id?, r_squared, quality]
-                # Ensure we have at least 4 elements
                 while len(self.detected_peaks[i]) < 4:
                     self.detected_peaks[i].append("")
                 self.detected_peaks[i][3] = display_height
@@ -911,7 +846,6 @@ class PeakNavigator(QWidget):
                 self.detected_peaks[i][5] = r_squared
                 self.detected_peaks[i][6] = status['quality']
 
-        # Update reference peaks similarly
         for i, peak in enumerate(self.reference_peaks):
             assignment = str(peak[0])
             if assignment in height_map:
@@ -930,7 +864,6 @@ class PeakNavigator(QWidget):
                     display_height = height_value
 
                 # Update peak data: [assignment, x, y, height, r_squared, quality]
-                # Ensure we have at least 4 elements
                 while len(self.reference_peaks[i]) < 4:
                     self.reference_peaks[i].append("")
                 self.reference_peaks[i][3] = display_height
@@ -941,12 +874,9 @@ class PeakNavigator(QWidget):
                 self.reference_peaks[i][4] = r_squared
                 self.reference_peaks[i][5] = status['quality']
 
-        # Refresh display
         self.refresh_peak_list()
 
-    # ============================================================================
     # Helper Methods
-    # ============================================================================
 
     def _get_current_peak_list(self) -> List[List[Any]]:
         """Get currently active peak list."""
@@ -1027,7 +957,6 @@ class PeakEditDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(300)
 
-        # Create form
         layout = QVBoxLayout(self)
         form = QFormLayout()
 

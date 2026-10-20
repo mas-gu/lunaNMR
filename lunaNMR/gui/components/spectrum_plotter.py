@@ -17,9 +17,6 @@ Key Features:
 - Interactive zoom and pan via matplotlib toolbar
 - Crosshair and peak highlighting
 - Configurable colorbar display
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import numpy as np
@@ -47,12 +44,10 @@ class SpectrumPlotter(MatplotlibWidget):
     Inherits from MatplotlibWidget for consistent matplotlib integration.
 
     Signals:
-        peak_clicked: Emitted when a peak is clicked (x_ppm, y_ppm) [legacy]
         peak_edit_requested: Emitted when modifier+click for peak editing (x_ppm, y_ppm, modifiers)
         peak_select_requested: Emitted when middle-click to select peak for moving (x_ppm, y_ppm)
     """
 
-    peak_clicked = Signal(float, float)
     peak_edit_requested = Signal(float, float, object)  # x_ppm, y_ppm, Qt.KeyboardModifiers
     peak_select_requested = Signal(float, float)  # x_ppm, y_ppm - middle-click selection
     peak_left_click_requested = Signal(float, float)  # x_ppm, y_ppm - left-click (no drag)
@@ -71,7 +66,6 @@ class SpectrumPlotter(MatplotlibWidget):
         """
         super().__init__(parent=parent, toolbar=toolbar, figsize=figsize, tight_layout=False)
 
-        # Store references for compatibility with original API
         self.fig = self.figure
         self.ax = self.axes
 
@@ -85,10 +79,8 @@ class SpectrumPlotter(MatplotlibWidget):
         # Store initial axes position to prevent shrinking
         self.initial_axes_position = self.ax.get_position()
 
-        # Calculate fixed positioning for axes and colorbar
         self._setup_fixed_layout()
 
-        # Plot settings
         self.settings = {
             'contour_levels': 15,
             'colormap': 'viridis',
@@ -97,7 +89,6 @@ class SpectrumPlotter(MatplotlibWidget):
             'alpha': 0.7
         }
 
-        # Setup navigation handler for pan/zoom
         self._nav_handler = NMRNavigationHandler()
         self._nav_handler.attach(self)
         self._nav_handler.on_peak_edit = self._on_peak_edit_request
@@ -112,10 +103,8 @@ class SpectrumPlotter(MatplotlibWidget):
         self._selection_rectangle = None  # Rubber-band rectangle during drag
         self._multi_selection_highlights = []  # List of highlight patches for multi-selected peaks
 
-        # Connect area selection callbacks
         self._nav_handler.on_area_select = self._on_area_select_request
         self._nav_handler.on_rect_drag = self._on_rect_drag_update
-        # Connect keyboard action callbacks
         self._nav_handler.on_escape = self._on_escape_request
         self._nav_handler.on_delete = self._on_delete_request
 
@@ -141,14 +130,11 @@ class SpectrumPlotter(MatplotlibWidget):
             self.canvas.draw()
             return
 
-        # Clear previous plot
         self.ax.clear()
         self.peak_annotations = []
 
-        # Update settings
         self.settings.update(kwargs)
 
-        # Create coordinate grids
         X, Y = np.meshgrid(integrator.ppm_x_axis, integrator.ppm_y_axis)
         data_abs = np.abs(integrator.nmr_data)
 
@@ -164,7 +150,6 @@ class SpectrumPlotter(MatplotlibWidget):
             alpha=self.settings['alpha']
         )
 
-        # Set up axes
         self.ax.set_xlabel('¹H Chemical Shift (ppm)', fontsize='small')
         self.ax.set_ylabel('¹⁵N/¹³C Chemical Shift (ppm)', fontsize='small')
         self.ax.set_title('lunaNMR v1.0', fontsize='small', fontweight='bold')
@@ -172,7 +157,6 @@ class SpectrumPlotter(MatplotlibWidget):
         self._ensure_nmr_axis_orientation()
         self.ax.grid(True, alpha=0.3)
 
-        # Add colorbar if requested
         if self.settings['show_colorbar'] and self.contour_plot:
             self._create_colorbar_safely()
 
@@ -191,12 +175,10 @@ class SpectrumPlotter(MatplotlibWidget):
             np.ndarray: Contour levels
         """
         if 'contour_min_level' in kwargs and 'contour_levels' in kwargs and 'contour_increment' in kwargs:
-            # Use GUI-specified parameters
             min_level = kwargs['contour_min_level'] * np.max(data_abs)
             num_levels = kwargs['contour_levels']
             increment = kwargs['contour_increment']
 
-            # Generate levels using increment method
             levels = []
             current_level = min_level
 
@@ -213,7 +195,6 @@ class SpectrumPlotter(MatplotlibWidget):
                         break
                     levels.append(level)
             else:
-                # Use multiplicative increment for increment > 1.0
                 for i in range(num_levels):
                     if current_level > np.max(data_abs):
                         break
@@ -226,7 +207,6 @@ class SpectrumPlotter(MatplotlibWidget):
             levels = np.unique(levels)
             levels = np.sort(levels)
         else:
-            # Default behavior
             if hasattr(integrator, 'threshold') and integrator.threshold > 0:
                 min_level = integrator.threshold
             else:
@@ -256,7 +236,6 @@ class SpectrumPlotter(MatplotlibWidget):
         main_axes_pos = [0.12, 0.15, 0.75, 0.75]  # Leave space for colorbar
         colorbar_pos = [0.89, 0.15, 0.03, 0.75]   # Fixed colorbar position
 
-        # Store positions
         self.main_axes_position = main_axes_pos
         self.colorbar_position = colorbar_pos
 
@@ -269,7 +248,6 @@ class SpectrumPlotter(MatplotlibWidget):
                    len(self.contour_plot.collections) > 0):
                 return
 
-            # Remove existing colorbar if it exists
             if self.colorbar is not None:
                 try:
                     if hasattr(self.colorbar, 'ax') and self.colorbar.ax in self.fig.axes:
@@ -279,20 +257,16 @@ class SpectrumPlotter(MatplotlibWidget):
                 self.colorbar = None
                 self.colorbar_ax = None
 
-            # Set main axes to fixed position
             self.ax.set_position(self.main_axes_position)
 
-            # Create dedicated colorbar axes with fixed position
             self.colorbar_ax = self.fig.add_axes(self.colorbar_position)
 
-            # Create colorbar in the dedicated axes
             self.colorbar = self.fig.colorbar(
                 self.contour_plot,
                 cax=self.colorbar_ax,
                 label='Intensity'
             )
 
-            # Ensure main axes position stays fixed
             self.ax.set_position(self.main_axes_position)
 
         except Exception:
@@ -317,7 +291,6 @@ class SpectrumPlotter(MatplotlibWidget):
                 - show_ellipses: Show PS2D elliptical windows
                 - nucleus_type: '15N' or '13C' for PS2D config
         """
-        # Clear previous annotations
         for annotation in self.peak_annotations:
             try:
                 annotation.remove()
@@ -330,11 +303,9 @@ class SpectrumPlotter(MatplotlibWidget):
         if not peak_list:
             peak_list = getattr(integrator, 'integration_results', [])
 
-        # Plot detected/fitted peaks with quality-based color coding
         if show_detected and peak_list:
             self._plot_detected_peaks(peak_list)
 
-        # Plot reference peaks (blue crosses)
         if show_assigned and hasattr(integrator, 'peak_list') and integrator.peak_list is not None:
             self._plot_reference_peaks(integrator.peak_list)
 
@@ -344,7 +315,6 @@ class SpectrumPlotter(MatplotlibWidget):
         if show_ellipses:
             self._plot_ps2d_ellipses(integrator, nucleus_type)
 
-        # Add legend
         handles, labels = self.ax.get_legend_handles_labels()
         if handles:
             self.ax.legend(loc='upper right', fontsize='small')
@@ -376,18 +346,14 @@ class SpectrumPlotter(MatplotlibWidget):
                 colors.append(quality_color(peak_quality_label(p)))
 
         if detected_x:
-            # Plot with quality-based colors
             self.ax.scatter(detected_x, detected_y, c=colors, marker='o', s=60,
                           alpha=0.8, edgecolors='black', linewidth=1, zorder=5,
                           label=f'Detected ({len(detected_x)})')
 
-            # Add annotations with matching colors
             for peak, color in zip(peak_list, colors):
-                # Use flexible field name lookup for assignment
                 assignment_label = (peak.get('assignment') or
                                   peak.get('Assignment') or
                                   str(peak.get('peak_number', '')))
-                # Use flexible field name lookup for coordinates
                 x = peak.get('ppm_x') or peak.get('x_ppm') or peak.get('peak_x') or peak.get('center_x')
                 y = peak.get('ppm_y') or peak.get('y_ppm') or peak.get('peak_y') or peak.get('center_y')
 
@@ -410,14 +376,12 @@ class SpectrumPlotter(MatplotlibWidget):
             peak_df: DataFrame with reference peak positions
         """
         try:
-            # Find X coordinate column (1H dimension)
             x_col = None
             for col_name in ['Position_X', 'position_x', 'pos_x', 'x_ppm', 'chemical_shift_x', 'H1', '1H']:
                 if col_name in peak_df.columns:
                     x_col = col_name
                     break
 
-            # Find Y coordinate column (15N/13C dimension)
             y_col = None
             for col_name in ['Position_Y', 'position_y', 'pos_y', 'y_ppm', 'chemical_shift_y', 'N15', '15N', 'C13', '13C']:
                 if col_name in peak_df.columns:
@@ -433,7 +397,6 @@ class SpectrumPlotter(MatplotlibWidget):
                                   alpha=0.6, linewidth=2, zorder=4,
                                   label=f'Reference ({len(ref_x)})')
 
-                    # Add peak numbers as annotations
                     for idx, (x, y) in enumerate(zip(ref_x, ref_y)):
                         # Get assignment if available, otherwise use peak number
                         if 'Assignment' in peak_df.columns:
@@ -473,7 +436,6 @@ class SpectrumPlotter(MatplotlibWidget):
         """
         from matplotlib.patches import Ellipse as EllipsePatch
 
-        # Get PS2D configuration
         try:
             from lunaNMR.core.ps2d_config import get_ps2d_config
             config = get_ps2d_config()
@@ -487,7 +449,6 @@ class SpectrumPlotter(MatplotlibWidget):
             print(f"⚠️  Could not load PS2D config: {e}")
             return
 
-        # Get peak positions - try multiple sources
         peaks_to_plot = []
 
         # Try detected/fitted peaks (list of dicts) - HIGHEST PRIORITY
@@ -508,7 +469,6 @@ class SpectrumPlotter(MatplotlibWidget):
             try:
                 peak_df = integrator.peak_list
 
-                # Find position columns
                 x_col, y_col = None, None
                 for col_name in ['Position_X', 'position_x', 'pos_x', 'x_ppm', '1H']:
                     if col_name in peak_df.columns:
@@ -532,7 +492,6 @@ class SpectrumPlotter(MatplotlibWidget):
             except Exception as e:
                 print(f"⚠️  Could not extract peaks from peak_list: {e}")
 
-        # Plot ellipses
         if peaks_to_plot:
             for peak in peaks_to_plot:
                 # Fitting region ellipse (red, dashed)
@@ -592,14 +551,12 @@ class SpectrumPlotter(MatplotlibWidget):
         """
         self.ax.set_xlim(x_center - x_range/2, x_center + x_range/2)
         self.ax.set_ylim(y_center - y_range/2, y_center + y_range/2)
-        # Ensure NMR convention: high ppm on left/bottom
         self._ensure_nmr_axis_orientation()
         self.canvas.draw()
 
     def reset_zoom(self):
         """Reset zoom to show full spectrum."""
         self.ax.autoscale()
-        # Ensure NMR convention: high ppm on left/bottom
         self._ensure_nmr_axis_orientation()
         self.canvas.draw()
 
@@ -638,8 +595,6 @@ class SpectrumPlotter(MatplotlibWidget):
         """
         # Emit signal for main window to handle peak editing
         self.peak_edit_requested.emit(x_ppm, y_ppm, modifiers)
-        # Also emit legacy signal for backward compatibility
-        self.peak_clicked.emit(x_ppm, y_ppm)
 
     def _on_peak_select_request(self, x_ppm: float, y_ppm: float):
         """
@@ -667,7 +622,6 @@ class SpectrumPlotter(MatplotlibWidget):
         """
         from matplotlib.patches import Ellipse
 
-        # Clear any existing highlight
         self.clear_selection_highlight()
 
         # Create highlight ellipse (width/height are full diameters, not radii)
@@ -708,16 +662,13 @@ class SpectrumPlotter(MatplotlibWidget):
         """
         from matplotlib.patches import Rectangle
 
-        # Clear existing rectangle
         self.clear_selection_rectangle()
 
-        # Calculate rectangle dimensions (handle any drag direction)
         left = min(x1, x2)
         bottom = min(y1, y2)
         width = abs(x2 - x1)
         height = abs(y2 - y1)
 
-        # Create rubber-band rectangle
         self._selection_rectangle = Rectangle(
             (left, bottom),
             width,
@@ -748,11 +699,9 @@ class SpectrumPlotter(MatplotlibWidget):
             x1, y1: First corner in ppm
             x2, y2: Second corner in ppm
         """
-        # Clear rubber-band rectangle
         self.clear_selection_rectangle()
         self.canvas.draw_idle()
 
-        # Emit signal for MainWindow to handle
         self.area_select_requested.emit(x1, y1, x2, y2)
 
     def show_multi_selection_highlights(self, peaks: list):
@@ -764,7 +713,6 @@ class SpectrumPlotter(MatplotlibWidget):
         """
         from matplotlib.patches import Ellipse
 
-        # Clear existing highlights
         self.clear_multi_selection_highlights()
 
         for peak_info in peaks:

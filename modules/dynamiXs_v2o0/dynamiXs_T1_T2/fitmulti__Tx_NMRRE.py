@@ -105,10 +105,8 @@ def bootstrap_errors(x, y, model, params, n_bootstrap=1000, fit_baseline=None):
         resampled_indices = np.random.randint(0, n, size=n)
         resampled_residuals = residuals[resampled_indices]
 
-        # Create synthetic data
         y_synthetic = y_fit + resampled_residuals
 
-        # Ensure positive values
         y_synthetic = np.maximum(y_synthetic, 1e-10)
 
         # Refit (unweighted)
@@ -129,7 +127,6 @@ def bootstrap_errors(x, y, model, params, n_bootstrap=1000, fit_baseline=None):
         except Exception:
             continue
 
-    # Return standard deviation of bootstrap distribution
     if len(a_values) < 10:
         # Not enough successful fits, fall back to covariance estimate
         a_err = result.params['A'].stderr if result.params['A'].stderr else np.nan
@@ -299,7 +296,6 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
     signal_units : str
         Units for signal axis
     """
-    # Filter successful fits for plotting
     successful_results = [r for r in results_list if r.get('success', False)]
 
     if not successful_results:
@@ -391,7 +387,6 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
         'fits': fits_data
     }
 
-    # Ensure output directory exists
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     with open(output_file, 'w') as f:
@@ -405,9 +400,7 @@ def main():
     Main function with configurable file handling and multiprocessing
     """
 
-    # ========================
     # CONFIGURATION SECTION
-    # ========================
 
     # Input file configuration
     input_csv_file = "T2_data_700.csv"  # Input CSV file path
@@ -427,25 +420,16 @@ def main():
     n_bootstrap = 1000  # Number of bootstrap iterations for error estimation
     error_method = 'analytical'  # 'analytical' (fast) or 'bootstrap' (robust)
 
-    # Plot configuration
     n_plots_per_figure = 20  # Number of plots per PDF page
 
     # Multiprocessing configuration
     n_processes = None  # Use None for automatic detection (80% of cores)
-    # n_processes = 4  # Or specify a specific number of processes
 
-    # Optional: Time scaling factor (uncomment if needed)
-    # time_scaling_factor = 1000  # Multiply time values by this factor
-
-    # ========================
     # END CONFIGURATION
-    # ========================
 
-    # Validate input file exists
     if not os.path.exists(input_csv_file):
         raise FileNotFoundError(f"Input file not found: {input_csv_file}")
 
-    # Determine number of processes
     if n_processes is None:
         n_processes = max(1, int(cpu_count() * 0.8))
 
@@ -490,7 +474,6 @@ def main():
         dropped_columns.extend(_dropped)
         y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()[:, _keep]  # Values to fit (rows 2+, columns 2+)
 
-    # Filter out dummy residues (case-insensitive)
     valid_mask = np.array([not str(name).lower().startswith('dummy') for name in residue_names])
     n_dummies = np.sum(~valid_mask)
     if n_dummies > 0:
@@ -501,7 +484,6 @@ def main():
     print(f"Loaded {len(residue_names)} residues with {len(x)} time points")
     print(f"Time range: {x.min():.3f} to {x.max():.3f} {time_units}")
 
-    # Prepare arguments for parallel processing
     print("Preparing parallel processing...")
     # Carried per call rather than read from the module global, so a caller
     # can choose and spawned workers cannot silently disagree.
@@ -525,7 +507,6 @@ def main():
     # Sort results by original index to maintain order
     results_list = sorted(results_list, key=lambda x: x['idx'])
 
-    # Remove idx from results for consistency
     for result in results_list:
         result.pop('idx', None)
 
@@ -540,13 +521,11 @@ def main():
         print(f"Failed fits: {len(failed_fits)}")
         print("Failed residues:", [r['residue'] for r in failed_fits])
 
-    # Create plots
     if successful_fits:
         print("Generating plots...")
         create_plots(results_list, output_prefix, n_plots_per_figure,
                      experiment_type, time_units, signal_units)
 
-    # Save results
     print(f"Saving results to {results_txt_file}...")
     save_results(results_list, results_txt_file, experiment_type)
 
@@ -607,13 +586,11 @@ def run_analysis_with_params(params, progress_callback=None):
     n_bootstrap = params.get('n_bootstrap', 1000)
     error_method = params.get('error_method', 'analytical')
 
-    # Plot configuration
     n_plots_per_figure = params.get('n_plots_per_figure', 20)
 
     # Multiprocessing configuration
     n_processes = max(1, int(cpu_count() * 0.8))
 
-    # Validate input file exists
     if not os.path.exists(input_csv_file):
         raise FileNotFoundError(f"Input file not found: {input_csv_file}")
 
@@ -634,7 +611,6 @@ def run_analysis_with_params(params, progress_callback=None):
     # Simple format has columns: Residue, delay1, delay2, ...
     header_row = raw_df.iloc[0].astype(str).tolist()
 
-    # Check for LunaNMR Fit Series format
     lunaNMR_columns = {'Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y'}
     # Columns whose header carries no delay: reported so a spectrum cannot go
     # missing from a series without anyone noticing.
@@ -644,7 +620,6 @@ def run_analysis_with_params(params, progress_callback=None):
     if detected_lunaNMR_cols:
         print(f"Detected LunaNMR Fit Series format (columns: {detected_lunaNMR_cols})")
 
-        # Find where the numeric delay columns start
         delay_start_idx = require_delay_start(header_row, lunaNMR_columns, input_csv_file)
 
         # Find the Assignment column index for residue names
@@ -669,7 +644,6 @@ def run_analysis_with_params(params, progress_callback=None):
         dropped_columns.extend(_dropped)
         y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()[:, _keep]  # Values to fit (rows 2+, columns 2+)
 
-    # Filter out dummy residues (case-insensitive)
     valid_mask = np.array([not str(name).lower().startswith('dummy') for name in residue_names])
     n_dummies = np.sum(~valid_mask)
     if n_dummies > 0:
@@ -685,7 +659,6 @@ def run_analysis_with_params(params, progress_callback=None):
     if progress_callback:
         progress_callback(0, total_residues, "", f"Loaded {total_residues} residues")
 
-    # Prepare arguments for parallel processing
     print("Preparing parallel processing...")
     # Carried per call rather than read from the module global, so a caller
     # can choose and spawned workers cannot silently disagree.
@@ -728,7 +701,6 @@ def run_analysis_with_params(params, progress_callback=None):
     # Sort results by original index to maintain order
     results_list = sorted(results_list, key=lambda x: x['idx'])
 
-    # Remove idx from results for consistency
     for result in results_list:
         result.pop('idx', None)
 
@@ -743,7 +715,6 @@ def run_analysis_with_params(params, progress_callback=None):
         print(f"Failed fits: {len(failed_fits)}")
         print("Failed residues:", [r['residue'] for r in failed_fits])
 
-    # Create plots
     if successful_fits:
         print("Generating plots...")
         if progress_callback:
@@ -751,17 +722,14 @@ def run_analysis_with_params(params, progress_callback=None):
         create_plots(results_list, output_prefix, n_plots_per_figure,
                      experiment_type, time_units, signal_units)
 
-    # Save results
     print(f"Saving results to {results_txt_file}...")
     if progress_callback:
         progress_callback(total_residues, total_residues, "", "Saving results...")
     save_results(results_list, results_txt_file, experiment_type)
 
-    # Save JSON data for interactive visualization
     json_folder = params.get('json_folder')
     json_file = None
     if json_folder:
-        # Create json folder if it doesn't exist
         os.makedirs(json_folder, exist_ok=True)
 
         # Construct JSON filename: field{N}_{T1|T2}_fit_data.json
@@ -800,7 +768,6 @@ def run_analysis_with_params(params, progress_callback=None):
 
     print("Multicore analysis completed successfully!")
 
-    # Return results summary
     return {
         'n_fitted': len(successful_fits),
         'dropped_columns': dropped_columns,

@@ -24,9 +24,7 @@ import pandas as pd
 from PySide6.QtCore import QThread, Signal, QObject
 
 
-# =============================================================================
 # BASE WORKER CLASS
-# =============================================================================
 
 class AnalysisWorker(QThread):
     """
@@ -95,9 +93,7 @@ class AnalysisWorker(QThread):
         self.error.emit(error_msg)
 
 
-# =============================================================================
 # GENERIC FUNCTION WORKER
-# =============================================================================
 
 class FunctionWorker(AnalysisWorker):
     """
@@ -160,9 +156,7 @@ class FunctionWorker(AnalysisWorker):
             self.emit_error(e)
 
 
-# =============================================================================
 # T1/T2 FITTING WORKER
-# =============================================================================
 
 @dataclass
 class T1T2FittingParams:
@@ -176,7 +170,7 @@ class T1T2FittingParams:
     When input_df or series_name is used, a temporary CSV file is created
     for the fitting module.
     """
-    input_file: str = ""  # CSV file path (legacy mode)
+    input_file: str = ""  # CSV file path (single-file mode)
     output_dir: str = ""
     experiment_type: str = "T1"  # "T1" or "T2"
     results_prefix: str = ""
@@ -223,13 +217,11 @@ class T1T2FittingWorker(AnalysisWorker):
             self.status.emit("Initializing fitting...")
             self.emit_progress("Loading data...", 5)
 
-            # Import the fitting module
             if self.params.multicore:
                 from dynamiXs_T1_T2 import fitmulti__Tx_NMRRE as fitting_module
             else:
                 from dynamiXs_T1_T2 import fit_Tx_NMRRE as fitting_module
 
-            # Determine input CSV file path
             # Priority: input_df > input_file
             if self.params.input_df is not None:
                 # Write DataFrame to temp file for fitting module
@@ -245,11 +237,9 @@ class T1T2FittingWorker(AnalysisWorker):
 
             self.emit_progress("Starting fit...", 10)
 
-            # Build output file paths
             output_prefix = os.path.join(self.params.output_dir, self.params.results_prefix)
             results_txt_file = f"{output_prefix}_fit_results.txt"
 
-            # Prepare parameters dictionary matching run_analysis_with_params() expected keys
             fit_params = {
                 'input_csv_file': input_csv_file,
                 'output_prefix': output_prefix,
@@ -264,14 +254,12 @@ class T1T2FittingWorker(AnalysisWorker):
                 'n_plots_per_figure': 20,
             }
 
-            # Add JSON export parameters if provided
             if self.params.json_folder:
                 fit_params['json_folder'] = self.params.json_folder
                 fit_params['field_name'] = "_".join(
                     p for p in (self.params.run_prefix, self.params.field_name) if p)
                 fit_params['field_freq'] = self.params.field_freq
 
-            # Create progress callback that emits signals
             def progress_callback(completed, total, residue_name, message):
                 if self._cancelled:
                     return
@@ -279,7 +267,6 @@ class T1T2FittingWorker(AnalysisWorker):
                 fitting_progress = int((completed / total) * 85) + 10
                 self.emit_progress(f"Fitting {residue_name} ({completed}/{total})", fitting_progress)
 
-            # Run the analysis with progress callback
             result = fitting_module.run_analysis_with_params(fit_params, progress_callback=progress_callback)
 
             if not self._cancelled:
@@ -297,7 +284,6 @@ class T1T2FittingWorker(AnalysisWorker):
         except Exception as e:
             self.emit_error(e)
         finally:
-            # Clean up temp file if created
             if temp_csv_path and os.path.exists(temp_csv_path):
                 try:
                     os.remove(temp_csv_path)
@@ -305,9 +291,7 @@ class T1T2FittingWorker(AnalysisWorker):
                     pass  # Best effort cleanup
 
 
-# =============================================================================
 # METHYL T2 BI-EXP WORKER
-# =============================================================================
 
 @dataclass
 class MethylT2FittingParams:
@@ -496,9 +480,7 @@ class MethylT2FittingWorker(AnalysisWorker):
                     pass
 
 
-# =============================================================================
 # SPECTRAL DENSITY WORKER
-# =============================================================================
 
 @dataclass
 class SpectralDensityParams:
@@ -543,11 +525,9 @@ class SpectralDensityWorker(AnalysisWorker):
             self.status.emit("Initializing spectral density analysis...")
             self.emit_progress("Loading data...", 10)
 
-            # Convert physical parameters to proper units
             rNH_meters = self.params.r_nh * 1e-10  # Angstroms to meters
             csaN_units = self.params.csa * 1e-6   # ppm to dimensionless
 
-            # Build output paths
             output_prefix = os.path.join(self.params.output_dir, self.params.results_prefix)
 
             self.emit_progress("Computing spectral densities...", 30)
@@ -562,7 +542,6 @@ class SpectralDensityWorker(AnalysisWorker):
                 else:
                     from dynamiXs_density_functions.ZZ_multi_2fields_density import DualFieldSpectralDensityAnalysis
 
-                # Create analyzer
                 analyzer = DualFieldSpectralDensityAnalysis(
                     field1_freq=self.params.field1_freq,
                     field2_freq=self.params.field2_freq,
@@ -572,7 +551,6 @@ class SpectralDensityWorker(AnalysisWorker):
 
                 self.emit_progress("Running dual-field analysis...", 50)
 
-                # Run analysis
                 results_df = analyzer.analyze_dual_field_csv(
                     csv_file1=self.params.input_file,
                     csv_file2=self.params.input_file2,
@@ -581,7 +559,6 @@ class SpectralDensityWorker(AnalysisWorker):
                     use_multiprocessing=True
                 )
 
-                # Save results
                 self.emit_progress("Saving results...", 80)
                 basic_csv = f"{output_prefix}_basic.csv"
                 detailed_csv = f"{output_prefix}_detailed.csv"
@@ -604,7 +581,6 @@ class SpectralDensityWorker(AnalysisWorker):
                 else:
                     from dynamiXs_density_functions.ZZ_multi_density import ReducedSpectralDensityAnalysis
 
-                # Create analyzer
                 analyzer = ReducedSpectralDensityAnalysis(
                     spectrometer_frequency=self.params.field1_freq,
                     rNH=rNH_meters,
@@ -613,7 +589,6 @@ class SpectralDensityWorker(AnalysisWorker):
 
                 self.emit_progress("Running single-field analysis...", 50)
 
-                # Run analysis
                 results_df = analyzer.analyze_csv(
                     csv_file=self.params.input_file,
                     use_monte_carlo_errors=self.params.monte_carlo,
@@ -621,7 +596,6 @@ class SpectralDensityWorker(AnalysisWorker):
                     use_multiprocessing=True
                 )
 
-                # Save results
                 self.emit_progress("Saving results...", 80)
                 output_csv = f"{output_prefix}_results.csv"
                 plots_pdf = f"{output_prefix}_plots.pdf"
@@ -643,9 +617,7 @@ class SpectralDensityWorker(AnalysisWorker):
             self.emit_error(e)
 
 
-# =============================================================================
 # INTEGRATED ANALYSIS WORKER
-# =============================================================================
 
 @dataclass
 class IntegratedAnalysisParams:
@@ -719,13 +691,11 @@ class IntegratedAnalysisWorker(AnalysisWorker):
         try:
             self.status.emit("Starting integrated analysis...")
 
-            # Import the integrated analysis pipeline
             from dynamiXs_integrated.integrated_analysis import (
                 IntegratedAnalysisPipeline,
                 IntegratedAnalysisParameters
             )
 
-            # Create pipeline parameters and set attributes
             pipeline_params = IntegratedAnalysisParameters()
 
             # Field 1 files and frequency
@@ -767,12 +737,10 @@ class IntegratedAnalysisWorker(AnalysisWorker):
             pipeline_params.output_prefix = self.params.results_prefix
             pipeline_params.json_folder = self.params.json_folder
 
-            # Define progress callback
             def progress_cb(msg, pct=None):
                 if not self._cancelled:
                     self.emit_progress(msg, pct)
 
-            # Create pipeline with progress callback and run
             pipeline = IntegratedAnalysisPipeline(pipeline_params, progress_callback=progress_cb)
             result = pipeline.run_complete_analysis()
 
@@ -784,9 +752,7 @@ class IntegratedAnalysisWorker(AnalysisWorker):
             self.emit_error(e)
 
 
-# =============================================================================
 # FILE LOADING WORKER
-# =============================================================================
 
 class FileLoadWorker(AnalysisWorker):
     """
@@ -821,12 +787,10 @@ class FileLoadWorker(AnalysisWorker):
 
             self.emit_progress(f"Loading {self.file_path}...", 20)
 
-            # Load the file
             df = pd.read_csv(self.file_path)
 
             self.emit_progress("Validating data...", 60)
 
-            # Run validation if provided
             if self.validator:
                 validation_result = self.validator(df)
                 if not validation_result.get('valid', True):
@@ -844,9 +808,7 @@ class FileLoadWorker(AnalysisWorker):
             self.emit_error(e)
 
 
-# =============================================================================
 # BATCH PROCESSING WORKER
-# =============================================================================
 
 class BatchProcessingWorker(AnalysisWorker):
     """
@@ -895,261 +857,3 @@ class BatchProcessingWorker(AnalysisWorker):
 
         except Exception as e:
             self.emit_error(e)
-
-
-# =============================================================================
-# SPECTRA PROCESSING WORKER (LunaNMR Integration)
-# =============================================================================
-
-@dataclass
-class SpectraProcessingParams:
-    """Parameters for NMR spectra processing via LunaNMR."""
-    experiment_folders: Dict[str, str]  # {experiment_type: folder_path}
-    peak_list_path: str
-    field_mhz: float
-    output_dir: str
-    intensity_column: str = 'height'  # 'height' or 'volume'
-    use_voigt: bool = True
-    use_parallel: bool = True
-    fix_positions: bool = False
-    fix_linewidths: bool = False
-
-
-class SpectraProcessingWorker(AnalysisWorker):
-    """
-    Worker for processing NMR spectra folders using LunaNMR.
-
-    This worker:
-    1. Runs LunaNMR series integration on each experiment folder
-    2. Converts the tidy CSV output to DynamiXs format
-    3. Returns paths to generated DynamiXs-compatible CSV files
-    """
-
-    def __init__(self, params: SpectraProcessingParams, parent: Optional[QObject] = None):
-        """
-        Initialize the spectra processing worker.
-
-        Args:
-            params: Processing parameters
-            parent: Parent QObject
-        """
-        super().__init__(parent)
-        self.params = params
-
-    def run(self):
-        """Execute the spectra processing pipeline."""
-        import os
-        import sys
-        from pathlib import Path
-
-        try:
-            self.status.emit("Initializing LunaNMR integration...")
-            self.emit_progress("Loading LunaNMR modules...", 5)
-
-            # Add lunaNMR to path
-            lunaNMR_root = Path(__file__).parent.parent.parent
-            if str(lunaNMR_root) not in sys.path:
-                sys.path.insert(0, str(lunaNMR_root))
-
-            from lunaNMR.utils.relaxation_data_bridge import RelaxationDataBridge
-            from lunaNMR.utils.delay_extractor import DelayExtractor
-
-            # Initialize bridge
-            bridge = RelaxationDataBridge(self.params.peak_list_path)
-            extractor = DelayExtractor()
-
-            # Create output directory
-            os.makedirs(self.params.output_dir, exist_ok=True)
-
-            results = {
-                'processed_experiments': [],
-                'output_files': {},
-                'errors': []
-            }
-
-            # Process each experiment type
-            experiments_to_process = list(self.params.experiment_folders.items())
-            total_experiments = len(experiments_to_process)
-
-            for idx, (exp_type, folder_path) in enumerate(experiments_to_process):
-                if self._cancelled:
-                    break
-
-                base_progress = int((idx / total_experiments) * 80) + 10
-                self.emit_progress(f"Processing {exp_type}...", base_progress)
-
-                try:
-                    if exp_type in ['T1', 'T2']:
-                        # T1/T2 processing: run series integration then convert
-                        output_file = self._process_t1_t2_folder(
-                            exp_type, folder_path, bridge, extractor, base_progress
-                        )
-                        results['output_files'][exp_type] = output_file
-                        results['processed_experiments'].append(exp_type)
-
-                    elif exp_type in ['hetNOE_sat', 'hetNOE_unsat']:
-                        # hetNOE: just extract intensities (no series fitting needed)
-                        output_file = self._process_hetnoe_folder(
-                            exp_type, folder_path, bridge, base_progress
-                        )
-                        results['output_files'][exp_type] = output_file
-                        results['processed_experiments'].append(exp_type)
-
-                except Exception as e:
-                    error_msg = f"{exp_type}: {str(e)}"
-                    results['errors'].append(error_msg)
-                    self.emit_progress(f"Error processing {exp_type}: {str(e)}", base_progress)
-
-            # Generate hetNOE ratio file if both sat and unsat were processed
-            if ('hetNOE_sat' in results['output_files'] and
-                'hetNOE_unsat' in results['output_files']):
-                try:
-                    self.emit_progress("Calculating hetNOE ratios...", 95)
-                    noe_output = self._calculate_hetnoe_ratio(
-                        results['output_files']['hetNOE_sat'],
-                        results['output_files']['hetNOE_unsat']
-                    )
-                    results['output_files']['hetNOE'] = noe_output
-                except Exception as e:
-                    results['errors'].append(f"hetNOE ratio: {str(e)}")
-
-            if not self._cancelled:
-                self.emit_progress("Processing complete!", 100)
-                self.finished.emit(results)
-
-        except Exception as e:
-            self.emit_error(e)
-
-    def _process_t1_t2_folder(
-        self,
-        exp_type: str,
-        folder_path: str,
-        bridge: 'RelaxationDataBridge',
-        extractor: 'DelayExtractor',
-        base_progress: int
-    ) -> str:
-        """
-        Process a T1 or T2 folder.
-
-        For now, this creates a mock tidy CSV from the folder contents.
-        Full LunaNMR integration would call MultiSpectrumProcessor here.
-        """
-        import os
-        import pandas as pd
-
-        # Scan folder for files with delays
-        files_with_delays = extractor.scan_folder(folder_path)
-
-        if not files_with_delays:
-            raise ValueError(f"No NMR files with delay patterns found in {folder_path}")
-
-        self.emit_progress(f"Found {len(files_with_delays)} {exp_type} spectra", base_progress + 2)
-
-        # For now, create a placeholder indicating integration is needed
-        # Full implementation would call:
-        #   from lunaNMR.processors.multi_spectrum_processor import MultiSpectrumProcessor
-        #   processor = MultiSpectrumProcessor(...)
-        #   processor.process_nmr_series(...)
-
-        # Create a stub tidy CSV for testing (in production, this comes from LunaNMR)
-        # This allows the GUI integration to proceed while full series integration is wired up
-
-        output_tidy = os.path.join(self.params.output_dir, f"{exp_type}_series_tidy.csv")
-        output_dynamixs = os.path.join(self.params.output_dir, f"{exp_type}_data.csv")
-
-        # Check if tidy file already exists (from previous LunaNMR run)
-        if os.path.exists(output_tidy):
-            self.emit_progress(f"Converting existing {exp_type} tidy CSV...", base_progress + 5)
-            result = bridge.convert_tidy_to_dynamixs_format(
-                tidy_csv_path=output_tidy,
-                output_csv_path=output_dynamixs,
-                intensity_column=self.params.intensity_column
-            )
-            self.emit_progress(
-                f"{exp_type}: {result['residue_count']} residues, {result['delay_count']} delays",
-                base_progress + 8
-            )
-            return output_dynamixs
-        else:
-            # No existing tidy file - would need to run series integration
-            raise ValueError(
-                f"Series integration not yet run for {exp_type}. "
-                f"Please run 'Fit Series' from LunaNMR first, or use the standalone "
-                f"series integration dialog."
-            )
-
-    def _process_hetnoe_folder(
-        self,
-        exp_type: str,
-        folder_path: str,
-        bridge: 'RelaxationDataBridge',
-        base_progress: int
-    ) -> str:
-        """
-        Process a hetNOE folder (sat or unsat).
-
-        For hetNOE, we just need single-spectrum integration, not series.
-        """
-        import os
-
-        output_file = os.path.join(self.params.output_dir, f"{exp_type}_intensities.csv")
-
-        # Check if integration results already exist
-        # In production, would check for existing peak integration results
-        tidy_file = os.path.join(folder_path, "integration_results.csv")
-
-        if os.path.exists(tidy_file):
-            # Convert from tidy format
-            import pandas as pd
-            df = pd.read_csv(tidy_file)
-
-            # Extract assignment and intensity columns
-            with open(output_file, 'w') as f:
-                for _, row in df.iterrows():
-                    assignment = str(row.get('assignment', row.get('Assignment', '')))
-                    intensity = row.get(self.params.intensity_column,
-                                        row.get('Height', row.get('height', 0)))
-                    residue = bridge.format_residue_id(assignment)
-                    f.write(f"{residue},{intensity}\n")
-
-            return output_file
-        else:
-            raise ValueError(
-                f"Integration not yet run for {exp_type}. "
-                f"Please run peak integration from LunaNMR first."
-            )
-
-    def _calculate_hetnoe_ratio(self, sat_file: str, unsat_file: str) -> str:
-        """Calculate hetNOE ratios from sat and unsat intensity files."""
-        import os
-        import pandas as pd
-
-        # Load intensities
-        sat_data = {}
-        unsat_data = {}
-
-        with open(sat_file, 'r') as f:
-            for line in f:
-                parts = line.strip().split(',')
-                if len(parts) >= 2:
-                    sat_data[parts[0]] = float(parts[1])
-
-        with open(unsat_file, 'r') as f:
-            for line in f:
-                parts = line.strip().split(',')
-                if len(parts) >= 2:
-                    unsat_data[parts[0]] = float(parts[1])
-
-        # Calculate ratios
-        output_file = os.path.join(self.params.output_dir, "hetNOE_ratios.csv")
-
-        with open(output_file, 'w') as f:
-            f.write("Residue,hetNOE,hetNOE_err\n")
-            for residue in sorted(sat_data.keys(), key=lambda x: int(x) if x.isdigit() else 0):
-                if residue in unsat_data and unsat_data[residue] > 0:
-                    ratio = sat_data[residue] / unsat_data[residue]
-                    # Estimate 2% error; abs, as a negative hetNOE is real data
-                    error = abs(ratio) * 0.02
-                    f.write(f"{residue},{ratio:.5f},{error:.5f}\n")
-
-        return output_file

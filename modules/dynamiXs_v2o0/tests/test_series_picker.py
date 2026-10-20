@@ -89,6 +89,7 @@ def _drop(label, mime):
 
 class TestDraggableSeriesList:
 
+    @pytest.mark.skipif(not T1_TIDY.exists(), reason="data_test not present")
     def test_the_page_lists_each_series_with_its_name_and_tidy_csv(self, window):
         from PySide6.QtCore import Qt
         window.saved_series = {"600_T1": _series(SERIES / "600_T1")}

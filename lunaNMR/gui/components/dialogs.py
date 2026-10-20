@@ -21,9 +21,7 @@ from lunaNMR.gui.styles.design_system import (
 logger = logging.getLogger(__name__)
 
 
-# ============================================================================
 # SIMPLE MESSAGE DIALOGS (QMessageBox wrappers)
-# ============================================================================
 
 def show_question(
     parent=None,
@@ -103,7 +101,6 @@ def show_confirmation(
     cancel_button = msg_box.addButton(cancel_text, QMessageBox.RejectRole)
     msg_box.setDefaultButton(ok_button)
 
-    # Apply primary button style to OK button
     ok_button.setProperty("class", "primary")
 
     msg_box.exec()
@@ -226,9 +223,7 @@ def show_info(
     msg_box.exec()
 
 
-# ============================================================================
 # CUSTOM DIALOGS (BaseDialog subclasses)
-# ============================================================================
 
 class ConfirmationDialog(BaseDialog):
     """Custom confirmation dialog with optional checkbox.
@@ -297,7 +292,6 @@ class ConfirmationDialog(BaseDialog):
         self._checkbox = None
         self._destructive = destructive
 
-        # Create layout
         layout = self.create_simple_layout(spacing=SPACING_MD)
 
         # Icon and message
@@ -305,7 +299,6 @@ class ConfirmationDialog(BaseDialog):
         message_label.setWordWrap(True)
         message_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
 
-        # Set font size from design system
         font = message_label.font()
         font.setPointSize(FONT_SIZE_BODY)
         message_label.setFont(font)
@@ -409,7 +402,6 @@ class InputDialog(BaseDialog):
             modal=True
         )
 
-        # Create layout
         layout = self.create_simple_layout(spacing=SPACING_MD)
 
         # Message label
@@ -449,9 +441,7 @@ class InputDialog(BaseDialog):
         return self._input.text()
 
 
-# ============================================================================
 # CONVENIENCE FUNCTIONS
-# ============================================================================
 
 def ask_yes_no(
     parent=None,

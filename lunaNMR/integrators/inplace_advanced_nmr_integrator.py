@@ -7,14 +7,9 @@ Spectrum loading for the NMR integrators
 The live integrator (core_integrator.EnhancedVoigtIntegrator) inherits its loading,
 ppm axes, nucleus detection and noise estimate from this class, and its default
 attributes.
-
-Author: Guillaume Mas
-Date: 2025
 """
 
-# ========================================================================
 # DEFAULTS OF THE INTEGRATOR'S ATTRIBUTES
-# ========================================================================
 
 # Reference-based detection parameters
 USE_REFERENCE_DETECTION = True                      # Enable reference-based peak detection
@@ -37,6 +32,7 @@ import pandas as pd
 import os
 import sys
 
+from lunaNMR.utils.output_manager import log_info, log_warning, log_error
 
 try:
     import nmrglue as ng
@@ -101,18 +97,15 @@ class InPlaceAdvancedNMRIntegrator:
 
     def load_data(self, peak_list_file, nmr_file):
         """Load peak list and NMR data"""
-        # Load peak list
         try:
             self.peak_list = pd.read_csv(peak_list_file, skipinitialspace=True)
             self.peak_list.columns = self.peak_list.columns.str.strip()
-            print(f"Loaded peak list: {len(self.peak_list)} peaks from {peak_list_file}")
+            log_info(f"Loaded peak list: {len(self.peak_list)} peaks from {peak_list_file}")
         except Exception as e:
-            print(f"Error loading peak list: {e}")
+            log_error(f"Error loading peak list: {e}")
             return False
 
-        # Load NMR data
         try:
-            # Detect format and load accordingly
             file_format = self._detect_nmr_format(nmr_file)
 
             if file_format == 'bruker_pdata':
@@ -120,22 +113,20 @@ class InPlaceAdvancedNMRIntegrator:
                 pdata_dir = os.path.dirname(nmr_file)
                 self.nmr_dict, self.nmr_data = ng.bruker.read_pdata(dir=pdata_dir)
                 self._nmr_format = 'bruker'
-                print(f"Loaded Bruker pdata: {self.nmr_data.shape} from {pdata_dir}")
+                log_info(f"Loaded Bruker pdata: {self.nmr_data.shape} from {pdata_dir}")
             else:
                 # NMRPipe format (default)
                 self.nmr_dict, self.nmr_data = ng.pipe.read(nmr_file)
                 self._nmr_format = 'pipe'
-                print(f"Loaded NMR data: {self.nmr_data.shape} from {nmr_file}")
+                log_info(f"Loaded NMR data: {self.nmr_data.shape} from {nmr_file}")
 
-            # Calculate PPM axes
             self._calculate_ppm_axes()
 
-            # Estimate noise level
             self._estimate_noise_level()
 
             return True
         except Exception as e:
-            print(f"Error loading NMR data: {e}")
+            log_error(f"Error loading NMR data: {e}")
             return False
 
     def _calculate_ppm_axes(self):
@@ -154,7 +145,6 @@ class InPlaceAdvancedNMRIntegrator:
                 uc_f2 = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=1)  # F2 dimension (1H)
                 uc_f1 = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=0)  # F1 dimension (15N/13C)
 
-            # Get the full PPM scales
             f2_ppm_scale = uc_f2.ppm_scale()
             f1_ppm_scale = uc_f1.ppm_scale()
 
@@ -163,11 +153,11 @@ class InPlaceAdvancedNMRIntegrator:
             self.ppm_y_axis = f1_ppm_scale
             self._using_fallback_ppm_axes = False
 
-            print(f"F2 (1H) range: {f2_ppm_scale[0]:.2f} to {f2_ppm_scale[-1]:.2f} ppm")
-            print(f"F1 (15N/13C) range: {f1_ppm_scale[0]:.1f} to {f1_ppm_scale[-1]:.1f} ppm")
+            log_info(f"F2 (1H) range: {f2_ppm_scale[0]:.2f} to {f2_ppm_scale[-1]:.2f} ppm")
+            log_info(f"F1 (15N/13C) range: {f1_ppm_scale[0]:.1f} to {f1_ppm_scale[-1]:.1f} ppm")
 
         except Exception as e:
-            print(f"Warning: Could not calculate PPM axes properly: {e}")
+            log_warning(f"Could not calculate PPM axes properly: {e}")
             # Fallback to simple linear axes
             self.ppm_x_axis = np.linspace(12, 0, self.nmr_data.shape[1])
             self.ppm_y_axis = np.linspace(140, 100, self.nmr_data.shape[0])
@@ -189,15 +179,13 @@ class InPlaceAdvancedNMRIntegrator:
 
         # Skip auto-detection if using fallback axes (unreliable)
         if hasattr(self, '_using_fallback_ppm_axes') and self._using_fallback_ppm_axes:
-            print("⚠️  Skipping nucleus auto-detection (using fallback PPM axes)")
+            log_warning("Skipping nucleus auto-detection (using fallback PPM axes)")
             return None
 
         try:
-            # Get spectral ranges
             x_min, x_max = float(min(self.ppm_x_axis)), float(max(self.ppm_x_axis))
             y_min, y_max = float(min(self.ppm_y_axis)), float(max(self.ppm_y_axis))
 
-            # Calculate center points for weighted detection
             x_center = (x_min + x_max) / 2.0
             y_center = (y_min + y_max) / 2.0
 
@@ -221,51 +209,45 @@ class InPlaceAdvancedNMRIntegrator:
             return None
 
         except Exception as e:
-            print(f"⚠️  Error during nucleus auto-detection: {e}")
+            log_warning(f"Error during nucleus auto-detection: {e}")
             return None
 
     def _estimate_noise_level(self):
         """Estimate noise level in the spectrum using custom or default regions"""
         if self.use_custom_noise_regions and self.noise_regions_ppm:
-            # Use custom noise regions
             noise_values = []
 
             for region in self.noise_regions_ppm:
                 x_min_ppm, x_max_ppm, y_min_ppm, y_max_ppm = region
 
-                # Convert ppm to indices
                 x_min_idx = np.argmin(np.abs(self.ppm_x_axis - x_max_ppm))  # Note: reversed for NMR
                 x_max_idx = np.argmin(np.abs(self.ppm_x_axis - x_min_ppm))
                 y_min_idx = np.argmin(np.abs(self.ppm_y_axis - y_max_ppm))  # Note: reversed for NMR
                 y_max_idx = np.argmin(np.abs(self.ppm_y_axis - y_min_ppm))
 
-                # Ensure proper ordering
                 x_min_idx, x_max_idx = min(x_min_idx, x_max_idx), max(x_min_idx, x_max_idx)
                 y_min_idx, y_max_idx = min(y_min_idx, y_max_idx), max(y_min_idx, y_max_idx)
 
-                # Extract region data
                 region_data = self.nmr_data[y_min_idx:y_max_idx, x_min_idx:x_max_idx]
                 noise_values.extend(region_data.flatten())
 
-                print(f"  Added noise region: {x_min_ppm}-{x_max_ppm} ppm (1H), {y_min_ppm}-{y_max_ppm} ppm (15N/13C)")
+                log_info(f"Added noise region: {x_min_ppm}-{x_max_ppm} ppm (1H), {y_min_ppm}-{y_max_ppm} ppm (15N/13C)")
 
             if noise_values:
                 self.noise_level = np.std(noise_values)
-                print(f"Custom noise estimation from {len(self.noise_regions_ppm)} regions")
+                log_info(f"Custom noise estimation from {len(self.noise_regions_ppm)} regions")
             else:
-                print("Warning: No valid custom noise regions found, falling back to corner method")
+                log_warning("No valid custom noise regions found, falling back to corner method")
                 self._estimate_noise_level_corners()
         else:
-            # Use default corner method
             self._estimate_noise_level_corners()
 
         self.threshold = self.noise_level * self.threshold_multiplier
-        print(f"Estimated noise level: {self.noise_level:.2f}")
-        print(f"Detection threshold: {self.threshold:.2f} (multiplier: {self.threshold_multiplier})")
+        log_info(f"Estimated noise level: {self.noise_level:.2f}")
+        log_info(f"Detection threshold: {self.threshold:.2f} (multiplier: {self.threshold_multiplier})")
 
     def _estimate_noise_level_corners(self):
         """Estimate noise level using left corner regions (fallback method)"""
-        # Use left corner regions to estimate noise
         corner_size = min(50, self.nmr_data.shape[0]//10, self.nmr_data.shape[1]//10)
 
         corners = [

@@ -43,7 +43,6 @@ import matplotlib.patches as mpatches
 import matplotlib.path as mpath
 import colorsys
 
-# Configure matplotlib for Adobe Illustrator compatibility
 # Keep text as editable text objects rather than converting to paths
 matplotlib.rcParams['pdf.fonttype'] = 42  # TrueType fonts
 matplotlib.rcParams['ps.fonttype'] = 42   # PostScript compatibility
@@ -65,16 +64,12 @@ def adjust_color(hex_color, lighten_amount=0.8, desaturate_amount=0.3):
     hex_color = hex_color.lstrip('#')
     r, g, b = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
 
-    # Convert RGB to HLS
     h, l, s = colorsys.rgb_to_hls(r, g, b)
 
-    # Adjust lightness
     l = min(1.0, l + lighten_amount * (1.0 - l))
 
-    # Adjust saturation (reduce toward 0)
     s = max(0.0, s * (1.0 - desaturate_amount))
 
-    # Convert back to RGB
     r, g, b = colorsys.hls_to_rgb(h, l, s)
     return '#{0:02x}{1:02x}{2:02x}'.format(int(r * 255), int(g * 255), int(b * 255))
 
@@ -101,7 +96,6 @@ def load_secondary_structure(ss_file):
         print(f"Loaded secondary structure from: {ss_file}")
         print(f"Secondary structure length: {len(ss_string)}")
         
-        # Convert string to spans
         ss_map = []
         current_type = None
         current_start = None
@@ -116,17 +110,14 @@ def load_secondary_structure(ss_file):
                 ss_type = 'loop'
             
             if ss_type != current_type:
-                # Close previous span if any
                 if current_type is not None:
                     ss_map.append({
                         "type": current_type,
                         "span": (current_start + 1, i)  # Convert to 1-based indexing
                     })
-                # Start new span
                 current_type = ss_type
                 current_start = i
         
-        # Append last span
         if current_type is not None:
             ss_map.append({
                 "type": current_type,
@@ -236,7 +227,6 @@ def draw_secondary_structure(target_ax, range, secondary_structure_map: list) ->
     sheet_color = "#1e90ff"
     sheet_edge_color = "black"
     
-    # Draw backbone
     draw_rect(target_ax, girth=0.05, range=target_ax.get_xlim(), color="gray")
 
     for secondary_structure in secondary_structure_map:
@@ -326,7 +316,6 @@ def apply_ylimits(ax, column, plot_type, ylimit_config):
     if not ylimit_config:
         return  # Use matplotlib auto-scaling
     
-    # Determine the config key
     if plot_type == "difference":
         config_key = "difference_ylimits"
         base_column = extract_base_column_name(column)
@@ -334,14 +323,12 @@ def apply_ylimits(ax, column, plot_type, ylimit_config):
         config_key = "ylimits"
         base_column = extract_base_column_name(column)
     
-    # Try exact match first, then base column
     limits = None
     if config_key in ylimit_config:
         limits = ylimit_config[config_key].get(column)  # Exact match (e.g., R1_f1)
         if not limits:
             limits = ylimit_config[config_key].get(base_column)  # Base match (e.g., R1)
     
-    # Also check field_specific for original plots
     if not limits and plot_type == "original" and "field_specific" in ylimit_config:
         limits = ylimit_config["field_specific"].get(column)
     
@@ -421,27 +408,22 @@ def create_complete_residue_data(df, data_column, error_column=None):
     dict : Contains complete residue data
     """
     if 'Residue' not in df.columns or data_column not in df.columns:
-        # Fallback to index if no Residue column
         residues = df.index.values
         data = df[data_column].values
         errors = df[error_column].values if error_column and error_column in df.columns else None
         return {'residues': residues, 'data': data, 'errors': errors}
     
-    # Get actual residues and data
     actual_residues = df['Residue'].values
     actual_data = df[data_column].values
     actual_errors = df[error_column].values if error_column and error_column in df.columns else None
     
-    # Create complete residue range starting from 1
     min_res = 1  # Always start from residue 1
     max_res = int(max(actual_residues))
     complete_residues = np.arange(min_res, max_res + 1)
     
-    # Initialize complete data arrays with NaN
     complete_data = np.full(len(complete_residues), np.nan)
     complete_errors = np.full(len(complete_residues), np.nan) if actual_errors is not None else None
     
-    # Fill in existing data
     for i, res in enumerate(actual_residues):
         idx = int(res) - min_res  # min_res is now always 1
         if 0 <= idx < len(complete_residues):
@@ -474,7 +456,6 @@ def plot_missing_residues_bars(ax, residue_data, color='lightgrey', alpha=0.3):
     residues = residue_data['residues']
     data = residue_data['data']
     
-    # Find missing residues (NaN values)
     missing_mask = np.isnan(data)
     missing_residues = residues[missing_mask]
     
@@ -507,7 +488,6 @@ def load_and_validate_data(file1, file2, label1, label2):
     print(f"Dataset 1 ({label1}): {len(df1)} rows")
     print(f"Dataset 2 ({label2}): {len(df2)} rows")
     
-    # Check for common residues
     if 'Residue' in df1.columns and 'Residue' in df2.columns:
         common_residues = set(df1['Residue']) & set(df2['Residue'])
         print(f"Common residues: {len(common_residues)}")
@@ -516,11 +496,9 @@ def load_and_validate_data(file1, file2, label1, label2):
             print("Warning: No common residues found between datasets")
             return df1, df2
         
-        # Filter to common residues
         df1_filtered = df1[df1['Residue'].isin(common_residues)].copy()
         df2_filtered = df2[df2['Residue'].isin(common_residues)].copy()
         
-        # Sort by residue for proper alignment
         df1_filtered = df1_filtered.sort_values('Residue').reset_index(drop=True)
         df2_filtered = df2_filtered.sort_values('Residue').reset_index(drop=True)
         
@@ -533,11 +511,9 @@ def get_available_columns_for_comparison(df1, df2):
     """Get columns available in both datasets for comparison"""
     common_cols = set(df1.columns) & set(df2.columns)
     
-    # Filter out non-data columns
     exclude_cols = {'Residue', 'Residue_Number', 'index'}
     data_cols = [col for col in common_cols if col not in exclude_cols]
     
-    # Group by type
     relaxation_cols = [col for col in data_cols if any(x in col for x in ['R1', 'R2', 'hetNOE'])]
     spectral_density_cols = [col for col in data_cols if any(x in col for x in ['J0', 'JwN', 'JwH'])]
     model_free_cols = [col for col in data_cols if any(x in col for x in ['S2', 'te', 'Rex', 'tc'])]
@@ -570,23 +546,19 @@ def calculate_difference(df1, df2, column, error_propagation=True):
     if column not in df1.columns or column not in df2.columns:
         raise ValueError(f"Column '{column}' not found in both datasets")
     
-    # Get complete residue data for both datasets
     error_col = f"{column}_err"
     residue_data1 = create_complete_residue_data(df1, column, error_col)
     residue_data2 = create_complete_residue_data(df2, column, error_col)
     
-    # Find common residue range starting from 1
     min_res = 1  # Always start from residue 1
     max_res = max(residue_data1['residues'].max(), residue_data2['residues'].max())
     complete_residues = np.arange(min_res, max_res + 1)
     
-    # Initialize complete arrays
     data1_complete = np.full(len(complete_residues), np.nan)
     data2_complete = np.full(len(complete_residues), np.nan)
     err1_complete = np.full(len(complete_residues), np.nan)
     err2_complete = np.full(len(complete_residues), np.nan)
     
-    # Fill in data1
     for i, res in enumerate(residue_data1['residues']):
         idx = int(res) - min_res
         if 0 <= idx < len(complete_residues):
@@ -594,7 +566,6 @@ def calculate_difference(df1, df2, column, error_propagation=True):
             if residue_data1['errors'] is not None:
                 err1_complete[idx] = residue_data1['errors'][i]
     
-    # Fill in data2
     for i, res in enumerate(residue_data2['residues']):
         idx = int(res) - min_res
         if 0 <= idx < len(complete_residues):
@@ -653,7 +624,6 @@ def plot_multiple_comparisons(diff_data_list, columns, label1, label2, output_fi
     
     # Add extra space for secondary structure if provided
     if ss_map:
-        # Create layout with SS panel at top
         height_ratios = [1] + [4] * n_params  # SS panel + data panels
         fig, axes = plt.subplots(n_params + 1, 2, figsize=(16, 4*n_params + 1),
                                 gridspec_kw={'height_ratios': height_ratios})
@@ -662,7 +632,6 @@ def plot_multiple_comparisons(diff_data_list, columns, label1, label2, output_fi
         if n_params == 0:
             axes = axes.reshape(-1, 2)
         
-        # Draw secondary structure in top panels
         if len(diff_data_list) > 0:
             residue_range = (diff_data_list[0]['residues'].min(), diff_data_list[0]['residues'].max())
             
@@ -674,7 +643,6 @@ def plot_multiple_comparisons(diff_data_list, columns, label1, label2, output_fi
             draw_secondary_structure(axes[0, 1], residue_range, ss_map)
             axes[0, 1].set_title('Secondary Structure')
         
-        # Adjust data panel indices
         data_axes = axes[1:, :]
     else:
         # Original layout without SS
@@ -694,7 +662,6 @@ def plot_multiple_comparisons(diff_data_list, columns, label1, label2, output_fi
         # Left column: Original data overlay
         ax_orig = data_axes[i, 0]
         
-        # Plot grey bars for missing residues first
         residue_data_for_bars = {
             'residues': residues,
             'data': diff_data['data1'],  # Use data1 for missing residue reference
@@ -702,7 +669,6 @@ def plot_multiple_comparisons(diff_data_list, columns, label1, label2, output_fi
         }
         plot_missing_residues_bars(ax_orig, residue_data_for_bars)
         
-        # Plot original data (only non-NaN values)
         valid_mask1 = ~np.isnan(diff_data['data1'])
         valid_mask2 = ~np.isnan(diff_data['data2'])
         
@@ -734,7 +700,6 @@ def plot_multiple_comparisons(diff_data_list, columns, label1, label2, output_fi
             ax_orig.legend()
         ax_orig.grid(True, alpha=0.3)
         
-        # Apply y-limits for original data
         apply_ylimits(ax_orig, column, "original", ylimit_config)
         
         # Only label x-axis on bottom row
@@ -744,7 +709,6 @@ def plot_multiple_comparisons(diff_data_list, columns, label1, label2, output_fi
         # Right column: Difference
         ax_diff = data_axes[i, 1]
         
-        # Plot grey bars for missing residues first
         residue_data_for_diff_bars = {
             'residues': residues,
             'data': diff_data['difference'],
@@ -752,7 +716,6 @@ def plot_multiple_comparisons(diff_data_list, columns, label1, label2, output_fi
         }
         plot_missing_residues_bars(ax_diff, residue_data_for_diff_bars)
         
-        # Plot difference data (only non-NaN values)
         valid_diff_mask = ~np.isnan(diff_data['difference'])
         if np.any(valid_diff_mask):
             valid_residues_diff = residues[valid_diff_mask]
@@ -766,21 +729,18 @@ def plot_multiple_comparisons(diff_data_list, columns, label1, label2, output_fi
             else:
                 ax_diff.plot(valid_residues_diff, valid_difference, 'o', color='red', alpha=0.7)
         
-        # Add zero line
         ax_diff.axhline(y=0, color='black', linestyle='--', alpha=0.5)
         
         ax_diff.set_ylabel(f'Δ{get_ylabel(column)}')
         ax_diff.set_title(f'Difference: {label1} - {label2}')
         ax_diff.grid(True, alpha=0.3)
         
-        # Apply y-limits for difference data
         apply_ylimits(ax_diff, column, "difference", ylimit_config)
         
         # Only label x-axis on bottom row
         if i == n_params - 1:
             ax_diff.set_xlabel('Residue')
         
-        # Calculate and display statistics
         mean_diff = np.nanmean(diff_data['difference'])
         std_diff = np.nanstd(diff_data['difference'])
         ax_diff.text(0.02, 0.98, f'Mean Δ: {mean_diff:.4f}\nStd Δ: {std_diff:.4f}', 
@@ -868,7 +828,6 @@ def interactive_mode():
     """Run script in interactive mode"""
     print("=== Dataset Comparison Tool (with Y-limits Configuration and Secondary Structure) ===\n")
     
-    # Get input files
     file1 = input("Enter path to first dataset (reference): ").strip()
     if not os.path.exists(file1):
         print(f"File not found: {file1}")
@@ -879,24 +838,19 @@ def interactive_mode():
         print(f"File not found: {file2}")
         return
     
-    # Get labels
     label1 = input("Enter label for first dataset (default: Dataset 1): ").strip() or "Dataset 1"
     label2 = input("Enter label for second dataset (default: Dataset 2): ").strip() or "Dataset 2"
     
-    # Get y-limits configuration
     config_file = input("Enter y-limits config file (optional, press Enter to skip): ").strip()
     ylimit_config = load_ylimit_config(config_file) if config_file else None
     
-    # Get secondary structure file
     ss_file = input("Enter secondary structure file (optional, press Enter to skip): ").strip()
     ss_map = load_secondary_structure(ss_file) if ss_file else None
     
-    # Load and validate data
     df1, df2 = load_and_validate_data(file1, file2, label1, label2)
     if df1 is None or df2 is None:
         return
     
-    # Show available columns
     available = get_available_columns_for_comparison(df1, df2)
     
     print(f"\nAvailable columns for comparison:")
@@ -917,13 +871,11 @@ def interactive_mode():
         for col in available['other']:
             print(f"  {col}")
     
-    # Get column selection - allow multiple columns
     print("\nSelect columns to compare (comma-separated):")
     print("Examples: R1,R2,hetNOE,J0,JwN,JwH,S2,te,Rex")
     column_input = input("Enter column names: ").strip()
     columns = [col.strip() for col in column_input.split(',')]
     
-    # Get field selection for field-dependent columns
     field_independent_cols = ['S2', 'te', 'tc']
     rex_cols = ['Rex']  # Rex has field-dependent versions
     has_field_dependent = any(col not in field_independent_cols 
@@ -978,7 +930,6 @@ def interactive_mode():
         print("No valid columns found in both datasets")
         return
     
-    # Get output file
     output_file = input("Enter output filename (optional, press Enter for screen): ").strip()
     if not output_file:
         output_file = None
@@ -988,11 +939,9 @@ def interactive_mode():
     # Calculate differences for all columns
     try:
         if field == 'both':
-            # Create separate comparisons for f1 and f2
             for field_suffix in ['f1', 'f2']:
                 print(f"\nProcessing field {field_suffix}...")
                 
-                # Filter columns for this field
                 field_specific_columns = []
                 for column in valid_columns:
                     if column.endswith(f'_{field_suffix}'):
@@ -1004,24 +953,20 @@ def interactive_mode():
                     print(f"No valid columns for field {field_suffix}")
                     continue
                 
-                # Calculate differences for this field
                 diff_data_list = []
                 for column in field_specific_columns:
                     diff_data = calculate_difference(df1, df2, column)
                     diff_data_list.append(diff_data)
                 
-                # Create field-specific output filename
                 if output_file:
                     base_name = output_file.replace('.pdf', '')
                     field_output_file = f"{base_name}_{field_suffix}.pdf"
                 else:
                     field_output_file = None
                 
-                # Plot comparisons for this field
                 plot_multiple_comparisons(diff_data_list, field_specific_columns, 
                                         label1, label2, field_output_file, ylimit_config, ss_map)
                 
-                # Print summary statistics for this field
                 print(f"\nComparison Summary for {field_suffix} ({label1} - {label2}):")
                 for column, diff_data in zip(field_specific_columns, diff_data_list):
                     print(f"  {column}:")
@@ -1036,10 +981,8 @@ def interactive_mode():
                 diff_data = calculate_difference(df1, df2, column)
                 diff_data_list.append(diff_data)
             
-            # Plot multiple comparisons
             plot_multiple_comparisons(diff_data_list, valid_columns, label1, label2, output_file, ylimit_config, ss_map)
             
-            # Print summary statistics
             print(f"\nComparison Summary ({label1} - {label2}):")
             for i, (column, diff_data) in enumerate(zip(valid_columns, diff_data_list)):
                 print(f"  {column}:")
@@ -1070,7 +1013,6 @@ def main():
     
     args = parser.parse_args()
     
-    # Handle example config creation
     if args.create_example_config:
         create_example_config()
         return
@@ -1079,7 +1021,6 @@ def main():
         interactive_mode()
         return
     
-    # Validate files
     if not os.path.exists(args.file1):
         print(f"File not found: {args.file1}")
         return
@@ -1087,17 +1028,13 @@ def main():
         print(f"File not found: {args.file2}")
         return
     
-    # Load y-limits configuration
     ylimit_config = load_ylimit_config(args.ylim_config) if args.ylim_config else None
     
-    # Load secondary structure
     ss_map = load_secondary_structure(args.ss_file) if args.ss_file else None
     
-    # Set defaults
     label1 = args.label1 or "Dataset 1"
     label2 = args.label2 or "Dataset 2"
     
-    # Load data
     df1, df2 = load_and_validate_data(args.file1, args.file2, label1, label2)
     if df1 is None or df2 is None:
         return
@@ -1112,10 +1049,8 @@ def main():
                     print(f"  {col}")
         return
     
-    # Parse multiple columns
     columns = [col.strip() for col in args.column.split(',')]
     
-    # Get field handling
     field_independent_cols = ['S2', 'te', 'tc']
     rex_cols = ['Rex']  # Rex has field-dependent versions
     has_field_dependent = any(col not in field_independent_cols 
@@ -1168,12 +1103,10 @@ def main():
     # Calculate and plot
     try:
         if field == 'both':
-            # Create separate comparisons for f1 and f2
             field_independent_cols = ['S2', 'te', 'tc']  # Define here for command line
             for field_suffix in ['f1', 'f2']:
                 print(f"\nProcessing field {field_suffix}...")
                 
-                # Filter columns for this field
                 field_specific_columns = []
                 for column in valid_columns:
                     if column.endswith(f'_{field_suffix}'):
@@ -1185,24 +1118,20 @@ def main():
                     print(f"No valid columns for field {field_suffix}")
                     continue
                 
-                # Calculate differences for this field
                 diff_data_list = []
                 for column in field_specific_columns:
                     diff_data = calculate_difference(df1, df2, column)
                     diff_data_list.append(diff_data)
                 
-                # Create field-specific output filename
                 if args.output:
                     base_name = args.output.replace('.pdf', '')
                     field_output_file = f"{base_name}_{field_suffix}.pdf"
                 else:
                     field_output_file = None
                 
-                # Plot comparisons for this field
                 plot_multiple_comparisons(diff_data_list, field_specific_columns, 
                                         label1, label2, field_output_file, ylimit_config, ss_map)
                 
-                # Print summary statistics for this field
                 print(f"\nComparison Summary for {field_suffix} ({label1} - {label2}):")
                 for column, diff_data in zip(field_specific_columns, diff_data_list):
                     print(f"  {column}:")
@@ -1215,10 +1144,8 @@ def main():
                 diff_data = calculate_difference(df1, df2, column)
                 diff_data_list.append(diff_data)
             
-            # Plot multiple comparisons
             plot_multiple_comparisons(diff_data_list, valid_columns, label1, label2, args.output, ylimit_config, ss_map)
             
-            # Print summary
             print(f"\nComparison Summary ({label1} - {label2}):")
             for column, diff_data in zip(valid_columns, diff_data_list):
                 print(f"  {column}:")

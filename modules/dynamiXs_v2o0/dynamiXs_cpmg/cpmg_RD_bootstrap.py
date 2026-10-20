@@ -91,19 +91,15 @@ def bootstrap_fit(intensities, I_ref, noise, nu_cpmg, residue_names):
                 resampled_intensities[j] += np.random.normal(0, noise)
             if I_ref[i] > 0:
                 resampled_I_ref += np.random.normal(0, noise)
-            # Ensure intensities remain positive
             resampled_intensities = np.maximum(resampled_intensities, 1e-10)
             resampled_I_ref = max(resampled_I_ref, 1e-10)
-            # Calculate R2,eff for resampled data
             r2_eff_resampled = calculate_r2_eff(resampled_intensities[np.newaxis, :], np.array([resampled_I_ref]))[0]
-            # Fit the resampled R2,eff
             popt, _ = fit_dispersion(r2_eff_resampled, nu_cpmg)
             if popt is not None:
                 bootstrap_params[n, i] = popt
             else:
                 bootstrap_params[n, i] = [np.nan, np.nan, np.nan, np.nan]
         print(f"Completed bootstrap resampling for residue {residue_names[i]}")
-    # Calculate mean and standard deviation of parameters
     param_mean = np.nanmean(bootstrap_params, axis=0)
     param_std = np.nanstd(bootstrap_params, axis=0, ddof=1)
     return param_mean, param_std
@@ -168,7 +164,6 @@ def main():
                 ax.grid(True)
                 ax.legend()
 
-            # Hide unused axes
             for j in range(ax_idx + 1, len(axes)):
                 fig.delaxes(axes[j])
 

@@ -7,9 +7,6 @@ in a Qt/PySide6 application.
 
 Run this script to see a demo window with styled widgets:
     python3 example_usage.py
-
-Author: Guillaume Mas
-Date: 2025
 """
 
 import sys
@@ -25,7 +22,6 @@ except ImportError:
     print("PySide6 not installed. Install with: pip install PySide6")
     sys.exit(1)
 
-# Import design system constants and stylesheet loader
 from lunaNMR.gui.styles import (
     # Core functions
     load_stylesheet,
@@ -45,7 +41,6 @@ class DesignSystemDemo(QMainWindow):
         self.setWindowTitle("LunaNMR Design System Demo")
         self.setMinimumSize(800, 600)
         
-        # Create central widget and main layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
@@ -53,7 +48,6 @@ class DesignSystemDemo(QMainWindow):
         main_layout.setSpacing(SPACING_MD)
         main_layout.setContentsMargins(SPACING_LG, SPACING_LG, SPACING_LG, SPACING_LG)
         
-        # Add demo sections
         self._add_header(main_layout)
         self._add_buttons_section(main_layout)
         self._add_inputs_section(main_layout)
@@ -172,7 +166,6 @@ def main():
     """Run the demo application."""
     app = QApplication(sys.argv)
     
-    # Load and apply the stylesheet
     try:
         stylesheet = load_stylesheet()
         app.setStyleSheet(stylesheet)
@@ -180,7 +173,6 @@ def main():
     except Exception as e:
         print(f"⚠ Warning: Could not load stylesheet: {e}")
     
-    # Create and show demo window
     window = DesignSystemDemo()
     window.show()
     
