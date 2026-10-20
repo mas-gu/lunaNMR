@@ -20,6 +20,7 @@ never copied: a bundle moved to another machine needs the data at the same place
 """
 
 import fnmatch
+import glob
 import json
 import os
 import shutil
@@ -247,7 +248,11 @@ def modelfree_analysis(record, name, out):
     variant = 'jwh' if (args.get('method') or '').endswith('jwh') else '087'
     page = {
         'session_results': {'analysis_complete': True, 'results_prefix': args['prefix'],
-                            'output_dir': out, 'json_folder': None},
+                            'output_dir': out, 'json_folder': out,
+                            # the run's own T1/T2 fit JSONs, as a GUI run records them
+                            'json_files': sorted(glob.glob(os.path.join(
+                                glob.escape(out),
+                                f"{glob.escape(args['prefix'])}_field[12]_T[12]_fit_data.json")))},
         'field1_t1_file': args.get('f1_t1'), 'field1_t2_file': args.get('f1_t2'),
         'field1_noe_sat_file': args.get('f1_noe_sat'),
         'field1_noe_unsat_file': args.get('f1_noe_unsat'),
