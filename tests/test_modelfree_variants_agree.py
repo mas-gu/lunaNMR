@@ -1,5 +1,5 @@
 # ABOUTME: The single- and dual-field model-free variants predict the same relaxation at one field.
-# ABOUTME: Same NOE (from the calculated T1) and same J frequencies, for the plain and the 0.87 pair.
+# ABOUTME: Same NOE (from the calculated T1), same J frequencies and same J errors, plain and 0.87 pairs.
 
 """
 Two inconsistencies made the same residue fit differently depending on the variant: the
@@ -49,3 +49,24 @@ def test_the_predicted_noe_does_not_depend_on_the_measured_t1(single_name):
     noe_dev = [single._single_field_residuals(s2, te, rex, 1 / r1, 1 / R2, NOE, TC)[2]
                for r1 in (R1, 1.5 * R1)]
     assert noe_dev[0] == pytest.approx(noe_dev[1], rel=1e-12)
+
+
+ERRORS = dict(r1_err=0.05, r2_err=0.3, noe_err=0.03)
+
+
+@pytest.mark.parametrize("single_name, dual_name", [
+    ("ZZ_multi_density", "ZZ_multi_2fields_density"),
+    ("ZZ_multi_density_087", "ZZ_multi_2fields_density_087")])
+def test_both_variants_propagate_the_same_spectral_density_errors(single_name, dual_name):
+    """First-order propagation, sqrt(sum((dJ/dx * sigma_x)^2)), in both: the single-field
+    J(wN) error was once halved, so one residue reported two different errors."""
+    single, dual = _pair(single_name, dual_name)
+    e = ERRORS
+    a = single.propagate_errors(R1, e['r1_err'], R2, e['r2_err'], NOE, e['noe_err'])
+    b = dual.propagate_dual_field_errors(R1, e['r1_err'], R2, e['r2_err'], NOE, e['noe_err'],
+                                         R1, e['r1_err'], R2, e['r2_err'], NOE, e['noe_err'])['Field1']
+    for key in ('J0_err', 'JwN_err'):
+        assert a[key] == pytest.approx(b[key], rel=1e-12, abs=0), key
+    jwh_a, = [k for k in a if k.startswith('JwH') and k.endswith('_err')]
+    jwh_b, = [k for k in b if k.startswith('JwH') and k.endswith('_err')]
+    assert a[jwh_a] == pytest.approx(b[jwh_b], rel=1e-12, abs=0)

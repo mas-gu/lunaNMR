@@ -431,7 +431,7 @@ class ReducedSpectralDensityAnalysis:
         factor_jwn = 1.0 / (3.0 * d / 4.0 + c)
         djwn_dr1 = factor_jwn * (1.0 - (7.0/5.0) * dsigma_dr1)
         djwn_dnoe = factor_jwn * (-(7.0/5.0) * dsigma_dnoe)
-        jwn_err = (np.sqrt((djwn_dr1 * r1_err)**2 + (djwn_dnoe * noe_err)**2))/2 ## /2 GM 
+        jwn_err = np.sqrt((djwn_dr1 * r1_err)**2 + (djwn_dnoe * noe_err)**2)
         
         # J(0.87ωH) and its error (Farrow-exact notation with factor 4)
         jwh_087 = 4.0 * sigma_noe / (5.0 * d)
