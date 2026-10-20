@@ -497,7 +497,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.show_peak_labels_3d = False  # Show peak labels (hidden by default)
         self.show_resid_3d = False  # Show residuals (hidden by default)
         self.limit_peak_display_3d = True  # Limit peak extent (ON by default)
-        self.residual_mode_3d = 'overlay'  # Residual mode: 'overlay' or 'separate'
+        self.residual_mode_3d = 'separate'  # Residual mode: 'overlay' or 'separate'
         self.color_scheme_3d = 'Clean'  # Color scheme: 'Classic', 'Clean', 'Dark', 'Warm'
         self.intensity_scale_3d = 100.0  # Intensity scale: 50-200%
 
@@ -3310,9 +3310,6 @@ class LunaNMRMainWindow(BaseWindow):
 
     def _reset_gui_widgets_to_defaults(self):
         """Reset all GUI widgets to their default values."""
-        # Block signals to prevent cascading updates during reset
-        widgets_to_reset = []
-
         # Workflow Selection
         if self.workflow_peak_list_radio:
             self.workflow_peak_list_radio.setChecked(True)
@@ -3351,13 +3348,13 @@ class LunaNMRMainWindow(BaseWindow):
         if hasattr(self, 'expert_centroid_y_spin') and self.expert_centroid_y_spin:
             self.expert_centroid_y_spin.setValue(0.1)
 
-        # Contour parameters
+        # Contour parameters, from the defaults init_variables has just restored
         if hasattr(self, 'contour_levels_spin') and self.contour_levels_spin:
-            self.contour_levels_spin.setValue(24)
+            self.contour_levels_spin.setValue(self.contour_levels)
         if hasattr(self, 'contour_min_spin') and self.contour_min_spin:
-            self.contour_min_spin.setValue(0.05)
-        if hasattr(self, 'contour_increment_spin') and self.contour_increment_spin:
-            self.contour_increment_spin.setValue(1.1)
+            self.contour_min_spin.setValue(self.contour_min)
+        if hasattr(self, 'contour_inc_spin') and self.contour_inc_spin:
+            self.contour_inc_spin.setValue(self.contour_increment)
 
         # Zoom parameters
         if hasattr(self, 'zoom_x_spin') and self.zoom_x_spin:
@@ -3606,8 +3603,6 @@ class LunaNMRMainWindow(BaseWindow):
         row1_layout.addStretch()
         control_layout.addWidget(row1)
 
-        # Keep residual mode and intensity scale state variables functional (hidden controls)
-        self.residual_mode_3d = 'separate'
         # Intensity scale slider/label not shown but state maintained via self.intensity_scale_3d
 
         main_layout.addWidget(control_frame)
@@ -5630,10 +5625,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             self.show_assigned = settings.value("display/show_assigned", True, type=bool)
             self.show_fitted_curves = settings.value("display/show_fitted_curves", True, type=bool)
             self.show_ellipses = settings.value("display/show_ellipses", False, type=bool)
-
-            self.contour_levels = settings.value("contour/levels", 24, type=int)
-            self.contour_min = settings.value("contour/min", 0.03, type=float)
-            self.contour_increment = settings.value("contour/increment", 1.2, type=float)
 
             logger.debug("User preferences applied successfully")
 
