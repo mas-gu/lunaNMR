@@ -44,13 +44,6 @@ class NMRParameterManager:
             'use_parallel_processing': {'default': False, 'type': bool},
             'use_centroid_refinement': {'default': True, 'type': bool},
 
-            # Multi-Peak Detection Parameters
-            'multi_peak_r2_threshold': {'default': 0.7, 'min': 0.1, 'max': 1.0, 'type': float},  # R² threshold to trigger multi-peak detection
-            'multi_peak_improvement_threshold': {'default': 0.1, 'min': 0.05, 'max': 0.5, 'type': float},  # Minimum improvement required from multi-peak fit
-            'peak_detection_sensitivity': {'default': 1.5, 'min': 0.5, 'max': 5.0, 'type': float},  # Height threshold multiplier (lower = more sensitive)
-            'overlap_detection_factor': {'default': 0.8, 'min': 0.3, 'max': 1.5, 'type': float},  # Separation factor for overlap detection
-            'residual_analysis_threshold': {'default': 1.5, 'min': 0.5, 'max': 3.0, 'type': float},  # Threshold for residual peak detection
-
             # Advanced Parameters
             'centroid_window_x_ppm': {'default': 0.02, 'min': 0.005, 'max': 0.1, 'type': float},
             'centroid_window_y_ppm': {'default': 1.0, 'min': 0.01, 'max': 5.0, 'type': float},
