@@ -22,226 +22,9 @@ from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, lo
 from lunaNMR.utils.cancellation import raise_if_stopped
 from lunaNMR.utils.quality_categories import fit_quality_label
 
-try:
-    from lunaNMR.core.enhanced_voigt_fitter import EnhancedVoigtFitter
-    ENHANCED_FITTING_AVAILABLE = True
-except ImportError:
-    ENHANCED_FITTING_AVAILABLE = False
-    log_warning("Enhanced Voigt fitting not available, using standard fitting")
-
-
-try:
-    from lunaNMR.core.ps2d_data_selector import Ps2dDataSelector
-    PS2D_DATA_SELECTOR_AVAILABLE = True
-except ImportError:
-    PS2D_DATA_SELECTOR_AVAILABLE = False
-
-# PS2D exact overlap integration - availability check only
-try:
-    import lunaNMR.core.ps2d_exact_overlap_integration as _ps2d_overlap  # noqa: F401
-    del _ps2d_overlap  # Clean up namespace
-    PS2D_EXACT_OVERLAP_INTEGRATION_AVAILABLE = True
-except ImportError:
-    PS2D_EXACT_OVERLAP_INTEGRATION_AVAILABLE = False
-
-# Import PS2D 2D multi-peak fitter (for closely-spaced overlapping peaks in 2D)
-try:
-    from lunaNMR.core.ps2d_2d_fitter import Ps2dMultiPeakFitter2D
-    PS2D_2D_FITTER_AVAILABLE = True
-except ImportError:
-    PS2D_2D_FITTER_AVAILABLE = False
-try:
-    from lunaNMR.integrators.inplace_advanced_nmr_integrator import InPlaceAdvancedNMRIntegrator
-    BaseIntegrator = InPlaceAdvancedNMRIntegrator
-except ImportError as e:
-    log_warning(f"Import error: {e}")
-    log_info("Creating fallback base integrator class...")
-
-    # Fallback base class with essential methods
-    class BaseIntegrator:
-        def __init__(self):
-            self.nmr_data = None
-            self.nmr_dict = None
-            self.ppm_x_axis = None
-            self.ppm_y_axis = None
-            self.peak_list = None
-            self.nmr_file_path = None
-            self.peak_list_path = None
-            self.fitted_peaks = []
-            self._next_peak_id = 0  # Counter for stable peak IDs
-
-        def ensure_peak_ids(self):
-            """Ensure all peaks have stable peak_id values.
-
-            Called after loading peak lists or adding peaks to ensure
-            every peak has a unique, stable identifier for undo/redo.
-            """
-            import pandas as pd
-
-            if self.peak_list is not None and isinstance(self.peak_list, pd.DataFrame):
-                if 'peak_id' not in self.peak_list.columns:
-                    self.peak_list['peak_id'] = range(len(self.peak_list))
-                    self._next_peak_id = len(self.peak_list)
-                else:
-                    # Find max existing ID and set counter above it
-                    max_id = self.peak_list['peak_id'].max()
-                    if pd.notna(max_id):
-                        self._next_peak_id = max(self._next_peak_id, int(max_id) + 1)
-
-            if self.fitted_peaks:
-                for peak in self.fitted_peaks:
-                    if 'peak_id' not in peak:
-                        peak['peak_id'] = self._next_peak_id
-                        self._next_peak_id += 1
-                    else:
-                        self._next_peak_id = max(self._next_peak_id, peak['peak_id'] + 1)
-
-        def get_next_peak_id(self):
-            """Get the next available peak_id and increment counter."""
-            peak_id = self._next_peak_id
-            self._next_peak_id += 1
-            return peak_id
-
-        def _detect_nmr_format(self, file_path):
-            """Detect NMR file format from file path.
-
-            Returns:
-                'bruker_pdata': Bruker processed data (2rr, 2ri, 2ir, 2ii, 1r, 1i)
-                'pipe': NMRPipe format (.ft, .ft2, .pipe, etc.)
-            """
-            import os
-            basename = os.path.basename(file_path)
-
-            # Bruker processed data files (no extension, specific names)
-            bruker_pdata_names = (
-                '2rr', '2ri', '2ir', '2ii', '1r', '1i',
-                '3rrr', '3rri', '3rir', '3rii', '3irr', '3iri', '3iir', '3iii'
-            )
-            if basename in bruker_pdata_names:
-                return 'bruker_pdata'
-
-            return 'pipe'
-
-        def _calculate_ppm_axes(self):
-            """Calculate PPM axes from NMR dictionary"""
-            if self.nmr_dict is None or self.nmr_data is None:
-                return
-            try:
-                import nmrglue as ng
-
-                nmr_format = getattr(self, '_nmr_format', 'pipe')
-
-                if nmr_format == 'bruker':
-                    # Bruker: use universal dictionary approach
-                    # strip_fake=True is required for processed data to get correct SW from procs
-                    udic = ng.bruker.guess_udic(self.nmr_dict, self.nmr_data, strip_fake=True)
-                    uc_x = ng.fileiobase.uc_from_udic(udic, dim=1)  # F2 / 1H
-                    uc_y = ng.fileiobase.uc_from_udic(udic, dim=0)  # F1 / 15N
-                else:
-                    # NMRPipe format (default)
-                    uc_x = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=1)
-                    uc_y = ng.pipe.make_uc(self.nmr_dict, self.nmr_data, dim=0)
-
-                self.ppm_x_axis = uc_x.ppm_scale()
-                self.ppm_y_axis = uc_y.ppm_scale()
-                self._using_fallback_ppm_axes = False
-
-                log_info(f"PPM axes calculated - X: {self.ppm_x_axis[0]:.2f} to {self.ppm_x_axis[-1]:.2f} ppm")
-                log_info(f"                      Y: {self.ppm_y_axis[0]:.1f} to {self.ppm_y_axis[-1]:.1f} ppm")
-            except Exception as e:
-                log_warning(f"Could not calculate PPM axes properly: {e}")
-                # Fallback to simple linear axes - ensures plotting/zoom always works
-                log_info("Creating fallback PPM axes...")
-                import numpy as np
-                self.ppm_x_axis = np.linspace(12, 0, self.nmr_data.shape[1])
-                self.ppm_y_axis = np.linspace(140, 100, self.nmr_data.shape[0])
-                self._using_fallback_ppm_axes = True
-                log_info(f"Fallback PPM axes created - X: {self.ppm_x_axis[0]:.2f} to {self.ppm_x_axis[-1]:.2f} ppm")
-                log_info(f"                               Y: {self.ppm_y_axis[0]:.1f} to {self.ppm_y_axis[-1]:.1f} ppm")
-
-        def _detect_nucleus_type(self):
-            """
-            Automatically detect nucleus type based on spectral dimensions.
-
-            Detection criteria:
-              15N-HSQC: X: 5-12 ppm, Y: 100-140 ppm (amide region)
-              13C-HSQC: X: -2-4 ppm, Y: 0-80 ppm (aliphatic region, aromatic excluded)
-
-            Returns:
-                str: '15N', '13C', or None (if cannot determine)
-            """
-            if self.ppm_x_axis is None or self.ppm_y_axis is None:
-                return None
-
-            # Skip auto-detection if using fallback axes (unreliable)
-            if hasattr(self, '_using_fallback_ppm_axes') and self._using_fallback_ppm_axes:
-                log_warning("Skipping nucleus auto-detection (using fallback PPM axes)")
-                return None
-
-            try:
-                x_min, x_max = float(min(self.ppm_x_axis)), float(max(self.ppm_x_axis))
-                y_min, y_max = float(min(self.ppm_y_axis)), float(max(self.ppm_y_axis))
-
-                x_center = (x_min + x_max) / 2.0
-                y_center = (y_min + y_max) / 2.0
-
-                # Priority 1: Classic 15N-HSQC (amide region)
-                # X: 5-12 ppm (amide protons), Y: 100-140 ppm (backbone/sidechain nitrogens)
-                if (5 <= x_center <= 12) and (100 <= y_center <= 140):
-                    return '15N'
-
-                # Priority 2: Classic 13C-HSQC (aliphatic region)
-                # X: -2 to 5 ppm (aliphatic CH), Y: 0-80 ppm (aliphatic carbons)
-                if (-2 <= x_center <= 5) and (0 <= y_center <= 80):
-                    return '13C'
-
-                # Priority 3: Edge cases based on Y-dimension
-                if y_center < 90:  # 13C aliphatic likely
-                    return '13C'
-                if y_center > 95:  # 15N backbone likely
-                    return '15N'
-
-                # Cannot determine with confidence
-                return None
-
-            except Exception as e:
-                log_warning(f"Error during nucleus auto-detection: {e}")
-                return None
-
-        def _estimate_noise_level(self):
-            """Estimate noise level from spectrum corners"""
-            if self.nmr_data is None:
-                return
-            try:
-                # Sample corners of the spectrum for noise estimation
-                h, w = self.nmr_data.shape
-                corner_size = min(20, h//10, w//10)
-
-                corners = [
-                    self.nmr_data[:corner_size, :corner_size],
-                    self.nmr_data[:corner_size, -corner_size:],
-                    self.nmr_data[-corner_size:, :corner_size],
-                    self.nmr_data[-corner_size:, -corner_size:]
-                ]
-
-                noise_data = np.concatenate([corner.flatten() for corner in corners])
-                self.noise_level = np.std(noise_data)
-                log_info(f"Estimated noise level: {self.noise_level:.2e}")
-            except Exception as e:
-                log_warning(f"Error estimating noise: {e}")
-                self.noise_level = 1e6  # Default fallback
-
-        def load_data(self, peak_list_file, nmr_file):
-            """Load both peak list and NMR data"""
-            success = True
-            success &= self.load_peak_list_file(peak_list_file)
-            success &= self._load_nmr_data_only(nmr_file)
-            return success
-
-        def detect_peaks_professional(self, **kwargs):
-            """Fallback peak detection method"""
-            log_warning("Using fallback peak detection - limited functionality")
-            return []
+from lunaNMR.core.enhanced_voigt_fitter import EnhancedVoigtFitter
+from lunaNMR.core.ps2d_2d_fitter import Ps2dMultiPeakFitter2D
+from lunaNMR.integrators.inplace_advanced_nmr_integrator import InPlaceAdvancedNMRIntegrator as BaseIntegrator
 
 # How many grid points either side of a picked coordinate to look for a seed height
 # when the sample under it is non-positive. Two survives a single bad sample without
@@ -395,11 +178,8 @@ class VoigtIntegrator(BaseIntegrator):
         # When set, uses absolute threshold = max_intensity * contour_min * safety_factor
         self.peak_list_contour_threshold = None  # None means use S/N threshold
 
-        if ENHANCED_FITTING_AVAILABLE:
-            self.enhanced_fitter = EnhancedVoigtFitter()
-            self.enhanced_fitter.parent = self  # Set parent reference for parallel processing
-        else:
-            self.enhanced_fitter = None
+        self.enhanced_fitter = EnhancedVoigtFitter()
+        self.enhanced_fitter.parent = self  # Set parent reference for parallel processing
 
         # PASS1→PASS2 Learning: Statistics from isolated peak fitting (parallel mode)
         # Set by parallel_voigt_processor after PASS1 completes
@@ -842,7 +622,7 @@ class VoigtIntegrator(BaseIntegrator):
             Peak dictionaries for all overlapping peaks (including target)
             Each dict contains: 'x_ppm', 'y_ppm', 'intensity' (optional)
         """
-        if not PS2D_2D_FITTER_AVAILABLE or all_peaks_context is None:
+        if all_peaks_context is None:
             return False, []
 
         if overlap_threshold_x is None or overlap_threshold_y is None:
@@ -1192,10 +972,6 @@ class VoigtIntegrator(BaseIntegrator):
         --------
         dict : Fitting results for all peaks in group, or None if failed
         """
-        if not PS2D_2D_FITTER_AVAILABLE:
-            log_warning("2D fitter not available, cannot fit overlap group")
-            return None
-
         log_info(f"2D multi-peak fitting for {assignment}: {len(overlap_group)} peaks")
 
         region = self.extract_2d_region_for_overlap_group(overlap_group)
@@ -1570,7 +1346,7 @@ class VoigtIntegrator(BaseIntegrator):
         # 2D SIMULTANEOUS FITTING: Always use 2D fitting for all peaks
         # All peaks are fitted using 2D simultaneous multi-peak Voigt fitting.
         # Isolated peaks are treated as single-peak groups.
-        if PS2D_2D_FITTER_AVAILABLE and all_peaks_context is not None:
+        if all_peaks_context is not None:
             needs_2d, overlap_group = self.check_if_peaks_need_2d_fitting(
                 peak_x_ppm, peak_y_ppm, all_peaks_context
             )
@@ -1683,10 +1459,7 @@ class VoigtIntegrator(BaseIntegrator):
                 log_error("2D fitting failed - peak not fitted")
                 return None
 
-        if PS2D_2D_FITTER_AVAILABLE:
-            reason = "no 2D fit context: no peak list was given to place this peak among its neighbours"
-        else:
-            reason = "no 2D fit context: the 2D fitter could not be imported"
+        reason = "no 2D fit context: no peak list was given to place this peak among its neighbours"
         log_error(f"{assignment} not fitted - {reason}")
         return {'assignment': assignment, 'success': False, 'error': reason}
 
@@ -2479,17 +2252,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             'zero_filling': 2,
             'peak_shape_analysis': True
         }
-        self.statistics = {
-            'processed_spectra': 0,
-            'successful_fits': 0,
-            'failed_fits': 0,
-            'average_quality': 0.0
-        }
-
-        if PS2D_DATA_SELECTOR_AVAILABLE:
-            self.ps2d_data_selector = Ps2dDataSelector(spectrum_type='15N-HSQC')
-        else:
-            self.ps2d_data_selector = None
 
         # Detection statistics for GUI status display
         self.detection_statistics = {
@@ -2513,23 +2275,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
         self.sn_from_gui_mode = False
         self.sn_absolute_threshold = None
         self.sn_contour_min_value = None
-
-    def get_statistics(self):
-        """Get processing statistics"""
-        return self.statistics.copy()
-
-    def update_statistics(self, successful=True, quality=0.0):
-        """Update processing statistics"""
-        self.statistics['processed_spectra'] += 1
-        if successful:
-            self.statistics['successful_fits'] += 1
-        else:
-            self.statistics['failed_fits'] += 1
-
-        total = self.statistics['successful_fits']
-        if total > 0:
-            current_avg = self.statistics['average_quality']
-            self.statistics['average_quality'] = ((current_avg * (total - 1)) + quality) / total
 
     def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown", all_peaks_context=None):
         """
@@ -2555,11 +2300,9 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
         )
 
         if result and result.get('success', True):
-            self.update_statistics(True, result['avg_r_squared'])
             # Convert nested format to flat format
             result = self.convert_voigt2d_result_to_standard(result)
         else:
-            self.update_statistics(False)
             result = None
 
         return result
