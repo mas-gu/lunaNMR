@@ -261,7 +261,6 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
 
     # Numerical fallback
     f1_flat = f1.ravel()
-    f2_flat = f2.ravel()
     n_points = len(f1_flat)
 
     # Total parameters: 8 per peak (pos_f1, lw_lor_f1, lw_gau_f1, pos_f2, lw_lor_f2, lw_gau_f2, intensity, spare)
@@ -480,12 +479,10 @@ class Ps2dStyleLevenbergMarquardt:
         lam = self.lambda_init
 
         n_params = len(params)
-        n_data = len(y)
 
         free_indices = [i for i in range(n_params) if i not in fixed_params]
         n_free = len(free_indices)
 
-        chi2_old = np.inf
         final_chi2 = np.inf      # chi2 of the parameters currently held
         done_count = 0
         stagnant_iterations = 0  # Track consecutive rejected steps
@@ -555,7 +552,6 @@ class Ps2dStyleLevenbergMarquardt:
                 params = params_new
                 final_chi2 = chi2_new
                 lam *= self.lambda_down  # Decrease damping
-                chi2_old = chi2
                 stagnant_iterations = 0  # Reset stagnation counter
 
                 if abs(chi2_new - chi2) < max(self.tol, self.tol * chi2):

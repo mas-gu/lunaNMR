@@ -829,16 +829,13 @@ class Ps2dMultiPeakFitter2D:
             initial_intensity_ratios = []
 
         f1_flat = f1_grid.ravel()
-        f2_flat = f2_grid.ravel()
         y_flat = intensity.ravel()
 
         # Apply data mask if provided (PS2D elliptical window filtering)
         if data_mask is not None:
             mask_flat = data_mask.ravel()
             y_flat_masked = y_flat[mask_flat]
-            n_masked = np.sum(mask_flat)
             if self.verbose:
-                n_total = len(y_flat)
                 sys.stdout.flush()
         else:
             mask_flat = np.ones(len(y_flat), dtype=bool)
@@ -864,17 +861,6 @@ class Ps2dMultiPeakFitter2D:
         # L/G penalty will be applied via custom optimizer wrapper (not by extending residuals)
 
         NPAR_VOIGT = 8
-
-        # Calculate median linewidths for diagnostics only (not used for bounds)
-        initial_lw_lor_f1 = [peak['lw_lor_f1'] for peak in initial_peaks]
-        initial_lw_gau_f1 = [peak['lw_gau_f1'] for peak in initial_peaks]
-        initial_lw_lor_f2 = [peak['lw_lor_f2'] for peak in initial_peaks]
-        initial_lw_gau_f2 = [peak['lw_gau_f2'] for peak in initial_peaks]
-
-        median_lw_lor_f1 = np.median(initial_lw_lor_f1)
-        median_lw_gau_f1 = np.median(initial_lw_gau_f1)
-        median_lw_lor_f2 = np.median(initial_lw_lor_f2)
-        median_lw_gau_f2 = np.median(initial_lw_gau_f2)
 
         config = get_ps2d_config()
 

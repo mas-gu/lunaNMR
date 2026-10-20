@@ -166,7 +166,6 @@ class EnhancedPeakPicker:
         """
         noise_level = self.estimate_noise_level(data_2d)
         data_max = np.max(data_2d)
-        data_range = data_max - np.min(data_2d)
 
         snr_estimate = data_max / (noise_level + 1e-10)
 
