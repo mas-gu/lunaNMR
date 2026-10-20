@@ -3916,7 +3916,6 @@ class LunaNMRMainWindow(BaseWindow):
 
         if hasattr(self.integrator, 'fitted_peaks') and self.integrator.fitted_peaks:
             if 0 <= peak_id < len(self.integrator.fitted_peaks):
-                deleted = self.integrator.fitted_peaks[peak_id]
                 del self.integrator.fitted_peaks[peak_id]
                 logger.info(f"Synced navigator delete to integrator.fitted_peaks: index {peak_id}")
 
@@ -7576,8 +7575,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             True if OK to proceed (no changes or user chose to discard)
             False if user cancelled
         """
-        # For now, always return True - we can add change tracking later
-        # TODO: Implement change tracking to detect unsaved modifications
+        # Modifications are not tracked, so there is nothing to prompt about:
+        # this always returns True and the caller proceeds.
         return True
 
     def _refresh_after_project_load(self):

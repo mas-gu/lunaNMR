@@ -14,7 +14,7 @@ import pandas as pd
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QRadioButton,
     QGroupBox, QListWidget, QListWidgetItem, QProgressBar,
-    QTextEdit, QButtonGroup, QMessageBox, QFileDialog, QCheckBox, QFrame,
+    QTextEdit, QButtonGroup, QMessageBox, QFileDialog, QFrame,
     QComboBox
 )
 from PySide6.QtCore import Qt, Signal, QThread, QObject

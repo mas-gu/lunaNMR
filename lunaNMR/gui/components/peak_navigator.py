@@ -747,7 +747,6 @@ class PeakNavigator(QWidget):
             assignment = str(peak[0])
             x_coord = float(peak[1])
             y_coord = float(peak[2])
-            height = peak[3] if len(peak) > 3 else ""
 
             # Extract R² value and quality label based on peak type
             # Reference peaks: [assignment, x, y, height, r_squared, quality] - R² at index 4

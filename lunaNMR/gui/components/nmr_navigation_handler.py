@@ -354,7 +354,6 @@ class NMRNavigationHandler:
         # Convert current mouse position to data coordinates using ORIGINAL limits
         # This avoids drift that would occur if we used event.xdata directly
         # (which is calculated from current, possibly already-panned limits)
-        inv = self._ax.transData.inverted()
 
         # Get the mouse position in screen (display) coordinates
         # and convert to data using current transform

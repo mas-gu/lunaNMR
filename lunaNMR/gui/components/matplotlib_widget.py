@@ -114,7 +114,6 @@ class MatplotlibWidget(QWidget):
         to match the LunaNMR design system.
         """
         panel_bg = self._hex_to_mpl_color(PANEL_BG_COLOR)
-        frame_bg = self._hex_to_mpl_color(FRAME_BG_COLOR)
         text_color = self._hex_to_mpl_color(PRIMARY_TEXT)
 
         self.figure.patch.set_facecolor(panel_bg)
