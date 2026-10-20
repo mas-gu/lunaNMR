@@ -13,10 +13,9 @@ model-free parameters, automating:
 
 import importlib
 import sys
-import os
 import tempfile
 from pathlib import Path
-from typing import Dict, Tuple, Optional, Callable
+from typing import Dict, Optional, Callable
 import pandas as pd
 
 # Import local modules - use absolute imports for GUI compatibility
@@ -34,8 +33,7 @@ try:
         validate_relaxation_rates,
         validate_field_consistency,
         check_minimum_residue_count,
-        generate_validation_report,
-        filter_invalid_residues
+        generate_validation_report
     )
     from .fitting_wrapper import run_t1_fitting, run_t2_fitting
 except ImportError:
@@ -52,8 +50,7 @@ except ImportError:
         validate_relaxation_rates,
         validate_field_consistency,
         check_minimum_residue_count,
-        generate_validation_report,
-        filter_invalid_residues
+        generate_validation_report
     )
     from fitting_wrapper import run_t1_fitting, run_t2_fitting
 
@@ -323,7 +320,7 @@ class IntegratedAnalysisPipeline:
             )
             self.log_progress(f"  │  ✓ {len(t2_params)} residues fitted")
 
-        self.log_progress(f"  ├─ Calculating hetNOE...")
+        self.log_progress("  ├─ Calculating hetNOE...")
         sat_intensities, sat_errors = parse_intensity_csv(noe_sat_file)
         unsat_intensities, unsat_errors = parse_intensity_csv(noe_unsat_file)
 
@@ -346,13 +343,13 @@ class IntegratedAnalysisPipeline:
             self.log_progress(f"  │  ⚠ hetNOE plot skipped: {exc}")
 
         # Step 4: Convert T1/T2 → R1/R2
-        self.log_progress(f"  ├─ Converting relaxation times to rates...")
+        self.log_progress("  ├─ Converting relaxation times to rates...")
         r1_params = convert_relaxation_times_to_rates(t1_params, time_units=t1_units)
         r2_params = (precomputed_r2 if precomputed_r2 is not None
                      else convert_relaxation_times_to_rates(t2_params, time_units=t2_units))
-        self.log_progress(f"  │  ✓ Converted to R1/R2 (s⁻¹)")
+        self.log_progress("  │  ✓ Converted to R1/R2 (s⁻¹)")
 
-        self.log_progress(f"  └─ Merging datasets...")
+        self.log_progress("  └─ Merging datasets...")
         merged_data, excluded = merge_datasets_by_residue(
             r1_data=r1_params,
             r2_data=r2_params,
@@ -478,7 +475,7 @@ class IntegratedAnalysisPipeline:
 
         script_name, class_name = script_info
         self.log_progress(f"  Using method: {self.params.analysis_method} ({script_name})")
-        self.log_progress(f"  Multicore spectral density analysis enabled")
+        self.log_progress("  Multicore spectral density analysis enabled")
 
         try:
             module = importlib.import_module(f'dynamiXs_density_functions.{script_name}')
