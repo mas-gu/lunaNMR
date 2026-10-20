@@ -17,7 +17,7 @@ Usage:
 import os
 import tempfile
 import traceback
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, Dict, Optional
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -747,113 +747,6 @@ class IntegratedAnalysisWorker(AnalysisWorker):
             if not self._cancelled:
                 self.emit_progress("Integrated analysis complete!", 100)
                 self.finished.emit(result)
-
-        except Exception as e:
-            self.emit_error(e)
-
-
-# FILE LOADING WORKER
-
-class FileLoadWorker(AnalysisWorker):
-    """
-    Worker for loading and validating data files.
-
-    Use this for loading large CSV files or performing validation
-    without blocking the GUI.
-    """
-
-    def __init__(
-        self,
-        file_path: str,
-        validator: Optional[Callable] = None,
-        parent: Optional[QObject] = None
-    ):
-        """
-        Initialize the file load worker.
-
-        Args:
-            file_path: Path to file to load
-            validator: Optional validation function
-            parent: Parent QObject
-        """
-        super().__init__(parent)
-        self.file_path = file_path
-        self.validator = validator
-
-    def run(self):
-        """Load and validate the file."""
-        try:
-            import pandas as pd
-
-            self.emit_progress(f"Loading {self.file_path}...", 20)
-
-            df = pd.read_csv(self.file_path)
-
-            self.emit_progress("Validating data...", 60)
-
-            if self.validator:
-                validation_result = self.validator(df)
-                if not validation_result.get('valid', True):
-                    raise ValueError(validation_result.get('error', 'Validation failed'))
-
-            self.emit_progress("File loaded successfully!", 100)
-            self.finished.emit({
-                'file_path': self.file_path,
-                'data': df,
-                'n_rows': len(df),
-                'columns': list(df.columns)
-            })
-
-        except Exception as e:
-            self.emit_error(e)
-
-
-# BATCH PROCESSING WORKER
-
-class BatchProcessingWorker(AnalysisWorker):
-    """
-    Worker for processing multiple files or residues in batch.
-
-    Provides progress updates for each item in the batch.
-    """
-
-    def __init__(
-        self,
-        items: list,
-        process_func: Callable,
-        parent: Optional[QObject] = None
-    ):
-        """
-        Initialize the batch processing worker.
-
-        Args:
-            items: List of items to process
-            process_func: Function to call for each item
-            parent: Parent QObject
-        """
-        super().__init__(parent)
-        self.items = items
-        self.process_func = process_func
-
-    def run(self):
-        """Process all items in the batch."""
-        try:
-            results = []
-            total = len(self.items)
-
-            for i, item in enumerate(self.items):
-                if self._cancelled:
-                    break
-
-                progress = int((i / total) * 100)
-                self.emit_progress(f"Processing item {i+1}/{total}...", progress)
-
-                result = self.process_func(item)
-                results.append(result)
-
-            if not self._cancelled:
-                self.emit_progress("Batch processing complete!", 100)
-                self.finished.emit(results)
 
         except Exception as e:
             self.emit_error(e)

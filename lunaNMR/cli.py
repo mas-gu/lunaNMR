@@ -1282,7 +1282,7 @@ def _run_project_remove(args):
                      'existing': [p for p, exists, _ in targets if exists],
                      'missing': [p for p, exists, _ in targets if not exists],
                      'would_free': sum(size for _, _, size in targets)},
-              f"[dry-run] project remove — nothing deleted",
+              "[dry-run] project remove — nothing deleted",
               *(f"  {'would remove' if exists else 'not present'}: {rel}"
                 f"{'  [' + _human_size(size) + ']' if exists else ''}"
                 for rel, exists, size in targets),

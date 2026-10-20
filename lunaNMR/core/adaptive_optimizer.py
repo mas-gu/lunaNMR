@@ -29,7 +29,6 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
 import multiprocessing as mp
-import time
 
 from lunaNMR.utils.cancellation import Cancelled, raise_if_stopped, result_unless_stopped
 
@@ -326,8 +325,6 @@ class AdaptiveOptimizer:
         """
         train_peaks, val_peaks = self._split_train_validation(isolated_peaks)
 
-        opt_start_time = time.time()
-
         n_combinations = len(self.MULTIPLIERS) ** 2
         n_fits_per_combo = len(train_peaks) + len(val_peaks)
 
@@ -338,14 +335,12 @@ class AdaptiveOptimizer:
 
         for combo_idx, (mult_f1, mult_f2) in enumerate([(m1, m2) for m1 in self.MULTIPLIERS for m2 in self.MULTIPLIERS]):
             raise_if_stopped(stop)
-            combo_start = time.time()
             radF1 = mult_f1 * median_lw_f1
             radF2 = mult_f2 * median_lw_f2
 
             # Evaluate on training set
             train_scores = []
             train_failures = 0
-            total_fits_in_combo = len(train_peaks) + len(val_peaks)
             for peak_idx, peak in enumerate(train_peaks):
                 if progress_callback:
                     fits_done = combo_idx * n_fits_per_combo + peak_idx
@@ -416,7 +411,6 @@ class AdaptiveOptimizer:
                 continue
 
             val_score = np.mean(val_scores)
-            combo_time = time.time() - combo_start
 
             # Record in history
             self.search_history.append({
@@ -501,8 +495,6 @@ class AdaptiveOptimizer:
         dict : Optimal parameters and optimization metadata
         """
         train_peaks, val_peaks = self._split_train_validation(isolated_peaks)
-
-        opt_start_time = time.time()
 
         combinations = [(m1, m2) for m1 in self.MULTIPLIERS for m2 in self.MULTIPLIERS]
         n_combinations = len(combinations)

@@ -301,7 +301,6 @@ class ParallelVoigtProcessor:
                         reference_linewidths=self._reference_linewidths,
                         reference_positions=self._reference_positions
                     )
-                    _debug_shown = [False]  # Use list to allow modification in nested function
 
                     def fit_single_peak(peak, radF1, radF2):
                         """Fit a single peak with given radF1/radF2 for optimization."""
@@ -911,12 +910,10 @@ class ParallelVoigtProcessor:
         parent = getattr(self.original_fitter, 'parent', None)
         if parent and hasattr(parent, 'gui_params') and parent.gui_params:
             gui_params = parent.gui_params
-            use_ps2d = gui_params.get('use_ps2d_multi_peak', False)
             return gui_params
 
         if hasattr(self.original_fitter, 'gui_params') and self.original_fitter.gui_params:
             gui_params = self.original_fitter.gui_params
-            use_ps2d = gui_params.get('use_ps2d_multi_peak', False)
             return gui_params
 
         log_warning("Parallel: No gui_params found, using empty dict (PS2D multi-peak will NOT activate)")

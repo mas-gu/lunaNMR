@@ -3,7 +3,6 @@
 
 import json
 import os
-import re
 
 import numpy as np
 import pandas as pd
@@ -493,7 +492,7 @@ def run_methyl_t2_analysis_with_params(params, progress_callback=None):
     if not os.path.exists(input_csv_file):
         raise FileNotFoundError(f"Input file not found: {input_csv_file}")
 
-    print(f"Starting methyl T2 (shared-amp bi-exp) fitting...")
+    print("Starting methyl T2 (shared-amp bi-exp) fitting...")
     print(f"Input file: {input_csv_file}")
     print(f"Output prefix: {output_prefix}")
     print(f"Error method: {error_method}")

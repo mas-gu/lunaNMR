@@ -11,7 +11,7 @@ import numpy as np
 from PySide6.QtCore import Qt, QEvent
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
-    QLabel, QPushButton, QCheckBox, QFileDialog, QSizePolicy,
+    QLabel, QCheckBox, QFileDialog, QSizePolicy,
     QListWidget, QListWidgetItem, QAbstractItemView, QScrollArea,
     QRadioButton, QButtonGroup,
 )
@@ -25,7 +25,7 @@ from constants import (
     PRIMARY_TEXT, SECONDARY_TEXT,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER,
     SPACING_XS, SPACING_SM, SPACING_MD,
-    FONT_SIZE_BODY, FONT_SIZE_SMALL,
+    FONT_SIZE_BODY,
 )
 from gui_components import (
     create_primary_button, create_secondary_button, create_label,

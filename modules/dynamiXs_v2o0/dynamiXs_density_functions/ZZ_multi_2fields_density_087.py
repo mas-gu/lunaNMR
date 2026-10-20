@@ -24,16 +24,12 @@ FIX VERSION: Fixed residue numbering issue by ensuring proper 0-based sequential
 import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
-from scipy import stats
-from scipy.optimize import minimize
 
 # Multiprocessing imports
 import multiprocessing
 from multiprocessing import cpu_count
-from functools import partial
 from dynamiXs_density_functions.model_free_search import (
     DUAL_FIELD_STARTS, S2_BOUNDS, TE_BOUNDS, REX_BOUNDS, TE_SCALE, best_least_squares)
-import pickle
 
 # Numba JIT compilation for performance (optional but recommended)
 try:
@@ -364,7 +360,7 @@ class DualFieldSpectralDensityAnalysis:
         n_successful = len(mc_results['S2'])
         if n_successful < 10:
             print(f"    Warning: Only {n_successful}/{n_monte_carlo} dual-field MC fits succeeded")
-            print(f"    Returning ensemble-based errors instead of Monte Carlo errors")
+            print("    Returning ensemble-based errors instead of Monte Carlo errors")
             return best_fit
 
         best_fit['S2_err'] = np.std(mc_results['S2'])
@@ -408,10 +404,8 @@ class DualFieldSpectralDensityAnalysis:
         c1 = self.field1_c_factor
         gamma_ratio = GAMMA_N / GAMMA_H
         
-        sigma_noe_f1 = (noe_f1 - 1.0) * r1_f1 * gamma_ratio
         dsigma_dr1_f1 = (noe_f1 - 1.0) * gamma_ratio
         dsigma_dnoe_f1 = r1_f1 * gamma_ratio
-        sigma_noe_f1_err = np.sqrt((dsigma_dr1_f1 * r1_f1_err)**2 + (dsigma_dnoe_f1 * noe_f1_err)**2)
         
         # J(0) field 1
         factor_j0_f1 = 3.0 / (2.0 * (3.0 * d1 / 4.0 + c1))
@@ -424,10 +418,8 @@ class DualFieldSpectralDensityAnalysis:
         d2 = self.field2_d_factor
         c2 = self.field2_c_factor
         
-        sigma_noe_f2 = (noe_f2 - 1.0) * r1_f2 * gamma_ratio
         dsigma_dr1_f2 = (noe_f2 - 1.0) * gamma_ratio
         dsigma_dnoe_f2 = r1_f2 * gamma_ratio
-        sigma_noe_f2_err = np.sqrt((dsigma_dr1_f2 * r1_f2_err)**2 + (dsigma_dnoe_f2 * noe_f2_err)**2)
         
         factor_j0_f2 = 3.0 / (2.0 * (3.0 * d2 / 4.0 + c2))
         dj0_dr1_f2 = factor_j0_f2 * (-0.5 - (3.0/5.0) * dsigma_dr1_f2)
@@ -713,7 +705,7 @@ class DualFieldSpectralDensityAnalysis:
         total_residues = len(merged_data)
         processed = len(results)
         
-        print(f"\nDual-Field Data Quality Summary:")
+        print("\nDual-Field Data Quality Summary:")
         print(f"  Total matched residues: {total_residues}")
         print(f"  Processed successfully: {processed}")
         print(f"  Skipped (NaN values): {skipped_nan}")
@@ -1157,7 +1149,7 @@ def main():
         analyzer.plot_dual_field_results(results, save_plots=True, plot_filename=plots_pdf)
         
         success_rate = results['fit_success'].mean() * 100
-        print(f"\nDual-Field Model-Free Fitting Results (Multicore):")
+        print("\nDual-Field Model-Free Fitting Results (Multicore):")
         print(f"  Fit success rate: {success_rate:.1f}%")
         print(f"  Fields analyzed: {analyzer.field1_freq} MHz and {analyzer.field2_freq} MHz")
         print(f"  Cores utilized: {int(cpu_count() * 0.8)} out of {cpu_count()} available")
@@ -1177,7 +1169,7 @@ def main():
             expected_ratio = (analyzer.field2_freq / analyzer.field1_freq)**2
             observed_ratio = rex_f2_mean / rex_f1_mean if rex_f1_mean > 0 else np.nan
             
-            print(f"\nRex Field Dependence Analysis:")
+            print("\nRex Field Dependence Analysis:")
             print(f"  Expected Rex ratio (B₂²/B₁²): {expected_ratio:.2f}")
             print(f"  Observed Rex ratio: {observed_ratio:.2f}")
             print(f"  Correlation between fields: {successful['Rex_f1'].corr(successful['Rex_f2']):.3f}")
@@ -1226,7 +1218,6 @@ def main():
         })
         
         # Field 2 (800 MHz) - typically higher Rex values due to field dependence
-        field_ratio_squared = (700.0/600.0)**2
         example_data2 = pd.DataFrame({
             'Residue': [f'A{i}' for i in range(1, n_residues + 1)],
             'R1': np.random.normal(1.1, 0.25, n_residues),  # Slightly different R1
@@ -1256,7 +1247,7 @@ def main():
         print("\nTo use your own data, ensure both CSV files have the same residue identifiers")
         print("and modify the field frequencies in the main() function as needed.")
         
-        print(f"\nMultiprocessing Performance Info:")
+        print("\nMultiprocessing Performance Info:")
         print(f"  Total CPU cores available: {cpu_count()}")
         print(f"  Cores that will be used: {int(cpu_count() * 0.8)} (80%)")
         print("  To disable multiprocessing, set use_multiprocessing=False in analyze_dual_field_csv()")

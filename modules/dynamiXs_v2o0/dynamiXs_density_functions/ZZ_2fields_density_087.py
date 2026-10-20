@@ -16,8 +16,6 @@ cross-correlation effects and dipolar-CSA interference in the relaxation mechani
 import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
-from scipy import stats
-from scipy.optimize import minimize
 
 # Physical constants
 GAMMA_H = 2.67522128e8  # 1H gyromagnetic ratio (rad s-1 T-1)
@@ -487,10 +485,8 @@ class DualFieldSpectralDensityAnalysis:
         c1 = self.field1_c_factor
         gamma_ratio = GAMMA_N / GAMMA_H
         
-        sigma_noe_f1 = (noe_f1 - 1.0) * r1_f1 * gamma_ratio
         dsigma_dr1_f1 = (noe_f1 - 1.0) * gamma_ratio
         dsigma_dnoe_f1 = r1_f1 * gamma_ratio
-        sigma_noe_f1_err = np.sqrt((dsigma_dr1_f1 * r1_f1_err)**2 + (dsigma_dnoe_f1 * noe_f1_err)**2)
         
         # J(0) field 1
         factor_j0_f1 = 3.0 / (2.0 * (3.0 * d1 / 4.0 + c1))
@@ -503,10 +499,8 @@ class DualFieldSpectralDensityAnalysis:
         d2 = self.field2_d_factor
         c2 = self.field2_c_factor
         
-        sigma_noe_f2 = (noe_f2 - 1.0) * r1_f2 * gamma_ratio
         dsigma_dr1_f2 = (noe_f2 - 1.0) * gamma_ratio
         dsigma_dnoe_f2 = r1_f2 * gamma_ratio
-        sigma_noe_f2_err = np.sqrt((dsigma_dr1_f2 * r1_f2_err)**2 + (dsigma_dnoe_f2 * noe_f2_err)**2)
         
         factor_j0_f2 = 3.0 / (2.0 * (3.0 * d2 / 4.0 + c2))
         dj0_dr1_f2 = factor_j0_f2 * (-0.5 - (3.0/5.0) * dsigma_dr1_f2)
@@ -750,7 +744,7 @@ class DualFieldSpectralDensityAnalysis:
             processed += 1
         
         # Report data quality summary
-        print(f"\nDual-Field Data Quality Summary (J(0.87ωH) Analysis):")
+        print("\nDual-Field Data Quality Summary (J(0.87ωH) Analysis):")
         print(f"  Total matched residues: {total_residues}")
         print(f"  Processed successfully: {processed}")
         print(f"  Skipped (NaN values): {skipped_nan}")
@@ -1067,7 +1061,7 @@ def main():
         analyzer.plot_dual_field_results(results)
         
         success_rate = results['fit_success'].mean() * 100
-        print(f"\nDual-Field Model-Free Fitting Results (J(0.87ωH)):")
+        print("\nDual-Field Model-Free Fitting Results (J(0.87ωH)):")
         print(f"  Fit success rate: {success_rate:.1f}%")
         print(f"  Fields analyzed: {analyzer.field1_freq} MHz and {analyzer.field2_freq} MHz")
         print(f"  Proton frequency factor: {OMEGA_H_FACTOR} (J(0.87ωH))")
@@ -1087,7 +1081,7 @@ def main():
             expected_ratio = (analyzer.field2_freq / analyzer.field1_freq)**2
             observed_ratio = rex_f2_mean / rex_f1_mean if rex_f1_mean > 0 else np.nan
             
-            print(f"\nRex Field Dependence Analysis (J(0.87ωH)):")
+            print("\nRex Field Dependence Analysis (J(0.87ωH)):")
             print(f"  Expected Rex ratio (B₂²/B₁²): {expected_ratio:.2f}")
             print(f"  Observed Rex ratio: {observed_ratio:.2f}")
             print(f"  Correlation between fields: {successful['Rex_field1'].corr(successful['Rex_field2']):.3f}")
@@ -1136,7 +1130,6 @@ def main():
         })
         
         # Field 2 (800 MHz) - typically higher Rex values due to field dependence
-        field_ratio_squared = (700.0/600.0)**2
         example_data2 = pd.DataFrame({
             'Residue': [f'A{i}' for i in range(1, n_residues + 1)],
             'R1': np.random.normal(1.1, 0.25, n_residues),  # Slightly different R1

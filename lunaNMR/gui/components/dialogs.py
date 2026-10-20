@@ -98,7 +98,7 @@ def show_confirmation(
     msg_box.setIcon(QMessageBox.Question)
 
     ok_button = msg_box.addButton(ok_text, QMessageBox.AcceptRole)
-    cancel_button = msg_box.addButton(cancel_text, QMessageBox.RejectRole)
+    msg_box.addButton(cancel_text, QMessageBox.RejectRole)
     msg_box.setDefaultButton(ok_button)
 
     ok_button.setProperty("class", "primary")

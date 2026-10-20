@@ -134,7 +134,7 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
         print("Error: No valid Rex data found in dataframe")
         return
 
-    print(f"\nRex data statistics:")
+    print("\nRex data statistics:")
     print(f"  Valid data points: {len(good_data)}")
     print(f"  Rex_f1 range: [{good_data[rex_col_f1].min():.2f}, {good_data[rex_col_f1].max():.2f}] s⁻¹")
     print(f"  Rex_f2 range: [{good_data[rex_col_f2].min():.2f}, {good_data[rex_col_f2].max():.2f}] s⁻¹")
@@ -173,7 +173,7 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
     mask = (good_data[rex_col_f1] > min_rex) & (good_data[rex_col_f2] > min_rex)
     filtered_rex_data = good_data[mask].copy()
 
-    print(f"\nRex Field Scaling filtering:")
+    print("\nRex Field Scaling filtering:")
     print(f"  Min Rex threshold: {min_rex} s⁻¹")
     print(f"  Data points after threshold filter: {len(filtered_rex_data)}/{len(good_data)}")
 
@@ -193,7 +193,7 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
             mean_ratio = final_rex_ratio.mean()
             std_ratio = final_rex_ratio.std()
 
-            print(f"  Rex ratio statistics:")
+            print("  Rex ratio statistics:")
             print(f"    Mean: {mean_ratio:.2f} (expected: {field_ratio:.2f})")
             print(f"    Std: {std_ratio:.2f}")
             print(f"    Range: [{final_rex_ratio.min():.2f}, {final_rex_ratio.max():.2f}]")
@@ -228,7 +228,7 @@ def plot_rex_field_analysis(df, field1_freq, field2_freq,
                      transform=ax_scale.transAxes, ha='center', va='center', fontsize=12,
                      bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.5))
 
-        print(f"  WARNING: No data points passed the minimum Rex threshold!")
+        print("  WARNING: No data points passed the minimum Rex threshold!")
 
     # Labels and formatting
     ax_scale.set_xlabel('Field Ratio² (B₂²/B₁²)', fontsize=11)

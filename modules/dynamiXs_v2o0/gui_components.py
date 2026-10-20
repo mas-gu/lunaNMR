@@ -14,26 +14,19 @@ from typing import Optional, Callable, List
 from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QLineEdit, QTextEdit, QPlainTextEdit,
-    QGroupBox, QScrollArea, QCheckBox, QRadioButton, QButtonGroup,
-    QComboBox, QSpinBox, QDoubleSpinBox, QSlider, QProgressBar,
-    QFileDialog, QMessageBox, QApplication, QSizePolicy, QInputDialog
+    QGroupBox, QScrollArea, QCheckBox, QRadioButton,
+    QComboBox, QSpinBox, QDoubleSpinBox,
+    QFileDialog, QMessageBox, QApplication, QInputDialog
 )
-from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtCore import Signal
+from PySide6.QtGui import QFont
 
 from constants import (
-    BG_COLOR, PANEL_BG_COLOR, FRAME_BG_COLOR,
-    PRIMARY_TEXT, SECONDARY_TEXT, DISABLED_TEXT,
-    PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
-    SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
-    DESTRUCTIVE_BUTTON_BG, DESTRUCTIVE_BUTTON_HOVER, DESTRUCTIVE_BUTTON_TEXT,
-    SUCCESS_GREEN, WARNING_ORANGE, ERROR_RED, INFO_BLUE,
-    BORDER_COLOR, SEPARATOR_COLOR,
-    BUTTON_CORNER_RADIUS, FRAME_CORNER_RADIUS, CARD_CORNER_RADIUS,
-    SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
+    PRIMARY_TEXT, SECONDARY_TEXT,
+    SUCCESS_GREEN, WARNING_ORANGE, ERROR_RED,
+    SPACING_SM, SPACING_MD,
     FONT_SIZE_LARGE_HEADER, FONT_SIZE_MEDIUM_HEADER, FONT_SIZE_SECTION_LABEL,
-    FONT_SIZE_BODY, FONT_SIZE_SMALL, FONT_SIZE_TINY, FONT_SIZE_MONOSPACE,
-    BUTTON_HEIGHT_STANDARD, BUTTON_WIDTH_STANDARD, BUTTON_WIDTH_LARGE,
+    FONT_SIZE_BODY, FONT_SIZE_SMALL, FONT_SIZE_MONOSPACE,
     get_system_font
 )
 

@@ -22,13 +22,13 @@ from lmfit import Model
 # One definition of the fit conventions, shared with the single-core fitter.
 try:
     from fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
-                              MARGINAL_TMAX_OVER_T, _is_reliable_t2, delay_window,
+                              _is_reliable_t2, delay_window,
                               fit_data_entry, measured_points, results_columns,
                               results_file_from_json, results_row)
     from fit_Tx_NMRRE import create_plots as plot_fit_results
 except ImportError:  # imported as dynamiXs_T1_T2.fitmulti__Tx_NMRRE (parent dir on path)
     from dynamiXs_T1_T2.fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
-                                             MARGINAL_TMAX_OVER_T, _is_reliable_t2,
+                                             _is_reliable_t2,
                                              delay_window, fit_data_entry,
                                              measured_points, results_columns,
                                              results_file_from_json, results_row)
@@ -36,18 +36,14 @@ except ImportError:  # imported as dynamiXs_T1_T2.fitmulti__Tx_NMRRE (parent dir
 import pandas as pd
 import multiprocessing
 from multiprocessing import cpu_count
-from functools import partial
-import pickle
 import json
-import re
-from pathlib import Path
 import time
 
 
 try:
-    from delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
+    from delay_parser import parse_delay_columns, require_delay_start
 except ImportError:  # imported as dynamiXs_T1_T2.fitmulti__Tx_NMRRE (parent dir on path)
-    from dynamiXs_T1_T2.delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
+    from dynamiXs_T1_T2.delay_parser import parse_delay_columns, require_delay_start
 
 
 def exp_decay(x, A, t2, C=0.0):
@@ -361,7 +357,7 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
     # Get time points from first successful result (same for all residues)
     successful_results = [r for r in results_list if r.get('success', False)]
     if not successful_results:
-        print(f"Warning: No successful fits to save to JSON")
+        print("Warning: No successful fits to save to JSON")
         return
 
     time_points = successful_results[0]['x'].tolist()

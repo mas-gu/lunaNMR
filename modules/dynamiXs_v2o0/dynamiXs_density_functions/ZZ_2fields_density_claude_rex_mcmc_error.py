@@ -9,11 +9,8 @@ including J(0), J(wN), J(wH), S2, Rex, and te parameters with proper error propa
 GUI Compatible wrapper functions added for integration with DynamiXs GUI.
 """
 
-import numpy as np
 import pandas as pd
 from matplotlib.figure import Figure
-from scipy import stats
-from scipy.optimize import minimize
 
 # Physical constants
 GAMMA_H = 2.67522128e8  # 1H gyromagnetic ratio (rad s-1 T-1)
@@ -381,7 +378,7 @@ def run_spectral_density_analysis_with_params(params):
                 csaN=csaN
             )
             
-            print(f"Starting dual-field spectral density analysis...")
+            print("Starting dual-field spectral density analysis...")
             print(f"Field 1: {field1_freq} MHz, Field 2: {field2_freq} MHz")
             
             # Analyze data
@@ -426,7 +423,7 @@ def run_spectral_density_analysis_with_params(params):
                 csaN=csaN
             )
             
-            print(f"Starting single-field spectral density analysis...")
+            print("Starting single-field spectral density analysis...")
             print(f"Field: {field1_freq} MHz")
             
             data = pd.read_csv(input_file1)

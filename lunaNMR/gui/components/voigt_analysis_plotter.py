@@ -1102,7 +1102,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             norm = Normalize(vmin=-z_max_resid, vmax=z_max_resid)
             colors_mapped = cmap_rdbu(norm(residuals))
 
-            residual_surf = ax_data.plot_surface(
+            ax_data.plot_surface(
                 F2_ppm, F1_ppm, residual_heights,
                 facecolors=colors_mapped,
                 alpha=0.6,

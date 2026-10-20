@@ -21,38 +21,37 @@ from typing import Optional, List, Dict, Any
 
 import pandas as pd
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QPushButton, QLineEdit, QTextEdit, QPlainTextEdit,
-    QFrame, QGroupBox, QScrollArea, QStackedWidget,
-    QCheckBox, QRadioButton, QButtonGroup, QComboBox,
-    QSpinBox, QDoubleSpinBox, QProgressBar,
-    QFileDialog, QMessageBox, QSizePolicy, QListWidget, QListWidgetItem,
+    QMainWindow, QWidget, QVBoxLayout, QGridLayout,
+    QLabel,
+    QFrame, QScrollArea, QStackedWidget,
+    QButtonGroup,
+    QDoubleSpinBox, QProgressBar,
+    QListWidget, QListWidgetItem,
     QAbstractItemView
 )
-from PySide6.QtCore import Qt, Signal, Slot, QThread, QTimer, QMimeData
-from PySide6.QtGui import QFont, QDragEnterEvent, QDropEvent
+from PySide6.QtCore import Qt, Signal, Slot, QTimer, QMimeData
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 
 from constants import (
-    BG_COLOR, PANEL_BG_COLOR, FRAME_BG_COLOR,
+    PANEL_BG_COLOR, FRAME_BG_COLOR,
     PRIMARY_TEXT, SECONDARY_TEXT,
     SUCCESS_GREEN,
-    SPACING_XS, SPACING_SM, SPACING_MD, SPACING_LG, SPACING_XL,
-    FONT_SIZE_LARGE_HEADER, FONT_SIZE_SECTION_LABEL, FONT_SIZE_BODY, FONT_SIZE_SMALL,
+    SPACING_XS, SPACING_SM, SPACING_MD, SPACING_XL,
+    FONT_SIZE_LARGE_HEADER, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
     WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT
 )
 
 from gui_components import (
-    load_stylesheet, get_font, get_monospace_font,
+    get_font,
     CollapsibleGroupBox, StyledGroupBox,
-    create_primary_button, create_secondary_button, create_destructive_button,
-    create_success_button, create_icon_button,
+    create_primary_button, create_secondary_button,
     create_label, create_header_label, create_secondary_label,
-    create_line_edit, create_text_edit, create_plain_text_edit,
+    create_line_edit, create_plain_text_edit,
     create_spin_box, create_double_spin_box, create_combo_box,
     create_check_box, create_radio_button,
-    create_h_layout, create_v_layout, create_grid_layout, create_scroll_area,
-    show_info, show_warning, show_error, ask_yes_no,
-    open_file_dialog, open_files_dialog, save_file_dialog, open_directory_dialog
+    create_h_layout, create_v_layout, create_grid_layout,
+    show_warning, show_error,
+    open_file_dialog, open_directory_dialog
 )
 
 from workers import (
@@ -1770,7 +1769,7 @@ class T1T2FittingPage(BasePage):
                 'derived_from': 't1rho'  # Mark as derived
             }
             self.fitted_experiments.add(f'{field}_t2')
-            self.results_text.appendPlainText(f"  T2 results now available in 'View Results'")
+            self.results_text.appendPlainText("  T2 results now available in 'View Results'")
 
         self.results_text.appendPlainText(f"  Residues processed: {len(result)}")
         self.results_text.appendPlainText(

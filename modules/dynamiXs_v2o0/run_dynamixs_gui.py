@@ -18,7 +18,6 @@ Requirements:
 """
 
 import sys
-import os
 from pathlib import Path
 
 # Add the current directory to the Python path
@@ -30,7 +29,6 @@ def main():
     """Launch the DynamiXs GUI application."""
     try:
         from PySide6.QtWidgets import QApplication
-        from PySide6.QtCore import Qt
 
         from gui_components import load_stylesheet
         from dynamiXs_gui import DynamiXsMainWindow

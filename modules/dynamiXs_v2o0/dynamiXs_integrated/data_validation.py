@@ -6,9 +6,7 @@ This module provides functions to validate NMR relaxation data and perform
 quality control checks before spectral density analysis.
 """
 
-import numpy as np
-from typing import Dict, List, Tuple, Set, Optional
-import warnings
+from typing import Dict, List, Tuple, Set
 
 
 class DataValidationWarning(UserWarning):
@@ -285,7 +283,7 @@ def generate_validation_report(warnings_dict: Dict[str, List[str]],
     # Excluded residues
     if excluded_residues:
         report_lines.append(f"\n⚠ EXCLUDED RESIDUES ({len(excluded_residues)} total):")
-        report_lines.append(f"   Residues not present in all datasets (R1, R2, hetNOE):")
+        report_lines.append("   Residues not present in all datasets (R1, R2, hetNOE):")
         report_lines.append(f"   {', '.join(excluded_residues[:20])}")  # Show first 20
         if len(excluded_residues) > 20:
             report_lines.append(f"   ... and {len(excluded_residues) - 20} more")
@@ -296,7 +294,7 @@ def generate_validation_report(warnings_dict: Dict[str, List[str]],
     if warnings_dict.get('zero_values'):
         zero_res = warnings_dict['zero_values']
         report_lines.append(f"\nℹ ZERO VALUES ({len(zero_res)} residues):")
-        report_lines.append(f"   These residues will be skipped in analysis:")
+        report_lines.append("   These residues will be skipped in analysis:")
         report_lines.append(f"   {', '.join(zero_res[:20])}")
         if len(zero_res) > 20:
             report_lines.append(f"   ... and {len(zero_res) - 20} more")
@@ -305,28 +303,28 @@ def generate_validation_report(warnings_dict: Dict[str, List[str]],
     if warnings_dict.get('negative_rates'):
         neg_res = warnings_dict['negative_rates']
         report_lines.append(f"\n⚠ NEGATIVE RATES ({len(neg_res)} residues - CRITICAL):")
-        report_lines.append(f"   Negative R1 or R2 values (unphysical):")
+        report_lines.append("   Negative R1 or R2 values (unphysical):")
         report_lines.append(f"   {', '.join(neg_res)}")
 
     # R2 < R1 (unphysical)
     if warnings_dict.get('r2_less_than_r1'):
         unphys_res = warnings_dict['r2_less_than_r1']
         report_lines.append(f"\n⚠ R2 < R1 ({len(unphys_res)} residues - WARNING):")
-        report_lines.append(f"   Unphysical for isotropic tumbling:")
+        report_lines.append("   Unphysical for isotropic tumbling:")
         report_lines.append(f"   {', '.join(unphys_res)}")
 
     # hetNOE out of range
     if warnings_dict.get('noe_out_of_range'):
         noe_res = warnings_dict['noe_out_of_range']
         report_lines.append(f"\n⚠ hetNOE OUT OF RANGE ({len(noe_res)} residues):")
-        report_lines.append(f"   hetNOE < 0 or > 1.5 (unusual):")
+        report_lines.append("   hetNOE < 0 or > 1.5 (unusual):")
         report_lines.append(f"   {', '.join(noe_res)}")
 
     # Large errors
     if warnings_dict.get('large_errors'):
         err_res = warnings_dict['large_errors']
         report_lines.append(f"\nℹ LARGE ERRORS ({len(err_res)} residues):")
-        report_lines.append(f"   Relative error > 50%:")
+        report_lines.append("   Relative error > 50%:")
         report_lines.append(f"   {', '.join(err_res[:20])}")
         if len(err_res) > 20:
             report_lines.append(f"   ... and {len(err_res) - 20} more")
