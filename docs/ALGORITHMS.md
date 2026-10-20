@@ -150,14 +150,9 @@ Dropping a decayed residue from an intensity series fabricates a plateau that is
 
 ## 5. Parameter Management
 
-`utils/parameter_manager.py` (+ `simplified_parameter_manager.py`).
+`utils/parameter_manager.py`: one parameter set, with a default, range and type per parameter.
 
-**Simplified mode** (`use_simplified_mode`) exposes 3 knobs → maps to legacy params via nucleus-adaptive thresholds:
-- `sensitivity` (legacy, no longer affects detection)
-- `window_scale` (default 1.0) — fitting-window sizing
-- `quality_target` (default 0.85) — feeds `min_r_squared`
-
-GUI spinbox values for `centroid_window_x/y_ppm` **override** simplified defaults via `update_from_gui_variables` → `get_effective_parameters` → `integrator.gui_params`.
+GUI spinbox values (search and centroid windows, fixed positions/linewidths, custom linewidths) **override** the defaults: `main_window.sync_parameters_to_integrator` writes them into `current_params`, and `get_integrator_parameters` groups them into the detection, fitting and `integrator.gui_params` sets.
 
 ---
 

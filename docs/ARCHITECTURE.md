@@ -53,7 +53,6 @@ tkinter is used **only** for the launcher's startup error dialogs; the app is en
 - **Overlap clustering** (`core_integrator.py::identify_overlap_clusters`): agglomerative closest-pair merging under diameter/size constraints → disjoint clusters
 
 ### 3.3 Parameter Management (`utils/parameter_manager.py`)
-- Simplified mode maps a few sliders onto the full legacy parameter set (`simplified_parameter_manager.py`)
 - GUI spinbox values always override calculated defaults (see §7)
 
 ---
@@ -120,12 +119,11 @@ All share the same core engines, parameter manager, and result schema — GUI/CL
 ## 7. Parameter Flow
 
 ```
-GUI spinboxes → ParameterManager.update_from_gui_variables() → current_params
-  → get_effective_parameters()
-      simplified mode: compute defaults, then override with GUI values (CRITICAL)
+GUI spinboxes → main_window.sync_parameters_to_integrator() → ParameterManager.current_params
+  → get_integrator_parameters()
   → integrator.gui_params → _detect_peaks_by_threshold() reads gui_params
 ```
-GUI values **always override** calculated defaults in simplified mode.
+GUI values **always override** the parameter manager's defaults.
 
 ---
 

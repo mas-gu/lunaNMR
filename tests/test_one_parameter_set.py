@@ -1,6 +1,7 @@
 # ABOUTME: The parameter manager has one parameter set, which the main window hands the integrator as it is.
-# ABOUTME: Pins that set and the main window's sync; the integrator leaves ppm-range nucleus detection to its fitter.
+# ABOUTME: Pins that set and the main window's sync, and that no alternative parameter mode or its helpers remain.
 
+import importlib
 import os
 import sys
 
@@ -57,6 +58,27 @@ def test_the_main_window_sync_hands_the_integrator_that_set(app):
         window.close()
         window.deleteLater()
         set_ps2d_config('15N')
+
+
+def test_there_is_no_simplified_parameter_module():
+    with pytest.raises(ImportError):
+        importlib.import_module('lunaNMR.utils.simplified_parameter_manager')
+
+
+def test_the_parameter_manager_has_no_simplified_mode():
+    from lunaNMR.utils.parameter_manager import NMRParameterManager
+    manager = NMRParameterManager()
+    for name in ('use_simplified_mode', 'simplified_manager', 'parameter_adapter',
+                 'update_simplified_parameters', 'validate_simplified_parameters',
+                 'get_effective_parameters'):
+        assert not hasattr(manager, name), name
+
+
+def test_the_fitter_has_no_simplified_parameter_manager():
+    from lunaNMR.core.enhanced_voigt_fitter import EnhancedVoigtFitter
+    fitter = EnhancedVoigtFitter()
+    for name in ('simplified_param_manager', 'parameter_adapter'):
+        assert not hasattr(fitter, name), name
 
 
 def test_the_integrator_leaves_ppm_range_nucleus_detection_to_its_fitter():
