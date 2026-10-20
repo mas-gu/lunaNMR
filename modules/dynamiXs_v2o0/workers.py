@@ -17,7 +17,7 @@ Usage:
 import os
 import tempfile
 import traceback
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, Dict, Optional
 from dataclasses import dataclass, field
 
 import pandas as pd

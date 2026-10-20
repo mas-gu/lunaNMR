@@ -42,15 +42,6 @@ except ImportError:
     PS2D_STYLE_FITTING_AVAILABLE = False
 
 try:
-    from lunaNMR.core.ps2d_multi_peak_fitter import (
-        Ps2dMultiPeakFitter,
-        fit_overlapping_peaks_ps2d_style
-    )
-    PS2D_MULTI_PEAK_AVAILABLE = True
-except ImportError:
-    PS2D_MULTI_PEAK_AVAILABLE = False
-
-try:
     from lunaNMR.core.ps2d_data_selector import Ps2dDataSelector
     PS2D_DATA_SELECTOR_AVAILABLE = True
 except ImportError:
@@ -67,7 +58,6 @@ except ImportError:
 # Import PS2D 2D multi-peak fitter (for closely-spaced overlapping peaks in 2D)
 try:
     from lunaNMR.core.ps2d_2d_fitter import Ps2dMultiPeakFitter2D
-    from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
     PS2D_2D_FITTER_AVAILABLE = True
 except ImportError:
     PS2D_2D_FITTER_AVAILABLE = False
@@ -1398,7 +1388,6 @@ class VoigtIntegrator(BaseIntegrator):
 
         n_isolated = sum(1 for c in final_clusters if len(c) == 1)
         n_groups = len(final_clusters) - n_isolated
-        max_group_size = max(len(c) for c in final_clusters) if final_clusters else 0
 
         log_info(f"Overlap clustering: {len(final_clusters)} clusters from {len(peak_positions)} peaks ({n_isolated} isolated, {n_groups} groups)")
 
@@ -2112,10 +2101,6 @@ class VoigtIntegrator(BaseIntegrator):
             max_intensity = 1.0
 
         normalized_data = region['intensity'] / max_intensity
-
-        # Store original measured heights BEFORE volume estimation
-        # These will be used by intensity ratio constraint in PS2D fitter
-        original_heights = [peak['intensity'] for peak in initial_peaks]
 
         # Convert HEIGHT to VOLUME using linewidth estimates: the peak picker returns
         # the HEIGHT (point value at maximum), but the Voigt intensity parameter is
@@ -3095,16 +3080,6 @@ class VoigtIntegrator(BaseIntegrator):
 
         if not np.any(mask):
             return original_x, original_y
-
-        # Get coordinates and intensities of top contour pixels
-        local_y_indices, local_x_indices = np.where(mask)
-        global_y_indices = local_y_indices + y_start
-        global_x_indices = local_x_indices + x_start
-
-        intensities = self.nmr_data[global_y_indices, global_x_indices]
-
-        ppm_x_vals = self.ppm_x_axis[global_x_indices]
-        ppm_y_vals = self.ppm_y_axis[global_y_indices]
 
         # Parabolic interpolation to find sub-pixel peak maximum
         # Uses 3-point parabola fit in both X and Y dimensions
