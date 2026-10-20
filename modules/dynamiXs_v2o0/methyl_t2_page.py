@@ -4,23 +4,19 @@
 import os
 from pathlib import Path
 
-import pandas as pd
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QFileDialog, QDoubleSpinBox, QSpinBox,
+    QHBoxLayout, QLabel, QFileDialog, QSpinBox,
     QComboBox, QProgressBar, QPlainTextEdit, QLineEdit,
 )
 
 from constants import (
-    BG_COLOR, PANEL_BG_COLOR, FRAME_BG_COLOR,
-    PRIMARY_TEXT, SECONDARY_TEXT, SECONDARY_BUTTON_BORDER,
-    SPACING_XS, SPACING_SM, SPACING_MD,
-    BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
-    FONT_SIZE_BODY, FONT_SIZE_SMALL,
+    FRAME_BG_COLOR,
+    PRIMARY_TEXT, SECONDARY_TEXT,
+    SPACING_SM,
+    FONT_SIZE_SMALL,
 )
 from gui_components import (
     create_primary_button, create_secondary_button, create_label,
-    create_header_label, create_v_layout, create_h_layout,
     get_font, show_error, show_warning, open_directory_dialog,
 )
 

@@ -17,7 +17,7 @@ from constants import (
 )
 from gui_components import (
     create_primary_button, create_secondary_button, create_label,
-    create_header_label, create_v_layout, create_h_layout, get_font, show_error,
+    create_v_layout, get_font, show_error,
     open_directory_dialog,
 )
 from dynamiXs_gui import BasePage, DropTargetLabel
