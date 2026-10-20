@@ -2,7 +2,7 @@
 Utility Classes and Managers for LunaNMR
 
 This module contains utility classes for configuration management,
-file handling, parameter management, and optimization.
+file handling and parameter management.
 """
 
 try:
@@ -17,11 +17,6 @@ except ImportError:
 
 try:
     from .parameter_manager import ParameterManager
-except ImportError:
-    pass
-
-try:
-    from .global_optimization_manager import GlobalOptimizationManager
 except ImportError:
     pass
 
@@ -67,7 +62,6 @@ __all__ = [
     'ConfigManager',
     'FileManager',
     'ParameterManager',
-    'GlobalOptimizationManager',
     'DelayExtractor',
     'RelaxationDataBridge',
     'OutputManager',

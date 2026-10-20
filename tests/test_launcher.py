@@ -62,7 +62,7 @@ def test_the_launcher_sends_info_logging_to_the_terminal():
 def test_importing_the_utilities_configures_no_logging():
     """Configuring the root logger is the application's choice, not a side effect of an
     import: a host importing lunaNMR keeps the logging it had."""
-    probe = ("import logging, lunaNMR.utils, lunaNMR.utils.global_optimization_manager; "
+    probe = ("import logging, lunaNMR.utils; "
              "print(len(logging.getLogger().handlers))")
     result = subprocess.run([sys.executable, "-c", probe], cwd=str(REPO_ROOT),
                             capture_output=True, text=True, timeout=300)

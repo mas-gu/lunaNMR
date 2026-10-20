@@ -15,7 +15,7 @@ Classes:
 
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Tuple, Any
+from typing import List, Tuple
 from scipy.special import wofz  # Faddeeva function for Voigt profiles
 from scipy.optimize import curve_fit
 from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
@@ -2239,7 +2239,7 @@ class VoigtIntegrator(BaseIntegrator):
         return result
 
     def fit_peak_voigt_2d(self, peak_x_ppm, peak_y_ppm, assignment="Unknown",
-                          all_peaks_context=None, linewidth_constraints=None):
+                          all_peaks_context=None):
         """
         2D simultaneous multi-peak Voigt fitting for all peaks
 
@@ -2254,7 +2254,6 @@ class VoigtIntegrator(BaseIntegrator):
         - peak_y_ppm: Y-axis peak position (ppm)
         - assignment: Peak assignment/label
         - all_peaks_context: List of all peak positions [(x1,y1), (x2,y2), ...] for overlap detection
-        - linewidth_constraints: Dict with 'x' and 'y' constraints for Global Optimization Manager
 
         Returns:
         - Dictionary with comprehensive fitting results or None if 2D fitting failed
@@ -3342,7 +3341,7 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             current_avg = self.statistics['average_quality']
             self.statistics['average_quality'] = ((current_avg * (total - 1)) + quality) / total
 
-    def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown", linewidth_constraints=None, all_peaks_context=None):
+    def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown", all_peaks_context=None):
         """
         Fit one peak in 2D among the peaks of the spectrum
 
@@ -3354,19 +3353,14 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             Peak position in Y dimension (ppm)
         assignment : str, optional
             Peak assignment/label
-        linewidth_constraints : dict, optional
-            PS2D linewidth reuse constraints from reference spectrum
-            Format: {'x': {'sigma_bounds': (min, max), 'gamma_bounds': (min, max)},
-                     'y': {'sigma_bounds': (min, max), 'gamma_bounds': (min, max)}}
         all_peaks_context : list of dict, optional
             List of all peaks in the spectrum for overlap detection and 2D routing
             Format: [{'assignment': str, 'x_ppm': float, 'y_ppm': float, 'pos_x': float, 'pos_y': float}, ...]
         """
 
-        # 2D fit with PS2D linewidth constraints and 2D routing
+        # 2D fit with 2D routing
         result = self.fit_peak_voigt_2d(
             peak_x_ppm, peak_y_ppm, assignment,
-            linewidth_constraints=linewidth_constraints,  # Pass through PS2D constraints
             all_peaks_context=all_peaks_context  # Enable automatic 2D routing for overlapping peaks
         )
 
@@ -3509,53 +3503,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
                 'method': 'voigt_2d_fitting_conversion_failed',
                 'error': str(e)
             }
-
-    def optimize_peak_list_globally(self, peak_list: List[Tuple[float, float, str]],
-                                   convergence_threshold: float = 0.05,
-                                   max_rounds: int = 5) -> Dict[str, Any]:
-        """
-        GLOBAL OPTIMIZATION: Two-phase optimization of multiple peaks using
-        GlobalOptimizationManager
-
-        This method implements the sophisticated two-phase approach:
-
-        Phase 1 (Survey):
-        - Fits all peaks with standard methods
-        - Collects linewidth statistics from successful peaks
-        - Identifies peaks needing improvement
-
-        Phase 2 (Iterative Refinement):
-        - Applies linewidth constraints from successful peaks
-        - Uses multi-peak deconvolution for complex cases
-        - Continues until convergence (<5% improvement per round)
-
-        Args:
-            peak_list: List of (x_ppm, y_ppm, peak_id) tuples
-            convergence_threshold: Stop when <N% peaks improve per round
-            max_rounds: Maximum refinement rounds
-
-        Returns:
-            Comprehensive optimization report with all results and statistics
-
-        Example:
-            peak_list = [(8.0, 120.0, "Peak1"), (7.9, 118.0, "Peak2")]
-            report = integrator.optimize_peak_list_globally(peak_list)
-            success_rate = report['optimization_summary']['final_success_rate']
-        """
-        from lunaNMR.utils.global_optimization_manager import GlobalOptimizationManager
-
-        log_progress("Starting Global Peak Optimization with Two-Phase Approach")
-
-        optimizer = GlobalOptimizationManager(
-            convergence_threshold=convergence_threshold,
-            max_rounds=max_rounds
-        )
-
-        optimization_report = optimizer.optimize_peak_list(peak_list, self)
-
-        log_info(f"Global Optimization Complete! Final success rate: {optimization_report['optimization_summary']['final_success_rate']:.1f}%, rounds: {optimization_report['optimization_summary']['total_rounds']}")
-
-        return optimization_report
 
 def _clamp_guess_to_bounds(vector, lower_bounds, upper_bounds, margin=1e-6):
     """Clamp parameter vector to be safely inside the provided bounds."""

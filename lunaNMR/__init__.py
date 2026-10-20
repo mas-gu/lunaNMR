@@ -37,7 +37,6 @@ _LAZY_EXPORTS = {
     'EnhancedPeakPicker': '.core.enhanced_peak_picker',
     'MultiSpectrumProcessor': '.processors.multi_spectrum_processor',
     'SingleSpectrumProcessor': '.processors.single_spectrum_processor',
-    'ParallelVoigtProcessor': '.processors.parallel_fitting',
     'ConfigurationManager': '.utils.config_manager',
     'NMRFileManager': '.utils.file_manager',
     'NMRParameterManager': '.utils.parameter_manager',
@@ -79,7 +78,6 @@ __all__ = [
     # Processors
     'MultiSpectrumProcessor',
     'SingleSpectrumProcessor',
-    'ParallelVoigtProcessor',
     # Utilities
     'ConfigurationManager',
     'NMRFileManager',
