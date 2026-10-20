@@ -42,7 +42,6 @@ class NMRParameterManager:
 
             # Processing Options (boolean parameters)
             'use_parallel_processing': {'default': False, 'type': bool},
-            'use_global_optimization': {'default': False, 'type': bool},
             'use_centroid_refinement': {'default': True, 'type': bool},
 
             # Multi-Peak Detection Parameters
@@ -148,8 +147,7 @@ class NMRParameterManager:
                 'use_adaptive_optimization': self.current_params.get('use_adaptive_optimization', False)
             },
             'processing_options': {
-                'use_parallel_processing': self.current_params['use_parallel_processing'],
-                'use_global_optimization': self.current_params['use_global_optimization']
+                'use_parallel_processing': self.current_params['use_parallel_processing']
             }
         }
 
@@ -193,7 +191,7 @@ class NMRParameterManager:
             'Detection': ['search_window_x', 'search_window_y'],
             'Fitting': ['fitting_window_x', 'fitting_window_y', 'min_r_squared', 'max_iterations'],
             'Peak Detection': ['height_threshold', 'distance_factor', 'prominence_threshold', 'smoothing_sigma'],
-            'Processing': ['use_parallel_processing', 'use_global_optimization', 'max_peaks_fit']
+            'Processing': ['use_parallel_processing', 'max_peaks_fit']
         }
 
         for category, param_names in categories.items():

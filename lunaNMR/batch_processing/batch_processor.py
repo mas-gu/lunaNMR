@@ -451,7 +451,6 @@ class BatchProcessor:
 
         processing_options = {
             'use_parallel': self.fit_processor.parameter_manager.current_params['use_parallel_processing'],
-            'use_global_optimization': False,
             'use_voigt_fitting': True,
             'skip_series_params': True
         }

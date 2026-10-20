@@ -370,7 +370,6 @@ class ProjectManager:
 
         # Fitting quality parameters
         'min_r_squared', 'max_iterations', 'fitting_window_x', 'fitting_window_y',
-        'use_global_optimization',
 
         # PS2D algorithm configuration
         'nucleus_type', 'ps2d_radF1', 'ps2d_radF2', 'ps2d_max_iterations',

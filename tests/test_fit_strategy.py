@@ -96,3 +96,9 @@ def test_a_parallel_fit_that_cannot_start_is_reported_not_rerouted():
 def test_the_older_parallel_fitter_is_gone():
     with pytest.raises(ImportError):
         importlib.import_module('lunaNMR.processors.parallel_fitting')
+
+
+def test_the_1d_multi_peak_estimator_module_is_gone():
+    """Nothing imported it; core_integrator's probe asked it for names it never defined."""
+    with pytest.raises(ImportError):
+        importlib.import_module('lunaNMR.core.ps2d_multi_peak_fitter')
