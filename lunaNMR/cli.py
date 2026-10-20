@@ -152,7 +152,7 @@ def _recorded(args, summary):
     record = {'schema_version': SCHEMA_VERSION, 'command': _full_command(args),
               'args': {k: (os.path.abspath(v) if k in _RECORD_PATH_ARGS
                            and isinstance(v, str) and v else v)
-                       for k, v in vars(args).items() if k != 'func'},
+                       for k, v in vars(args).items() if not callable(v)},
               'summary': _absolute_paths(summary)}
     path = os.path.join(args.out, f"{args.prefix}_dynamixs.json")
     with open(path, 'w') as fh:
