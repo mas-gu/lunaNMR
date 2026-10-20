@@ -35,7 +35,7 @@ from dynamiXs_density_functions.model_free_search import (
 from dynamiXs_density_functions.spectral_density_physics import (
     spectral_density, omega_h, omega_n, dipolar_constant, csa_constant, sigma_noe,
     reduced_spectral_densities, reduced_spectral_density_errors, relaxation_deviations,
-    overall_correlation_time)
+    overall_correlation_time, monte_carlo_rng)
 
 # The J(wH) column for each proton-frequency factor J(wH) can be evaluated at
 JWH_COLUMN = {1.0: 'JwH', 0.87: 'JwH_087'}
@@ -253,16 +253,18 @@ class DualFieldSpectralDensityAnalysis:
         mc_results = {'S2': [], 'te': [], 'Rex_f1': [], 'Rex_f2': [], 'chi2': []}
         
         mc_niter = max(1000, niter // 10)
-        
+        rng = monte_carlo_rng(r1_f1, r1_f1_err, r2_f1, r2_f1_err, noe_f1, noe_f1_err,
+                              r1_f2, r1_f2_err, r2_f2, r2_f2_err, noe_f2, noe_f2_err, tc_fixed)
+
         for i in range(n_monte_carlo):
             # Sample within experimental uncertainties for both fields
-            r1_f1_sample = max(0.1, np.random.normal(r1_f1, r1_f1_err))
-            r2_f1_sample = max(r1_f1_sample * 1.1, np.random.normal(r2_f1, r2_f1_err))
-            noe_f1_sample = np.clip(np.random.normal(noe_f1, noe_f1_err), -0.5, 1.0)
-            
-            r1_f2_sample = max(0.1, np.random.normal(r1_f2, r1_f2_err))
-            r2_f2_sample = max(r1_f2_sample * 1.1, np.random.normal(r2_f2, r2_f2_err))
-            noe_f2_sample = np.clip(np.random.normal(noe_f2, noe_f2_err), -0.5, 1.0)
+            r1_f1_sample = max(0.1, rng.normal(r1_f1, r1_f1_err))
+            r2_f1_sample = max(r1_f1_sample * 1.1, rng.normal(r2_f1, r2_f1_err))
+            noe_f1_sample = np.clip(rng.normal(noe_f1, noe_f1_err), -0.5, 1.0)
+
+            r1_f2_sample = max(0.1, rng.normal(r1_f2, r1_f2_err))
+            r2_f2_sample = max(r1_f2_sample * 1.1, rng.normal(r2_f2, r2_f2_err))
+            noe_f2_sample = np.clip(rng.normal(noe_f2, noe_f2_err), -0.5, 1.0)
             
             mc_fit = self._fit_dual_field_dataset(r1_f1_sample, r2_f1_sample, noe_f1_sample,
                                                 r1_f2_sample, r2_f2_sample, noe_f2_sample,

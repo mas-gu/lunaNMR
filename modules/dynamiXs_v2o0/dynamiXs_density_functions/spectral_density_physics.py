@@ -146,6 +146,15 @@ def relaxation_deviations(s2, te, rex, t1, t2, noe, tc, d, c, omega_h_j, omega_h
     return deviations
 
 
+def monte_carlo_rng(*values):
+    """
+    Random generator for one residue's Monte-Carlo error refits, seeded from the values it
+    samples around (their float64 bit patterns): the same input draws the same samples in
+    any run, residue order or worker process, and two residues draw different ones.
+    """
+    return np.random.default_rng(np.array(values, dtype=np.float64).view(np.uint64))
+
+
 def overall_correlation_time(r1_array, r2_array, omega_n_abs):
     """
     Overall correlation time from R1/R2 by the Fushman method,
