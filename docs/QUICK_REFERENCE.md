@@ -142,7 +142,7 @@ multiple named analyses; reopen from the Project Browser (File ▸ Project Conte
 | Peak Detection | `core/enhanced_peak_picker.py` |
 | Clustering + Orchestrator | `core/core_integrator.py` (`identify_overlap_clusters`) |
 | PS2D 2D Fitting | `core/ps2d_2d_fitter.py` |
-| 1D Voigt / fallback | `core/enhanced_voigt_fitter.py` |
+| Peak-list fit entry (`enhanced_peak_fitting_parallel`) | `core/enhanced_voigt_fitter.py` |
 | Parallel Processing | `core/parallel_voigt_processor.py` |
 | Multi-Spectrum Overlay | `gui/dialogs/multi_spectrum_viewer_dialog.py` |
 
