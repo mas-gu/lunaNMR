@@ -959,7 +959,7 @@ class VoigtIntegrator(BaseIntegrator):
         fix_positions : bool
             If True, peak positions are held constant during fitting (Stage 2 skipped)
         fix_linewidths : bool
-            If True, linewidths are held constant during fitting (Stage 1 skipped)
+            If True, linewidths are held constant during fitting (Stage 1 still fits the intensities)
         reference_positions : dict, optional
             Mapping of assignment -> (x_ppm, y_ppm) for cascade mode absolute drift limiting.
             If provided, position bounds are clipped to stay within max_drift of original reference.
