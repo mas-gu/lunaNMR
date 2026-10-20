@@ -422,9 +422,6 @@ class VoigtIntegrator(BaseIntegrator):
         else:
             self.enhanced_fitter = None
 
-        # Overlap resolution configuration (optional)
-        self.overlap_resolution_enabled = False
-
         # Initialize with nucleus-specific windows (will be overridden by GUI if provided)
         self.detected_nucleus_type = None
         self.gui_window_override = {'x': None, 'y': None}  # Track GUI overrides
@@ -513,88 +510,6 @@ class VoigtIntegrator(BaseIntegrator):
         peak_id = self._next_peak_id
         self._next_peak_id += 1
         return peak_id
-
-    def configure_overlap_resolution(self, enable: bool = True, config: Dict = None):
-        """
-        Configure overlap resolution for the integrator
-
-        This enables automatic detection and resolution of overlapping peaks
-        during fitting operations.
-
-        Args:
-            enable: Enable/disable overlap resolution (default: True)
-            config: Optional configuration dictionary with keys:
-                - 'jackknife': {'n_resamples': int, 'cv_threshold': float}
-                - 'staged_fitting': {'stage2_position_tolerance': float, ...}
-                - 'model_selection': {'max_peaks': int, 'criterion': 'AIC'|'BIC'}
-                - 'correlation': {'amplitude_correlation_threshold': float}
-
-        Example:
-            integrator = VoigtIntegrator()
-            integrator.configure_overlap_resolution(
-                enable=True,
-                config={
-                    'jackknife': {'n_resamples': 100},
-                    'model_selection': {'max_peaks': 5}
-                }
-            )
-
-        Note:
-            Overlap resolution is disabled by default for backward compatibility.
-            Enable it explicitly when you expect overlapping peaks.
-        """
-        self.overlap_resolution_enabled = enable
-
-        if self.enhanced_fitter is not None:
-            # CRITICAL: Call enhanced_fitter's configure_overlap_resolution method
-            # This sets the overlap_detection_enabled flag that triggers routing to OverlapResolverEngine
-            self.enhanced_fitter.configure_overlap_resolution(enable=enable, config=config)
-        else:
-            log_warning("Enhanced fitter not available - cannot configure overlap resolution")
-
-    def enable_overlap_resolution_preset(self, preset: str = 'default'):
-        """
-        Enable overlap resolution with preset configurations
-
-        Args:
-            preset: Configuration preset
-                - 'default': Balanced settings (50 resamples)
-                - 'fast': Speed-optimized (25 resamples)
-                - 'thorough': Accuracy-optimized (100 resamples)
-
-        Example:
-            integrator.enable_overlap_resolution_preset('thorough')
-        """
-        preset_configs = {
-            'default': {
-                'jackknife': {'n_resamples': 50},
-                'model_selection': {'max_peaks': 10}
-            },
-            'fast': {
-                'jackknife': {'n_resamples': 25},
-                'staged_fitting': {
-                    'stage1_max_iterations': 500,
-                    'stage2_max_iterations': 750,
-                    'stage3_max_iterations': 1000
-                }
-            },
-            'thorough': {
-                'jackknife': {'n_resamples': 100},
-                'staged_fitting': {
-                    'stage1_max_iterations': 2000,
-                    'stage2_max_iterations': 2500,
-                    'stage3_max_iterations': 3000
-                },
-                'model_selection': {'max_peaks': 15}
-            }
-        }
-
-        if preset not in preset_configs:
-            log_warning(f"Unknown preset '{preset}'. Using 'default'.")
-            preset = 'default'
-
-        self.configure_overlap_resolution(enable=True, config=preset_configs[preset])
-        log_info(f"Overlap resolution enabled with '{preset}' preset")
 
     def load_nmr_data(self, data_2d, ppm_x_axis, ppm_y_axis):
         """

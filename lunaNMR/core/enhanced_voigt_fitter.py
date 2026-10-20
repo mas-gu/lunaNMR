@@ -18,9 +18,9 @@ Key improvements:
 import numpy as np
 from scipy.special import wofz
 from scipy.optimize import curve_fit
-from scipy.signal import find_peaks, peak_widths
+from scipy.signal import peak_widths
 
-from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
+from lunaNMR.utils.output_manager import log_progress, log_warning, log_error
 
 from lunaNMR.utils.quality_categories import fit_quality_label
 
@@ -1293,111 +1293,6 @@ class EnhancedVoigtFitter:
 
 
 
-
-    def detect_potential_overlap(self, x_data: np.ndarray,
-                                  y_data: np.ndarray,
-                                  primary_peak_ppm: float,
-                                  nucleus_type: str = '1H') -> dict:
-        """
-        Detect if there are other peaks near the primary peak
-
-        Uses simple local maximum detection in a window around primary peak.
-        This is a lightweight overlap detector that routes to the full
-        OverlapResolverEngine when overlaps are detected.
-
-        Args:
-            x_data: PPM axis
-            y_data: Intensity data (should be baseline-corrected)
-            primary_peak_ppm: Main peak position
-            nucleus_type: Nucleus type for adaptive threshold
-
-        Returns:
-            {
-                'has_overlap': bool,
-                'peak_candidates': List[float],  # PPM positions
-                'n_peaks': int,
-                'separation_distance': float,     # Minimum distance between peaks
-                'confidence': float               # 0-1 scale
-            }
-        """
-        try:
-            nucleus_windows = {
-                '1H': 0.3,   # ±0.3 ppm window for 1H
-                '15N': 1.0,  # ±1.0 ppm window for 15N
-                '13C': 0.8,  # ±0.8 ppm window for 13C
-            }
-            search_window = nucleus_windows.get(nucleus_type, 0.5)
-
-            mask = np.abs(x_data - primary_peak_ppm) <= search_window
-            if not np.any(mask):
-                return {
-                    'has_overlap': False,
-                    'peak_candidates': [primary_peak_ppm],
-                    'n_peaks': 1,
-                    'separation_distance': float('inf'),
-                    'confidence': 0.0
-                }
-
-            x_region = x_data[mask]
-            y_region = y_data[mask]
-
-            # Adaptive prominence based on data range
-            data_range = np.max(y_region) - np.min(y_region)
-            prominence = 0.05 * data_range  # 5% of local data range
-
-            peaks_idx, properties = find_peaks(
-                y_region,
-                prominence=prominence,
-                distance=int(len(x_region) * 0.05)  # At least 5% of points apart
-            )
-
-            if len(peaks_idx) == 0:
-                return {
-                    'has_overlap': False,
-                    'peak_candidates': [primary_peak_ppm],
-                    'n_peaks': 1,
-                    'separation_distance': float('inf'),
-                    'confidence': 0.0
-                }
-
-            peak_candidates = x_region[peaks_idx].tolist()
-
-            if len(peak_candidates) > 1:
-                separations = np.diff(sorted(peak_candidates))
-                min_separation = float(np.min(np.abs(separations)))
-            else:
-                min_separation = float('inf')
-
-            has_overlap = (
-                len(peak_candidates) > 1 and
-                min_separation < self.overlap_detection_threshold
-            )
-
-            # Confidence based on prominence and separation
-            if len(peak_candidates) > 1:
-                avg_prominence = float(np.mean(properties['prominences']))
-                prominence_ratio = avg_prominence / data_range
-                confidence = min(1.0, prominence_ratio * 2)  # Scale to 0-1
-            else:
-                confidence = 0.0
-
-            return {
-                'has_overlap': has_overlap,
-                'peak_candidates': peak_candidates,
-                'n_peaks': len(peak_candidates),
-                'separation_distance': min_separation,
-                'confidence': confidence
-            }
-
-        except Exception as e:
-            log_warning(f"Overlap detection failed: {e}")
-            return {
-                'has_overlap': False,
-                'peak_candidates': [primary_peak_ppm],
-                'n_peaks': 1,
-                'separation_distance': float('inf'),
-                'confidence': 0.0
-            }
 
     def get_adaptive_peak_detection_params(self, x_data, y_data, nucleus_type, window_size_multiplier=1.0):
         """
