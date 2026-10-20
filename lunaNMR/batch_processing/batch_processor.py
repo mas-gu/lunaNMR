@@ -19,12 +19,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Union, Any
 from datetime import datetime
 
-# Import lunaNMR core components (READ-ONLY usage)
-try:
-    from ..core.core_integrator import EnhancedVoigtIntegrator
-    CORE_AVAILABLE = True
-except ImportError:
-    CORE_AVAILABLE = False
+from ..core.core_integrator import EnhancedVoigtIntegrator
 
 # Note: Processor imports will be done dynamically in methods to avoid import issues
 
@@ -139,54 +134,50 @@ class BatchProcessor:
             'files': []
         }
 
-        if CORE_AVAILABLE:
-            self.integrator = EnhancedVoigtIntegrator()
+        self.integrator = EnhancedVoigtIntegrator()
 
-            max_iter = self.config.get('max_iterations', 1000)
-            self.integrator.fitting_parameters['max_iterations'] = max_iter
-            if hasattr(self.integrator, 'enhanced_fitter') and self.integrator.enhanced_fitter:
-                self.integrator.enhanced_fitter.fitting_parameters['max_iterations'] = max_iter
-                self.logger.info(f"Configured max_iterations: {max_iter}")
+        max_iter = self.config.get('max_iterations', 1000)
+        self.integrator.fitting_parameters['max_iterations'] = max_iter
+        if hasattr(self.integrator, 'enhanced_fitter') and self.integrator.enhanced_fitter:
+            self.integrator.enhanced_fitter.fitting_parameters['max_iterations'] = max_iter
+            self.logger.info(f"Configured max_iterations: {max_iter}")
 
-            proc_param_config = self.config.get('processing_parameters', {})
+        proc_param_config = self.config.get('processing_parameters', {})
 
-            search_window_x = proc_param_config.get('search_window_x')
-            search_window_y = proc_param_config.get('search_window_y')
-            if search_window_x and search_window_y and hasattr(self.integrator, 'set_search_window'):
-                try:
-                    self.integrator.set_search_window(float(search_window_x), float(search_window_y))
-                    self.logger.info(
-                        f"Configured search window: ±{search_window_x} ppm (1H) × ±{search_window_y} ppm (15N/13C)"
-                    )
-                except Exception as exc:
-                    self.logger.warning(f"Unable to apply search window overrides: {exc}")
+        search_window_x = proc_param_config.get('search_window_x')
+        search_window_y = proc_param_config.get('search_window_y')
+        if search_window_x and search_window_y and hasattr(self.integrator, 'set_search_window'):
+            try:
+                self.integrator.set_search_window(float(search_window_x), float(search_window_y))
+                self.logger.info(
+                    f"Configured search window: ±{search_window_x} ppm (1H) × ±{search_window_y} ppm (15N/13C)"
+                )
+            except Exception as exc:
+                self.logger.warning(f"Unable to apply search window overrides: {exc}")
 
-            fitting_window_x = proc_param_config.get('fitting_window_x')
-            if fitting_window_x is not None:
-                try:
-                    window_x_value = float(fitting_window_x)
-                    self.integrator.fitting_parameters['fitting_window_x'] = window_x_value
-                    if hasattr(self.integrator, 'enhanced_fitter') and self.integrator.enhanced_fitter:
-                        self.integrator.enhanced_fitter.fitting_parameters['fitting_window_x'] = window_x_value
-                    self.logger.info(f"Configured fitting window X: ±{window_x_value} ppm")
-                except (TypeError, ValueError) as exc:
-                    self.logger.warning(f"Invalid fitting_window_x override ({fitting_window_x}): {exc}")
+        fitting_window_x = proc_param_config.get('fitting_window_x')
+        if fitting_window_x is not None:
+            try:
+                window_x_value = float(fitting_window_x)
+                self.integrator.fitting_parameters['fitting_window_x'] = window_x_value
+                if hasattr(self.integrator, 'enhanced_fitter') and self.integrator.enhanced_fitter:
+                    self.integrator.enhanced_fitter.fitting_parameters['fitting_window_x'] = window_x_value
+                self.logger.info(f"Configured fitting window X: ±{window_x_value} ppm")
+            except (TypeError, ValueError) as exc:
+                self.logger.warning(f"Invalid fitting_window_x override ({fitting_window_x}): {exc}")
 
-            fitting_window_y = proc_param_config.get('fitting_window_y')
-            if fitting_window_y is not None:
-                try:
-                    window_y_value = float(fitting_window_y)
-                    self.integrator.fitting_parameters['fitting_window_y'] = window_y_value
-                    if hasattr(self.integrator, 'enhanced_fitter') and self.integrator.enhanced_fitter:
-                        self.integrator.enhanced_fitter.fitting_parameters['fitting_window_y'] = window_y_value
-                    self.logger.info(f"Configured fitting window Y: ±{window_y_value} ppm")
-                except (TypeError, ValueError) as exc:
-                    self.logger.warning(f"Invalid fitting_window_y override ({fitting_window_y}): {exc}")
+        fitting_window_y = proc_param_config.get('fitting_window_y')
+        if fitting_window_y is not None:
+            try:
+                window_y_value = float(fitting_window_y)
+                self.integrator.fitting_parameters['fitting_window_y'] = window_y_value
+                if hasattr(self.integrator, 'enhanced_fitter') and self.integrator.enhanced_fitter:
+                    self.integrator.enhanced_fitter.fitting_parameters['fitting_window_y'] = window_y_value
+                self.logger.info(f"Configured fitting window Y: ±{window_y_value} ppm")
+            except (TypeError, ValueError) as exc:
+                self.logger.warning(f"Invalid fitting_window_y override ({fitting_window_y}): {exc}")
 
-            self.logger.info("Batch processor initialized")
-        else:
-            self.integrator = None
-            self.logger.error("Core components not available - batch processing disabled")
+        self.logger.info("Batch processor initialized")
 
     def _setup_logging(self, log_dir: Path):
         """Set up logging system for batch processing, logging to a file in `log_dir`.
@@ -562,9 +553,6 @@ class BatchProcessor:
         Returns:
             Dictionary with complete processing results
         """
-        if not CORE_AVAILABLE:
-            raise RuntimeError("Core components not available - cannot process spectra")
-
         self.logger.info(f"Starting batch processing of folder: {folder_path}")
         self.stats['processing_start_time'] = datetime.now()
 

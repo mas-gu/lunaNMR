@@ -24,24 +24,12 @@ Usage:
 __version__ = "1.0.0"
 __author__ = "lunaNMR Development Team"
 
-try:
-    from .batch_processor import BatchProcessor
-    from .config_manager import ConfigManager
-    BATCH_PROCESSING_AVAILABLE = True
-except ImportError:
-    BATCH_PROCESSING_AVAILABLE = False
-
-# CLI interface imported separately to avoid dependency issues
-try:
-    from .cli_interface import CLIInterface
-    CLI_AVAILABLE = True
-except ImportError:
-    CLI_AVAILABLE = False
+from .batch_processor import BatchProcessor
+from .config_manager import ConfigManager
+from .cli_interface import CLIInterface
 
 __all__ = [
     'BatchProcessor',
     'ConfigManager',
     'CLIInterface',
-    'BATCH_PROCESSING_AVAILABLE',
-    'CLI_AVAILABLE'
 ]
