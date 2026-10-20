@@ -62,3 +62,37 @@ def test_a_peak_fit_takes_no_linewidth_constraints():
     for method in (EnhancedVoigtIntegrator.enhanced_peak_fitting,
                    EnhancedVoigtIntegrator.fit_peak_voigt_2d):
         assert 'linewidth_constraints' not in inspect.signature(method).parameters
+
+
+def test_a_parallel_fit_that_cannot_start_is_reported_not_rerouted():
+    """An integrator without its Voigt fitter (the fitter failed to import) was handed
+    in parallel mode to a second, older parallel fitter with no locked clusters or
+    statistics, and then to sequential: logged as a warning, the spectrum came back
+    fitted by something else. It is reported as the failure it is."""
+    import pandas as pd
+    from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
+    from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
+    from lunaNMR.utils.output_manager import OutputManager
+    from lunaNMR.utils.parameter_manager import NMRParameterManager
+
+    peaks = pd.DataFrame({'Assignment': ['a', 'b', 'c'],
+                          'Position_X': [8.0, 8.2, 8.4], 'Position_Y': [120.0, 121.0, 122.0]})
+    integrator = EnhancedVoigtIntegrator()
+    integrator.load_nmr_file(str(HSQC / "600_T1_0o0.ft"))
+    integrator.peak_list = peaks
+    integrator.enhanced_fitter = None
+    messages = []
+    OutputManager.set_callback(lambda progress, task, message, failed: messages.append(message))
+    try:
+        results, statistics = SingleSpectrumProcessor(
+            integrator, NMRParameterManager()).process_peak_list(peaks, {'use_parallel': True})
+    finally:
+        OutputManager.set_callback(None)
+    assert results == [] and statistics is None
+    assert any('cluster-based fitter is unavailable' in m for m in messages)
+    assert not any('original parallel' in m.lower() or 'Falling back' in m for m in messages)
+
+
+def test_the_older_parallel_fitter_is_gone():
+    with pytest.raises(ImportError):
+        importlib.import_module('lunaNMR.processors.parallel_fitting')

@@ -17,7 +17,6 @@ MODULE_DIRS = [REPO_ROOT / "modules" / "dynamiXs_v2o0" / "dynamiXs_T1_T2",
 _MODULES = [
     "lunaNMR.core.parallel_voigt_processor",
     "lunaNMR.core.adaptive_optimizer",
-    "lunaNMR.processors.parallel_fitting",
     "fitmulti__Tx_NMRRE",
     # by package name, as every caller imports them
     "dynamiXs_density_functions.ZZ_multi_density",

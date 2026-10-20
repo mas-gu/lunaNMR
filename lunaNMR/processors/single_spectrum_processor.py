@@ -285,107 +285,62 @@ class SingleSpectrumProcessor:
         if force_reference_linewidths and reference_linewidths:
             log_info(f"Parallel mode: Using {len(reference_linewidths)} reference linewidths")
 
-        fallback_reason = "the cluster-based parallel fitter is unavailable"
+        if not (hasattr(self.integrator, 'enhanced_fitter') and
+                hasattr(self.integrator.enhanced_fitter, 'enhanced_peak_fitting_parallel')):
+            raise RuntimeError("the cluster-based fitter is unavailable")
+
+        def parallel_progress_callback(progress, status, current_item):
+            if self.progress_callback and self.processing_active:
+                self.progress_callback(progress, status, current_item)
+
+        # Returns tuple: (fitted_results, learned_statistics)
+        # skip_series_params forces fresh adaptive optimization (Independent mode)
+        skip_series_params = getattr(self, '_skip_series_params', False)
+        result = self.integrator.enhanced_fitter.enhanced_peak_fitting_parallel(
+            peak_list,
+            progress_callback=parallel_progress_callback,
+            locked_clusters_by_assignment=locked_clusters,
+            pre_learned_statistics=pre_learned_statistics,
+            reference_linewidths=reference_linewidths if force_reference_linewidths else None,
+            skip_series_params=skip_series_params,
+            reference_positions=getattr(self, '_original_reference_positions', None),
+            in_process=in_process,
+            stop=getattr(self, '_stop', None)
+        )
+
+        # Handle both old (list) and new (tuple) return formats
+        if isinstance(result, tuple):
+            fitted_results, learned_statistics = result
+        else:
+            fitted_results = result
+            learned_statistics = None
+                
+        if not isinstance(fitted_results, list):
+            fitted_results = [fitted_results] if fitted_results else []
+                
+        for i, result in enumerate(fitted_results):
+            if result:
+                # A fallback's own mode is the one thing that says it happened
+                if 'fitting_fallback' not in result:
+                    result['processing_mode'] = 'sequential' if in_process else 'enhanced_parallel'
+                if 'peak_number' not in result:
+                    result['peak_number'] = i + 1
+
+        log_info(f"Enhanced parallel processing completed: {len(fitted_results)} results")
+
+        # CRITICAL: Copy clusters from enhanced_fitter.series_params for series propagation
+        # This ensures the same cluster storage works for both parallel and sequential modes
         if (hasattr(self.integrator, 'enhanced_fitter') and
-            hasattr(self.integrator.enhanced_fitter, 'enhanced_peak_fitting_parallel')):
+            hasattr(self.integrator.enhanced_fitter, 'series_params') and
+            self.integrator.enhanced_fitter.series_params):
+            clusters_from_parallel = self.integrator.enhanced_fitter.series_params.get(
+                'locked_clusters_by_assignment'
+            )
+            if clusters_from_parallel:
+                self._computed_clusters_by_assignment = clusters_from_parallel
+                log_info(f"Stored {len(clusters_from_parallel)} clusters from parallel fitting for series propagation")
 
-            def parallel_progress_callback(progress, status, current_item):
-                if self.progress_callback and self.processing_active:
-                    self.progress_callback(progress, status, current_item)
-
-            try:
-                # Returns tuple: (fitted_results, learned_statistics)
-                # skip_series_params forces fresh adaptive optimization (Independent mode)
-                skip_series_params = getattr(self, '_skip_series_params', False)
-                result = self.integrator.enhanced_fitter.enhanced_peak_fitting_parallel(
-                    peak_list,
-                    progress_callback=parallel_progress_callback,
-                    locked_clusters_by_assignment=locked_clusters,
-                    pre_learned_statistics=pre_learned_statistics,
-                    reference_linewidths=reference_linewidths if force_reference_linewidths else None,
-                    skip_series_params=skip_series_params,
-                    reference_positions=getattr(self, '_original_reference_positions', None),
-                    in_process=in_process,
-                    stop=getattr(self, '_stop', None)
-                )
-
-                # Handle both old (list) and new (tuple) return formats
-                if isinstance(result, tuple):
-                    fitted_results, learned_statistics = result
-                else:
-                    fitted_results = result
-                    learned_statistics = None
-                
-                if not isinstance(fitted_results, list):
-                    fitted_results = [fitted_results] if fitted_results else []
-                
-                for i, result in enumerate(fitted_results):
-                    if result:
-                        # A fallback's own mode is the one thing that says it happened
-                        if 'fitting_fallback' not in result:
-                            result['processing_mode'] = 'sequential' if in_process else 'enhanced_parallel'
-                        if 'peak_number' not in result:
-                            result['peak_number'] = i + 1
-
-                log_info(f"Enhanced parallel processing completed: {len(fitted_results)} results")
-
-                # CRITICAL: Copy clusters from enhanced_fitter.series_params for series propagation
-                # This ensures the same cluster storage works for both parallel and sequential modes
-                if (hasattr(self.integrator, 'enhanced_fitter') and
-                    hasattr(self.integrator.enhanced_fitter, 'series_params') and
-                    self.integrator.enhanced_fitter.series_params):
-                    clusters_from_parallel = self.integrator.enhanced_fitter.series_params.get(
-                        'locked_clusters_by_assignment'
-                    )
-                    if clusters_from_parallel:
-                        self._computed_clusters_by_assignment = clusters_from_parallel
-                        log_info(f"Stored {len(clusters_from_parallel)} clusters from parallel fitting for series propagation")
-
-                return (fitted_results, learned_statistics)
-
-            except Cancelled:
-                raise
-            except Exception as e:
-                if in_process:
-                    raise
-                log_warning(f"Enhanced parallel processing failed: {e}")
-                fallback_reason = f"{type(e).__name__}: {e}"
-                # Fall through to existing parallel implementation
-
-        log_warning(f"Falling back to the original parallel fitter, with no locked clusters "
-                    f"or learned statistics, because {fallback_reason}")
-
-        try:
-            from lunaNMR.processors.parallel_fitting import ParallelPeakFitter
-
-            log_info(f"Using original parallel fitting for {len(peak_list)} peaks")
-
-            parallel_fitter = ParallelPeakFitter(self.integrator)
-
-            def original_parallel_progress_callback(completed, total, _current_assignment):
-                if self.progress_callback and self.processing_active:
-                    progress = (completed / total) * 100
-                    self.progress_callback(
-                        progress,
-                        f"Original parallel fitting: {completed}/{total} completed",
-                        "Processing peaks in parallel"
-                    )
-
-            fitted_results = parallel_fitter.fit_peaks_parallel(peak_list, original_parallel_progress_callback)
-
-            for i, result in enumerate(fitted_results):
-                if result:
-                    result['processing_mode'] = 'original_parallel'
-                    result['fitting_fallback'] = f"original parallel fitting ({fallback_reason})"
-                    if 'peak_number' not in result:
-                        result['peak_number'] = i + 1
-
-            return (fitted_results, None)  # Original parallel doesn't learn statistics
-
-        except Exception as e:
-            log_error(f"Original parallel fitting also failed: {e}")
-            log_info("Falling back to sequential processing")
-            return self._process_with_parallel_fitting(peak_list, in_process=True)
+        return (fitted_results, learned_statistics)
 
     def get_processing_summary(self, fitted_results: List[Dict], total_peaks: int) -> Dict[str, Any]:
         """Generate comprehensive processing summary"""
