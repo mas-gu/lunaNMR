@@ -1,6 +1,6 @@
 # Algorithm Reference
 
-Prominence-based peak detection with top-contour centroid refinement, PS2D simultaneous 2D Voigt fitting (5-stage Levenberg-Marquardt), and hierarchical overlap clustering.
+Prominence-based peak detection with top-contour centroid refinement, PS2D simultaneous 2D Voigt fitting (3-stage Levenberg-Marquardt), and hierarchical overlap clustering.
 
 Quality (R²): Excellent >0.9, Good >0.8, Fair >0.6; below that Poor above S/N 5, else Poor ≥0.2, Failed <0.2 (a near-noise peak Poor). See §4.
 
@@ -43,17 +43,17 @@ Defaults (`ps2d_config.py`, 15N): radF1=0.4, radF2=0.04. 13C: radF1=0.15, radF2=
 
 Internal Voigt units: σ = FWHM/2.3548 (Gaussian), γ = FWHM/2 (Lorentzian); profile via Faddeeva `wofz`.
 
-### 2.3 Five-Stage Levenberg-Marquardt
+### 2.3 Three-Stage Levenberg-Marquardt
 
 | Stage | Floating | Notes |
 |-------|----------|-------|
-| 0 | intensities only | DISABLED (caused intensity collapse) — fitting starts at Stage 1 |
 | 1 | linewidths + intensities (positions fixed) | always runs; with `fix_linewidths=True` the linewidths are held and only intensities float |
 | 2 | positions + linewidths + intensities | skipped if `fix_positions=True` |
-| 3 | reserved / unused | |
-| 4 | all parameters (global refine) | positions held if `fix_positions`, linewidths if `fix_linewidths`; fixed params restored exactly after `np.clip` bounds |
+| 3 | all parameters (global refine) | positions held if `fix_positions`, linewidths if `fix_linewidths`; fixed params restored exactly after `np.clip` bounds |
 
-GUI **Fix Positions**→skip Stage 2 and hold positions in Stage 4; **Fix Linewidths**→hold linewidths in every stage (Stage 1 still fits the intensities). A near-noise peak (`weak_peak_indices`, §2.6) has its position and linewidths held in every stage. Stages 1/4 support optional L/G-ratio and intensity-ratio soft penalties (applied only for too-close clusters).
+No stage fits the intensities alone: that collapses them.
+
+GUI **Fix Positions**→skip Stage 2 and hold positions in Stage 3; **Fix Linewidths**→hold linewidths in every stage (Stage 1 still fits the intensities). A near-noise peak (`weak_peak_indices`, §2.6) has its position and linewidths held in every stage. Stages 1/3 support optional L/G-ratio and intensity-ratio soft penalties (applied only for too-close clusters).
 
 **Optimizer** (`PS2DStyleFitter`): additive damping `α + λ·I`; λ init 1e-4, ×5 on rejection, ×0.2 on acceptance. Analytical Jacobian (`compute_multi_voigt_jacobian_2d`). Parameter normalization `self.scales = max(|params|, 1e-8)` (Hessian condition ~10¹⁰→10³–10⁴); Jacobian scaled by `scales`, covariance denormalized via `outer(scales, scales)`.
 

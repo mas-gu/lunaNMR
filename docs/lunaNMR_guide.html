@@ -237,7 +237,7 @@ The Jacobian is chain-ruled (<code>J_norm = J_phys · scales</code>) and the cov
 <tr><td><strong>Fix Positions</strong></td><td>Skips Stage 2 (position refinement) and holds positions in the global stage.</td></tr>
 <tr><td><strong>Fix Linewidths</strong></td><td>Holds linewidths in every stage; Stage 1 still fits the intensities.</td></tr>
 </table>
-<p class="muted">5-stage Levenberg-Marquardt: (0) intensity-only (disabled), (1) linewidths + intensities, (2) positions, (4) global.
+<p class="muted">3-stage Levenberg-Marquardt: (1) linewidths + intensities, (2) positions, (3) global.
 The intensity box carries the seed's sign (negative peaks are fitted); a peak inside the noise has its shape held.
 Hard position bounds are enforced via <code>np.clip()</code> every iteration. A 2D fit that fails is
 reported Failed; there is no 1D cross-section fallback.</p>

@@ -1,4 +1,4 @@
-# ABOUTME: PS2D 2D simultaneous multi-peak Voigt fitter using 5-stage Levenberg-Marquardt optimization.
+# ABOUTME: PS2D 2D simultaneous multi-peak Voigt fitter using 3-stage Levenberg-Marquardt optimization.
 # ABOUTME: Handles overlapping peak clusters with elliptical data selection and absolute position/linewidth constraints.
 """
 PS2D 2D Multi-Peak Fitter - Simultaneous 2D Voigt Fitting
@@ -610,10 +610,10 @@ class Ps2dMultiPeakFitter2D:
 
         return params, cov, info
 
-    def _fit_stage4_with_intensity_penalty(self, model_function, jacobian_function, x, y, p0, bounds,
+    def _fit_stage3_with_intensity_penalty(self, model_function, jacobian_function, x, y, p0, bounds,
                                           fixed_params, n_peaks, target_ratios, lambda_ratio, optimizer):
         """
-        Custom Stage 4 fitting with intensity ratio penalty PROPERLY integrated into objective.
+        Custom Stage 3 fitting with intensity ratio penalty PROPERLY integrated into objective.
 
         Same mathematical formulation as Stage 1, but used in global refinement stage.
 
@@ -741,7 +741,7 @@ class Ps2dMultiPeakFitter2D:
         Fit multiple overlapping 2D Voigt peaks simultaneously
 
         This is the CORE function that implements  2D multi-peak fitting.
-        Uses 5-stage Levenberg-Marquardt strategy for stable convergence.
+        Uses 3-stage Levenberg-Marquardt strategy for stable convergence.
 
         Parameters:
         -----------
@@ -792,7 +792,7 @@ class Ps2dMultiPeakFitter2D:
         Staged fitting
         - Stage 1: Fix positions, float widths + intensities
         - Stage 2: Float positions (if allowed)
-        - Stage 4: Final global refinement (all parameters float)
+        - Stage 3: Final global refinement (all parameters float)
         """
 
         n_peaks = len(initial_peaks)
@@ -1122,7 +1122,7 @@ class Ps2dMultiPeakFitter2D:
         # Stage 1: constraints as penalty terms in the objective (soft). Measured peak
         # height ratios guide the volume ratios within a tolerance - they come from
         # the detected positions, so they hold whether or not positions float - and
-        # hard clipping after Stage 4 destroyed fit quality. Both penalties apply ONLY
+        # hard clipping after Stage 3 destroyed fit quality. Both penalties apply ONLY
         # when peaks are too close (spectral ambiguity), decoupled from heavy_overlap
         # (which only affects linewidth estimation).
 
@@ -1235,31 +1235,31 @@ class Ps2dMultiPeakFitter2D:
         params, _ = cap_linewidth_totals(params, n_peaks,
                                          lw_caps_f1, lw_caps_f2)
 
-        # STAGE 4: Final global refinement
+        # STAGE 3: Final global refinement
         # Fix spare parameters + respect fix_positions/fix_linewidths flags
         # USER EXPECTATION: fix_positions/fix_linewidths are ABSOLUTE constraints
         # Positions/linewidths must remain unchanged regardless of χ² improvement potential
-        fixed_stage4 = {}
+        fixed_stage3 = {}
         for i in range(n_peaks):
             offset = i * NPAR_VOIGT
-            fixed_stage4[offset + 7] = 0.0  # Always fix spare parameter
+            fixed_stage3[offset + 7] = 0.0  # Always fix spare parameter
 
             # CRITICAL: Respect fix_positions flag (user's absolute constraint)
             # Also fix positions for weak peaks (low S/N or weak in cluster)
             if fix_positions or i in weak_peak_indices:
-                fixed_stage4[offset + 0] = params[offset + 0]  # Fix pos_f1
-                fixed_stage4[offset + 3] = params[offset + 3]  # Fix pos_f2
+                fixed_stage3[offset + 0] = params[offset + 0]  # Fix pos_f1
+                fixed_stage3[offset + 3] = params[offset + 3]  # Fix pos_f2
 
             # CRITICAL: Respect fix_linewidths flag (user's absolute constraint)
             if fix_linewidths or i in weak_peak_indices:
-                fixed_stage4[offset + 1] = params[offset + 1]  # Fix lw_lor_f1
-                fixed_stage4[offset + 2] = params[offset + 2]  # Fix lw_gau_f1
-                fixed_stage4[offset + 4] = params[offset + 4]  # Fix lw_lor_f2
-                fixed_stage4[offset + 5] = params[offset + 5]  # Fix lw_gau_f2
+                fixed_stage3[offset + 1] = params[offset + 1]  # Fix lw_lor_f1
+                fixed_stage3[offset + 2] = params[offset + 2]  # Fix lw_gau_f1
+                fixed_stage3[offset + 4] = params[offset + 4]  # Fix lw_lor_f2
+                fixed_stage3[offset + 5] = params[offset + 5]  # Fix lw_gau_f2
 
         # Always use default optimizer (max_iterations from ps2d_config)
         # Iterations are controlled by config, not by fix_positions flag
-        stage4_optimizer = self.optimizer
+        stage3_optimizer = self.optimizer
 
         # Apply intensity ratio penalty if enabled (same as Stage 1)
         # This ensures the penalty continues to guide the fit during global refinement
@@ -1269,34 +1269,34 @@ class Ps2dMultiPeakFitter2D:
 
         if apply_intensity_penalty:
 
-            params, cov, info = self._fit_stage4_with_intensity_penalty(
+            params, cov, info = self._fit_stage3_with_intensity_penalty(
                 model_function=model_function,
                 jacobian_function=jacobian_function,
                 x=f1_flat,
                 y=y_flat_masked,  # Use masked data (union of elliptical windows)
                 p0=params,
                 bounds=bounds,
-                fixed_params=fixed_stage4,
+                fixed_params=fixed_stage3,
                 n_peaks=n_peaks,
                 target_ratios=initial_intensity_ratios,
                 lambda_ratio=self.intensity_ratio_penalty_weight,
-                optimizer=stage4_optimizer
+                optimizer=stage3_optimizer
             )
         else:
-            params, cov, info = stage4_optimizer.fit(
+            params, cov, info = stage3_optimizer.fit(
                 func=model_function,
                 jacobian=jacobian_function,
                 x=f1_flat,
                 y=y_flat_masked,  # Use masked data (union of elliptical windows)
                 p0=params,
                 bounds=bounds,
-                fixed_params=fixed_stage4
+                fixed_params=fixed_stage3
             )
 
         total_iterations += info['iterations']
 
-        # L/G RATIO CONSTRAINT: Apply after Stage 4 if enabled
-        # Stage 4 floats the linewidths (unless fix_linewidths), which can undo the
+        # L/G RATIO CONSTRAINT: Apply after Stage 3 if enabled
+        # Stage 3 floats the linewidths (unless fix_linewidths), which can undo the
         # L/G constraint Stage 1 applied, so it is re-applied here.
         if self.lg_penalty_weight > 0.0 and not fix_linewidths:
 
@@ -1333,10 +1333,10 @@ class Ps2dMultiPeakFitter2D:
                 params[offset + 5] = total_lw_f2 * (1.0 - mean_lg_f2)  # lw_gau_f2
 
             params = np.clip(params, bounds[0], bounds[1])
-            for param_idx, fixed_value in fixed_stage4.items():
+            for param_idx, fixed_value in fixed_stage3.items():
                 params[param_idx] = fixed_value
 
-        # Nothing optimises after Stage 4, so a cap that fires from here on leaves the
+        # Nothing optimises after Stage 3, so a cap that fires from here on leaves the
         # intensity describing a width the fit no longer has. Tracked and repaired
         # below rather than at each site, because the intensity-ratio and L/G blocks
         # in between may move the widths again.
@@ -1427,7 +1427,7 @@ class Ps2dMultiPeakFitter2D:
                 # `cov` is deliberately NOT replaced. This refit floats one parameter
                 # per peak, so its covariance carries no variance for the positions or
                 # the linewidths, and the errors downstream are computed over the full
-                # parameter block. Keeping Stage 4's covariance means a capped peak's
+                # parameter block. Keeping Stage 3's covariance means a capped peak's
                 # reported error describes the UNCONSTRAINED fit - it does not know the
                 # width was held - which overstates the freedom rather than inventing
                 # a certainty the constraint did not earn.

@@ -49,7 +49,7 @@ State-based save/load. Fit surfaces are stored slim and reconstructed on load. D
 ### PS2D 2D Simultaneous Fitting
 The primary fitting engine for overlapping peaks — not optional.
 - Triggered automatically by hierarchical overlap clustering for peaks separated by < 0.08 ppm (¹H) or < 0.8 ppm (¹⁵N).
-- 5-stage Levenberg-Marquardt; fits every peak in a cluster simultaneously over elliptical data windows.
+- 3-stage Levenberg-Marquardt; fits every peak in a cluster simultaneously over elliptical data windows.
 - Respects the Expert-Mode **Fix Positions** / **Fix Linewidths** flags.
 
 ### Two-Phase Fitting
