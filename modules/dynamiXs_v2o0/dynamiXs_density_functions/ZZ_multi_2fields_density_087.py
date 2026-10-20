@@ -666,12 +666,13 @@ class DualFieldSpectralDensityAnalysis:
                     r1_f2, r1_f2_err, r2_f2, r2_f2_err, noe_f2, noe_f2_err
                 )
                 
-                # Fit dual-field model-free parameters with Monte Carlo error propagation
+                # Fit dual-field model-free parameters, with Monte Carlo error refits when asked
+                mf_errors = (dict(r1_f1_err=r1_f1_err, r2_f1_err=r2_f1_err, noe_f1_err=noe_f1_err,
+                                  r1_f2_err=r1_f2_err, r2_f2_err=r2_f2_err, noe_f2_err=noe_f2_err)
+                             if use_monte_carlo_errors else {})
                 mf_results = self.fit_dual_field_model_free(
                     r1_f1, r2_f1, noe_f1, r1_f2, r2_f2, noe_f2, tc_overall,
-                    r1_f1_err=r1_f1_err, r2_f1_err=r2_f1_err, noe_f1_err=noe_f1_err,
-                    r1_f2_err=r1_f2_err, r2_f2_err=r2_f2_err, noe_f2_err=noe_f2_err,
-                    n_monte_carlo=n_monte_carlo
+                    n_monte_carlo=n_monte_carlo, **mf_errors
                 )
                 
                 # Compile results
@@ -1043,12 +1044,13 @@ def _worker_process_residue_087(args):
             r1_f2, r1_f2_err, r2_f2, r2_f2_err, noe_f2, noe_f2_err
         )
         
-        # Fit dual-field model-free parameters with Monte Carlo error propagation
+        # Fit dual-field model-free parameters, with Monte Carlo error refits when asked
+        mf_errors = (dict(r1_f1_err=r1_f1_err, r2_f1_err=r2_f1_err, noe_f1_err=noe_f1_err,
+                          r1_f2_err=r1_f2_err, r2_f2_err=r2_f2_err, noe_f2_err=noe_f2_err)
+                     if use_monte_carlo_errors else {})
         mf_results = analyzer.fit_dual_field_model_free(
             r1_f1, r2_f1, noe_f1, r1_f2, r2_f2, noe_f2, tc_overall,
-            r1_f1_err=r1_f1_err, r2_f1_err=r2_f1_err, noe_f1_err=noe_f1_err,
-            r1_f2_err=r1_f2_err, r2_f2_err=r2_f2_err, noe_f2_err=noe_f2_err,
-            n_monte_carlo=n_monte_carlo
+            n_monte_carlo=n_monte_carlo, **mf_errors
         )
         
         # Compile results
