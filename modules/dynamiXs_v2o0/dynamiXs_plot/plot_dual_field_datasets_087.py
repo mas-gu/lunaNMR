@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Standalone script for plotting dual-field NMR relaxation data - J(0.87ωH) Version
-from ZZ_multi_2fields_density_087.py output files.
+from 0.87 ZZ_multi_2fields_density.py output files.
 
 J(0.87ωH) VERSION: Updated to plot J(0.87ωH) instead of J(ωH) for more accurate
 spectral density visualization in NMR relaxation analysis.

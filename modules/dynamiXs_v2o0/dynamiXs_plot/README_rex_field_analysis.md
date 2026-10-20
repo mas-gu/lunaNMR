@@ -153,7 +153,7 @@ The default threshold (0.5 s⁻¹) works well for most datasets. Adjust if:
 ## Integration with Other Scripts
 
 This standalone script uses the **same filtering logic** (Option 3) as the Rex field scaling panel of
-`../dynamiXs_density_functions/ZZ_multi_2fields_density_087.py`.
+`../dynamiXs_density_functions/ZZ_multi_2fields_density.py`.
 
 ## Troubleshooting
 

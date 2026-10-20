@@ -18,9 +18,7 @@ _MODULES = [
     "lunaNMR.integrators.inplace_advanced_nmr_integrator",
     # by package name, as every caller imports them
     "dynamiXs_density_functions.ZZ_multi_density",
-    "dynamiXs_density_functions.ZZ_multi_density_087",
     "dynamiXs_density_functions.ZZ_multi_2fields_density",
-    "dynamiXs_density_functions.ZZ_multi_2fields_density_087",
 ]
 
 # The third-party libraries those modules import, loaded before the snapshot: what they

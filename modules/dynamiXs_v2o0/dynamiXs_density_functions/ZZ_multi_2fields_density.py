@@ -5,6 +5,10 @@ This script imports R1, R1err, R2, R2err, hetNOE, and hetNOEerr from two CSV fil
 at different field strengths and performs reduced spectral density calculations 
 including J(0), J(wN), J(wH), S2, Rex, and te parameters with proper error propagation.
 
+omega_h_factor 0.87 evaluates J at 0.87 wH instead of wH - J(0.87wH), for a more
+accurate treatment of cross-correlation effects and dipolar-CSA interference - and
+names its columns JwH_087_f1/f2.
+
 The dual-field approach provides better separation of chemical exchange (Rex) from 
 internal dynamics (te) and more reliable model-free parameter determination.
 
@@ -33,13 +37,17 @@ from dynamiXs_density_functions.spectral_density_physics import (
     reduced_spectral_densities, reduced_spectral_density_errors, relaxation_deviations,
     overall_correlation_time)
 
+# The J(wH) column for each proton-frequency factor J(wH) can be evaluated at
+JWH_COLUMN = {1.0: 'JwH', 0.87: 'JwH_087'}
+
 
 class DualFieldSpectralDensityAnalysis:
     """
     Class for performing dual-field reduced spectral density mapping analysis
     """
     
-    def __init__(self, field1_freq=600.0, field2_freq=800.0, rNH=1.015e-10, csaN=-160.0e-6):
+    def __init__(self, field1_freq=600.0, field2_freq=800.0, rNH=1.015e-10, csaN=-160.0e-6,
+                 omega_h_factor=1.0):
         """
         Initialize the analysis with experimental parameters for two fields
         
@@ -53,7 +61,12 @@ class DualFieldSpectralDensityAnalysis:
             N-H bond length in meters (default: 1.015e-10)
         csaN : float
             15N CSA in ppm converted to frequency units (default: -160.0e-6)
+        omega_h_factor : float
+            J(wH) is evaluated at omega_h_factor * wH: 1.0, or 0.87 for J(0.87wH)
         """
+        if omega_h_factor not in JWH_COLUMN:
+            raise ValueError(f"omega_h_factor must be one of {sorted(JWH_COLUMN)}, "
+                             f"not {omega_h_factor}")
         self.field1_freq = field1_freq
         self.field2_freq = field2_freq
         self.rNH = rNH
@@ -69,7 +82,13 @@ class DualFieldSpectralDensityAnalysis:
         self.field1_c_factor = self._calculate_c_factor(self.field1_omegaN)
         self.field2_d_factor = self._calculate_d_factor()
         self.field2_c_factor = self._calculate_c_factor(self.field2_omegaN)
-        
+
+        self.omega_h_factor = omega_h_factor
+        self.field1_omegaH_eff = self.field1_omegaH * omega_h_factor
+        self.field2_omegaH_eff = self.field2_omegaH * omega_h_factor
+        self.jwh_column = JWH_COLUMN[omega_h_factor]
+        self.jwh_label = 'J(ωH)' if omega_h_factor == 1.0 else 'J(0.87ωH)'
+
     def _calculate_omegaH(self, freq_mhz):
         """Calculate 1H Larmor frequency in rad/s"""
         return omega_h(freq_mhz)
@@ -107,8 +126,14 @@ class DualFieldSpectralDensityAnalysis:
         """
         j0, jwn, jwh = reduced_spectral_densities(r1, r2, noe, getattr(self, f'{field}_d_factor'),
                                                   getattr(self, f'{field}_c_factor'))
-        return {'J0': j0, 'JwN': jwn, 'JwH': jwh}
+        return {'J0': j0, 'JwN': jwn, self.jwh_column: jwh}
     
+    def _jwh_columns(self, j_results, field):
+        """One field's J(wH) value and error columns, named for this analysis's J(wH);
+        `field` is 1 or 2."""
+        col, values = self.jwh_column, j_results[f'Field{field}']
+        return {f'{col}_f{field}': values[col], f'{col}_f{field}_err': values[f'{col}_err']}
+
     def calculate_isotropic_spectral_density(self, s2, tc, te, omega):
         """J(w) of the Lipari-Szabo model-free form"""
         return spectral_density(s2, tc, te, omega)
@@ -128,7 +153,7 @@ class DualFieldSpectralDensityAnalysis:
         return relaxation_deviations(s2, te, rex, t1, t2, noe, tc_fixed,
                                      getattr(self, f'field{field}_d_factor'),
                                      getattr(self, f'field{field}_c_factor'),
-                                     getattr(self, f'field{field}_omegaH'),
+                                     getattr(self, f'field{field}_omegaH_eff'),
                                      getattr(self, f'field{field}_omegaH'),
                                      abs(getattr(self, f'field{field}_omegaN')))
 
@@ -255,6 +280,7 @@ class DualFieldSpectralDensityAnalysis:
         n_successful = len(mc_results['S2'])
         if n_successful < 10:
             print(f"    Warning: Only {n_successful}/{n_monte_carlo} dual-field MC fits succeeded")
+            print("    Returning ensemble-based errors instead of Monte Carlo errors")
             return best_fit
         
         best_fit['S2_err'] = np.std(mc_results['S2'])
@@ -298,7 +324,7 @@ class DualFieldSpectralDensityAnalysis:
             results[field.capitalize()] = {
                 'J0': j['J0'], 'J0_err': j0_err,
                 'JwN': j['JwN'], 'JwN_err': jwn_err,
-                'JwH': j['JwH'], 'JwH_err': jwh_err
+                self.jwh_column: j[self.jwh_column], f'{self.jwh_column}_err': jwh_err
             }
         return results
 
@@ -414,7 +440,8 @@ class DualFieldSpectralDensityAnalysis:
                 'field1_freq': self.field1_freq,
                 'field2_freq': self.field2_freq,
                 'rNH': self.rNH,
-                'csaN': self.csaN
+                'csaN': self.csaN,
+                'omega_h_factor': self.omega_h_factor
             }
             
             worker_args = []
@@ -527,10 +554,10 @@ class DualFieldSpectralDensityAnalysis:
                     # Spectral densities for both fields
                     'J0_f1': j_results['Field1']['J0'], 'J0_f1_err': j_results['Field1']['J0_err'],
                     'JwN_f1': j_results['Field1']['JwN'], 'JwN_f1_err': j_results['Field1']['JwN_err'],
-                    'JwH_f1': j_results['Field1']['JwH'], 'JwH_f1_err': j_results['Field1']['JwH_err'],
+                    **self._jwh_columns(j_results, 1),
                     'J0_f2': j_results['Field2']['J0'], 'J0_f2_err': j_results['Field2']['J0_err'],
                     'JwN_f2': j_results['Field2']['JwN'], 'JwN_f2_err': j_results['Field2']['JwN_err'],
-                    'JwH_f2': j_results['Field2']['JwH'], 'JwH_f2_err': j_results['Field2']['JwH_err'],
+                    **self._jwh_columns(j_results, 2),
                     # Model-free parameters
                     **mf_results
                 }
@@ -667,12 +694,14 @@ class DualFieldSpectralDensityAnalysis:
         # J(ωH) comparison
         axes[1,2].set_ylim(0, 0.00000000002)
         add_missing_residue_bars(axes[1,2], missing_residues)
-        axes[1,2].errorbar(residue_numbers, good_data['JwH_f1'], yerr=good_data['JwH_f1_err'],
+        axes[1,2].errorbar(residue_numbers, good_data[f'{self.jwh_column}_f1'],
+                          yerr=good_data[f'{self.jwh_column}_f1_err'],
                                           fmt='o', capsize=3, label=f'{self.field1_freq} MHz', alpha=0.7)
-        axes[1,2].errorbar(residue_numbers, good_data['JwH_f2'], yerr=good_data['JwH_f2_err'],
+        axes[1,2].errorbar(residue_numbers, good_data[f'{self.jwh_column}_f2'],
+                          yerr=good_data[f'{self.jwh_column}_f2_err'],
                                           fmt='s', capsize=3, label=f'{self.field2_freq} MHz', alpha=0.7)
-        axes[1,2].set_title('J(ωH) Comparison')
-        axes[1,2].set_ylabel('J(ωH) (ns/rad²)')
+        axes[1,2].set_title(f'{self.jwh_label} Comparison')
+        axes[1,2].set_ylabel(f'{self.jwh_label} (ns/rad²)')
         axes[1,2].legend()
 
         # Row 3: Model-free parameters (S², τe, Rex comparison)
@@ -714,10 +743,37 @@ class DualFieldSpectralDensityAnalysis:
         
         # Rex ratio vs field ratio (should be quadratic for chemical exchange)
         field_ratio = (self.field2_freq / self.field1_freq)**2
-        rex_ratio = good_data['Rex_f2'] / (good_data['Rex_f1'] + 0.01)  # Avoid division by zero
-        axes[3,1].scatter(np.full(len(good_data), field_ratio), rex_ratio, alpha=0.6)
-        axes[3,1].axhline(y=field_ratio, color='red', linestyle='--', 
-                                         label=f'Expected ratio = {field_ratio:.1f}')
+        # Option 3: Filter by minimum threshold + outlier removal
+        field_ratio = (self.field2_freq / self.field1_freq)**2
+        min_rex = 0.5  # s⁻¹, minimum Rex threshold for meaningful scaling analysis
+
+        mask = (good_data['Rex_f1'] > min_rex) & (good_data['Rex_f2'] > min_rex)
+        filtered_rex_data = good_data[mask].copy()
+
+        if len(filtered_rex_data) > 0:
+            # Calculate ratios without offset (not needed after filtering)
+            rex_ratio = filtered_rex_data['Rex_f2'] / filtered_rex_data['Rex_f1']
+
+            # Remove outliers (ratio > 3× expected or < 0.3× expected)
+            ratio_mask = (rex_ratio < 3 * field_ratio) & (rex_ratio > 0.3 * field_ratio)
+            final_filtered_data = filtered_rex_data[ratio_mask]
+            final_rex_ratio = rex_ratio[ratio_mask]
+
+            axes[3,1].scatter(np.full(len(final_filtered_data), field_ratio), final_rex_ratio, alpha=0.6)
+            axes[3,1].axhline(y=field_ratio, color='red', linestyle='--',
+                             label=f'Expected ratio = {field_ratio:.2f}')
+
+            n_total = len(good_data)
+            n_filtered = len(final_filtered_data)
+            axes[3,1].text(0.05, 0.95, f'n = {n_filtered}/{n_total}\n(Rex > {min_rex} s⁻¹)',
+                          transform=axes[3,1].transAxes, verticalalignment='top',
+                          bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), fontsize=9)
+        else:
+            # No data passed filtering
+            axes[3,1].text(0.5, 0.5, f'No residues with Rex > {min_rex} s⁻¹\nat both fields',
+                          transform=axes[3,1].transAxes, ha='center', va='center',
+                          bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.5))
+
         axes[3,1].set_xlabel('Field Ratio² (B₂²/B₁²)')
         axes[3,1].set_ylabel('Rex Ratio (Rex₂/Rex₁)')
         axes[3,1].set_title('Rex Field Scaling')
@@ -806,7 +862,8 @@ def _worker_process_residue(args):
         field1_freq=analyzer_state['field1_freq'],
         field2_freq=analyzer_state['field2_freq'],
         rNH=analyzer_state['rNH'],
-        csaN=analyzer_state['csaN']
+        csaN=analyzer_state['csaN'],
+        omega_h_factor=analyzer_state['omega_h_factor']
     )
     
     try:
@@ -879,10 +936,10 @@ def _worker_process_residue(args):
             # Spectral densities for both fields
             'J0_f1': j_results['Field1']['J0'], 'J0_f1_err': j_results['Field1']['J0_err'],
             'JwN_f1': j_results['Field1']['JwN'], 'JwN_f1_err': j_results['Field1']['JwN_err'],
-            'JwH_f1': j_results['Field1']['JwH'], 'JwH_f1_err': j_results['Field1']['JwH_err'],
+            **analyzer._jwh_columns(j_results, 1),
             'J0_f2': j_results['Field2']['J0'], 'J0_f2_err': j_results['Field2']['J0_err'],
             'JwN_f2': j_results['Field2']['JwN'], 'JwN_f2_err': j_results['Field2']['JwN_err'],
-            'JwH_f2': j_results['Field2']['JwH'], 'JwH_f2_err': j_results['Field2']['JwH_err'],
+            **analyzer._jwh_columns(j_results, 2),
             # Model-free parameters
             **mf_results
         }

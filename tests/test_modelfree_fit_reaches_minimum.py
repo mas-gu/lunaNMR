@@ -1,5 +1,5 @@
-# ABOUTME: Model-free fits reach the minimum of their objective, deterministically, in all four variants.
-# ABOUTME: Real JA1 R1/R2/NOE at 600 and 700 MHz; the inputs come from a real modelfree run.
+# ABOUTME: Model-free fits reach the minimum of their objective, deterministically, single and dual field,
+# ABOUTME: J(wH) at 1.0 or 0.87 wH. Real JA1 R1/R2/NOE at 600/700 MHz from a real modelfree run.
 
 """
 The fit was a Monte-Carlo search whose steps MULTIPLY each parameter, so a member with
@@ -43,27 +43,27 @@ def inputs(tmp_path_factory):
     return {600: _basic(tmp_path_factory, 600), 700: _basic(tmp_path_factory, 700)}
 
 
-def _single(module, field):
-    import importlib
-    cls = importlib.import_module(f"dynamiXs_density_functions.{module}").ReducedSpectralDensityAnalysis
-    return cls(spectrometer_frequency=float(field), rNH=1.015e-10, csaN=-172.0e-6)
+def _single(factor, field):
+    from dynamiXs_density_functions.ZZ_multi_density import ReducedSpectralDensityAnalysis
+    return ReducedSpectralDensityAnalysis(spectrometer_frequency=float(field), rNH=1.015e-10,
+                                          csaN=-172.0e-6, omega_h_factor=factor)
 
 
-def _dual(module):
-    import importlib
-    cls = importlib.import_module(f"dynamiXs_density_functions.{module}").DualFieldSpectralDensityAnalysis
-    return cls(field1_freq=600.0, field2_freq=700.0, rNH=1.015e-10, csaN=-172.0e-6)
+def _dual(factor):
+    from dynamiXs_density_functions.ZZ_multi_2fields_density import DualFieldSpectralDensityAnalysis
+    return DualFieldSpectralDensityAnalysis(field1_freq=600.0, field2_freq=700.0, rNH=1.015e-10,
+                                            csaN=-172.0e-6, omega_h_factor=factor)
 
 
-def _fit_single(module, inputs, residue):
+def _fit_single(factor, inputs, residue):
     row = inputs[600].loc[residue]
-    return _single(module, 600)._fit_single_dataset(
+    return _single(factor, 600)._fit_single_dataset(
         row.R1, row.R2, row.hetNOE, row.tc * 1e-9, 10_000)
 
 
-def _fit_dual(module, inputs, residue):
+def _fit_dual(factor, inputs, residue):
     a, b = inputs[600].loc[residue], inputs[700].loc[residue]
-    return _dual(module)._fit_dual_field_dataset(
+    return _dual(factor)._fit_dual_field_dataset(
         a.R1, a.R2, a.hetNOE, b.R1, b.R2, b.hetNOE, a.tc * 1e-9, 10_000)
 
 
@@ -76,31 +76,31 @@ def modules_path():
 
 
 def test_a_residue_that_needs_a_small_rex_gets_it(inputs):
-    fit = _fit_single("ZZ_multi_density_087", inputs, TRAPPED)
+    fit = _fit_single(0.87, inputs, TRAPPED)
     assert fit["Rex"] == pytest.approx(0.31, abs=0.02)
     assert fit["S2"] == pytest.approx(0.6716, abs=0.002)
     assert fit["chi2"] < 1e-8
     assert fit["at_iteration_cap"] is False
 
 
-@pytest.mark.parametrize("module", ["ZZ_multi_density", "ZZ_multi_density_087"])
-def test_a_single_field_fit_does_not_depend_on_the_seed(inputs, module):
+@pytest.mark.parametrize("factor", [1.0, 0.87])
+def test_a_single_field_fit_does_not_depend_on_the_seed(inputs, factor):
     fits = []
     for seed in (0, 1):
         random.seed(seed)
         np.random.seed(seed)
-        fits.append(_fit_single(module, inputs, TRAPPED))
+        fits.append(_fit_single(factor, inputs, TRAPPED))
     assert fits[0]["S2"] == fits[1]["S2"]
     assert fits[0]["Rex"] == fits[1]["Rex"]
 
 
-@pytest.mark.parametrize("module", ["ZZ_multi_2fields_density", "ZZ_multi_2fields_density_087"])
-def test_a_dual_field_fit_converges_and_does_not_depend_on_the_seed(inputs, module):
+@pytest.mark.parametrize("factor", [1.0, 0.87])
+def test_a_dual_field_fit_converges_and_does_not_depend_on_the_seed(inputs, factor):
     fits = []
     for seed in (0, 1):
         random.seed(seed)
         np.random.seed(seed)
-        fits.append(_fit_dual(module, inputs, TRAPPED))
+        fits.append(_fit_dual(factor, inputs, TRAPPED))
     assert fits[0]["at_iteration_cap"] is False
     assert np.isfinite(fits[0]["chi2"])
     assert fits[0]["S2"] == fits[1]["S2"]
@@ -109,5 +109,5 @@ def test_a_dual_field_fit_converges_and_does_not_depend_on_the_seed(inputs, modu
 
 def test_without_monte_carlo_the_errors_are_not_invented(inputs):
     """The ensemble's spread was ~1e-9: copies of one member, not an uncertainty."""
-    fit = _fit_single("ZZ_multi_density_087", inputs, TRAPPED)
+    fit = _fit_single(0.87, inputs, TRAPPED)
     assert np.isnan(fit["S2_err"])

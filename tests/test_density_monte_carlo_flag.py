@@ -7,7 +7,6 @@ analyze_dual_field_csv took use_monte_carlo_errors and never read it: every dual
 refitted each residue n_monte_carlo times (1000 from the CLI) with unseeded sampling.
 """
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -25,6 +24,12 @@ SOURCES = {'f600': RUN / "f600" / "f600_spectral_density_basic.csv",
 pytestmark = pytest.mark.skipif(not RUN.exists(), reason="data_test not present")
 
 
+def _analyzer(factor):
+    from dynamiXs_density_functions.ZZ_multi_2fields_density import DualFieldSpectralDensityAnalysis
+    return DualFieldSpectralDensityAnalysis(field1_freq=600.0, field2_freq=700.0, rNH=1.015e-10,
+                                            csaN=-172.0e-6, omega_h_factor=factor)
+
+
 @pytest.fixture
 def tables(tmp_path):
     paths = []
@@ -37,11 +42,10 @@ def tables(tmp_path):
     return paths
 
 
-@pytest.mark.parametrize("module", ["ZZ_multi_2fields_density", "ZZ_multi_2fields_density_087"])
+@pytest.mark.parametrize("factor", [1.0, 0.87])
 @pytest.mark.parametrize("parallel", [False, True])
-def test_no_monte_carlo_refits_unless_asked(module, parallel, tables, capsys):
-    cls = importlib.import_module(f"dynamiXs_density_functions.{module}").DualFieldSpectralDensityAnalysis
-    analyzer = cls(field1_freq=600.0, field2_freq=700.0, rNH=1.015e-10, csaN=-172.0e-6)
+def test_no_monte_carlo_refits_unless_asked(factor, parallel, tables, capsys):
+    analyzer = _analyzer(factor)
     df = analyzer.analyze_dual_field_csv(tables[0], tables[1], use_monte_carlo_errors=False,
                                          n_monte_carlo=12, use_multiprocessing=parallel,
                                          n_processes=2)
@@ -50,10 +54,9 @@ def test_no_monte_carlo_refits_unless_asked(module, parallel, tables, capsys):
     assert 'Monte Carlo' not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("module", ["ZZ_multi_2fields_density", "ZZ_multi_2fields_density_087"])
-def test_monte_carlo_refits_give_errors_when_asked(module, tables):
-    cls = importlib.import_module(f"dynamiXs_density_functions.{module}").DualFieldSpectralDensityAnalysis
-    analyzer = cls(field1_freq=600.0, field2_freq=700.0, rNH=1.015e-10, csaN=-172.0e-6)
+@pytest.mark.parametrize("factor", [1.0, 0.87])
+def test_monte_carlo_refits_give_errors_when_asked(factor, tables):
+    analyzer = _analyzer(factor)
     df = analyzer.analyze_dual_field_csv(tables[0], tables[1], use_monte_carlo_errors=True,
                                          n_monte_carlo=12, use_multiprocessing=False)
     assert np.isfinite(df['S2_err']).all()

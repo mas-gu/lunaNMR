@@ -138,7 +138,7 @@ Where:
 - `Rex` = Chemical exchange contribution to R₂
 
 #### J(0.87ωH) Variants
-The `_087` variants (`ZZ_*density_087.py`) evaluate the `J(ωH)` term of R₂ at `0.87ωH`; `J(ωH ± ωN)` stays at the true frequencies in every variant.
+`omega_h_factor=0.87` (the `_087` variants, `--method *_087` / the GUI's J(0.87ωH) choice) makes `ZZ_multi_density` and `ZZ_multi_2fields_density` evaluate the `J(ωH)` term of R₂ at `0.87ωH` and name its columns `JwH_087`; `J(ωH ± ωN)` stays at the true frequencies in every variant. The physics both analyses share is in `dynamiXs_density_functions/spectral_density_physics.py`.
 
 #### Fitting
 Every model-free variant fits S², τe and Rex by bounded least squares from a grid of starts (`dynamiXs_density_functions/model_free_search.py`), including starts with Rex > 0. The fit is unweighted: without Monte Carlo error refits the parameter errors are NaN.

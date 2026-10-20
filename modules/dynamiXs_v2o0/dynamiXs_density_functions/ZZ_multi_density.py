@@ -6,6 +6,10 @@ This script imports R1, R1err, R2, R2err, hetNOE, and hetNOEerr from a CSV file
 and performs reduced spectral density calculations including J(0), J(wN), J(wH),
 S2, Rex, and te parameters with proper error propagation.
 
+omega_h_factor 0.87 evaluates J at 0.87 wH instead of wH - J(0.87wH), for a more
+accurate treatment of cross-correlation effects and dipolar-CSA interference - and
+names its column JwH_087.
+
 MULTICORE VERSION: Modified to utilize multiple CPU cores for parallel processing.
 """
 
@@ -29,13 +33,17 @@ from dynamiXs_density_functions.spectral_density_physics import (
     reduced_spectral_densities, reduced_spectral_density_errors, relaxation_deviations,
     overall_correlation_time)
 
+# The J(wH) column for each proton-frequency factor J(wH) can be evaluated at
+JWH_COLUMN = {1.0: 'JwH', 0.87: 'JwH_087'}
+
 
 class ReducedSpectralDensityAnalysis:
     """
     Class for performing reduced spectral density mapping analysis
     """
     
-    def __init__(self, spectrometer_frequency=600.0, rNH=1.015e-10, csaN=-160.0e-6):
+    def __init__(self, spectrometer_frequency=600.0, rNH=1.015e-10, csaN=-160.0e-6,
+                 omega_h_factor=1.0):
         """
         Initialize the analysis with experimental parameters
         
@@ -47,7 +55,12 @@ class ReducedSpectralDensityAnalysis:
             N-H bond length in meters (default: 1.015e-10)
         csaN : float
             15N CSA in ppm converted to frequency units (default: -160.0e-6)
+        omega_h_factor : float
+            J(wH) is evaluated at omega_h_factor * wH: 1.0, or 0.87 for J(0.87wH)
         """
+        if omega_h_factor not in JWH_COLUMN:
+            raise ValueError(f"omega_h_factor must be one of {sorted(JWH_COLUMN)}, "
+                             f"not {omega_h_factor}")
         self.spectrometer_frequency = spectrometer_frequency
         self.rNH = rNH
         self.csaN = csaN
@@ -57,6 +70,14 @@ class ReducedSpectralDensityAnalysis:
         
         self.d_factor = self._calculate_d_factor()
         self.c_factor = self._calculate_c_factor()
+
+        self.omega_h_factor = omega_h_factor
+        self.omegaH_eff = self.omegaH * omega_h_factor
+        self.jwh_column = JWH_COLUMN[omega_h_factor]
+        self.jwh_label = 'J(ωH)' if omega_h_factor == 1.0 else 'J(0.87ωH)'
+        # Appended to plot titles and summaries of the 0.87 analysis
+        self.variant_note = '' if omega_h_factor == 1.0 else ' (J(0.87ωH))'
+        self.file_suffix = '' if omega_h_factor == 1.0 else '_087'
         
     def _calculate_omegaH(self):
         """Calculate 1H Larmor frequency in rad/s"""
@@ -87,7 +108,7 @@ class ReducedSpectralDensityAnalysis:
         measured ones, at fixed tc - the fit's objective, summed in squares."""
         return relaxation_deviations(s2, te, rex, t1, t2, noe, tc_fixed,
                                      self.d_factor, self.c_factor,
-                                     self.omegaH, self.omegaH, abs(self.omegaN))
+                                     self.omegaH_eff, self.omegaH, abs(self.omegaN))
 
     def _fit_single_dataset(self, r1, r2, noe, tc_fixed, niter):
         """Fit S2, te and Rex for one residue at fixed tc.
@@ -224,7 +245,7 @@ class ReducedSpectralDensityAnalysis:
         return {
             'J0': j0, 'J0_err': j0_err,
             'JwN': jwn, 'JwN_err': jwn_err,
-            'JwH': jwh, 'JwH_err': jwh_err
+            self.jwh_column: jwh, f'{self.jwh_column}_err': jwh_err
         }
     
     def analyze_csv(self, csv_file, residue_col='Residue', use_monte_carlo_errors=True,
@@ -263,6 +284,8 @@ class ReducedSpectralDensityAnalysis:
             n_processes = max(1, int(cpu_count() * 0.8))
         
         print(f"\nProcessing {len(data)} residues from {csv_file}...")
+        if self.omega_h_factor != 1.0:
+            print(f"Using J(0.87ωH) approach with factor = {self.omega_h_factor}")
         if use_monte_carlo_errors:
             print(f"Using Monte Carlo error propagation with {n_monte_carlo} samples per residue")
         if use_multiprocessing:
@@ -377,7 +400,7 @@ class ReducedSpectralDensityAnalysis:
             processed += 1
         
         # Report data quality summary
-        print("\nData Quality Summary:")
+        print(f"\nData Quality Summary{self.variant_note}:")
         print(f"  Total residues in file: {total_residues}")
         print(f"  Processed successfully: {processed}")
         print(f"  Skipped (NaN values): {skipped_nan}")
@@ -399,7 +422,8 @@ class ReducedSpectralDensityAnalysis:
         analyzer_state = {
             'spectrometer_frequency': self.spectrometer_frequency,
             'rNH': self.rNH,
-            'csaN': self.csaN
+            'csaN': self.csaN,
+            'omega_h_factor': self.omega_h_factor
         }
         
         worker_args = []
@@ -437,7 +461,7 @@ class ReducedSpectralDensityAnalysis:
         total_residues = len(data)
         processed = len(results)
         
-        print("\nData Quality Summary:")
+        print(f"\nData Quality Summary{self.variant_note}:")
         print(f"  Total residues in file: {total_residues}")
         print(f"  Processed successfully: {processed}")
         print(f"  Skipped (NaN values): {skipped_nan}")
@@ -464,7 +488,7 @@ class ReducedSpectralDensityAnalysis:
         """
         fig = Figure(figsize=(15, 10))
         axes = fig.subplots(2, 3)
-        fig.suptitle('Reduced Spectral Density Analysis Results', fontsize=16)
+        fig.suptitle(f'Reduced Spectral Density Analysis Results{self.variant_note}', fontsize=16)
         
         success_mask = results_df['fit_success'] == True
         good_data = results_df[success_mask]
@@ -488,29 +512,30 @@ class ReducedSpectralDensityAnalysis:
         axes[0,1].set_ylabel('J(ωN) (ns/rad²)')
         
         # J(ωH)
-        axes[0,2].errorbar(residues, good_data['JwH'], yerr=good_data['JwH_err'],
+        axes[0,2].errorbar(residues, good_data[self.jwh_column],
+                          yerr=good_data[f'{self.jwh_column}_err'],
                           fmt='o', capsize=3, color='green') 
-        axes[0,2].set_title('J(ωH)')
-        axes[0,2].set_ylabel('J(ωH) (ns/rad²)')
+        axes[0,2].set_title(self.jwh_label)
+        axes[0,2].set_ylabel(f'{self.jwh_label} (ns/rad²)')
         
         # S²
         axes[1,0].errorbar(residues, good_data['S2'], yerr=good_data['S2_err'],
                           fmt='o', capsize=3, color='blue')         
-        axes[1,0].set_title('Order Parameter S²')
+        axes[1,0].set_title(f'Order Parameter S²{self.variant_note}')
         axes[1,0].set_ylabel('S²')
         axes[1,0].set_ylim(0, 1)
         
         # τe  
         axes[1,1].errorbar(residues, good_data['te'], yerr=good_data['te_err'],
                           fmt='o', capsize=3, color='purple')
-        axes[1,1].set_title('Internal Correlation Time τe')
+        axes[1,1].set_title(f'Internal Correlation Time τe{self.variant_note}')
         axes[1,1].set_ylim(0, 100) 
         axes[1,1].set_ylabel('τe (ps)')
         
         # Rex
         axes[1,2].errorbar(residues, good_data['Rex'], yerr=good_data['Rex_err'],
                           fmt='o', capsize=3, color='brown')
-        axes[1,2].set_title('Chemical Exchange Rex')
+        axes[1,2].set_title(f'Chemical Exchange Rex{self.variant_note}')
         axes[1,2].set_ylabel('Rex (s⁻¹)')
         
         for ax in axes.flat:
@@ -520,11 +545,11 @@ class ReducedSpectralDensityAnalysis:
         fig.tight_layout()
 
         if save_plots:
-            filename = plot_filename or 'ZZ_rsdm_multicore_analysis_results.pdf'
+            filename = plot_filename or f'ZZ_rsdm_multicore_analysis_results{self.file_suffix}.pdf'
             fig.savefig(filename, dpi=300, bbox_inches='tight')
             print(f"Plots saved as '{filename}'")
 
-    def save_detailed_results(self, results_df, filename='ZZ_multicore_detailed_results.csv'):
+    def save_detailed_results(self, results_df, filename=None):
         """
         Save results with confidence intervals if Monte Carlo was used
         
@@ -533,8 +558,9 @@ class ReducedSpectralDensityAnalysis:
         results_df : pandas.DataFrame
             Results from analyze_csv()
         filename : str
-            Output filename
+            Output filename (default: ZZ_multicore_detailed_results[_087].csv)
         """
+        filename = filename or f'ZZ_multicore_detailed_results{self.file_suffix}.csv'
         if 'S2_95CI' in results_df.columns:
             results_df['S2_CI'] = results_df['S2_95CI'].apply(
                 lambda x: f"[{x[0]:.3f}, {x[1]:.3f}]" if not pd.isna(x).any() else ""
@@ -550,7 +576,7 @@ class ReducedSpectralDensityAnalysis:
             results_df = results_df.drop(columns=['S2_95CI', 'te_95CI', 'Rex_95CI'])
         
         results_df.to_csv(filename, index=False)
-        print(f"Detailed results saved to '{filename}'")
+        print(f"Detailed results{self.variant_note} saved to '{filename}'")
 
 
 # Worker functions for multiprocessing (must be defined at module level)
@@ -567,7 +593,8 @@ def _worker_process_residue_single(args):
         analyzer = ReducedSpectralDensityAnalysis(
             spectrometer_frequency=analyzer_state['spectrometer_frequency'],
             rNH=analyzer_state['rNH'],
-            csaN=analyzer_state['csaN']
+            csaN=analyzer_state['csaN'],
+            omega_h_factor=analyzer_state['omega_h_factor']
         )
         
         r1 = residue_data['R1']

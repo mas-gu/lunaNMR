@@ -15,9 +15,7 @@ import pytest
 
 DYNAMIXS = Path(__file__).resolve().parents[1] / "modules" / "dynamiXs_v2o0"
 MODULES = ["dynamiXs_density_functions.ZZ_multi_density",
-           "dynamiXs_density_functions.ZZ_multi_density_087",
            "dynamiXs_density_functions.ZZ_multi_2fields_density",
-           "dynamiXs_density_functions.ZZ_multi_2fields_density_087",
            "fitmulti__Tx_NMRRE"]
 
 

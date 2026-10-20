@@ -25,8 +25,8 @@ app = QApplication(sys.argv)
 """
 
 FITTERS = ["fit_Tx_NMRRE", "fitmulti__Tx_NMRRE"]
-SINGLE_FIELD = ["ZZ_multi_density", "ZZ_multi_density_087"]
-DUAL_FIELD = ["ZZ_multi_2fields_density", "ZZ_multi_2fields_density_087"]
+SINGLE_FIELD = ["ZZ_multi_density"]
+DUAL_FIELD = ["ZZ_multi_2fields_density"]
 PLOT_SCRIPTS = ["compare_datasets", "compare_datasets_087", "plot_dual_field_datasets",
                 "plot_dual_field_datasets_087"]
 

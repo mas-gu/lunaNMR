@@ -462,18 +462,19 @@ class IntegratedAnalysisPipeline:
         if dynamixs_path not in sys.path:
             sys.path.insert(0, dynamixs_path)
 
+        # (module, class, proton-frequency factor J(wH) is evaluated at)
         method_map = {
-            'single_jwh': ('ZZ_multi_density', 'ReducedSpectralDensityAnalysis'),
-            'single_087': ('ZZ_multi_density_087', 'ReducedSpectralDensityAnalysis'),
-            'dual_jwh': ('ZZ_multi_2fields_density', 'DualFieldSpectralDensityAnalysis'),
-            'dual_087': ('ZZ_multi_2fields_density_087', 'DualFieldSpectralDensityAnalysis')
+            'single_jwh': ('ZZ_multi_density', 'ReducedSpectralDensityAnalysis', 1.0),
+            'single_087': ('ZZ_multi_density', 'ReducedSpectralDensityAnalysis', 0.87),
+            'dual_jwh': ('ZZ_multi_2fields_density', 'DualFieldSpectralDensityAnalysis', 1.0),
+            'dual_087': ('ZZ_multi_2fields_density', 'DualFieldSpectralDensityAnalysis', 0.87)
         }
 
         script_info = method_map.get(self.params.analysis_method)
         if not script_info:
             raise ValueError(f"Unknown analysis method: {self.params.analysis_method}")
 
-        script_name, class_name = script_info
+        script_name, class_name, omega_h_factor = script_info
         self.log_progress(f"  Using method: {self.params.analysis_method} ({script_name})")
         self.log_progress("  Multicore spectral density analysis enabled")
 
@@ -497,7 +498,8 @@ class IntegratedAnalysisPipeline:
                 field1_freq=self.params.field1_freq_mhz,
                 field2_freq=self.params.field2_freq_mhz,
                 rNH=rNH_meters,
-                csaN=csaN_units
+                csaN=csaN_units,
+                omega_h_factor=omega_h_factor
             )
 
             results_df = analyzer.analyze_dual_field_csv(
@@ -528,7 +530,8 @@ class IntegratedAnalysisPipeline:
             analyzer = AnalysisClass(
                 spectrometer_frequency=self.params.field1_freq_mhz,
                 rNH=rNH_meters,
-                csaN=csaN_units
+                csaN=csaN_units,
+                omega_h_factor=omega_h_factor
             )
 
             results_df = analyzer.analyze_csv(
