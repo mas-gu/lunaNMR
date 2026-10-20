@@ -52,3 +52,13 @@ def test_the_global_optimisation_survey_is_gone():
     assert 'GlobalOptimizationManager' not in lunaNMR.utils.__all__
     with pytest.raises(ImportError):
         importlib.import_module('lunaNMR.utils.global_optimization_manager')
+
+
+def test_a_peak_fit_takes_no_linewidth_constraints():
+    """The 2D fit never read them; the survey was the only caller that passed any."""
+    import inspect
+    from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
+
+    for method in (EnhancedVoigtIntegrator.enhanced_peak_fitting,
+                   EnhancedVoigtIntegrator.fit_peak_voigt_2d):
+        assert 'linewidth_constraints' not in inspect.signature(method).parameters

@@ -2239,7 +2239,7 @@ class VoigtIntegrator(BaseIntegrator):
         return result
 
     def fit_peak_voigt_2d(self, peak_x_ppm, peak_y_ppm, assignment="Unknown",
-                          all_peaks_context=None, linewidth_constraints=None):
+                          all_peaks_context=None):
         """
         2D simultaneous multi-peak Voigt fitting for all peaks
 
@@ -2254,7 +2254,6 @@ class VoigtIntegrator(BaseIntegrator):
         - peak_y_ppm: Y-axis peak position (ppm)
         - assignment: Peak assignment/label
         - all_peaks_context: List of all peak positions [(x1,y1), (x2,y2), ...] for overlap detection
-        - linewidth_constraints: Dict with 'x' and 'y' constraints for Global Optimization Manager
 
         Returns:
         - Dictionary with comprehensive fitting results or None if 2D fitting failed
@@ -3342,7 +3341,7 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             current_avg = self.statistics['average_quality']
             self.statistics['average_quality'] = ((current_avg * (total - 1)) + quality) / total
 
-    def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown", linewidth_constraints=None, all_peaks_context=None):
+    def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown", all_peaks_context=None):
         """
         Fit one peak in 2D among the peaks of the spectrum
 
@@ -3354,19 +3353,14 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             Peak position in Y dimension (ppm)
         assignment : str, optional
             Peak assignment/label
-        linewidth_constraints : dict, optional
-            PS2D linewidth reuse constraints from reference spectrum
-            Format: {'x': {'sigma_bounds': (min, max), 'gamma_bounds': (min, max)},
-                     'y': {'sigma_bounds': (min, max), 'gamma_bounds': (min, max)}}
         all_peaks_context : list of dict, optional
             List of all peaks in the spectrum for overlap detection and 2D routing
             Format: [{'assignment': str, 'x_ppm': float, 'y_ppm': float, 'pos_x': float, 'pos_y': float}, ...]
         """
 
-        # 2D fit with PS2D linewidth constraints and 2D routing
+        # 2D fit with 2D routing
         result = self.fit_peak_voigt_2d(
             peak_x_ppm, peak_y_ppm, assignment,
-            linewidth_constraints=linewidth_constraints,  # Pass through PS2D constraints
             all_peaks_context=all_peaks_context  # Enable automatic 2D routing for overlapping peaks
         )
 
