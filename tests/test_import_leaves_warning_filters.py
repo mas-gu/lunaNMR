@@ -16,13 +16,9 @@ _MODULES = [
     "lunaNMR.core.enhanced_voigt_fitter",
     "lunaNMR.utils.file_manager",
     "lunaNMR.integrators.inplace_advanced_nmr_integrator",
-    "ZZ_density",
     # by package name, as every caller imports them
     "dynamiXs_density_functions.ZZ_multi_density",
     "dynamiXs_density_functions.ZZ_multi_density_087",
-    "ZZ_2fields_density",
-    "ZZ_2fields_density_087",
-    "ZZ_2fields_density_claude_rex_mcmc_error",
     "dynamiXs_density_functions.ZZ_multi_2fields_density",
     "dynamiXs_density_functions.ZZ_multi_2fields_density_087",
 ]
