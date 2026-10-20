@@ -241,7 +241,7 @@ class MultiSpectrumProcessor:
         self.progress_callback = None
 
         if isinstance(self.voigt_params, dict) and 'gui_params' in self.voigt_params:
-            # Nested structure from get_effective_parameters()
+            # Nested structure from get_integrator_parameters()
             self.integrator.gui_params = self.voigt_params['gui_params'].copy()
             self.integrator.fitting_parameters.update(
                 self.voigt_params.get('fitting_params', {})

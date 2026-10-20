@@ -82,15 +82,6 @@ class EnhancedVoigtFitter:
         if self.level2_params['robust_estimation_enabled']:
             self.parameter_estimator = RobustParameterEstimator(self)
 
-
-        try:
-            from ..utils.simplified_parameter_manager import SimplifiedParameterManager, ParameterAdapter
-            self.simplified_param_manager = SimplifiedParameterManager()
-            self.parameter_adapter = ParameterAdapter(self.simplified_param_manager)
-        except ImportError:
-            self.simplified_param_manager = None
-            self.parameter_adapter = None
-
     def set_gui_parameters(self, gui_fitting_params):
         """
         Store GUI fitting parameters for consistent window sizing in analysis displays.

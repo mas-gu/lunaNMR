@@ -5704,23 +5704,11 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     self.param_manager.current_params['lw_lorentz_15n'] = None
                     self.param_manager.current_params['lw_gauss_15n'] = None
 
-                if hasattr(self, 'use_simplified_parameters'):
-                    self.param_manager.use_simplified_mode = self.use_simplified_parameters
-                    if self.use_simplified_parameters:
-                        self.param_manager.update_simplified_parameters(
-                            window_scale=getattr(self, 'simplified_window_scale', 1.0),
-                            quality_target=getattr(self, 'simplified_quality_target', 'standard'),
-                            max_peaks_fit=getattr(self, 'simplified_max_peaks_fit', 50),
-                            max_iterations=getattr(self, 'simplified_max_iterations', 1000),
-                            noise_estimation_method=getattr(self, 'simplified_noise_method', 'auto'),
-                            baseline_method=getattr(self, 'simplified_baseline_method', 'auto')
-                        )
-
                 validation_errors = self.param_manager.validate_all_parameters()
                 if validation_errors:
                     logger.warning(f"Parameter validation warnings: {', '.join(validation_errors[:3])}")
 
-                integrator_params = self.param_manager.get_effective_parameters()
+                integrator_params = self.param_manager.get_integrator_parameters()
 
                 detection_params = integrator_params['detection_params']
                 self.integrator.set_search_window(

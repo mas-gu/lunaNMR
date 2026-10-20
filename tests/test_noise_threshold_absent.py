@@ -1,7 +1,5 @@
 # ABOUTME: No parameter set carries a noise threshold: nothing on any detection or fit path reads one.
-# ABOUTME: The CLI defaults, both parameter managers, the configuration file and the parallel workers.
-
-import pytest
+# ABOUTME: The CLI defaults, the parameter manager, the configuration file and the parallel workers.
 
 
 def test_the_cli_series_defaults_carry_none():
@@ -14,16 +12,7 @@ def test_the_parameter_manager_carries_none():
     manager = NMRParameterManager()
     assert 'noise_threshold' not in manager.parameter_definitions
     assert 'noise_threshold' not in manager.get_parameter_summary()
-
-
-@pytest.mark.parametrize("snr", [None, 2.0])
-def test_the_simplified_parameters_carry_none(snr):
-    from lunaNMR.utils.simplified_parameter_manager import ParameterAdapter, SimplifiedParameterManager
-    manager = SimplifiedParameterManager()
-    assert 'noise_threshold' not in manager.derive_full_parameters(
-        '15N', None if snr is None else {'snr': snr})
-    detection = ParameterAdapter(manager).get_integrator_parameters('15N')['detection_params']
-    assert 'noise_threshold' not in detection
+    assert 'noise_threshold' not in manager.get_integrator_parameters()['detection_params']
 
 
 def test_the_configuration_file_defaults_carry_none():

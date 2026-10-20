@@ -534,22 +534,6 @@ class VoigtIntegrator(BaseIntegrator):
 
         return True
 
-    def detect_nucleus_type(self, ppm_range):
-        """Detect nucleus type based on ppm range"""
-        ppm_span = abs(ppm_range[1] - ppm_range[0])
-        center_ppm = (ppm_range[0] + ppm_range[1]) / 2
-
-        # Check ¹H range (5.5-12 ppm)
-        if 5.0 <= center_ppm <= 13.0 and ppm_span < 20:
-            return '1H'
-        # Check ¹⁵N range (100-140 ppm)
-        elif 90 <= center_ppm <= 150 and ppm_span < 100:
-            return '15N'
-        # Check ¹³C range (0-220 ppm)
-        elif 0 <= center_ppm <= 230 and ppm_span > 50:
-            return '13C'
-        return '1H'  # Default
-
     def get_adaptive_window_parameters(self, nucleus_type=None):
         """
         Get window parameters with proper priority: GUI > Nucleus-specific > Defaults
@@ -3396,18 +3380,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
 
         return result
 
-
-    def detect_nucleus_type(self, peak_x_ppm, peak_y_ppm):
-        """Detect nucleus type based on peak position"""
-        # Simple heuristic based on chemical shift ranges
-        if abs(peak_x_ppm) < 20:  # 1H range approximately 0-15 ppm
-            return '1H'
-        elif 100 <= abs(peak_x_ppm) <= 200:  # 13C range approximately 0-200 ppm
-            return '13C'
-        elif abs(peak_y_ppm) > 100:  # 15N range approximately 0-600 ppm
-            return '15N'
-        else:
-            return '1H'  # Default fallback
 
     def convert_voigt2d_result_to_standard(self, voigt2d_result):
         """Convert nested 2D Voigt result to flat standard format

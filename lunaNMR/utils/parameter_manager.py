@@ -1,5 +1,5 @@
-# ABOUTME: GUI parameter synchronization and validation with simplified/full mode support.
-# ABOUTME: Overrides calculated defaults with GUI spinbox values (critical for centroid windows in simplified mode).
+# ABOUTME: GUI parameter synchronization and validation.
+# ABOUTME: Overrides calculated defaults with GUI spinbox values and groups them for the integrator.
 """
 Centralized Parameter Management for NMR Processing
 Handles all parameter validation, conversion, and synchronization
@@ -20,16 +20,6 @@ class NMRParameterManager:
 
     def __init__(self):
         """Initialize with default parameters"""
-
-        try:
-            from .simplified_parameter_manager import SimplifiedParameterManager, ParameterAdapter
-            self.simplified_manager = SimplifiedParameterManager()
-            self.parameter_adapter = ParameterAdapter(self.simplified_manager)
-            self.use_simplified_mode = False  # Can be toggled by user
-        except ImportError:
-            self.simplified_manager = None
-            self.parameter_adapter = None
-            self.use_simplified_mode = False
 
         self.parameter_definitions = {
             # Detection Parameters
@@ -300,54 +290,3 @@ class NMRParameterManager:
         for param_name, definition in self.parameter_definitions.items():
             self.current_params[param_name] = definition['default']
         log_info("All parameters reset to defaults")
-
-    def update_simplified_parameters(self, **kwargs):
-        """Update simplified parameters when in simplified mode"""
-        if not self.use_simplified_mode or not self.simplified_manager:
-            log_warning("Not in simplified mode or manager not available")
-            return
-
-        self.simplified_manager.update_simplified_parameters(**kwargs)
-
-    def get_effective_parameters(self, nucleus_type='default'):
-        """
-        Get effective parameters based on current mode.
-
-        Returns either simplified-derived parameters or the full parameter set.
-        """
-        if self.use_simplified_mode and self.parameter_adapter:
-            # Simplified parameters, expanded to the full set
-            params = self.parameter_adapter.get_integrator_parameters(nucleus_type)
-
-            # Detection parameters (search windows) must ALWAYS use GUI values
-            # Simplified mode only affects FITTING parameters, NOT detection parameters
-            params['detection_params']['search_window_x'] = self.current_params['search_window_x']
-            params['detection_params']['search_window_y'] = self.current_params['search_window_y']
-
-            # GUI control parameters must ALWAYS use GUI values
-            # Simplified mode should NOT override fix_positions, fix_linewidths, use_parallel_processing
-            params['gui_params']['fix_positions'] = self.current_params.get('fix_positions', False)
-            params['gui_params']['fix_linewidths'] = self.current_params.get('fix_linewidths', False)
-            params['gui_params']['use_parallel_processing'] = self.current_params.get('use_parallel_processing', False)
-
-            # Centroid parameters must ALWAYS use GUI values
-            # Simplified mode should NOT override user-specified centroid window sizes
-            params['gui_params']['centroid_window_x_ppm'] = self.current_params.get('centroid_window_x_ppm', 0.01)
-            params['gui_params']['centroid_window_y_ppm'] = self.current_params.get('centroid_window_y_ppm', 0.1)
-            params['gui_params']['centroid_noise_multiplier'] = self.current_params.get('centroid_noise_multiplier', 2.0)
-
-            # Adaptive optimization parameter
-            params['gui_params']['use_adaptive_optimization'] = self.current_params.get('use_adaptive_optimization', False)
-
-            return params
-        else:
-            # Full parameter set
-            return self.get_integrator_parameters()
-
-    def validate_simplified_parameters(self):
-        """Validate simplified parameters"""
-        if self.simplified_manager:
-            is_valid, errors = self.simplified_manager.validate_simplified_parameters()
-            return is_valid, errors
-        else:
-            return True, []
