@@ -20,12 +20,6 @@ import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter, maximum_filter
 
-try:
-    from lunaNMR.core.enhanced_voigt_fitter import EnhancedVoigtFitter
-    ENHANCED_FITTING_AVAILABLE = True
-except ImportError:
-    ENHANCED_FITTING_AVAILABLE = False
-
 class EnhancedPeakPicker:
     """Enhanced peak picker with intelligent detection and validation"""
 
@@ -54,11 +48,6 @@ class EnhancedPeakPicker:
             '15N': {'min': 100.0, 'max': 140.0, 'typical_width': 1.5, 'min_snr': 3.0},
             '13C': {'min': 0.0, 'max': 220.0, 'typical_width': 1.0, 'min_snr': 4.0}
         }
-
-        if ENHANCED_FITTING_AVAILABLE:
-            self.fitter = EnhancedVoigtFitter()
-        else:
-            self.fitter = None
 
         self.last_detection_stats = {}
 

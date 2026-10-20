@@ -22,12 +22,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 import signal
 
-try:
-    from .batch_processor import BatchProcessor
-    from .config_manager import ConfigManager, UnreadConfigKeys
-    BATCH_COMPONENTS_AVAILABLE = True
-except ImportError:
-    BATCH_COMPONENTS_AVAILABLE = False
+from .batch_processor import BatchProcessor
+from .config_manager import ConfigManager, UnreadConfigKeys
 
 class CLIInterface:
     """
@@ -496,11 +492,6 @@ Examples:
         Returns:
             Exit code (0 for success, 1 for error)
         """
-        if not BATCH_COMPONENTS_AVAILABLE:
-            print("Error: Batch processing components not available")
-            print("Please ensure lunaNMR core components are properly installed")
-            return 1
-
         parser = self.create_parser()
         args = parser.parse_args(argv)
 
