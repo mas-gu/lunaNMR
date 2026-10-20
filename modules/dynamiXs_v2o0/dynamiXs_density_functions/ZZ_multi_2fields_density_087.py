@@ -31,39 +31,12 @@ from multiprocessing import cpu_count
 from dynamiXs_density_functions.model_free_search import (
     DUAL_FIELD_STARTS, S2_BOUNDS, TE_BOUNDS, REX_BOUNDS, TE_SCALE, best_least_squares)
 
-# Numba JIT compilation for performance (optional but recommended)
-try:
-    from numba import jit
-    HAS_NUMBA = True
-except ImportError:
-    HAS_NUMBA = False
-    # Fallback: decorator that does nothing
-    def jit(*args, **kwargs):
-        def decorator(func):
-            return func
-        return decorator
+from dynamiXs_density_functions.spectral_density_physics import (
+    spectral_density, omega_h, omega_n, dipolar_constant, csa_constant, sigma_noe,
+    reduced_spectral_densities, reduced_spectral_density_errors, relaxation_deviations,
+    overall_correlation_time)
 
-# Physical constants
-GAMMA_H = 2.67522128e8  # 1H gyromagnetic ratio (rad s-1 T-1)
-GAMMA_N = -2.7126e7     # 15N gyromagnetic ratio (rad s-1 T-1) 
-REDUCED_PERM_VACUUM = 1.25663706212e-6  # H/m
-REDUCED_PLANK = 1.05457180013e-34       # J⋅s
-PI = 3.14159265359
 OMEGA_H_FACTOR = 0.87  # Factor for more accurate spectral density calculation J(0.87ωH)
-
-# JIT-compiled spectral density calculation for performance
-@jit(cache=True, forceobj=True)
-def _calculate_spectral_density_jit(s2, tc, te, omega):
-    """
-    Calculate J(w) using Lipari-Szabo model-free approach (JIT-compiled version)
-    """
-    if te == 0:
-        j = s2 * tc / (1.0 + (omega * tc)**2)
-    else:
-        teff = 1.0 / (1.0/tc + 1.0/te)
-        j = (s2 * tc / (1.0 + (omega * tc)**2) +
-             (1.0 - s2) * teff / (1.0 + (omega * teff)**2))
-    return j * 0.4  # 2/5 prefactor
 
 
 class DualFieldSpectralDensityAnalysis:
@@ -111,131 +84,65 @@ class DualFieldSpectralDensityAnalysis:
         
     def _calculate_omegaH(self, freq_mhz):
         """Calculate 1H Larmor frequency in rad/s"""
-        return freq_mhz * 2 * PI * 1e6
+        return omega_h(freq_mhz)
     
     def _calculate_omegaN(self, freq_mhz):
         """Calculate 15N Larmor frequency in rad/s"""
-        omegaH = self._calculate_omegaH(freq_mhz)
-        return omegaH * GAMMA_N / GAMMA_H
+        return omega_n(freq_mhz)
     
     def _calculate_d_factor(self):
-        """
-        Calculate dipolar coupling constant (d²) - field-independent
-
-        Returns d² as defined in Farrow et al. J. Biomol. NMR, 6 (1995) 153-162
-        d² = [μ₀ħγNγH/(4πr³NH)]² = [μ₀hγNγH/(8π²r³NH)]²
-        """
-        mu0_h_bar = REDUCED_PERM_VACUUM * REDUCED_PLANK
-        d_squared = (mu0_h_bar * GAMMA_N * GAMMA_H / (4 * PI * self.rNH**3))**2
-        return d_squared  # Returns d², not d²/4 (Farrow-exact notation)
+        """Dipolar coupling constant d² (Farrow et al. 1995) - field-independent"""
+        return dipolar_constant(self.rNH)
     
     def _calculate_c_factor(self, omegaN):
         """Calculate CSA constant (field-dependent)"""
-        return (omegaN * self.csaN)**2 / 3.0
+        return csa_constant(omegaN, self.csaN)
     
     def calculate_sigma_NOE(self, noe, r1):
         """Calculate sigma NOE value"""
-        return (noe - 1.0) * r1 * (GAMMA_N / GAMMA_H)
+        return sigma_noe(noe, r1)
     
     def calculate_spectral_densities(self, r1, r2, noe, field='field1'):
         """
-        Calculate spectral densities for a given field
-        
+        Calculate spectral densities for a given field (Farrow et al. 1995, Eqs. 5-7)
+
         Parameters:
         -----------
         r1, r2, noe : float or array
             Relaxation parameters
         field : str
             'field1' or 'field2'
-            
+
         Returns:
         --------
         dict : Spectral density values
         """
-        if field == 'field1':
-            d_factor = self.field1_d_factor
-            c_factor = self.field1_c_factor
-        else:
-            d_factor = self.field2_d_factor
-            c_factor = self.field2_c_factor
-            
-        sigma_noe = self.calculate_sigma_NOE(noe, r1)
-
-        # Calculate spectral densities using Farrow et al. (1995) equations
-        # Farrow Eq. 7
-        j0 = (3.0 / (2.0 * (3.0 * d_factor / 4.0 + c_factor))) * (
-            -0.5 * r1 + r2 - (3.0/5.0) * sigma_noe
-        )
-
-        # Farrow Eq. 6
-        jwn = (1.0 / (3.0 * d_factor / 4.0 + c_factor)) * (r1 - (7.0/5.0) * sigma_noe)
-
-        # Farrow Eq. 5: J(0.87ωH)
-        jwh = 4.0 * sigma_noe / (5.0 * d_factor)
-
+        j0, jwn, jwh = reduced_spectral_densities(r1, r2, noe, getattr(self, f'{field}_d_factor'),
+                                                  getattr(self, f'{field}_c_factor'))
         return {'J0': j0, 'JwN': jwn, 'JwH_087': jwh}
     
     def calculate_isotropic_spectral_density(self, s2, tc, te, omega):
-        """
-        Calculate J(w) using Lipari-Szabo model-free approach
-        Delegates to JIT-compiled function for performance
-        """
-        return _calculate_spectral_density_jit(s2, tc, te, omega)
+        """J(w) of the Lipari-Szabo model-free form"""
+        return spectral_density(s2, tc, te, omega)
     
     def estimate_overall_correlation_time(self, r1_data1, r2_data1, r1_data2, r2_data2):
         """
         Estimate overall correlation time from dual-field R1/R2 data
         Uses the higher field data for better sensitivity
         """
-        # Use higher field data for tc estimation (better sensitivity)
         if self.field2_freq > self.field1_freq:
-            r1_array, r2_array = r1_data2, r2_data2
-            omegaN = abs(self.field2_omegaN)
-        else:
-            r1_array, r2_array = r1_data1, r2_data1  
-            omegaN = abs(self.field1_omegaN)
-            
-        t1_array = 1.0 / r1_array
-        t2_array = 1.0 / r2_array
-        
-        # Fushman method: tc = [1/(2*omegaN)] * sqrt[(6*T1/T2) - 7]
-        ratio = 6.0 * t1_array / t2_array
-        valid_mask = ratio > 7.0
-        
-        if np.sum(valid_mask) < 3:
-            tc_est = 1.0 / (2.0 * omegaN) * np.sqrt(np.mean(ratio) - 7.0) if np.mean(ratio) > 7 else 10e-9
-        else:
-            tc_values = 1.0 / (2.0 * omegaN) * np.sqrt(ratio[valid_mask] - 7.0)
-            tc_est = np.median(tc_values)
-            
-        return max(1e-12, min(100e-9, tc_est))
+            return overall_correlation_time(r1_data2, r2_data2, abs(self.field2_omegaN))
+        return overall_correlation_time(r1_data1, r2_data1, abs(self.field1_omegaN))
 
     def _field_residuals(self, field, s2, te, rex, t1, t2, noe, tc_fixed):
         """Relative deviations of one field's predicted T1, T2 and (when measured) NOE from
         the measured ones, at fixed tc. `field` is 1 or 2."""
-        A = getattr(self, f'field{field}_d_factor')
-        C = getattr(self, f'field{field}_c_factor')
-        # J(wH) at the variant's wH (0.87 wH in the 0.87 variant); J(wH +/- wN) at the
-        # true frequencies, as the single-field fit evaluates them
-        omegaH_j = getattr(self, f'field{field}_omegaH_eff')
-        omegaH = getattr(self, f'field{field}_omegaH')
-        omegaN = abs(getattr(self, f'field{field}_omegaN'))
-        gammaHN = GAMMA_H / GAMMA_N
-        jH = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaH_j)
-        jN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaN)
-        jHpN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaH + omegaN)
-        jHmN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, omegaH - omegaN)
-        j0 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, 0.0)
-
-        r1_calc = (A / 4.0) * (3*jN + 6*jHpN + jHmN) + C * jN
-        r2_calc = 0.5 * (A / 4.0) * (4*j0 + 3*jN + 6*jHpN + 6*jH + jHmN) + C * (2*j0/3.0 + 0.5*jN) + rex
-        t1_calc = 1.0 / r1_calc
-
-        deviations = [(t1_calc - t1) / t1, (1.0 / r2_calc - t2) / t2]
-        if noe is not None and not pd.isna(noe):
-            noe_calc = 1.0 + ((A / 4.0) * gammaHN * t1_calc * (6*jHpN - jHmN))
-            deviations.append((noe_calc - noe) / (0.1 if noe == 0 else abs(noe)))
-        return deviations
+        return relaxation_deviations(s2, te, rex, t1, t2, noe, tc_fixed,
+                                     getattr(self, f'field{field}_d_factor'),
+                                     getattr(self, f'field{field}_c_factor'),
+                                     getattr(self, f'field{field}_omegaH_eff'),
+                                     getattr(self, f'field{field}_omegaH'),
+                                     abs(getattr(self, f'field{field}_omegaN')))
 
     def _fit_dual_field_dataset(self, r1_f1, r2_f1, noe_f1, r1_f2, r2_f2, noe_f2, tc_fixed, niter):
         """
@@ -380,89 +287,33 @@ class DualFieldSpectralDensityAnalysis:
     def propagate_dual_field_errors(self, r1_f1, r1_f1_err, r2_f1, r2_f1_err, noe_f1, noe_f1_err,
                                   r1_f2, r1_f2_err, r2_f2, r2_f2_err, noe_f2, noe_f2_err):
         """
-        Propagate errors through dual-field spectral density calculations
-        
+        Spectral densities and their first-order errors at both fields
+
         Parameters:
         -----------
         r1_f1, r1_f1_err, r2_f1, r2_f1_err, noe_f1, noe_f1_err : float
             Field 1 relaxation parameters and errors
         r1_f2, r1_f2_err, r2_f2, r2_f2_err, noe_f2, noe_f2_err : float
             Field 2 relaxation parameters and errors
-            
+
         Returns:
         --------
         dict : Spectral density values and errors for both fields
         """
-        j_f1 = self.calculate_spectral_densities(r1_f1, r2_f1, noe_f1, 'field1')
-        j_f2 = self.calculate_spectral_densities(r1_f2, r2_f2, noe_f2, 'field2')
-        
-        # For error propagation, use analytical derivatives (simplified version)
-        # In practice, Monte Carlo is more robust for complex error propagation
-        
-        # Field 1 errors (using same approach as single field)
-        d1 = self.field1_d_factor
-        c1 = self.field1_c_factor
-        gamma_ratio = GAMMA_N / GAMMA_H
-        
-        dsigma_dr1_f1 = (noe_f1 - 1.0) * gamma_ratio
-        dsigma_dnoe_f1 = r1_f1 * gamma_ratio
-        
-        # J(0) field 1
-        factor_j0_f1 = 3.0 / (2.0 * (3.0 * d1 / 4.0 + c1))
-        dj0_dr1_f1 = factor_j0_f1 * (-0.5 - (3.0/5.0) * dsigma_dr1_f1)
-        dj0_dr2_f1 = factor_j0_f1
-        dj0_dnoe_f1 = factor_j0_f1 * (-(3.0/5.0) * dsigma_dnoe_f1)
-        j0_f1_err = np.sqrt((dj0_dr1_f1 * r1_f1_err)**2 + (dj0_dr2_f1 * r2_f1_err)**2 + (dj0_dnoe_f1 * noe_f1_err)**2)
-        
-        # Field 2 errors (similar calculation)
-        d2 = self.field2_d_factor
-        c2 = self.field2_c_factor
-        
-        dsigma_dr1_f2 = (noe_f2 - 1.0) * gamma_ratio
-        dsigma_dnoe_f2 = r1_f2 * gamma_ratio
-        
-        factor_j0_f2 = 3.0 / (2.0 * (3.0 * d2 / 4.0 + c2))
-        dj0_dr1_f2 = factor_j0_f2 * (-0.5 - (3.0/5.0) * dsigma_dr1_f2)
-        dj0_dr2_f2 = factor_j0_f2
-        dj0_dnoe_f2 = factor_j0_f2 * (-(3.0/5.0) * dsigma_dnoe_f2)
-        j0_f2_err = np.sqrt((dj0_dr1_f2 * r1_f2_err)**2 + (dj0_dr2_f2 * r2_f2_err)**2 + (dj0_dnoe_f2 * noe_f2_err)**2)
-    
-        # J(ωN) error for field 1
-        factor_jwn_f1 = 1.0 / (3.0 * d1 / 4.0 + c1)
-        djwn_dr1_f1 = factor_jwn_f1 * (1.0 - (7.0/5.0) * (noe_f1 - 1.0) * gamma_ratio)
-        djwn_dnoe_f1 = factor_jwn_f1 * (-(7.0/5.0) * r1_f1 * gamma_ratio)
-        jwn_f1_err = np.sqrt((djwn_dr1_f1 * r1_f1_err)**2 + (djwn_dnoe_f1 * noe_f1_err)**2)
-
-        # J(0.87ωH) error for field 1  
-        factor_jwh_f1 = 4.0 / (5.0 * d1)
-        djwh_dr1_f1 = factor_jwh_f1 * (noe_f1 - 1.0) * gamma_ratio
-        djwh_dnoe_f1 = factor_jwh_f1 * r1_f1 * gamma_ratio
-        jwh_f1_err = np.sqrt((djwh_dr1_f1 * r1_f1_err)**2 + (djwh_dnoe_f1 * noe_f1_err)**2) 
-        
-        # J(ωN) error for field 2
-        factor_jwn_f2 = 1.0 / (3.0 * d2 / 4.0 + c2)
-        djwn_dr1_f2 = factor_jwn_f2 * (1.0 - (7.0/5.0) * (noe_f2 - 1.0) * gamma_ratio)
-        djwn_dnoe_f2 = factor_jwn_f2 * (-(7.0/5.0) * r1_f2 * gamma_ratio)
-        jwn_f2_err = np.sqrt((djwn_dr1_f2 * r1_f2_err)**2 + (djwn_dnoe_f2 * noe_f2_err)**2)
-
-        # J(0.87ωH) error for field 2  
-        factor_jwh_f2 = 4.0 / (5.0 * d2)
-        djwh_dr1_f2 = factor_jwh_f2 * (noe_f2 - 1.0) * gamma_ratio
-        djwh_dnoe_f2 = factor_jwh_f2 * r1_f2 * gamma_ratio
-        jwh_f2_err = np.sqrt((djwh_dr1_f2 * r1_f2_err)**2 + (djwh_dnoe_f2 * noe_f2_err)**2)
-        
-        return {
-            'Field1': {
-                'J0': j_f1['J0'], 'J0_err': j0_f1_err,
-                'JwN': j_f1['JwN'], 'JwN_err': jwn_f1_err,
-                'JwH_087': j_f1['JwH_087'], 'JwH_087_err': jwh_f1_err                          
-            },
-            'Field2': {
-                'J0': j_f2['J0'], 'J0_err': j0_f2_err,
-                'JwN': j_f2['JwN'], 'JwN_err': jwn_f2_err,
-                'JwH_087': j_f2['JwH_087'], 'JwH_087_err': jwh_f2_err
+        results = {}
+        for field, (r1, r1_err, r2, r2_err, noe, noe_err) in (
+                ('field1', (r1_f1, r1_f1_err, r2_f1, r2_f1_err, noe_f1, noe_f1_err)),
+                ('field2', (r1_f2, r1_f2_err, r2_f2, r2_f2_err, noe_f2, noe_f2_err))):
+            j = self.calculate_spectral_densities(r1, r2, noe, field)
+            j0_err, jwn_err, jwh_err = reduced_spectral_density_errors(
+                r1, r1_err, r2, r2_err, noe, noe_err,
+                getattr(self, f'{field}_d_factor'), getattr(self, f'{field}_c_factor'))
+            results[field.capitalize()] = {
+                'J0': j['J0'], 'J0_err': j0_err,
+                'JwN': j['JwN'], 'JwN_err': jwn_err,
+                'JwH_087': j['JwH_087'], 'JwH_087_err': jwh_err
             }
-        }
+        return results
 
     def analyze_dual_field_csv(self, csv_file1, csv_file2, residue_col='Residue',
                               use_monte_carlo_errors=True, n_monte_carlo=100,
