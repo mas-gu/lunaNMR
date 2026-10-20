@@ -31,7 +31,7 @@ from dynamiXs_density_functions.model_free_search import (
 from dynamiXs_density_functions.spectral_density_physics import (
     spectral_density, omega_h, omega_n, dipolar_constant, csa_constant,
     reduced_spectral_densities, reduced_spectral_density_errors, relaxation_deviations,
-    overall_correlation_time)
+    overall_correlation_time, monte_carlo_rng)
 
 # The J(wH) column for each proton-frequency factor J(wH) can be evaluated at
 JWH_COLUMN = {1.0: 'JwH', 0.87: 'JwH_087'}
@@ -180,12 +180,13 @@ class ReducedSpectralDensityAnalysis:
         
         # Use reduced iterations for MC samples since we start from a good guess
         mc_niter = max(1000, niter // 10)
-        
+        rng = monte_carlo_rng(r1, r1_err, r2, r2_err, noe, noe_err, tc_fixed)
+
         for i in range(n_monte_carlo):
             # Sample within experimental uncertainties
-            r1_sample = np.random.normal(r1, r1_err)
-            r2_sample = np.random.normal(r2, r2_err) 
-            noe_sample = np.random.normal(noe, noe_err)
+            r1_sample = rng.normal(r1, r1_err)
+            r2_sample = rng.normal(r2, r2_err)
+            noe_sample = rng.normal(noe, noe_err)
             
             r1_sample = max(0.1, r1_sample)  # R1 must be positive
             r2_sample = max(r1_sample * 1.1, r2_sample)  # R2 > R1
