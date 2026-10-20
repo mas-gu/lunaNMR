@@ -15,7 +15,7 @@ Classes:
 
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Tuple, Any
+from typing import List, Tuple
 from scipy.special import wofz  # Faddeeva function for Voigt profiles
 from scipy.optimize import curve_fit
 from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
@@ -3509,53 +3509,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
                 'method': 'voigt_2d_fitting_conversion_failed',
                 'error': str(e)
             }
-
-    def optimize_peak_list_globally(self, peak_list: List[Tuple[float, float, str]],
-                                   convergence_threshold: float = 0.05,
-                                   max_rounds: int = 5) -> Dict[str, Any]:
-        """
-        GLOBAL OPTIMIZATION: Two-phase optimization of multiple peaks using
-        GlobalOptimizationManager
-
-        This method implements the sophisticated two-phase approach:
-
-        Phase 1 (Survey):
-        - Fits all peaks with standard methods
-        - Collects linewidth statistics from successful peaks
-        - Identifies peaks needing improvement
-
-        Phase 2 (Iterative Refinement):
-        - Applies linewidth constraints from successful peaks
-        - Uses multi-peak deconvolution for complex cases
-        - Continues until convergence (<5% improvement per round)
-
-        Args:
-            peak_list: List of (x_ppm, y_ppm, peak_id) tuples
-            convergence_threshold: Stop when <N% peaks improve per round
-            max_rounds: Maximum refinement rounds
-
-        Returns:
-            Comprehensive optimization report with all results and statistics
-
-        Example:
-            peak_list = [(8.0, 120.0, "Peak1"), (7.9, 118.0, "Peak2")]
-            report = integrator.optimize_peak_list_globally(peak_list)
-            success_rate = report['optimization_summary']['final_success_rate']
-        """
-        from lunaNMR.utils.global_optimization_manager import GlobalOptimizationManager
-
-        log_progress("Starting Global Peak Optimization with Two-Phase Approach")
-
-        optimizer = GlobalOptimizationManager(
-            convergence_threshold=convergence_threshold,
-            max_rounds=max_rounds
-        )
-
-        optimization_report = optimizer.optimize_peak_list(peak_list, self)
-
-        log_info(f"Global Optimization Complete! Final success rate: {optimization_report['optimization_summary']['final_success_rate']:.1f}%, rounds: {optimization_report['optimization_summary']['total_rounds']}")
-
-        return optimization_report
 
 def _clamp_guess_to_bounds(vector, lower_bounds, upper_bounds, margin=1e-6):
     """Clamp parameter vector to be safely inside the provided bounds."""

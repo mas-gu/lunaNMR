@@ -130,7 +130,7 @@ class SingleSpectrumProcessor:
     Processes peaks in a single NMR spectrum
 
     This class encapsulates all logic for fitting multiple peaks in a single
-    spectrum, including sequential, parallel, and global optimization modes.
+    spectrum, in sequential and parallel modes.
     It operates independently of the GUI and can be easily tested.
     """
 
@@ -186,9 +186,8 @@ class SingleSpectrumProcessor:
         """
         if processing_options is None:
             processing_options = {
-                'mode': 'sequential',  # 'sequential', 'parallel', 'global_optimization'
-                'use_parallel': self.parameter_manager.current_params.get('use_parallel_processing', False),
-                'use_global_optimization': self.parameter_manager.current_params.get('use_global_optimization', False)
+                'mode': 'sequential',  # 'sequential', 'parallel'
+                'use_parallel': self.parameter_manager.current_params.get('use_parallel_processing', False)
             }
 
         self.progress_callback = progress_callback
@@ -217,10 +216,7 @@ class SingleSpectrumProcessor:
 
             # Choose processing strategy
             # Returns tuple: (fitted_results, learned_statistics)
-            if processing_options.get('use_global_optimization', False):
-                results = self._process_with_global_optimization(peak_list)
-                return (results, None)  # Global optimization doesn't learn statistics
-            elif processing_options.get('use_parallel', False):
+            if processing_options.get('use_parallel', False):
                 return self._process_with_parallel_fitting(peak_list)
             else:
                 # Sequential is the same pipeline, run in this process
@@ -390,56 +386,6 @@ class SingleSpectrumProcessor:
             log_error(f"Original parallel fitting also failed: {e}")
             log_info("Falling back to sequential processing")
             return self._process_with_parallel_fitting(peak_list, in_process=True)
-
-    def _process_with_global_optimization(self, peak_list: pd.DataFrame) -> List[Dict]:
-        """Process peaks using global optimization"""
-
-        try:
-            log_progress(f"Starting global optimization of {len(peak_list)} peaks")
-
-            # Convert peak list to format expected by global optimization
-            peak_tuples = []
-            for i, (_, row) in enumerate(peak_list.iterrows()):
-                peak_x = float(row['Position_X'])
-                peak_y = float(row['Position_Y'])
-                assignment = row.get('Assignment', f'Peak_{i+1}')
-                peak_tuples.append((peak_x, peak_y, assignment))
-
-            if self.progress_callback:
-                self.progress_callback(10, "Global optimization", "Analyzing peak patterns...")
-
-            optimization_report = self.integrator.optimize_peak_list_globally(
-                peak_tuples,
-                convergence_threshold=0.05,
-                max_rounds=5
-            )
-
-            if self.progress_callback:
-                self.progress_callback(90, "Global optimization", "Finalizing results...")
-
-            fitted_results = []
-            if 'fitted_results' in optimization_report:
-                fitted_results = optimization_report['fitted_results']
-
-                for i, result in enumerate(fitted_results):
-                    if result:
-                        result['processing_mode'] = 'global_optimization'
-                        if 'peak_number' not in result:
-                            result['peak_number'] = i + 1
-
-            if 'optimization_summary' in optimization_report:
-                summary = optimization_report['optimization_summary']
-                success_rate = summary.get('final_success_rate', 0)
-                optimization_rounds = summary.get('total_rounds', 0)
-
-                log_info(f"Global optimization complete: {success_rate:.1f}% success rate after {optimization_rounds} rounds")
-
-            return fitted_results
-
-        except Exception as e:
-            log_error(f"Global optimization failed: {e}")
-            log_info("Falling back to sequential processing")
-            return self._process_with_parallel_fitting(peak_list, in_process=True)[0]
 
     def get_processing_summary(self, fitted_results: List[Dict], total_peaks: int) -> Dict[str, Any]:
         """Generate comprehensive processing summary"""
