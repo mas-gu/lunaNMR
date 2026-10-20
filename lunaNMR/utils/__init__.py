@@ -26,11 +26,6 @@ except ImportError:
     pass
 
 try:
-    from .font_config import FontManager, get_font_manager, configure_emoji_support, get_display_text
-except ImportError:
-    pass
-
-try:
     from .delay_extractor import DelayExtractor
 except ImportError:
     pass
@@ -73,10 +68,6 @@ __all__ = [
     'FileManager',
     'ParameterManager',
     'GlobalOptimizationManager',
-    'FontManager',
-    'get_font_manager',
-    'configure_emoji_support',
-    'get_display_text',
     'DelayExtractor',
     'RelaxationDataBridge',
     'OutputManager',
