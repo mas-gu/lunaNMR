@@ -17,7 +17,9 @@ ONE_D_CHAIN = (
     'sequential_peak_isolation', 'set_gui_parameters', 'validate_and_fix_initial_guess',
     'validate_initial_parameters_and_bounds', 'parameter_estimator',
     'detect_overlapping_peaks', 'get_adaptive_peak_detection_params',
-    'comprehensive_quality_assessment',
+    'comprehensive_quality_assessment', 'voigt_profile_1d', 'calculate_r_squared',
+    'detect_nucleus_type', 'adaptive_width_estimation', 'extract_local_peak_region',
+    'calculate_local_baseline', '_calculate_gui_based_multiplier',
 )
 
 

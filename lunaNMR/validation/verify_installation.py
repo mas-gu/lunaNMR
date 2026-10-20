@@ -136,7 +136,7 @@ def check_fitting_pipeline():
             return False
         print("   [ok] Voigt fitter initialized")
 
-        required_methods = ('extract_local_peak_region', 'enhanced_peak_fitting_parallel')
+        required_methods = ('enhanced_peak_fitting_parallel',)
         for method in required_methods:
             if not hasattr(fitter, method):
                 print(f"   [FAIL] {method} missing from fitter")
