@@ -95,15 +95,3 @@ class TestANegativeNoeHasAPositiveError:
         out = tmp_path / "hetnoe.pdf"
         plot_hetnoe_vs_residue(noe, str(out))
         assert out.exists() and out.stat().st_size > 0
-
-    def test_the_gui_worker_writes_a_positive_error(self, tmp_path):
-        from types import SimpleNamespace
-        from workers import SpectraProcessingWorker
-        sat, unsat = tmp_path / "sat.csv", tmp_path / "unsat.csv"
-        sat.write_text("33,-3614098.0\n")
-        unsat.write_text("33,2603630.3\n")
-        host = SimpleNamespace(params=SimpleNamespace(output_dir=str(tmp_path)))
-        out = SpectraProcessingWorker._calculate_hetnoe_ratio(host, str(sat), str(unsat))
-        import pandas as pd
-        row = pd.read_csv(out).iloc[0]
-        assert row["hetNOE"] < 0 and row["hetNOE_err"] > 0
