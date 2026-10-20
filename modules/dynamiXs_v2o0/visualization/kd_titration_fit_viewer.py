@@ -23,7 +23,7 @@ if _KD_DIR not in sys.path:
     sys.path.insert(0, _KD_DIR)
 from kd_models import (csp_model, intensity_decay,  # noqa: E402
                        pair_observable as _pair_observable,  # re-exported for tests
-                       ref_point_values, ref_vs_point_table,
+                       ref_point_values,
                        residue_sort_key as _residue_sort_key)
 from kd_fit import (fit_residue_csp, fit_residue_intensity, json_safe,  # noqa: E402
                     _GLOBAL_R2_MIN)

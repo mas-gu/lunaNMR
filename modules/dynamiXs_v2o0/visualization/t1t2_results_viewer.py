@@ -17,10 +17,9 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
-    QLabel, QPushButton, QCheckBox, QDoubleSpinBox, QFileDialog,
-    QScrollArea, QSizePolicy
+    QLabel, QCheckBox, QDoubleSpinBox, QFileDialog,
+    QSizePolicy
 )
-from PySide6.QtCore import Qt
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure

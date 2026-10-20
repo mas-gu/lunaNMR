@@ -13,10 +13,9 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
-    QLabel, QPushButton, QCheckBox, QRadioButton, QButtonGroup,
-    QFileDialog, QMessageBox, QScrollArea, QSizePolicy
+    QCheckBox, QRadioButton, QButtonGroup,
+    QFileDialog, QSizePolicy
 )
-from PySide6.QtCore import Qt
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -26,9 +25,8 @@ sys.path.append(str(Path(__file__).parent.parent))
 from constants import (
     BG_COLOR, PANEL_BG_COLOR, FRAME_BG_COLOR,
     PRIMARY_TEXT, SECONDARY_TEXT,
-    PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER,
-    SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER,
-    SUCCESS_GREEN, WARNING_ORANGE, ERROR_RED,
+    PRIMARY_BUTTON_BG,
+    SUCCESS_GREEN, ERROR_RED,
     SPACING_XS, SPACING_SM, SPACING_MD,
     FONT_SIZE_SECTION_LABEL, FONT_SIZE_BODY, FONT_SIZE_SMALL
 )
