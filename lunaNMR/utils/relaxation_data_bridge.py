@@ -427,7 +427,7 @@ class RelaxationDataBridge:
         )
 
         processor = MultiSpectrumProcessor(voigt_params)
-        batch_results = processor.process_nmr_series(
+        processor.process_nmr_series(
             nmr_files=spectrum_files,
             reference_peaks=peak_df,
             output_folder=output_folder,
@@ -563,7 +563,6 @@ class RelaxationDataBridge:
             try:
                 dic, data = ng.pipe.read(spec_file)
 
-                udic = ng.pipe.guess_udic(dic, data)
                 uc0 = ng.pipe.make_uc(dic, data, dim=0)  # 15N
                 uc1 = ng.pipe.make_uc(dic, data, dim=1)  # 1H
 

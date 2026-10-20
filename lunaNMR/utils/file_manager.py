@@ -13,7 +13,6 @@ Classes:
 
 import os
 import pandas as pd
-from datetime import datetime
 
 try:
     import nmrglue as ng
