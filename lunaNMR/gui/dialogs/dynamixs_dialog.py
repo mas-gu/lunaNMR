@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from PySide6.QtWidgets import (
-    QVBoxLayout, QStackedWidget, QWidget, QFrame, QInputDialog
+    QVBoxLayout, QStackedWidget, QWidget, QFrame, QInputDialog, QListWidget, QListWidgetItem,
+    QMessageBox
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -220,6 +221,43 @@ class DynamiXsDialog(BaseDialog):
 
         layout.addWidget(options_panel, stretch=1)
 
+        # The project's saved runs - reopen / delete, as the Kd page lists its fits
+        runs_frame = QFrame()
+        runs_frame.setProperty("class", "card")
+        runs_layout = create_v_layout(SPACING_SM, (SPACING_MD, SPACING_SM, SPACING_MD, SPACING_SM))
+        runs_frame.setLayout(runs_layout)
+        runs_layout.addWidget(create_secondary_label("Saved runs in this project"))
+
+        self.saved_runs_list = QListWidget()
+        self.saved_runs_list.setMaximumHeight(140)
+        self.saved_runs_list.itemDoubleClicked.connect(lambda _item: self._open_selected_run())
+        runs_layout.addWidget(self.saved_runs_list)
+
+        self.no_saved_runs_label = create_label(
+            "No saved runs in this project yet - 'Save run to project' on a page keeps one; "
+            "saving the project writes it.",
+            font_size=FONT_SIZE_SMALL
+        )
+        self.no_saved_runs_label.setStyleSheet(f"color: {SECONDARY_TEXT};")
+        self.no_saved_runs_label.setWordWrap(True)
+        runs_layout.addWidget(self.no_saved_runs_label)
+
+        runs_buttons = create_h_layout(SPACING_SM)
+        self.open_run_button = create_secondary_button(
+            "Open selected run", clicked=self._open_selected_run, width=160)
+        self.delete_run_button = create_secondary_button(
+            "Delete selected", clicked=self._delete_selected_run, width=140)
+        for button in (self.open_run_button, self.delete_run_button):
+            button.setEnabled(False)
+            runs_buttons.addWidget(button)
+        self.saved_runs_list.currentItemChanged.connect(
+            lambda item, _previous: [b.setEnabled(item is not None)
+                                     for b in (self.open_run_button, self.delete_run_button)])
+        runs_buttons.addStretch()
+        runs_layout.addLayout(runs_buttons)
+
+        layout.addWidget(runs_frame)
+
         # Working directory info
         dir_frame = QFrame()
         dir_frame.setProperty("class", "card")
@@ -248,7 +286,55 @@ class DynamiXsDialog(BaseDialog):
 
     def show_main_menu(self):
         """Show the main menu page."""
+        self._populate_saved_runs()
         self.stack.setCurrentWidget(self.main_menu_page)
+
+    def showEvent(self, event):
+        # A project opened while the dialog was closed brings its own runs
+        self._populate_saved_runs()
+        super().showEvent(event)
+
+    # The page title each saved run is listed with, by page key
+    _PAGE_TITLES = {'t1t2': 'T1/T2', 'integrated': 'Model-free', 'methyl_t2': 'Methyl T2',
+                    'hetnoe': 'hetNOE', 'spectral': 'Spectral density'}
+
+    def _populate_saved_runs(self):
+        """List the project's saved runs (main_window.dynamixs_analyses), each with the
+        page it opens on."""
+        analyses = getattr(self.main_window, 'dynamixs_analyses', None) or {}
+        self.saved_runs_list.clear()
+        for name in sorted(analyses):
+            page = ((analyses[name] or {}).get('state') or {}).get('active_page')
+            title = self._PAGE_TITLES.get(page)
+            item = QListWidgetItem(f"{name}  -  {title}" if title else name)
+            item.setData(Qt.UserRole, name)
+            self.saved_runs_list.addItem(item)
+        self.saved_runs_list.setVisible(bool(analyses))
+        self.no_saved_runs_label.setVisible(not analyses)
+
+    def _selected_run_name(self) -> Optional[str]:
+        item = self.saved_runs_list.currentItem()
+        return item.data(Qt.UserRole) if item is not None else None
+
+    def _open_selected_run(self):
+        name = self._selected_run_name()
+        if name is None:
+            return
+        entry = (getattr(self.main_window, 'dynamixs_analyses', None) or {}).get(name)
+        if entry is not None:
+            self.open_analysis(entry, name=name)
+
+    def _delete_selected_run(self):
+        name = self._selected_run_name()
+        if name is None:
+            return
+        if QMessageBox.question(
+                self, "Delete saved run",
+                f"Remove the saved run '{name}' from this project?\n"
+                "(applies when you next save the project)") != QMessageBox.Yes:
+            return
+        (getattr(self.main_window, 'dynamixs_analyses', None) or {}).pop(name, None)
+        self._populate_saved_runs()
 
     def show_t1t2_fitting(self):
         """Show T1/T2 fitting page."""
@@ -573,6 +659,7 @@ class DynamiXsDialog(BaseDialog):
         self.current_analysis_name = name
         self._saved_analyses()[name] = {'state': self.get_state(),
                                         'file_refs': self.get_file_refs()}
+        self._populate_saved_runs()
         return name
 
     def save_run_to_project(self, page) -> Optional[str]:

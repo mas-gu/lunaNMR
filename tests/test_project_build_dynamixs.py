@@ -300,7 +300,7 @@ def test_the_menu_offers_no_plot_data_page(app):
         assert dialog.stack.count() == 1 + len(dialog._pages())
         opened = []
         for button in dialog.main_menu_page.findChildren(QPushButton):
-            if button.text() == "Change Directory":
+            if button.text() in ("Change Directory", "Open selected run", "Delete selected"):
                 continue
             dialog.show_main_menu()
             button.click()
