@@ -32,6 +32,7 @@ import pandas as pd
 import os
 import sys
 
+from lunaNMR.utils.output_manager import log_info, log_warning, log_error
 
 try:
     import nmrglue as ng
@@ -96,10 +97,6 @@ class InPlaceAdvancedNMRIntegrator:
 
     def load_data(self, peak_list_file, nmr_file):
         """Load peak list and NMR data"""
-        # Imported here, not at module level: lunaNMR.utils imports lunaNMR.core, whose
-        # integrator imports this module, so a module-level import would hand it this
-        # class half-initialised whenever this module is imported first.
-        from lunaNMR.utils.output_manager import log_info, log_error
         try:
             self.peak_list = pd.read_csv(peak_list_file, skipinitialspace=True)
             self.peak_list.columns = self.peak_list.columns.str.strip()
@@ -134,7 +131,6 @@ class InPlaceAdvancedNMRIntegrator:
 
     def _calculate_ppm_axes(self):
         """Calculate proper PPM axes using nmrglue's built-in conversion"""
-        from lunaNMR.utils.output_manager import log_info, log_warning
         try:
             nmr_format = getattr(self, '_nmr_format', 'pipe')
 
@@ -178,7 +174,6 @@ class InPlaceAdvancedNMRIntegrator:
         Returns:
             str: '15N', '13C', or None (if cannot determine)
         """
-        from lunaNMR.utils.output_manager import log_warning
         if self.ppm_x_axis is None or self.ppm_y_axis is None:
             return None
 
@@ -219,7 +214,6 @@ class InPlaceAdvancedNMRIntegrator:
 
     def _estimate_noise_level(self):
         """Estimate noise level in the spectrum using custom or default regions"""
-        from lunaNMR.utils.output_manager import log_info, log_warning
         if self.use_custom_noise_regions and self.noise_regions_ppm:
             noise_values = []
 
