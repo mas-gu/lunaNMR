@@ -19,7 +19,7 @@ lunaNMR_v1o0/
 │   ├── batch_processing/   # CLI folder batch automation
 │   ├── integrators/        # In-place advanced/series integrators
 │   ├── utils/              # Config, params, file I/O, project bundles, output routing
-│   └── validation/         # Installation + memory checks, `diagnose` pre-flight (spectra_check.py)
+│   └── validation/         # Installation checks, `diagnose` pre-flight (spectra_check.py)
 └── modules/
     ├── dynamiXs_v2o0/      # DynamiXs (relaxation/dynamics) + dynamiXs_Kd/ (Kd/titration)
     └── integration_1d_v1o0/ # 1D peak integration across a series

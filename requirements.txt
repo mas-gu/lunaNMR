@@ -18,9 +18,6 @@ numba>=0.57.0  # REQUIRED: 3-5× speedup for 2D multi-peak fitting
 # NMR data file reading
 nmrglue>=0.9.0
 
-# System monitoring (optional - for performance tracking)
-psutil>=5.8.0
-
 # GUI framework - Qt for modern cross-platform UI
 PySide6>=6.6.0
 

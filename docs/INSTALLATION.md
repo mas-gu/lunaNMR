@@ -35,7 +35,6 @@ All runtime deps are in `requirements.txt`:
 | PySide6 ≥6.6 | Qt6 GUI — **required** |
 | numba ≥0.57 | **required** — 3–5× faster 2D multi-peak fitting |
 | nmrglue ≥0.9 | NMR file reading |
-| psutil ≥5.8 | optional — performance tracking |
 
 ```bash
 pip install -r requirements.txt
@@ -66,7 +65,7 @@ read as `python -m lunaNMR …`.
 python3 lunaNMR/validation/verify_installation.py
 ```
 
-Reports the Python version, the required packages (and optional `psutil`), the internal modules, whether the main GUI imports, and whether the fitting pipeline initialises.
+Reports the Python version, the required packages, the internal modules, whether the main GUI imports, and whether the fitting pipeline initialises.
 
 ## 6. Launch
 

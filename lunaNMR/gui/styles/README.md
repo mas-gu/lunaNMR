@@ -7,7 +7,6 @@ This directory contains the complete design system for the Qt/PySide6 version of
 - **`design_system.py`** - All design constants (colors, spacing, typography, sizing)
 - **`main.qss`** - Qt stylesheet (QSS) implementing the Apple-style design
 - **`__init__.py`** - Module initialization with convenience functions
-- **`example_usage.py`** - Demo application showing styled widgets
 
 ## Quick Start
 
@@ -243,12 +242,6 @@ Run the validation:
 
 ```bash
 python3 -m lunaNMR.gui.styles.design_system
-```
-
-Run the demo application (requires PySide6), from `lunaNMR_v1o0/`:
-
-```bash
-python3 -m lunaNMR.gui.styles.example_usage
 ```
 
 `tests/test_design_token_consistency.py` fails on a font token written in `px`
