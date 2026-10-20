@@ -4,7 +4,7 @@
 PS2D-Style High-Performance Voigt Fitter for LunaNMR
 =====================================================
 
-1. Multi-stage fitting (4 stages) - prevents local minima
+1. Multi-stage fitting (3 stages, run by ps2d_2d_fitter) - prevents local minima
 2. Relative numerical derivatives (1e-6 step) - handles parameter scales correctly
 3. Additive Levenberg-Marquardt damping - better convergence
 4. Exact Faddeeva-based Voigt profiles - matches  math

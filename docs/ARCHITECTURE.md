@@ -49,7 +49,7 @@ tkinter is used **only** for the launcher's startup error dialogs; the app is en
 ### 3.2 PS2D Stack
 - **Data selector** (`ps2d_data_selector.py`): union of elliptical masks around a cluster
 - **Voigt primitives** (`ps2d_style_fitter.py`): Faddeeva (`scipy.special.wofz`), Numba-accelerated (`forceobj`)
-- **2D fitter** (`ps2d_2d_fitter.py::fit_multi_peak_2d`): 5-stage Levenberg-Marquardt
+- **2D fitter** (`ps2d_2d_fitter.py::fit_multi_peak_2d`): 3-stage Levenberg-Marquardt
 - **Overlap clustering** (`core_integrator.py::identify_overlap_clusters`): agglomerative closest-pair merging under diameter/size constraints → disjoint clusters
 
 ### 3.3 Parameter Management (`utils/parameter_manager.py`)
