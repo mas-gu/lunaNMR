@@ -15,7 +15,7 @@ import os
 import json
 from pathlib import Path
 from datetime import datetime
-from lunaNMR.utils.output_manager import log_info, log_warning, log_error
+from lunaNMR.utils.output_manager import log_warning, log_error
 
 class ConfigurationManager:
     """Main configuration management system"""
@@ -75,19 +75,6 @@ class ConfigurationManager:
                 "last_nmr_folder": "",
                 "last_peak_folder": "",
                 "last_output_folder": ""
-            },
-            "overlap_resolution": {
-                "enabled": False,  # Default OFF for backward compatibility
-                "auto_detect": True,
-                "detection_threshold": 0.5,  # ppm separation threshold
-                "staged_fitting": True,
-                "jackknife_validation": True,
-                "correlation_analysis": True,
-                "n_resamples": 50,
-                "max_peaks": 10,
-                "model_selection_criterion": "BIC",
-                "cv_threshold": 0.2,
-                "amplitude_correlation_threshold": 0.7
             }
         }
 
@@ -250,42 +237,6 @@ class ConfigurationManager:
             recent[key] = recent[key][:max_recent]
 
         self.save_recent_files(recent)
-
-    def load_overlap_config(self):
-        """
-        Load overlap resolution configuration
-
-        Returns:
-            Dictionary with overlap resolution settings
-        """
-        return self.config.get('overlap_resolution', {
-            'enabled': False,
-            'auto_detect': True,
-            'detection_threshold': 0.5,
-            'staged_fitting': True,
-            'jackknife_validation': True,
-            'correlation_analysis': True,
-            'n_resamples': 50,
-            'max_peaks': 10,
-            'model_selection_criterion': 'BIC',
-            'cv_threshold': 0.2,
-            'amplitude_correlation_threshold': 0.7
-        })
-
-    def enable_overlap_resolution(self, enable=True):
-        """
-        Quick enable/disable overlap resolution
-
-        Args:
-            enable: True to enable, False to disable
-        """
-        if 'overlap_resolution' not in self.config:
-            self.config['overlap_resolution'] = self.load_overlap_config()
-
-        self.config['overlap_resolution']['enabled'] = enable
-        self.save_config()
-        status = 'enabled' if enable else 'disabled'
-        log_info(f"Overlap resolution {status}")
 
 class UserPreferences:
     """User interface preferences manager"""

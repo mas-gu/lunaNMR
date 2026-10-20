@@ -879,9 +879,6 @@ class ParallelVoigtProcessor:
             'optimization_settings': self._get_optimization_settings(),
             'validation_thresholds': self._get_validation_thresholds(),
 
-            # Overlap resolution parameters
-            'overlap_resolution_params': self._serialize_overlap_resolution_params(),
-
             # CRITICAL: All peaks context for automatic 2D routing
             'all_peaks_context': all_peaks_context if all_peaks_context is not None else [],
 
@@ -982,26 +979,6 @@ class ParallelVoigtProcessor:
             'algorithm': getattr(self.original_fitter, 'optimization_algorithm', 'lm'),
             'step_size': getattr(self.original_fitter, 'step_size', 1e-8),
             'gradient_tolerance': getattr(self.original_fitter, 'gradient_tolerance', 1e-12)
-        }
-
-    def _serialize_overlap_resolution_params(self):
-        """Extract overlap resolution parameters"""
-        # Check if overlap_config exists (may be disabled in enhanced_voigt_fitter)
-        if not hasattr(self.original_fitter, 'overlap_config'):
-            return {
-                'enabled': False,
-                'threshold': 0.5,
-                'config': None
-            }
-
-        overlap_config = getattr(self.original_fitter, 'overlap_config', None)
-        if overlap_config is not None and hasattr(overlap_config, 'to_dict'):
-            overlap_config = overlap_config.to_dict()
-
-        return {
-            'enabled': getattr(self.original_fitter, 'overlap_detection_enabled', False),
-            'threshold': getattr(self.original_fitter, 'overlap_detection_threshold', 0.5),
-            'config': overlap_config
         }
 
     def _serialize_ps2d_config(self):
@@ -1426,7 +1403,7 @@ def _parallel_cluster_worker(cluster_task):
             assignment = cluster_assignments[0]
             peak_number = cluster_peak_numbers[0]
 
-            # Fit using enhanced_peak_fitting (routes through consensus or 2D fitting)
+            # Fit using enhanced_peak_fitting (single-peak 2D fitting)
             result = worker_integrator.enhanced_peak_fitting(
                 peak_x, peak_y, assignment,
                 all_peaks_context=cluster_task['shared_context']['all_peaks_context']
@@ -1703,9 +1680,6 @@ def _initialize_worker_fitter(shared_context):
         _restore_optimization_settings(worker_fitter, shared_context['optimization_settings'])
         _restore_validation_thresholds(worker_fitter, shared_context['validation_thresholds'])
 
-        # Overlap resolution settings
-        _restore_overlap_resolution_params(worker_fitter, shared_context['overlap_resolution_params'])
-
         # Set noise_level on worker_integrator for fit_overlap_group_2d() weak peak detection
         worker_integrator.noise_level = shared_context['validation_thresholds'].get('noise_level')
 
@@ -1767,21 +1741,3 @@ def _restore_validation_thresholds(worker_fitter, validation_thresholds):
     worker_fitter.peak_threshold = validation_thresholds['peak_detection_threshold']
     worker_fitter.multipeak_threshold = validation_thresholds['multipeak_threshold']
     worker_fitter.noise_level = validation_thresholds['noise_level']
-
-def _restore_overlap_resolution_params(worker_fitter, overlap_params):
-    """Restore overlap resolution settings"""
-    # CRITICAL: Set the overlap_detection_enabled flag
-    worker_fitter.overlap_detection_enabled = overlap_params.get('enabled', False)
-    worker_fitter.overlap_detection_threshold = overlap_params.get('threshold', 0.5)
-
-    config = overlap_params.get('config')
-    if config is not None:
-        if isinstance(config, dict):
-            try:
-                from lunaNMR.utils.overlap_config import OverlapResolutionConfig
-                worker_fitter.overlap_config = OverlapResolutionConfig(user_config=config)
-            except ImportError:
-                # Fallback: store as dict
-                worker_fitter.overlap_config = config
-        else:
-            worker_fitter.overlap_config = config

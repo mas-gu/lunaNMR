@@ -422,9 +422,6 @@ class VoigtIntegrator(BaseIntegrator):
         else:
             self.enhanced_fitter = None
 
-        # Overlap resolution configuration (optional)
-        self.overlap_resolution_enabled = False
-
         # Initialize with nucleus-specific windows (will be overridden by GUI if provided)
         self.detected_nucleus_type = None
         self.gui_window_override = {'x': None, 'y': None}  # Track GUI overrides
@@ -513,88 +510,6 @@ class VoigtIntegrator(BaseIntegrator):
         peak_id = self._next_peak_id
         self._next_peak_id += 1
         return peak_id
-
-    def configure_overlap_resolution(self, enable: bool = True, config: Dict = None):
-        """
-        Configure overlap resolution for the integrator
-
-        This enables automatic detection and resolution of overlapping peaks
-        during fitting operations.
-
-        Args:
-            enable: Enable/disable overlap resolution (default: True)
-            config: Optional configuration dictionary with keys:
-                - 'jackknife': {'n_resamples': int, 'cv_threshold': float}
-                - 'staged_fitting': {'stage2_position_tolerance': float, ...}
-                - 'model_selection': {'max_peaks': int, 'criterion': 'AIC'|'BIC'}
-                - 'correlation': {'amplitude_correlation_threshold': float}
-
-        Example:
-            integrator = VoigtIntegrator()
-            integrator.configure_overlap_resolution(
-                enable=True,
-                config={
-                    'jackknife': {'n_resamples': 100},
-                    'model_selection': {'max_peaks': 5}
-                }
-            )
-
-        Note:
-            Overlap resolution is disabled by default for backward compatibility.
-            Enable it explicitly when you expect overlapping peaks.
-        """
-        self.overlap_resolution_enabled = enable
-
-        if self.enhanced_fitter is not None:
-            # CRITICAL: Call enhanced_fitter's configure_overlap_resolution method
-            # This sets the overlap_detection_enabled flag that triggers routing to OverlapResolverEngine
-            self.enhanced_fitter.configure_overlap_resolution(enable=enable, config=config)
-        else:
-            log_warning("Enhanced fitter not available - cannot configure overlap resolution")
-
-    def enable_overlap_resolution_preset(self, preset: str = 'default'):
-        """
-        Enable overlap resolution with preset configurations
-
-        Args:
-            preset: Configuration preset
-                - 'default': Balanced settings (50 resamples)
-                - 'fast': Speed-optimized (25 resamples)
-                - 'thorough': Accuracy-optimized (100 resamples)
-
-        Example:
-            integrator.enable_overlap_resolution_preset('thorough')
-        """
-        preset_configs = {
-            'default': {
-                'jackknife': {'n_resamples': 50},
-                'model_selection': {'max_peaks': 10}
-            },
-            'fast': {
-                'jackknife': {'n_resamples': 25},
-                'staged_fitting': {
-                    'stage1_max_iterations': 500,
-                    'stage2_max_iterations': 750,
-                    'stage3_max_iterations': 1000
-                }
-            },
-            'thorough': {
-                'jackknife': {'n_resamples': 100},
-                'staged_fitting': {
-                    'stage1_max_iterations': 2000,
-                    'stage2_max_iterations': 2500,
-                    'stage3_max_iterations': 3000
-                },
-                'model_selection': {'max_peaks': 15}
-            }
-        }
-
-        if preset not in preset_configs:
-            log_warning(f"Unknown preset '{preset}'. Using 'default'.")
-            preset = 'default'
-
-        self.configure_overlap_resolution(enable=True, config=preset_configs[preset])
-        log_info(f"Overlap resolution enabled with '{preset}' preset")
 
     def load_nmr_data(self, data_2d, ppm_x_axis, ppm_y_axis):
         """
@@ -3445,7 +3360,7 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
 
     def enhanced_peak_fitting(self, peak_x_ppm, peak_y_ppm, assignment="Unknown", linewidth_constraints=None, all_peaks_context=None):
         """
-        Enhanced peak fitting with advanced features and consensus fitting integration
+        Fit one peak in 2D among the peaks of the spectrum
 
         Parameters
         ----------
@@ -3464,39 +3379,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             Format: [{'assignment': str, 'x_ppm': float, 'y_ppm': float, 'pos_x': float, 'pos_y': float}, ...]
         """
 
-        # Check if simplified parameters are enabled (indicating automated mode preference)
-        use_consensus = False
-        if hasattr(self, 'parameter_manager') and hasattr(self.parameter_manager, 'use_simplified_mode'):
-            use_consensus = self.parameter_manager.use_simplified_mode
-        elif hasattr(self, 'gui_params') and self.gui_params.get('use_simplified_parameters', False):
-            use_consensus = True
-
-        if use_consensus and hasattr(self.voigt_fitter, 'fit_with_consensus'):
-            log_progress(f"Using consensus fitting for peak at ({peak_x_ppm:.4f}, {peak_y_ppm:.4f})")
-
-            # Extract region data for consensus fitting using existing method
-            region_data = self.extract_peak_region(peak_x_ppm, peak_y_ppm, self.fitting_parameters.get('fitting_window_x', 0.15), self.fitting_parameters.get('fitting_window_y', 2.0))
-            if region_data is not None:
-                # Use the x cross-section for 1D consensus fitting
-                x_region = region_data['x_ppm_scale']
-                y_region = region_data['x_cross_section']  # Intensity data along x-axis
-            else:
-                x_region, y_region = None, None
-            if x_region is not None and y_region is not None:
-                nucleus_type = self.detect_nucleus_type(peak_x_ppm, peak_y_ppm)
-                consensus_result = self.voigt_fitter.fit_with_consensus(
-                    x_region, y_region, nucleus_type, use_simplified=True
-                )
-
-                if consensus_result and consensus_result.get('success', False):
-                    result = self.convert_consensus_result_to_standard(consensus_result, peak_x_ppm, peak_y_ppm, assignment)
-                    log_info(f"Consensus fitting successful: R² = {result.get('avg_r_squared', 0):.4f}")
-
-                    self.update_statistics(True, result['avg_r_squared'])
-                    return result
-                else:
-                    log_warning("Consensus fitting unavailable; fitting in 2D")
-
         # 2D fit with PS2D linewidth constraints and 2D routing
         result = self.fit_peak_voigt_2d(
             peak_x_ppm, peak_y_ppm, assignment,
@@ -3506,7 +3388,7 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
 
         if result and result.get('success', True):
             self.update_statistics(True, result['avg_r_squared'])
-            # Convert nested format to flat format for consistency with consensus results
+            # Convert nested format to flat format
             result = self.convert_voigt2d_result_to_standard(result)
         else:
             self.update_statistics(False)
@@ -3527,71 +3409,16 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
         else:
             return '1H'  # Default fallback
 
-    def convert_consensus_result_to_standard(self, consensus_result, peak_x_ppm, peak_y_ppm, assignment):
-        """Convert consensus fitting result to standard peak result format"""
-        try:
-            r_squared = consensus_result.get('r_squared', 0)
-            parameters = consensus_result.get('parameters', [])
-            fitted_curve = consensus_result.get('fitted_curve')
-
-            # Extract fitted parameters (assuming Voigt format: [amp, center, sigma, gamma, baseline])
-            if len(parameters) >= 5:
-                amplitude = parameters[0]
-                center = parameters[1]
-                sigma = parameters[2]
-                gamma = parameters[3]
-                baseline = parameters[4]
-                width = sigma + gamma  # Total width
-            else:
-                amplitude, center, sigma, gamma, baseline, width = 1000, peak_x_ppm, 0.01, 0.01, 0, 0.02
-
-            result = {
-                'assignment': assignment,
-                'peak_x': peak_x_ppm,
-                'peak_y': peak_y_ppm,
-                'amplitude': amplitude,
-                'volume': amplitude * width * np.pi,  # Approximate volume
-                'avg_r_squared': r_squared,
-                'height': amplitude,
-                'width': width,
-                'sigma': sigma,
-                'gamma': gamma,
-                'baseline': baseline,
-                'center_x': center,
-                'center_y': peak_y_ppm,
-                'success': True,
-                'method': 'consensus_fitting',
-                'quality_class': consensus_result.get('quality_class', 'Fair'),
-                'fitted_curve': fitted_curve,
-                'original_consensus_result': consensus_result
-            }
-
-            return result
-
-        except Exception as e:
-            log_error(f"Failed to convert consensus result: {e}")
-            return {
-                'assignment': assignment,
-                'peak_x': peak_x_ppm,
-                'peak_y': peak_y_ppm,
-                'amplitude': 1000,
-                'volume': 1000,
-                'avg_r_squared': 0.5,
-                'success': False,
-                'method': 'consensus_fitting_failed'
-            }
-
     def convert_voigt2d_result_to_standard(self, voigt2d_result):
         """Convert nested 2D Voigt result to flat standard format
 
-        This ensures enhanced_peak_fitting() always returns a consistent flat format,
-        regardless of whether it uses consensus fitting or fit_peak_voigt_2d().
+        This ensures enhanced_peak_fitting() always returns a consistent flat format.
 
         Args:
             voigt2d_result: Result dict from fit_peak_voigt_2d() with nested x_fit/y_fit structure
 
         Returns:
-            Flattened result dict compatible with consensus format and parallel processing
+            Flattened result dict compatible with parallel processing
         """
         try:
             # Extract x and y fit parameters (use x_fit for primary parameters)

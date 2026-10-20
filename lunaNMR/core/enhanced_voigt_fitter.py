@@ -18,9 +18,9 @@ Key improvements:
 import numpy as np
 from scipy.special import wofz
 from scipy.optimize import curve_fit
-from scipy.signal import find_peaks, peak_widths
+from scipy.signal import peak_widths
 
-from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
+from lunaNMR.utils.output_manager import log_progress, log_warning, log_error
 
 from lunaNMR.utils.quality_categories import fit_quality_label
 
@@ -90,9 +90,6 @@ class EnhancedVoigtFitter:
         except ImportError:
             self.simplified_param_manager = None
             self.parameter_adapter = None
-
-        # There is no consensus fitting engine; fit_with_consensus returns None
-        self.use_automated_fitting = False
 
     def set_gui_parameters(self, gui_fitting_params):
         """
@@ -171,98 +168,6 @@ class EnhancedVoigtFitter:
         """
         # RETURN DUMMY VALUE - NOT USED ANYMORE
         return 1.0  # No multiplier needed - PS2D uses fixed radF1/radF2
-
-    # AUTOMATED FITTING METHODS (Priority 1 & 2)
-
-    def fit_with_consensus(self, x_data, y_data, nucleus_type='default', use_simplified=True):
-        """
-        Fit peaks using automated consensus fitting approach.
-
-        This method implements Priority 2 improvements:
-        - Separates detection from fitting
-        - Uses multi-method consensus
-        - Automated peak counting with AIC/BIC model selection
-
-        Parameters:
-        -----------
-        x_data : np.ndarray
-            Frequency/chemical shift data
-        y_data : np.ndarray
-            Intensity data
-        nucleus_type : str
-            Type of nucleus ('1H', '15N', '13C', 'default')
-        use_simplified : bool
-            Whether to use simplified parameters (Priority 1)
-
-        Returns:
-        --------
-        dict : Consensus fitting results with backward-compatible format
-        """
-        if not self.use_automated_fitting:
-            log_warning("Automated fitting not available, falling back to legacy method")
-            return self._legacy_fit_fallback(x_data, y_data, nucleus_type)
-
-        try:
-            # Phase 1: Detection using consensus detector
-            if use_simplified:
-                sensitivity = self.simplified_param_manager.simplified_params.sensitivity
-            else:
-                sensitivity = 0.5
-
-            peak_candidates = self.consensus_detector.detect_peaks(
-                x_data, y_data, nucleus_type, sensitivity
-            )
-
-            if not peak_candidates:
-                log_info("No peaks detected")
-                return self._empty_result()
-
-            # Phase 2: Consensus fitting with automated peak counting
-            max_peaks = min(10, len(peak_candidates))  # Reasonable limit
-            consensus_result = self.consensus_fitter.fit_consensus(
-                x_data, y_data, peak_candidates, max_peaks
-            )
-
-            # Phase 3: Convert to backward-compatible format
-            legacy_result = self._convert_consensus_to_legacy(
-                consensus_result, x_data, y_data, nucleus_type
-            )
-
-            # Phase 4: Adaptive quality assessment
-            if use_simplified:
-                adaptive_threshold = self.simplified_param_manager.calculate_adaptive_quality_threshold(
-                    y_data, nucleus_type
-                )
-                legacy_result['adaptive_threshold'] = adaptive_threshold
-                legacy_result['meets_adaptive_threshold'] = legacy_result.get('r_squared', 0) >= adaptive_threshold
-
-            return legacy_result
-
-        except Exception as e:
-            log_error(f"Automated fitting failed: {e}")
-            return self._legacy_fit_fallback(x_data, y_data, nucleus_type)
-
-    def _convert_consensus_to_legacy(self, consensus_result):
-        """DEPRECATED: This method is no longer used."""
-        return None
-
-    def _legacy_fit_fallback(self, x_data, y_data, peak_center, **kwargs):
-        """DEPRECATED: This method is no longer used."""
-        return None
-
-    def _empty_result(self):
-        """Return empty result in legacy format"""
-        return {
-            'peaks': [],
-            'r_squared': 0.0,
-            'residual_std': np.inf,
-            'aic': np.inf,
-            'bic': np.inf,
-            'method': 'no_peaks',
-            'n_peaks': 0,
-            'quality_category': 'no_signal',
-            'automated_fitting': True
-        }
 
     @staticmethod
     def voigt_profile_1d(x, amplitude, center, sigma, gamma, baseline=0):
@@ -1388,111 +1293,6 @@ class EnhancedVoigtFitter:
 
 
 
-
-    def detect_potential_overlap(self, x_data: np.ndarray,
-                                  y_data: np.ndarray,
-                                  primary_peak_ppm: float,
-                                  nucleus_type: str = '1H') -> dict:
-        """
-        Detect if there are other peaks near the primary peak
-
-        Uses simple local maximum detection in a window around primary peak.
-        This is a lightweight overlap detector that routes to the full
-        OverlapResolverEngine when overlaps are detected.
-
-        Args:
-            x_data: PPM axis
-            y_data: Intensity data (should be baseline-corrected)
-            primary_peak_ppm: Main peak position
-            nucleus_type: Nucleus type for adaptive threshold
-
-        Returns:
-            {
-                'has_overlap': bool,
-                'peak_candidates': List[float],  # PPM positions
-                'n_peaks': int,
-                'separation_distance': float,     # Minimum distance between peaks
-                'confidence': float               # 0-1 scale
-            }
-        """
-        try:
-            nucleus_windows = {
-                '1H': 0.3,   # ±0.3 ppm window for 1H
-                '15N': 1.0,  # ±1.0 ppm window for 15N
-                '13C': 0.8,  # ±0.8 ppm window for 13C
-            }
-            search_window = nucleus_windows.get(nucleus_type, 0.5)
-
-            mask = np.abs(x_data - primary_peak_ppm) <= search_window
-            if not np.any(mask):
-                return {
-                    'has_overlap': False,
-                    'peak_candidates': [primary_peak_ppm],
-                    'n_peaks': 1,
-                    'separation_distance': float('inf'),
-                    'confidence': 0.0
-                }
-
-            x_region = x_data[mask]
-            y_region = y_data[mask]
-
-            # Adaptive prominence based on data range
-            data_range = np.max(y_region) - np.min(y_region)
-            prominence = 0.05 * data_range  # 5% of local data range
-
-            peaks_idx, properties = find_peaks(
-                y_region,
-                prominence=prominence,
-                distance=int(len(x_region) * 0.05)  # At least 5% of points apart
-            )
-
-            if len(peaks_idx) == 0:
-                return {
-                    'has_overlap': False,
-                    'peak_candidates': [primary_peak_ppm],
-                    'n_peaks': 1,
-                    'separation_distance': float('inf'),
-                    'confidence': 0.0
-                }
-
-            peak_candidates = x_region[peaks_idx].tolist()
-
-            if len(peak_candidates) > 1:
-                separations = np.diff(sorted(peak_candidates))
-                min_separation = float(np.min(np.abs(separations)))
-            else:
-                min_separation = float('inf')
-
-            has_overlap = (
-                len(peak_candidates) > 1 and
-                min_separation < self.overlap_detection_threshold
-            )
-
-            # Confidence based on prominence and separation
-            if len(peak_candidates) > 1:
-                avg_prominence = float(np.mean(properties['prominences']))
-                prominence_ratio = avg_prominence / data_range
-                confidence = min(1.0, prominence_ratio * 2)  # Scale to 0-1
-            else:
-                confidence = 0.0
-
-            return {
-                'has_overlap': has_overlap,
-                'peak_candidates': peak_candidates,
-                'n_peaks': len(peak_candidates),
-                'separation_distance': min_separation,
-                'confidence': confidence
-            }
-
-        except Exception as e:
-            log_warning(f"Overlap detection failed: {e}")
-            return {
-                'has_overlap': False,
-                'peak_candidates': [primary_peak_ppm],
-                'n_peaks': 1,
-                'separation_distance': float('inf'),
-                'confidence': 0.0
-            }
 
     def get_adaptive_peak_detection_params(self, x_data, y_data, nucleus_type, window_size_multiplier=1.0):
         """
