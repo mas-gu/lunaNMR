@@ -2077,6 +2077,8 @@ def _run_dynamixs_modelfree(args):
     p.monte_carlo_iterations = args.n_monte_carlo
     p.output_dir = out_dir
     p.output_prefix = args.prefix
+    # The T1/T2 fit JSONs (<prefix>_field<n>_<T1|T2>_fit_data.json) the page's View Fits reads
+    p.json_folder = out_dir
 
     # Under --format json the engine's own prints already go to stderr via
     # _engine_stdout, but this callback bypasses it. Nulling it discarded

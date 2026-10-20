@@ -365,3 +365,29 @@ def test_a_malformed_record_is_an_error_not_a_traceback(default_prefix_run, tmp_
     out = tmp_path / "x.lunaNMR"
     assert main(["project", "build", str(default_prefix_run), "--out", str(out)]) == 1
     assert not out.exists()
+
+
+def test_a_cli_modelfree_run_writes_its_fit_json(run_dir):
+    """The page's View Fits reads the T1/T2 fit JSONs a run writes, as a GUI run does."""
+    names = sorted(p.name for p in (run_dir.parent / "JA1.lunaNMR").rglob(
+        "dynamixs/analyses/dual_modelfree/**/*_fit_data.json"))
+    assert names == ["dual_field1_T1_fit_data.json", "dual_field1_T2_fit_data.json",
+                     "dual_field2_T1_fit_data.json", "dual_field2_T2_fit_data.json"]
+
+
+def test_the_modelfree_page_views_its_fits_from_the_bundle(app, loaded, bundle, monkeypatch):
+    from visualization import fit_viewer
+    for box in ("show_info", "show_warning", "show_error"):
+        monkeypatch.setattr(fit_viewer, box, lambda *a, **k: None)
+    dialog = _dialog(app, loaded, MODELFREE)
+    try:
+        page = dialog.integrated_page
+        json_files = page.session_results.get('json_files') or []
+        assert len(json_files) == 4
+        assert all(_inside(f, bundle) and Path(f).exists() for f in json_files)
+        page._open_fit_viewer()
+        assert getattr(page, 'fit_viewer', None) is not None
+        assert "nothing to view" not in page.progress_text.toPlainText()
+        page.fit_viewer.close()
+    finally:
+        dialog.deleteLater()

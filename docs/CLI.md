@@ -453,6 +453,7 @@ python -m lunaNMR dynamixs modelfree [--dual] \
   DynamiXs-format T1 in seconds (`0.1, 0.4, …`) beside a T2 in ms → `--f1-t1-units s`, without
   which R1 is out by 1000×.
 - **Outputs:** `<prefix>_field{1,2}_T{1,2}_fit_results.txt` (+ `_fig{1,2,3}.pdf`),
+  `<prefix>_field{1,2}_T{1,2}_fit_data.json` (the fits the DynamiXs Fit Viewer opens),
   `<prefix>_field{1,2}_input.csv` (the R1/R2/hetNOE table the density step read),
   `<prefix>_field{1,2}_hetnoe.pdf`, `<prefix>_spectral_density_basic.csv` (one row
   per residue — this is the per-residue result), `_detailed.csv`, and
