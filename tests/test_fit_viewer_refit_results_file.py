@@ -25,7 +25,7 @@ def app():
 
 @pytest.fixture
 def quiet_viewers(monkeypatch):
-    """The fit viewer reports each load in a message box; nothing closes one offscreen."""
+    """The fit viewer reports a refit or a load problem in a message box; nothing closes one offscreen."""
     import lunaNMR.gui.dialogs.dynamixs_dialog  # noqa: F401 - puts the module on sys.path
     import visualization.fit_viewer as fit_viewer
     for box in ("show_info", "show_warning", "show_error"):

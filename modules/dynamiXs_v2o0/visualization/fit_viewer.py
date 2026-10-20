@@ -466,10 +466,6 @@ class FitViewer(QMainWindow):
             self._update_field_controls()
             self._populate_residue_list()
 
-            n_files = len(self.data)
-            n_residues = len(self.available_residues)
-            show_info(self, "Data Loaded",
-                     f"Loaded {n_files} dataset(s) with {n_residues} residue(s)")
             if not_shown:
                 show_warning(self, "Fits Not Shown",
                              "These files hold a field and experiment already shown, "
