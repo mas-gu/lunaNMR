@@ -38,6 +38,7 @@ from .ps2d_style_fitter import (
 )
 from .ps2d_config import get_ps2d_config
 from scipy.special import wofz
+from lunaNMR.utils.output_manager import log_warning
 
 
 def calculate_peak_height(lw_lor_f1: float, lw_gau_f1: float,
@@ -1466,7 +1467,7 @@ class Ps2dMultiPeakFitter2D:
                 # A refit that fails leaves the capped widths with the pre-cap
                 # intensity, which is the defect above - so say so rather than
                 # reporting the numbers as if they were fitted together.
-                print(f"   ⚠ intensity refit after the width cap failed: {error}")
+                log_warning(f"intensity refit after the width cap failed: {error}")
 
         # Measured beside the analytic integral, from the same mask the fit used.
         try:
@@ -1477,7 +1478,7 @@ class Ps2dMultiPeakFitter2D:
             # NOT `model_function`: inside this function that name is a curve_fit-style
             # closure taking varargs, while region_sum_volumes wants the grid model.
         except Exception as error:                           # pragma: no cover
-            print(f"   ⚠ region-sum volume unavailable: {error}")
+            log_warning(f"region-sum volume unavailable: {error}")
             region_volumes = [None] * n_peaks
 
         fitted_peaks = []

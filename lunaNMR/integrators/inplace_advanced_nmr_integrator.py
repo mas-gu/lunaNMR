@@ -96,12 +96,16 @@ class InPlaceAdvancedNMRIntegrator:
 
     def load_data(self, peak_list_file, nmr_file):
         """Load peak list and NMR data"""
+        # Imported here, not at module level: lunaNMR.utils imports lunaNMR.core, whose
+        # integrator imports this module, so a module-level import would hand it this
+        # class half-initialised whenever this module is imported first.
+        from lunaNMR.utils.output_manager import log_info, log_error
         try:
             self.peak_list = pd.read_csv(peak_list_file, skipinitialspace=True)
             self.peak_list.columns = self.peak_list.columns.str.strip()
-            print(f"Loaded peak list: {len(self.peak_list)} peaks from {peak_list_file}")
+            log_info(f"Loaded peak list: {len(self.peak_list)} peaks from {peak_list_file}")
         except Exception as e:
-            print(f"Error loading peak list: {e}")
+            log_error(f"Error loading peak list: {e}")
             return False
 
         try:
@@ -112,12 +116,12 @@ class InPlaceAdvancedNMRIntegrator:
                 pdata_dir = os.path.dirname(nmr_file)
                 self.nmr_dict, self.nmr_data = ng.bruker.read_pdata(dir=pdata_dir)
                 self._nmr_format = 'bruker'
-                print(f"Loaded Bruker pdata: {self.nmr_data.shape} from {pdata_dir}")
+                log_info(f"Loaded Bruker pdata: {self.nmr_data.shape} from {pdata_dir}")
             else:
                 # NMRPipe format (default)
                 self.nmr_dict, self.nmr_data = ng.pipe.read(nmr_file)
                 self._nmr_format = 'pipe'
-                print(f"Loaded NMR data: {self.nmr_data.shape} from {nmr_file}")
+                log_info(f"Loaded NMR data: {self.nmr_data.shape} from {nmr_file}")
 
             self._calculate_ppm_axes()
 
@@ -125,11 +129,12 @@ class InPlaceAdvancedNMRIntegrator:
 
             return True
         except Exception as e:
-            print(f"Error loading NMR data: {e}")
+            log_error(f"Error loading NMR data: {e}")
             return False
 
     def _calculate_ppm_axes(self):
         """Calculate proper PPM axes using nmrglue's built-in conversion"""
+        from lunaNMR.utils.output_manager import log_info, log_warning
         try:
             nmr_format = getattr(self, '_nmr_format', 'pipe')
 
@@ -152,11 +157,11 @@ class InPlaceAdvancedNMRIntegrator:
             self.ppm_y_axis = f1_ppm_scale
             self._using_fallback_ppm_axes = False
 
-            print(f"F2 (1H) range: {f2_ppm_scale[0]:.2f} to {f2_ppm_scale[-1]:.2f} ppm")
-            print(f"F1 (15N/13C) range: {f1_ppm_scale[0]:.1f} to {f1_ppm_scale[-1]:.1f} ppm")
+            log_info(f"F2 (1H) range: {f2_ppm_scale[0]:.2f} to {f2_ppm_scale[-1]:.2f} ppm")
+            log_info(f"F1 (15N/13C) range: {f1_ppm_scale[0]:.1f} to {f1_ppm_scale[-1]:.1f} ppm")
 
         except Exception as e:
-            print(f"Warning: Could not calculate PPM axes properly: {e}")
+            log_warning(f"Could not calculate PPM axes properly: {e}")
             # Fallback to simple linear axes
             self.ppm_x_axis = np.linspace(12, 0, self.nmr_data.shape[1])
             self.ppm_y_axis = np.linspace(140, 100, self.nmr_data.shape[0])
@@ -173,12 +178,13 @@ class InPlaceAdvancedNMRIntegrator:
         Returns:
             str: '15N', '13C', or None (if cannot determine)
         """
+        from lunaNMR.utils.output_manager import log_warning
         if self.ppm_x_axis is None or self.ppm_y_axis is None:
             return None
 
         # Skip auto-detection if using fallback axes (unreliable)
         if hasattr(self, '_using_fallback_ppm_axes') and self._using_fallback_ppm_axes:
-            print("⚠ Skipping nucleus auto-detection (using fallback PPM axes)")
+            log_warning("Skipping nucleus auto-detection (using fallback PPM axes)")
             return None
 
         try:
@@ -208,11 +214,12 @@ class InPlaceAdvancedNMRIntegrator:
             return None
 
         except Exception as e:
-            print(f"⚠ Error during nucleus auto-detection: {e}")
+            log_warning(f"Error during nucleus auto-detection: {e}")
             return None
 
     def _estimate_noise_level(self):
         """Estimate noise level in the spectrum using custom or default regions"""
+        from lunaNMR.utils.output_manager import log_info, log_warning
         if self.use_custom_noise_regions and self.noise_regions_ppm:
             noise_values = []
 
@@ -230,20 +237,20 @@ class InPlaceAdvancedNMRIntegrator:
                 region_data = self.nmr_data[y_min_idx:y_max_idx, x_min_idx:x_max_idx]
                 noise_values.extend(region_data.flatten())
 
-                print(f"  Added noise region: {x_min_ppm}-{x_max_ppm} ppm (1H), {y_min_ppm}-{y_max_ppm} ppm (15N/13C)")
+                log_info(f"Added noise region: {x_min_ppm}-{x_max_ppm} ppm (1H), {y_min_ppm}-{y_max_ppm} ppm (15N/13C)")
 
             if noise_values:
                 self.noise_level = np.std(noise_values)
-                print(f"Custom noise estimation from {len(self.noise_regions_ppm)} regions")
+                log_info(f"Custom noise estimation from {len(self.noise_regions_ppm)} regions")
             else:
-                print("Warning: No valid custom noise regions found, falling back to corner method")
+                log_warning("No valid custom noise regions found, falling back to corner method")
                 self._estimate_noise_level_corners()
         else:
             self._estimate_noise_level_corners()
 
         self.threshold = self.noise_level * self.threshold_multiplier
-        print(f"Estimated noise level: {self.noise_level:.2f}")
-        print(f"Detection threshold: {self.threshold:.2f} (multiplier: {self.threshold_multiplier})")
+        log_info(f"Estimated noise level: {self.noise_level:.2f}")
+        log_info(f"Detection threshold: {self.threshold:.2f} (multiplier: {self.threshold_multiplier})")
 
     def _estimate_noise_level_corners(self):
         """Estimate noise level using left corner regions (fallback method)"""
