@@ -12,18 +12,15 @@ Shows processing results from MultiSpectrumProcessor including:
 """
 
 import pandas as pd
-import numpy as np
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Optional, Any
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFrame, QTabWidget,
-    QLabel, QPushButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QSplitter, QScrollArea, QWidget, QComboBox,
-    QCheckBox, QSpinBox, QGroupBox, QGridLayout, QFileDialog,
-    QMessageBox
+    QTableWidget, QTableWidgetItem,
+    QWidget, QComboBox,
+    QGridLayout, QFileDialog
 )
-from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
@@ -34,14 +31,12 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent))
 from constants import (
     BG_COLOR, PANEL_BG_COLOR, FRAME_BG_COLOR,
-    PRIMARY_TEXT, SECONDARY_TEXT,
-    SUCCESS_GREEN, WARNING_ORANGE, ERROR_RED,
-    SPACING_XS, SPACING_SM, SPACING_MD,
-    FONT_SIZE_SECTION_LABEL, FONT_SIZE_BODY, FONT_SIZE_SMALL
+    PRIMARY_TEXT,
+    SPACING_SM, SPACING_MD
 )
 from gui_components import (
     create_primary_button, create_secondary_button, create_label,
-    create_secondary_label, get_font, show_info, show_error,
+    show_info, show_error,
     StyledGroupBox
 )
 
@@ -425,7 +420,7 @@ class SeriesResultsViewer(QDialog):
                 colors.append('#F44336')  # Red
 
         x_positions = range(len(data))
-        bars = ax.bar(x_positions, data['mean_r2'], color=colors, edgecolor='none', alpha=0.8)
+        ax.bar(x_positions, data['mean_r2'], color=colors, edgecolor='none', alpha=0.8)
 
         ax.axhline(y=self.R2_EXCELLENT, color='#4CAF50', linestyle='--', alpha=0.5,
                    label=f'Excellent ({self.R2_EXCELLENT})')

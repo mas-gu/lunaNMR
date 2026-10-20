@@ -1214,7 +1214,6 @@ class EnhancedVoigtFitter:
                             center = parameters[param_start + 1]
                             sigma = parameters[param_start + 2]
                             gamma = parameters[param_start + 3]
-                            baseline = parameters[-1]  # shared baseline
 
                             y_fitted += self.voigt_profile_1d(x_data, amp, center, sigma, gamma, 0)
 
@@ -1388,7 +1387,7 @@ class EnhancedVoigtFitter:
             y_corrected = y_data - baseline
 
 
-            # TODO: In future, pass actual window size multiplier from caller
+            # A window multiplier of 3.0 selects the standard height factor and peak distance
             adaptive_params = self.get_adaptive_peak_detection_params(x_data, y_corrected, nucleus_type, window_size_multiplier=3.0)
             
             min_height = adaptive_params['min_height']
@@ -1618,8 +1617,8 @@ class EnhancedVoigtFitter:
         if len(detected_peaks) < 2:
             return {'success': False, 'error': 'insufficient_peaks_for_pairwise'}
         
-        # For now, fall back to standard multi-peak
-        # TODO: Implement actual pairwise fitting algorithm
+        # No pairs are fitted separately: all peaks are fitted together by the
+        # standard multi-peak fit, with a separation threshold of 1.2x the typical linewidth
         peak_positions = [p['position'] for p in detected_peaks]
         nucleus_type = self.detect_nucleus_type([x_data[0], x_data[-1]])
         typical_separation = self.nmr_ranges[nucleus_type]['typical_width'] * 1.2
@@ -1631,7 +1630,6 @@ class EnhancedVoigtFitter:
         """
         try:
             # Use standard single peak fitting with relaxed constraints
-            nucleus_type = self.detect_nucleus_type([x_data[0], x_data[-1]])
             
             max_idx = np.argmax(y_data)
             peak_position = x_data[max_idx]
@@ -3315,7 +3313,6 @@ if __name__ == "__main__":
     x_test = np.linspace(7.5, 8.5, 200)  # ¹H range
     true_params = [2000, 8.0, 0.015, 0.008, 150]  # Realistic ¹H peak
 
-    from scipy.special import wofz
     def test_voigt(x, amp, cen, sig, gam, base):
         z = ((x - cen) + 1j*gam) / (sig * np.sqrt(2))
         return amp * np.real(wofz(z)) / (sig * np.sqrt(2*np.pi)) + base

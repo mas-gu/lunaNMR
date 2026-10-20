@@ -12,7 +12,7 @@ from typing import List, Optional
 from PySide6.QtWidgets import (
     QWidget, QSplitter, QLabel, QVBoxLayout, QHBoxLayout,
     QPushButton, QCheckBox, QToolBar, QTreeWidget, QTreeWidgetItem,
-    QFileDialog, QInputDialog, QMessageBox, QDoubleSpinBox, QSpinBox,
+    QFileDialog, QInputDialog, QDoubleSpinBox, QSpinBox,
     QGroupBox, QColorDialog, QMenu, QAbstractItemView
 )
 from PySide6.QtWidgets import QSizePolicy, QFormLayout, QSlider

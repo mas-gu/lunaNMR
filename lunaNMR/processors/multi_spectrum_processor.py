@@ -528,7 +528,6 @@ class MultiSpectrumProcessor:
                     break
 
                 spectrum_name = os.path.basename(nmr_file)
-                spectrum_key = os.path.splitext(spectrum_name)[0]
 
                 progress = (i / total_spectra) * 100
                 if self.progress_callback:

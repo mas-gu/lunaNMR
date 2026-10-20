@@ -7,9 +7,7 @@ scripts to enable programmatic fitting without command-line interaction.
 """
 
 import sys
-import os
 import pandas as pd
-import numpy as np
 from pathlib import Path
 from typing import Dict, Tuple, Optional
 import tempfile

@@ -19,9 +19,7 @@ Usage:
     app.setStyleSheet(load_stylesheet())
 """
 
-import os
 from pathlib import Path
-from typing import Optional
 
 # Import all design system constants for easy access
 from .design_system import (

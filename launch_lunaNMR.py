@@ -139,13 +139,9 @@ if __name__ == "__main__":
 
         success = locals().get("success", True)  # Default to success if undefined
         if platform.system() == "Linux":
-            import os
-
             # Force clean exit
             os._exit(0 if success else 1)
         elif platform.system() == "Darwin":  # Add macOS support
-            import os
-
             # Force clean exit on macOS too
             os._exit(0 if success else 1)
         else:

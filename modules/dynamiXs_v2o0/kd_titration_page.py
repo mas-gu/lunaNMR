@@ -5,11 +5,10 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QVBoxLayout, QLabel, QFileDialog, QDoubleSpinBox, QSpinBox,
     QComboBox, QFormLayout, QProgressBar, QPlainTextEdit, QScrollArea, QWidget,
-    QListWidget, QListWidgetItem, QMessageBox,
+    QListWidget, QMessageBox,
 )
 
 from constants import (
@@ -19,7 +18,6 @@ from constants import (
 )
 from gui_components import (
     create_primary_button, create_secondary_button, create_label,
-    create_header_label, create_v_layout, create_h_layout,
     get_font, show_info, show_error, show_warning, open_directory_dialog,
     prompt_name_collision, unique_name,
 )

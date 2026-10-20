@@ -13,8 +13,8 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
-    QLabel, QPushButton, QCheckBox, QRadioButton, QButtonGroup,
-    QFileDialog, QMessageBox, QScrollArea, QSizePolicy, QSplitter,
+    QLabel, QCheckBox, QRadioButton, QButtonGroup,
+    QFileDialog, QScrollArea, QSizePolicy,
     QListWidget, QListWidgetItem, QAbstractItemView
 )
 from PySide6.QtCore import Qt, Signal

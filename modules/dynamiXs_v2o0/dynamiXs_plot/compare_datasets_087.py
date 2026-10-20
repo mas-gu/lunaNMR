@@ -39,7 +39,6 @@ import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 import argparse
-import sys
 import os
 import json
 import matplotlib.patches as mpatches
@@ -147,7 +146,6 @@ def draw_secondary_structure(target_ax, range, secondary_structure_map: list) ->
     def draw_helix(ax, r: tuple, h:float, annot:str ="", strand_width:float = 1.0, angle:float = 10, c: list=["red", "white"], ec: str="black", lw: float=0.5) -> None:
         r = (r[0]-0.5, r[1]+0.5)
         w = r[1] - r[0]
-        coords = (r[0], -h/2)
 
         w_para = strand_width
         l = h / np.sin(np.deg2rad(angle))
@@ -657,7 +655,7 @@ def plot_multiple_comparisons(diff_data_list, columns, label1, label2, output_fi
         
         data_axes = axes
     
-    print(f"Applying y-axis limits from configuration...")
+    print("Applying y-axis limits from configuration...")
     
     for i, (diff_data, column) in enumerate(zip(diff_data_list, columns)):
         residues = diff_data['residues']
@@ -856,7 +854,7 @@ def interactive_mode():
     
     available = get_available_columns_for_comparison(df1, df2)
     
-    print(f"\nAvailable columns for comparison:")
+    print("\nAvailable columns for comparison:")
     print("\nRelaxation parameters:")
     for col in available['relaxation']:
         print(f"  {col}")

@@ -58,7 +58,7 @@ else:
             outfile.write(row_line + "\n")
     
     print(f"Compiled data saved to '{os.path.join(input_directory, output_file)}'")
-    print(f"Files processed in order:")
+    print("Files processed in order:")
     for i, file_path in enumerate(sorted_files, 1):
         filename = os.path.basename(file_path)
         number = extract_number(file_path)
