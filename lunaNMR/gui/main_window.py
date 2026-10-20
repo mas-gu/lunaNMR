@@ -175,7 +175,6 @@ class VoigtFittingWorker(QThread):
             param_manager: Parameter manager for configuration
             processing_options: Dict with keys:
                 - use_parallel: bool
-                - use_global_optimization: bool (optional, default False)
                 - use_voigt_fitting: bool
             peaks_to_fit: DataFrame of peaks to fit. If None, uses integrator.peak_list
             stop: Optional threading.Event; setting it ends the fit before its next cluster
@@ -446,7 +445,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.max_iterations = 1000  # Levenberg-Marquardt max iterations
         self.fitting_window_x = 0.2  # 1H fitting window (ppm)
         self.fitting_window_y = 2.0  # 15N fitting window (ppm)
-        self.use_global_optimization = False  # Global optimization flag
 
         # ===== PS2D Algorithm Configuration (Expert Mode) =====
         self.nucleus_type = '15N'  # Default to 15N-HSQC
@@ -6086,7 +6084,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         # Build processing options from GUI parameters (v0o9 pattern)
         processing_options = {
             'use_parallel': self.use_parallel_processing,
-            'use_global_optimization': getattr(self, 'use_global_optimization', False),
             'use_voigt_fitting': self.use_voigt_fitting,
             # For single spectrum fitting, always recompute clusters fresh.
             # This ensures changes to max_cluster_size and other Expert Mode

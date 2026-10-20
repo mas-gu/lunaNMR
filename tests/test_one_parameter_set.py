@@ -37,7 +37,7 @@ def test_the_manager_hands_the_integrator_its_default_parameter_set():
         'detection_params': {'search_window_x': SEARCH_WINDOW_PPM, 'search_window_y': search_window_y},
         'fitting_params': FITTING_PARAMS,
         'gui_params': GUI_PARAMS,
-        'processing_options': {'use_global_optimization': False, 'use_parallel_processing': False},
+        'processing_options': {'use_parallel_processing': False},
     }
 
 

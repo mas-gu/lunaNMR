@@ -26,9 +26,6 @@ try:
 except ImportError:
     NUMBA_AVAILABLE = False
 
-# Import apriori linewidth estimator and global instance (self-contained, no circular deps)
-
-
 # Conditional JIT decorator - compiles to native code if Numba available, otherwise no-op
 if NUMBA_AVAILABLE:
     def jit_decorator(func):

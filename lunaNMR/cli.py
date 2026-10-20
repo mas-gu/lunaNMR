@@ -780,7 +780,6 @@ def _default_series_params(parallel=False):
         },
         'processing_options': {
             'use_parallel_processing': parallel,
-            'use_global_optimization': False,
             'enable_cascade_drift_limit': True,
             'rerun_adaptive_per_spectrum': False,
             'lock_cluster_assignments': False,

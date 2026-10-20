@@ -913,7 +913,6 @@ class MultiSpectrumProcessor:
 
         processing_options = {
             'use_parallel': use_parallel,
-            'use_global_optimization': False,
             'use_voigt_fitting': use_voigt,
             # Only if cascade/independent mode AND drift limit enabled
             'original_reference_positions': self.original_reference_positions if use_drift_limit else None,
