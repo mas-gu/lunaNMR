@@ -16,7 +16,7 @@ matplotlib.use("Agg")
 
 
 def _single_field_frame():
-    """A single-field results frame, shaped like ZZ_multi_density_087.analyze_csv output."""
+    """A single-field results frame, shaped like a 0.87 ZZ_multi_density.analyze_csv output."""
     return pd.DataFrame({
         "Residue": ["3LysH", "8TyrH"],
         "R1": [1.39, 1.42], "R1_err": [0.05, 0.06],
@@ -77,17 +77,17 @@ class TestPlotFilename:
     """Single-field plots must land where the caller asks, not on a hardcoded name."""
 
     def test_plot_results_honours_plot_filename(self, tmp_path):
-        from ZZ_multi_density_087 import ReducedSpectralDensityAnalysis
+        from ZZ_multi_density import ReducedSpectralDensityAnalysis
         target = tmp_path / "single600_spectral_density_plots.pdf"
-        analyzer = ReducedSpectralDensityAnalysis(spectrometer_frequency=600)
+        analyzer = ReducedSpectralDensityAnalysis(spectrometer_frequency=600, omega_h_factor=0.87)
         analyzer.plot_results(_single_field_frame(), save_plots=True,
                               plot_filename=str(target))
         assert target.is_file(), "plot_filename was ignored"
 
     def test_default_name_is_unchanged_when_no_filename_given(self, tmp_path, monkeypatch):
-        from ZZ_multi_density_087 import ReducedSpectralDensityAnalysis
+        from ZZ_multi_density import ReducedSpectralDensityAnalysis
         monkeypatch.chdir(tmp_path)
-        analyzer = ReducedSpectralDensityAnalysis(spectrometer_frequency=600)
+        analyzer = ReducedSpectralDensityAnalysis(spectrometer_frequency=600, omega_h_factor=0.87)
         analyzer.plot_results(_single_field_frame(), save_plots=True)
         assert (tmp_path / "ZZ_rsdm_multicore_analysis_results_087.pdf").is_file()
 

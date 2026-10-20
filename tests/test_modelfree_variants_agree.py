@@ -1,5 +1,5 @@
 # ABOUTME: The single- and dual-field model-free variants predict the same relaxation at one field.
-# ABOUTME: Same NOE (from the calculated T1) and same J frequencies, for the plain and the 0.87 pair.
+# ABOUTME: Same NOE (from the calculated T1), same J frequencies and same J errors, plain and 0.87 pairs.
 
 """
 Two inconsistencies made the same residue fit differently depending on the variant: the
@@ -21,31 +21,47 @@ R1, R2, NOE, TC = 1.62, 6.31, 0.71, 6.61e-9
 TRIAL = (0.72, 3e-11, 0.4)
 
 
-def _pair(single_name, dual_name):
-    import importlib
-    single = importlib.import_module(f"dynamiXs_density_functions.{single_name}")
-    dual = importlib.import_module(f"dynamiXs_density_functions.{dual_name}")
-    return (single.ReducedSpectralDensityAnalysis(spectrometer_frequency=600.0,
-                                                  rNH=1.015e-10, csaN=-172.0e-6),
-            dual.DualFieldSpectralDensityAnalysis(field1_freq=600.0, field2_freq=700.0,
-                                                  rNH=1.015e-10, csaN=-172.0e-6))
+def _pair(factor):
+    from dynamiXs_density_functions.ZZ_multi_density import ReducedSpectralDensityAnalysis
+    from dynamiXs_density_functions.ZZ_multi_2fields_density import DualFieldSpectralDensityAnalysis
+    return (ReducedSpectralDensityAnalysis(spectrometer_frequency=600.0, rNH=1.015e-10,
+                                           csaN=-172.0e-6, omega_h_factor=factor),
+            DualFieldSpectralDensityAnalysis(field1_freq=600.0, field2_freq=700.0, rNH=1.015e-10,
+                                             csaN=-172.0e-6, omega_h_factor=factor))
 
 
-@pytest.mark.parametrize("single_name, dual_name", [
-    ("ZZ_multi_density", "ZZ_multi_2fields_density"),
-    ("ZZ_multi_density_087", "ZZ_multi_2fields_density_087")])
-def test_one_field_of_a_dual_fit_predicts_what_the_single_fit_does(single_name, dual_name):
-    single, dual = _pair(single_name, dual_name)
+@pytest.mark.parametrize("factor", [1.0, 0.87])
+def test_one_field_of_a_dual_fit_predicts_what_the_single_fit_does(factor):
+    single, dual = _pair(factor)
     s2, te, rex = TRIAL
     a = single._single_field_residuals(s2, te, rex, 1 / R1, 1 / R2, NOE, TC)
     b = dual._field_residuals(1, s2, te, rex, 1 / R1, 1 / R2, NOE, TC)
     assert a == pytest.approx(b, rel=1e-12)
 
 
-@pytest.mark.parametrize("single_name", ["ZZ_multi_density", "ZZ_multi_density_087"])
-def test_the_predicted_noe_does_not_depend_on_the_measured_t1(single_name):
-    single, _ = _pair(single_name, "ZZ_multi_2fields_density")
+@pytest.mark.parametrize("factor", [1.0, 0.87])
+def test_the_predicted_noe_does_not_depend_on_the_measured_t1(factor):
+    single, _ = _pair(factor)
     s2, te, rex = TRIAL
     noe_dev = [single._single_field_residuals(s2, te, rex, 1 / r1, 1 / R2, NOE, TC)[2]
                for r1 in (R1, 1.5 * R1)]
     assert noe_dev[0] == pytest.approx(noe_dev[1], rel=1e-12)
+
+
+ERRORS = dict(r1_err=0.05, r2_err=0.3, noe_err=0.03)
+
+
+@pytest.mark.parametrize("factor", [1.0, 0.87])
+def test_both_variants_propagate_the_same_spectral_density_errors(factor):
+    """First-order propagation, sqrt(sum((dJ/dx * sigma_x)^2)), in both: the single-field
+    J(wN) error was once halved, so one residue reported two different errors."""
+    single, dual = _pair(factor)
+    e = ERRORS
+    a = single.propagate_errors(R1, e['r1_err'], R2, e['r2_err'], NOE, e['noe_err'])
+    b = dual.propagate_dual_field_errors(R1, e['r1_err'], R2, e['r2_err'], NOE, e['noe_err'],
+                                         R1, e['r1_err'], R2, e['r2_err'], NOE, e['noe_err'])['Field1']
+    for key in ('J0_err', 'JwN_err'):
+        assert a[key] == pytest.approx(b[key], rel=1e-12, abs=0), key
+    jwh_a, = [k for k in a if k.startswith('JwH') and k.endswith('_err')]
+    jwh_b, = [k for k in b if k.startswith('JwH') and k.endswith('_err')]
+    assert a[jwh_a] == pytest.approx(b[jwh_b], rel=1e-12, abs=0)

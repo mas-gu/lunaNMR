@@ -537,16 +537,14 @@ class SpectralDensityWorker(AnalysisWorker):
                 if not self.params.input_file2:
                     raise ValueError("Dual-field analysis requires two input files")
 
-                if self.params.use_087:
-                    from dynamiXs_density_functions.ZZ_multi_2fields_density_087 import DualFieldSpectralDensityAnalysis
-                else:
-                    from dynamiXs_density_functions.ZZ_multi_2fields_density import DualFieldSpectralDensityAnalysis
+                from dynamiXs_density_functions.ZZ_multi_2fields_density import DualFieldSpectralDensityAnalysis
 
                 analyzer = DualFieldSpectralDensityAnalysis(
                     field1_freq=self.params.field1_freq,
                     field2_freq=self.params.field2_freq,
                     rNH=rNH_meters,
-                    csaN=csaN_units
+                    csaN=csaN_units,
+                    omega_h_factor=0.87 if self.params.use_087 else 1.0
                 )
 
                 self.emit_progress("Running dual-field analysis...", 50)
@@ -576,15 +574,13 @@ class SpectralDensityWorker(AnalysisWorker):
 
             else:
                 # Single-field analysis
-                if self.params.use_087:
-                    from dynamiXs_density_functions.ZZ_multi_density_087 import ReducedSpectralDensityAnalysis
-                else:
-                    from dynamiXs_density_functions.ZZ_multi_density import ReducedSpectralDensityAnalysis
+                from dynamiXs_density_functions.ZZ_multi_density import ReducedSpectralDensityAnalysis
 
                 analyzer = ReducedSpectralDensityAnalysis(
                     spectrometer_frequency=self.params.field1_freq,
                     rNH=rNH_meters,
-                    csaN=csaN_units
+                    csaN=csaN_units,
+                    omega_h_factor=0.87 if self.params.use_087 else 1.0
                 )
 
                 self.emit_progress("Running single-field analysis...", 50)

@@ -51,8 +51,6 @@ def test_the_2d_voigt_kernel_compiles_quietly():
 
 def test_the_density_kernels_raise_no_deprecation():
     numba_warnings, unchanged = _recorded(
-        "from dynamiXs_density_functions import ZZ_multi_density, ZZ_multi_density_087\n"
-        "from dynamiXs_density_functions import (ZZ_multi_2fields_density,\n"
-        "                                        ZZ_multi_2fields_density_087)\n")
+        "from dynamiXs_density_functions import ZZ_multi_density, ZZ_multi_2fields_density\n")
     assert numba_warnings == "[]"
     assert unchanged

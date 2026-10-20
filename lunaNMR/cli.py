@@ -1917,14 +1917,14 @@ def _run_dynamixs_density(args):
     r_nh_m = args.rnh * 1e-10       # Angstrom -> metre
     csa_n = args.csa * 1e-6         # ppm -> dimensionless
     prefix = os.path.join(args.out, args.prefix)
-    suffix = '_087' if args.use_087 else ''
+    omega_h_factor = 0.87 if args.use_087 else 1.0
 
     with _engine_stdout(args):
         if args.dual:
-            cls = getattr(import_module(f'dynamiXs_density_functions.ZZ_multi_2fields_density{suffix}'),
+            cls = getattr(import_module('dynamiXs_density_functions.ZZ_multi_2fields_density'),
                           'DualFieldSpectralDensityAnalysis')
             analyzer = cls(field1_freq=args.field1_freq, field2_freq=args.field2_freq,
-                           rNH=r_nh_m, csaN=csa_n)
+                           rNH=r_nh_m, csaN=csa_n, omega_h_factor=omega_h_factor)
             df = analyzer.analyze_dual_field_csv(
                 csv_file1=args.input, csv_file2=args.input2,
                 use_monte_carlo_errors=args.monte_carlo, n_monte_carlo=args.n_samples,
@@ -1938,9 +1938,10 @@ def _run_dynamixs_density(args):
                 analyzer.plot_dual_field_results(df, save_plots=True, plot_filename=plots)
                 outputs.append(plots)
         else:
-            cls = getattr(import_module(f'dynamiXs_density_functions.ZZ_multi_density{suffix}'),
+            cls = getattr(import_module('dynamiXs_density_functions.ZZ_multi_density'),
                           'ReducedSpectralDensityAnalysis')
-            analyzer = cls(spectrometer_frequency=args.field1_freq, rNH=r_nh_m, csaN=csa_n)
+            analyzer = cls(spectrometer_frequency=args.field1_freq, rNH=r_nh_m, csaN=csa_n,
+                           omega_h_factor=omega_h_factor)
             df = analyzer.analyze_csv(
                 csv_file=args.input, use_monte_carlo_errors=args.monte_carlo,
                 n_monte_carlo=args.n_samples, use_multiprocessing=not args.no_parallel)

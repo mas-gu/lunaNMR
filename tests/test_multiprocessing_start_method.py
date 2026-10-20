@@ -20,9 +20,7 @@ _MODULES = [
     "fitmulti__Tx_NMRRE",
     # by package name, as every caller imports them
     "dynamiXs_density_functions.ZZ_multi_density",
-    "dynamiXs_density_functions.ZZ_multi_density_087",
     "dynamiXs_density_functions.ZZ_multi_2fields_density",
-    "dynamiXs_density_functions.ZZ_multi_2fields_density_087",
 ]
 
 

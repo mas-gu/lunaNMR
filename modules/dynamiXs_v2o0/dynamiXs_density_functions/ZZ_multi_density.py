@@ -6,6 +6,10 @@ This script imports R1, R1err, R2, R2err, hetNOE, and hetNOEerr from a CSV file
 and performs reduced spectral density calculations including J(0), J(wN), J(wH),
 S2, Rex, and te parameters with proper error propagation.
 
+omega_h_factor 0.87 evaluates J at 0.87 wH instead of wH - J(0.87wH), for a more
+accurate treatment of cross-correlation effects and dipolar-CSA interference - and
+names its column JwH_087.
+
 MULTICORE VERSION: Modified to utilize multiple CPU cores for parallel processing.
 """
 
@@ -24,38 +28,13 @@ from multiprocessing import cpu_count
 from dynamiXs_density_functions.model_free_search import (
     SINGLE_FIELD_STARTS, S2_BOUNDS, TE_BOUNDS, REX_BOUNDS, TE_SCALE, best_least_squares)
 
-# Numba JIT compilation for performance (optional but recommended)
-try:
-    from numba import jit
-    HAS_NUMBA = True
-except ImportError:
-    HAS_NUMBA = False
-    # Fallback: decorator that does nothing
-    def jit(*args, **kwargs):
-        def decorator(func):
-            return func
-        return decorator
+from dynamiXs_density_functions.spectral_density_physics import (
+    spectral_density, omega_h, omega_n, dipolar_constant, csa_constant,
+    reduced_spectral_densities, reduced_spectral_density_errors, relaxation_deviations,
+    overall_correlation_time)
 
-# Physical constants
-GAMMA_H = 2.67522128e8  # 1H gyromagnetic ratio (rad s-1 T-1)
-GAMMA_N = -2.7126e7     # 15N gyromagnetic ratio (rad s-1 T-1) 
-REDUCED_PERM_VACUUM = 1.25663706212e-6  # H/m
-REDUCED_PLANK = 1.05457180013e-34       # J⋅s
-PI = 3.14159265359
-
-# JIT-compiled spectral density calculation for performance
-@jit(cache=True, forceobj=True)
-def _calculate_spectral_density_jit(s2, tc, te, omega):
-    """
-    Calculate J(w) using Lipari-Szabo model-free approach (JIT-compiled version)
-    """
-    if te == 0:
-        j = s2 * tc / (1.0 + (omega * tc)**2)
-    else:
-        teff = 1.0 / (1.0/tc + 1.0/te)
-        j = (s2 * tc / (1.0 + (omega * tc)**2) +
-             (1.0 - s2) * teff / (1.0 + (omega * teff)**2))
-    return j * 0.4  # 2/5 prefactor
+# The J(wH) column for each proton-frequency factor J(wH) can be evaluated at
+JWH_COLUMN = {1.0: 'JwH', 0.87: 'JwH_087'}
 
 
 class ReducedSpectralDensityAnalysis:
@@ -63,7 +42,8 @@ class ReducedSpectralDensityAnalysis:
     Class for performing reduced spectral density mapping analysis
     """
     
-    def __init__(self, spectrometer_frequency=600.0, rNH=1.015e-10, csaN=-160.0e-6):
+    def __init__(self, spectrometer_frequency=600.0, rNH=1.015e-10, csaN=-160.0e-6,
+                 omega_h_factor=1.0):
         """
         Initialize the analysis with experimental parameters
         
@@ -75,7 +55,12 @@ class ReducedSpectralDensityAnalysis:
             N-H bond length in meters (default: 1.015e-10)
         csaN : float
             15N CSA in ppm converted to frequency units (default: -160.0e-6)
+        omega_h_factor : float
+            J(wH) is evaluated at omega_h_factor * wH: 1.0, or 0.87 for J(0.87wH)
         """
+        if omega_h_factor not in JWH_COLUMN:
+            raise ValueError(f"omega_h_factor must be one of {sorted(JWH_COLUMN)}, "
+                             f"not {omega_h_factor}")
         self.spectrometer_frequency = spectrometer_frequency
         self.rNH = rNH
         self.csaN = csaN
@@ -85,191 +70,45 @@ class ReducedSpectralDensityAnalysis:
         
         self.d_factor = self._calculate_d_factor()
         self.c_factor = self._calculate_c_factor()
+
+        self.omega_h_factor = omega_h_factor
+        self.omegaH_eff = self.omegaH * omega_h_factor
+        self.jwh_column = JWH_COLUMN[omega_h_factor]
+        self.jwh_label = 'J(ωH)' if omega_h_factor == 1.0 else 'J(0.87ωH)'
+        # Appended to plot titles and summaries of the 0.87 analysis
+        self.variant_note = '' if omega_h_factor == 1.0 else ' (J(0.87ωH))'
+        self.file_suffix = '' if omega_h_factor == 1.0 else '_087'
         
     def _calculate_omegaH(self):
         """Calculate 1H Larmor frequency in rad/s"""
-        return self.spectrometer_frequency * 2 * PI * 1e6
+        return omega_h(self.spectrometer_frequency)
     
     def _calculate_omegaN(self):
         """Calculate 15N Larmor frequency in rad/s"""
-        return self.omegaH * GAMMA_N / GAMMA_H
+        return omega_n(self.spectrometer_frequency)
     
     def _calculate_d_factor(self):
-        """
-        Calculate dipolar coupling constant (d²)
-
-        Returns d² as defined in Farrow et al. J. Biomol. NMR, 6 (1995) 153-162
-        d² = [μ₀ħγNγH/(4πr³NH)]² = [μ₀hγNγH/(8π²r³NH)]²
-        """
-        mu0_h_bar = REDUCED_PERM_VACUUM * REDUCED_PLANK
-        d_squared = (mu0_h_bar * GAMMA_N * GAMMA_H / (4 * PI * self.rNH**3))**2
-        return d_squared  # Returns d², not d²/4 (Farrow-exact notation)
+        """Dipolar coupling constant d² (Farrow et al. 1995)"""
+        return dipolar_constant(self.rNH)
     
     def _calculate_c_factor(self):
         """Calculate CSA constant"""
-        return (self.omegaN * self.csaN)**2 / 3.0
-    
-    def calculate_sigma_NOE(self, noe, r1):
-        """
-        Calculate sigma NOE value
-        
-        Parameters:
-        -----------
-        noe : array-like
-            Heteronuclear NOE values
-        r1 : array-like
-            R1 relaxation rates (s-1)
-            
-        Returns:
-        --------
-        array : sigma NOE values
-        """
-        return (noe - 1.0) * r1 * (GAMMA_N / GAMMA_H)
-    
-    def calculate_J0(self, noe, r1, r2):
-        """
-        Calculate J(0) spectral density
-
-        Implements Farrow et al. (1995) Equation 7:
-        J(0) = [R₂ - (3d²/8 + c²/2)J(ωN) - (13d²/8)J(ω̃H)] / (d²/2 + 2c²/3)
-
-        Parameters:
-        -----------
-        noe : array-like
-            Heteronuclear NOE values
-        r1 : array-like
-            R1 relaxation rates (s-1)
-        r2 : array-like
-            R2 relaxation rates (s-1)
-
-        Returns:
-        --------
-        array : J(0) values
-        """
-        sigma_noe = self.calculate_sigma_NOE(noe, r1)
-        d = self.d_factor  # d = d² (Farrow notation)
-        c = self.c_factor  # c = c²
-
-        # Farrow Eq. 7 with algebraically simplified form
-        j0 = (3.0 / (2.0 * (3.0 * d / 4.0 + c))) * (
-            -0.5 * r1 + r2 - (3.0/5.0) * sigma_noe
-        )
-        return j0
-    
-    def calculate_JwN(self, noe, r1, r2):
-        """
-        Calculate J(wN) spectral density
-
-        Implements Farrow et al. (1995) Equation 6:
-        J(ωN) = [R₁ - (7d²/4)J(ω̃H)] / [(3d²/4) + c²]
-
-        Parameters:
-        -----------
-        noe : array-like
-            Heteronuclear NOE values
-        r1 : array-like
-            R1 relaxation rates (s-1)
-        r2 : array-like
-            R2 relaxation rates (s-1)
-
-        Returns:
-        --------
-        array : J(wN) values
-        """
-        sigma_noe = self.calculate_sigma_NOE(noe, r1)
-        d = self.d_factor  # d = d² (Farrow notation)
-        c = self.c_factor  # c = c²
-
-        # Farrow Eq. 6: denominator has (3d²/4) + c²
-        jwn = (1.0 / (3.0 * d / 4.0 + c)) * (r1 - (7.0/5.0) * sigma_noe)
-        return jwn
-    
-    def calculate_JwH(self, noe, r1):
-        """
-        Calculate J(wH) spectral density
-
-        Implements Farrow et al. (1995) Equation 5:
-        J(ω̃H) = [4/(5d²)] × (γN/γH) × (NOE - 1) × R₁
-
-        Parameters:
-        -----------
-        noe : array-like
-            Heteronuclear NOE values
-        r1 : array-like
-            R1 relaxation rates (s-1)
-
-        Returns:
-        --------
-        array : J(wH) values
-        """
-        sigma_noe = self.calculate_sigma_NOE(noe, r1)
-        d = self.d_factor  # d = d² (Farrow notation)
-
-        # Farrow Eq. 5: J(ω̃H) = [4/(5d²)] × σNOE
-        jwh = 4.0 * sigma_noe / (5.0 * d)
-        return jwh
+        return csa_constant(self.omegaN, self.csaN)
     
     def calculate_isotropic_spectral_density(self, s2, tc, te, omega):
-        """
-        Calculate J(w) using Lipari-Szabo model-free approach
-        Delegates to JIT-compiled function for performance
-        """
-        return _calculate_spectral_density_jit(s2, tc, te, omega)
+        """J(w) of the Lipari-Szabo model-free form"""
+        return spectral_density(s2, tc, te, omega)
     
     def estimate_overall_correlation_time(self, r1_array, r2_array):
-        """
-        Estimate overall correlation time from R1/R2 data using Fushman method
-        
-        Parameters:
-        -----------
-        r1_array : array
-            Array of R1 values
-        r2_array : array  
-            Array of R2 values
-            
-        Returns:
-        --------
-        float : Overall correlation time in seconds
-        """
-        t1_array = 1.0 / r1_array
-        t2_array = 1.0 / r2_array
-        
-        # Fushman method: tc = [1/(2*omegaN)] * sqrt[(6*T1/T2) - 7]
-        ratio = 6.0 * t1_array / t2_array
-        valid_mask = ratio > 7.0  # Only use residues where ratio > 7
-        
-        if np.sum(valid_mask) < 3:
-            # Fallback: use simple average if not enough valid residues
-            tc_est = 1.0 / (2.0 * abs(self.omegaN)) * np.sqrt(np.mean(ratio) - 7.0) if np.mean(ratio) > 7 else 10e-9
-        else:
-            tc_values = 1.0 / (2.0 * abs(self.omegaN)) * np.sqrt(ratio[valid_mask] - 7.0)
-            tc_est = np.median(tc_values)  # Use median for robustness
-            
-        return max(1e-12, min(100e-9, tc_est))  # Constrain to reasonable range
+        """Overall correlation time from R1/R2 data by the Fushman method"""
+        return overall_correlation_time(r1_array, r2_array, abs(self.omegaN))
 
     def _single_field_residuals(self, s2, te, rex, t1, t2, noe, tc_fixed):
         """Relative deviations of the predicted T1, T2 and (when measured) NOE from the
         measured ones, at fixed tc - the fit's objective, summed in squares."""
-        A = self.d_factor
-        C = self.c_factor
-        gammaHN = GAMMA_H / GAMMA_N
-        jH = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.omegaH)
-        jN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, abs(self.omegaN))
-        jHpN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.omegaH + abs(self.omegaN))
-        jHmN = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, self.omegaH - abs(self.omegaN))
-        j0 = self.calculate_isotropic_spectral_density(s2, tc_fixed, te, 0.0)
-
-        r1_calc = (A / 4.0) * (3*jN + 6*jHpN + jHmN) + C * jN
-        r2_calc = 0.5 * (A / 4.0) * (4*j0 + 3*jN + 6*jHpN + 6*jH + jHmN) + C * (2*j0/3.0 + 0.5*jN) + rex
-        t1_calc = 1.0 / r1_calc
-
-        deviations = [(t1_calc - t1) / t1, (1.0 / r2_calc - t2) / t2]
-        if noe is not None and not pd.isna(noe):
-            # From the T1 the model predicts, so the prediction depends on the parameters
-            # alone - as the dual-field fit predicts it
-            noe_calc = 1.0 + ((A / 4.0) * gammaHN * t1_calc * (6*jHpN - jHmN))
-            deviations.append((noe_calc - noe) / (0.1 if noe == 0 else abs(noe)))
-        return deviations
+        return relaxation_deviations(s2, te, rex, t1, t2, noe, tc_fixed,
+                                     self.d_factor, self.c_factor,
+                                     self.omegaH_eff, self.omegaH, abs(self.omegaN))
 
     def _fit_single_dataset(self, r1, r2, noe, tc_fixed, niter):
         """Fit S2, te and Rex for one residue at fixed tc.
@@ -385,57 +224,28 @@ class ReducedSpectralDensityAnalysis:
     
     def propagate_errors(self, r1, r1_err, r2, r2_err, noe, noe_err):
         """
-        Propagate errors through spectral density calculations
-        
+        Spectral densities and their first-order errors
+
         Parameters:
         -----------
         r1, r1_err : float
             R1 value and error
-        r2, r2_err : float  
+        r2, r2_err : float
             R2 value and error
         noe, noe_err : float
             NOE value and error
-            
+
         Returns:
         --------
         dict : Spectral density values and errors
         """
-        # Calculate partial derivatives for error propagation
-        d = self.d_factor
-        c = self.c_factor
-        gamma_ratio = GAMMA_N / GAMMA_H
-        
-        # Sigma NOE and its error
-        sigma_noe = (noe - 1.0) * r1 * gamma_ratio
-        dsigma_dr1 = (noe - 1.0) * gamma_ratio
-        dsigma_dnoe = r1 * gamma_ratio
-        
-        # J(0) and its error (Farrow-exact notation with d²/4)
-        j0 = (3.0 / (2.0 * (3.0 * d / 4.0 + c))) * (-0.5 * r1 + r2 - (3.0/5.0) * sigma_noe)
-        factor_j0 = 3.0 / (2.0 * (3.0 * d / 4.0 + c))
-        dj0_dr1 = factor_j0 * (-0.5 - (3.0/5.0) * dsigma_dr1)
-        dj0_dr2 = factor_j0
-        dj0_dnoe = factor_j0 * (-(3.0/5.0) * dsigma_dnoe)
-        j0_err = np.sqrt((dj0_dr1 * r1_err)**2 + (dj0_dr2 * r2_err)**2 + (dj0_dnoe * noe_err)**2)
-        
-        # J(wN) and its error (Farrow-exact notation with d²/4)
-        jwn = (1.0 / (3.0 * d / 4.0 + c)) * (r1 - (7.0/5.0) * sigma_noe)
-        factor_jwn = 1.0 / (3.0 * d / 4.0 + c)
-        djwn_dr1 = factor_jwn * (1.0 - (7.0/5.0) * dsigma_dr1)
-        djwn_dnoe = factor_jwn * (-(7.0/5.0) * dsigma_dnoe)
-        jwn_err = (np.sqrt((djwn_dr1 * r1_err)**2 + (djwn_dnoe * noe_err)**2))/2 ## /2 GM 
-        
-        # J(wH) and its error (Farrow-exact notation with factor 4)
-        jwh = 4.0 * sigma_noe / (5.0 * d)
-        factor_jwh = 4.0 / (5.0 * d)
-        djwh_dr1 = factor_jwh * dsigma_dr1
-        djwh_dnoe = factor_jwh * dsigma_dnoe
-        jwh_err = np.sqrt((djwh_dr1 * r1_err)**2 + (djwh_dnoe * noe_err)**2)
-        
+        j0, jwn, jwh = reduced_spectral_densities(r1, r2, noe, self.d_factor, self.c_factor)
+        j0_err, jwn_err, jwh_err = reduced_spectral_density_errors(
+            r1, r1_err, r2, r2_err, noe, noe_err, self.d_factor, self.c_factor)
         return {
             'J0': j0, 'J0_err': j0_err,
             'JwN': jwn, 'JwN_err': jwn_err,
-            'JwH': jwh, 'JwH_err': jwh_err
+            self.jwh_column: jwh, f'{self.jwh_column}_err': jwh_err
         }
     
     def analyze_csv(self, csv_file, residue_col='Residue', use_monte_carlo_errors=True,
@@ -474,6 +284,8 @@ class ReducedSpectralDensityAnalysis:
             n_processes = max(1, int(cpu_count() * 0.8))
         
         print(f"\nProcessing {len(data)} residues from {csv_file}...")
+        if self.omega_h_factor != 1.0:
+            print(f"Using J(0.87ωH) approach with factor = {self.omega_h_factor}")
         if use_monte_carlo_errors:
             print(f"Using Monte Carlo error propagation with {n_monte_carlo} samples per residue")
         if use_multiprocessing:
@@ -588,7 +400,7 @@ class ReducedSpectralDensityAnalysis:
             processed += 1
         
         # Report data quality summary
-        print("\nData Quality Summary:")
+        print(f"\nData Quality Summary{self.variant_note}:")
         print(f"  Total residues in file: {total_residues}")
         print(f"  Processed successfully: {processed}")
         print(f"  Skipped (NaN values): {skipped_nan}")
@@ -610,7 +422,8 @@ class ReducedSpectralDensityAnalysis:
         analyzer_state = {
             'spectrometer_frequency': self.spectrometer_frequency,
             'rNH': self.rNH,
-            'csaN': self.csaN
+            'csaN': self.csaN,
+            'omega_h_factor': self.omega_h_factor
         }
         
         worker_args = []
@@ -648,7 +461,7 @@ class ReducedSpectralDensityAnalysis:
         total_residues = len(data)
         processed = len(results)
         
-        print("\nData Quality Summary:")
+        print(f"\nData Quality Summary{self.variant_note}:")
         print(f"  Total residues in file: {total_residues}")
         print(f"  Processed successfully: {processed}")
         print(f"  Skipped (NaN values): {skipped_nan}")
@@ -675,7 +488,7 @@ class ReducedSpectralDensityAnalysis:
         """
         fig = Figure(figsize=(15, 10))
         axes = fig.subplots(2, 3)
-        fig.suptitle('Reduced Spectral Density Analysis Results', fontsize=16)
+        fig.suptitle(f'Reduced Spectral Density Analysis Results{self.variant_note}', fontsize=16)
         
         success_mask = results_df['fit_success'] == True
         good_data = results_df[success_mask]
@@ -699,29 +512,30 @@ class ReducedSpectralDensityAnalysis:
         axes[0,1].set_ylabel('J(ωN) (ns/rad²)')
         
         # J(ωH)
-        axes[0,2].errorbar(residues, good_data['JwH'], yerr=good_data['JwH_err'],
+        axes[0,2].errorbar(residues, good_data[self.jwh_column],
+                          yerr=good_data[f'{self.jwh_column}_err'],
                           fmt='o', capsize=3, color='green') 
-        axes[0,2].set_title('J(ωH)')
-        axes[0,2].set_ylabel('J(ωH) (ns/rad²)')
+        axes[0,2].set_title(self.jwh_label)
+        axes[0,2].set_ylabel(f'{self.jwh_label} (ns/rad²)')
         
         # S²
         axes[1,0].errorbar(residues, good_data['S2'], yerr=good_data['S2_err'],
                           fmt='o', capsize=3, color='blue')         
-        axes[1,0].set_title('Order Parameter S²')
+        axes[1,0].set_title(f'Order Parameter S²{self.variant_note}')
         axes[1,0].set_ylabel('S²')
         axes[1,0].set_ylim(0, 1)
         
         # τe  
         axes[1,1].errorbar(residues, good_data['te'], yerr=good_data['te_err'],
                           fmt='o', capsize=3, color='purple')
-        axes[1,1].set_title('Internal Correlation Time τe')
+        axes[1,1].set_title(f'Internal Correlation Time τe{self.variant_note}')
         axes[1,1].set_ylim(0, 100) 
         axes[1,1].set_ylabel('τe (ps)')
         
         # Rex
         axes[1,2].errorbar(residues, good_data['Rex'], yerr=good_data['Rex_err'],
                           fmt='o', capsize=3, color='brown')
-        axes[1,2].set_title('Chemical Exchange Rex')
+        axes[1,2].set_title(f'Chemical Exchange Rex{self.variant_note}')
         axes[1,2].set_ylabel('Rex (s⁻¹)')
         
         for ax in axes.flat:
@@ -731,11 +545,11 @@ class ReducedSpectralDensityAnalysis:
         fig.tight_layout()
 
         if save_plots:
-            filename = plot_filename or 'ZZ_rsdm_multicore_analysis_results.pdf'
+            filename = plot_filename or f'ZZ_rsdm_multicore_analysis_results{self.file_suffix}.pdf'
             fig.savefig(filename, dpi=300, bbox_inches='tight')
             print(f"Plots saved as '{filename}'")
 
-    def save_detailed_results(self, results_df, filename='ZZ_multicore_detailed_results.csv'):
+    def save_detailed_results(self, results_df, filename=None):
         """
         Save results with confidence intervals if Monte Carlo was used
         
@@ -744,8 +558,9 @@ class ReducedSpectralDensityAnalysis:
         results_df : pandas.DataFrame
             Results from analyze_csv()
         filename : str
-            Output filename
+            Output filename (default: ZZ_multicore_detailed_results[_087].csv)
         """
+        filename = filename or f'ZZ_multicore_detailed_results{self.file_suffix}.csv'
         if 'S2_95CI' in results_df.columns:
             results_df['S2_CI'] = results_df['S2_95CI'].apply(
                 lambda x: f"[{x[0]:.3f}, {x[1]:.3f}]" if not pd.isna(x).any() else ""
@@ -761,7 +576,7 @@ class ReducedSpectralDensityAnalysis:
             results_df = results_df.drop(columns=['S2_95CI', 'te_95CI', 'Rex_95CI'])
         
         results_df.to_csv(filename, index=False)
-        print(f"Detailed results saved to '{filename}'")
+        print(f"Detailed results{self.variant_note} saved to '{filename}'")
 
 
 # Worker functions for multiprocessing (must be defined at module level)
@@ -778,7 +593,8 @@ def _worker_process_residue_single(args):
         analyzer = ReducedSpectralDensityAnalysis(
             spectrometer_frequency=analyzer_state['spectrometer_frequency'],
             rNH=analyzer_state['rNH'],
-            csaN=analyzer_state['csaN']
+            csaN=analyzer_state['csaN'],
+            omega_h_factor=analyzer_state['omega_h_factor']
         )
         
         r1 = residue_data['R1']
