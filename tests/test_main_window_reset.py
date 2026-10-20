@@ -1,6 +1,9 @@
 # ABOUTME: The main window shows the contour settings it draws with, and Reset leaves it as a newly opened one.
 # ABOUTME: Real LunaNMRMainWindow offscreen; compares its widgets and plain state against a fresh window.
 
+"""The window restores no preferences: nothing in the application saves any but the recent
+projects list, so a loader of window, display and contour keys only ever read its own defaults."""
+
 import os
 import sys
 
@@ -71,3 +74,8 @@ def test_reset_leaves_the_window_as_a_newly_opened_one(make_window, monkeypatch)
     differ = {k: (fresh.get(k), after.get(k)) for k in fresh.keys() | after.keys()
               if fresh.get(k) != after.get(k)}
     assert differ == {}
+
+
+def test_the_window_restores_no_preferences_nothing_saves():
+    from lunaNMR.gui.main_window import LunaNMRMainWindow
+    assert not hasattr(LunaNMRMainWindow, 'apply_user_preferences')
