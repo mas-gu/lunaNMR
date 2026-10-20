@@ -19,13 +19,12 @@ from lmfit import Model
 import pandas as pd
 import os
 import json
-import re
 from pathlib import Path
 
 try:
-    from delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
+    from delay_parser import parse_delay_columns, require_delay_start
 except ImportError:  # imported as dynamiXs_T1_T2.fit_Tx_NMRRE (parent dir on path)
-    from dynamiXs_T1_T2.delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
+    from dynamiXs_T1_T2.delay_parser import parse_delay_columns, require_delay_start
 
 
 # A fitted time constant beyond this multiple of the longest delay means the decay
