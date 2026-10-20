@@ -32,7 +32,6 @@ import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 import argparse
-import sys
 import os
 import json
 import matplotlib.patches as mpatches
@@ -140,7 +139,6 @@ def draw_secondary_structure(target_ax, range, secondary_structure_map: list) ->
     def draw_helix(ax, r: tuple, h:float, annot:str ="", strand_width:float = 1.0, angle:float = 10, c: list=["red", "white"], ec: str="black", lw: float=0.5) -> None:
         r = (r[0]-0.5, r[1]+0.5)
         w = r[1] - r[0]
-        coords = (r[0], -h/2)
 
         w_para = strand_width
         l = h / np.sin(np.deg2rad(angle))
@@ -862,7 +860,6 @@ def interactive_mode():
     columns = [col.strip() for col in column_input.split(',')]
     
     field_independent_cols = ['S2', 'te', 'tc'] #'tau_e'
-    rex_cols = ['Rex']  # Rex is field-dependent
     has_field_dependent = any(col not in field_independent_cols 
                              and not any(f'_{f}' in col for f in ['f1', 'f2']) 
                              for col in columns)
