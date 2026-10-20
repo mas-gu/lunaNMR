@@ -34,9 +34,7 @@ REQUIRED_DEPENDENCIES = {
 }
 
 # Absent installs degrade a feature rather than breaking the application.
-OPTIONAL_DEPENDENCIES = {
-    'psutil': 'Memory and performance monitoring',
-}
+OPTIONAL_DEPENDENCIES = {}
 
 INTERNAL_MODULES = [
     ('lunaNMR.core.core_integrator', 'Core integration engine'),
