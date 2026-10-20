@@ -16,13 +16,6 @@ class EnhancedVoigtFitter:
             'baseline_polynomial_degree': 1,
             'smoothing_window': 5,
             'peak_detection_prominence': 0.1,
-            ##
-            'multi_peak_r2_threshold': 0.7,          # R² threshold to trigger multi-peak detection
-            'multi_peak_improvement_threshold': 0.1,  # Minimum improvement required from multi-peak fit
-            'peak_detection_sensitivity': 1.5,        # Height threshold multiplier (lower = more sensitive)
-            'overlap_detection_factor': 0.8,          # Separation factor for overlap detection
-            'residual_analysis_threshold': 1.5      # Threshold for residual peak detection
-
         }
 
     def enhanced_peak_fitting_parallel(self, peak_list, progress_callback=None,

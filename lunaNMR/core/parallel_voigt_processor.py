@@ -2,20 +2,13 @@
 # ABOUTME: Distributes entire overlap clusters (not individual peaks) across workers with deterministic clustering.
 #!/usr/bin/env python3
 """
-Complete Parallel Voigt Fitting Implementation
+Cluster-based parallel 2D fitting of a peak list.
 
-This module provides comprehensive parallel processing for the entire
-Voigt fitting pipeline while maintaining complete compatibility with
-the existing EnhancedVoigtFitter workflow.
-
-Key Features:
-- Complete parallel processing of ALL Voigt fitting steps
-- Baseline correction (ArPLS) parallelization
-- Parameter estimation parallelization  
-- Voigt profile optimization parallelization
-- Quality assessment parallelization
-- Shared memory for efficient data transfer
-- Maintains 100% compatibility with existing interfaces
+The peak list is partitioned into overlap clusters once, and each cluster is one task,
+fitted in 2D by a worker integrator rebuilt from a serialised copy of the caller's, with
+the spectrum passed through shared memory. Pass 1 fits the isolated peaks and collects
+their linewidth statistics; pass 2 fits the clusters seeded from them. With
+in_process=True the same tasks run in this process (sequential mode).
 """
 
 import contextlib
@@ -48,17 +41,8 @@ _SPAWN = mp.get_context('spawn')
 
 class ParallelVoigtProcessor:
     """
-    Master coordinator for parallel Voigt fitting that maintains 
-    complete compatibility with current EnhancedVoigtFitter logic.
-    
-    This class orchestrates the complete parallel execution of:
-    - Spectral region extraction
-    - Baseline correction (ArPLS)
-    - Initial parameter estimation  
-    - Multi-peak detection
-    - Voigt profile optimization
-    - Quality assessment
-    - Result compilation
+    Fits a peak list cluster by cluster, in a process pool or in this process, in two
+    passes: the isolated peaks, then the clusters seeded from their linewidths.
     """
     
     def __init__(self, enhanced_voigt_fitter, max_workers=None, enable_adaptive=False,
@@ -1649,24 +1633,23 @@ def _initialize_worker_fitter(shared_context):
                 setattr(config, key, value)
 
     # 6. Restore enhanced fitter parameters
-    if worker_integrator.enhanced_fitter:
-        worker_fitter = worker_integrator.enhanced_fitter
-        _restore_baseline_params(worker_fitter, shared_context['baseline_params'])
-        _restore_fitting_params(worker_fitter, shared_context['fitting_params'])
-        _restore_quality_params(worker_fitter, shared_context['quality_params'])
-        worker_fitter.gui_params = shared_context['gui_params']
+    worker_fitter = worker_integrator.enhanced_fitter
+    _restore_baseline_params(worker_fitter, shared_context['baseline_params'])
+    _restore_fitting_params(worker_fitter, shared_context['fitting_params'])
+    _restore_quality_params(worker_fitter, shared_context['quality_params'])
+    worker_fitter.gui_params = shared_context['gui_params']
 
-        # CRITICAL: Update enhanced_fitter's parent reference to point to worker_integrator
-        # This ensures enhanced_fitter's calls reach the worker integrator, which holds gui_params
-        worker_fitter.parent = worker_integrator
+    # CRITICAL: Update enhanced_fitter's parent reference to point to worker_integrator
+    # This ensures enhanced_fitter's calls reach the worker integrator, which holds gui_params
+    worker_fitter.parent = worker_integrator
         
-        # Advanced settings
-        _restore_fitting_windows(worker_fitter, shared_context['fitting_windows'])
-        _restore_optimization_settings(worker_fitter, shared_context['optimization_settings'])
-        _restore_validation_thresholds(worker_fitter, shared_context['validation_thresholds'])
+    # Advanced settings
+    _restore_fitting_windows(worker_fitter, shared_context['fitting_windows'])
+    _restore_optimization_settings(worker_fitter, shared_context['optimization_settings'])
+    _restore_validation_thresholds(worker_fitter, shared_context['validation_thresholds'])
 
-        # Set noise_level on worker_integrator for fit_overlap_group_2d() weak peak detection
-        worker_integrator.noise_level = shared_context['validation_thresholds'].get('noise_level')
+    # Set noise_level on worker_integrator for fit_overlap_group_2d() weak peak detection
+    worker_integrator.noise_level = shared_context['validation_thresholds'].get('noise_level')
 
     # Cleanup shared memory reference in worker
     try:
