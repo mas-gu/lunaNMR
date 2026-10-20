@@ -4176,8 +4176,7 @@ class LunaNMRMainWindow(BaseWindow):
     def _forget_previous_results(self):
         """Drop the detected peaks, fit results and fitted clusters of the data loaded before."""
         self.integrator.fitted_peaks = []
-        if self.integrator.enhanced_fitter is not None:
-            self.integrator.enhanced_fitter.series_params = None
+        self.integrator.enhanced_fitter.series_params = None
         self.last_fitting_results = None
         if self.peak_navigator is not None:
             self.peak_navigator.load_detected_peaks([])
@@ -5986,8 +5985,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         # changes parameters like max_cluster_size between fits.
         # A cancelled fit puts the clusters of the fit before it back
         previous_series_params = getattr(self.integrator.enhanced_fitter, 'series_params', None)
-        if self.integrator.enhanced_fitter is not None:
-            self.integrator.enhanced_fitter.series_params = None
+        self.integrator.enhanced_fitter.series_params = None
 
         if not hasattr(self.integrator, 'peak_list') or self.integrator.peak_list is None:
             from lunaNMR.gui.components import show_error
@@ -6074,8 +6072,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
     def _discard_cancelled_fit(self, previous_series_params):
         """A fit the user cancelled ended: its results are neither shown nor saved."""
-        if self.integrator.enhanced_fitter is not None:
-            self.integrator.enhanced_fitter.series_params = previous_series_params
+        self.integrator.enhanced_fitter.series_params = previous_series_params
         logger.info("Cancelled fit finished; its results were discarded")
         self.update_status("Fitting cancelled - its results were discarded")
 

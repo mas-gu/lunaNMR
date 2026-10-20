@@ -138,9 +138,8 @@ class BatchProcessor:
 
         max_iter = self.config.get('max_iterations', 1000)
         self.integrator.fitting_parameters['max_iterations'] = max_iter
-        if hasattr(self.integrator, 'enhanced_fitter') and self.integrator.enhanced_fitter:
-            self.integrator.enhanced_fitter.fitting_parameters['max_iterations'] = max_iter
-            self.logger.info(f"Configured max_iterations: {max_iter}")
+        self.integrator.enhanced_fitter.fitting_parameters['max_iterations'] = max_iter
+        self.logger.info(f"Configured max_iterations: {max_iter}")
 
         proc_param_config = self.config.get('processing_parameters', {})
 
@@ -160,8 +159,7 @@ class BatchProcessor:
             try:
                 window_x_value = float(fitting_window_x)
                 self.integrator.fitting_parameters['fitting_window_x'] = window_x_value
-                if hasattr(self.integrator, 'enhanced_fitter') and self.integrator.enhanced_fitter:
-                    self.integrator.enhanced_fitter.fitting_parameters['fitting_window_x'] = window_x_value
+                self.integrator.enhanced_fitter.fitting_parameters['fitting_window_x'] = window_x_value
                 self.logger.info(f"Configured fitting window X: ±{window_x_value} ppm")
             except (TypeError, ValueError) as exc:
                 self.logger.warning(f"Invalid fitting_window_x override ({fitting_window_x}): {exc}")
@@ -171,8 +169,7 @@ class BatchProcessor:
             try:
                 window_y_value = float(fitting_window_y)
                 self.integrator.fitting_parameters['fitting_window_y'] = window_y_value
-                if hasattr(self.integrator, 'enhanced_fitter') and self.integrator.enhanced_fitter:
-                    self.integrator.enhanced_fitter.fitting_parameters['fitting_window_y'] = window_y_value
+                self.integrator.enhanced_fitter.fitting_parameters['fitting_window_y'] = window_y_value
                 self.logger.info(f"Configured fitting window Y: ±{window_y_value} ppm")
             except (TypeError, ValueError) as exc:
                 self.logger.warning(f"Invalid fitting_window_y override ({fitting_window_y}): {exc}")
@@ -437,8 +434,7 @@ class BatchProcessor:
         self.logger.info(f"  Fitting {len(peak_list)} detected peaks")
 
         # Fit Spectrum clusters the peaks it is given, never the clusters of a fit before
-        if self.integrator.enhanced_fitter is not None:
-            self.integrator.enhanced_fitter.series_params = None
+        self.integrator.enhanced_fitter.series_params = None
 
         processing_options = {
             'use_parallel': self.fit_processor.parameter_manager.current_params['use_parallel_processing'],
