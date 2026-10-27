@@ -402,9 +402,14 @@ def check_dataset(root, *, quick: bool = False, sample: bool = False,
     """
     root = str(root)
     skip = ('/analysis/', '/lunaNMR_analysis/', '/staging/', '/series/', '/run_')
+
+    def below_root(path):
+        # Only folders below the root can be run output; where the root itself sits is the user's.
+        return '/' + os.path.relpath(path, root).replace(os.sep, '/')
+
     folders = sorted({os.path.dirname(p) for ext in SPECTRUM_EXTENSIONS
                       for p in glob.glob(f'{root}/**/*.{ext}', recursive=True)
-                      if not any(k in p for k in skip)})
+                      if not any(k in below_root(p) for k in skip)})
 
     result: Dict = dict(root=root, experiments=[], assignments=None, findings=[])
     if not folders:
