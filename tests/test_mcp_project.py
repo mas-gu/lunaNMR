@@ -50,7 +50,7 @@ def test_a_bundle_is_built_from_a_series_and_a_kd_run(dataset):
     summary = call_tool(dataset, "project_build", BUILD)
     assert summary["ok"] is True
     assert summary["series"] == ["s1"]
-    assert summary["kd"] == ["kd1"]
+    assert summary["kd"] == ["kd"]
     assert (dataset / "bundle.lunaNMR" / "project.json").is_file()
 
 

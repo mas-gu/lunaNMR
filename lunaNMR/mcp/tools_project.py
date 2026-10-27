@@ -31,7 +31,8 @@ def register(server, ctx):
 
     @server.tool(annotations=READS_ONLY)
     async def project_inventory(bundle: str) -> CallToolResult:
-        """List what a `.lunaNMR` bundle holds, by category, with sizes. Read-only."""
+        """List what a `.lunaNMR` project bundle holds, by category (series, Kd analyses, DynamiXs
+        runs, fit results) with the size of each item. Read-only: nothing in the bundle changes."""
         try:
             bundle_folder = root.existing(bundle)
             root.refuse_escaping_links(bundle_folder)
