@@ -8,8 +8,8 @@ import sys
 STDERR_TAIL_LINES = 40
 
 
-def diagnose_args(path, quick=False):
-    args = ['diagnose', str(path), '--format', 'json']
+def diagnose_args(path, quick=False, mode='time'):
+    args = ['diagnose', str(path), '--mode', mode, '--format', 'json']
     if quick:
         args.append('--quick')
     return args

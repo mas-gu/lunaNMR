@@ -53,15 +53,17 @@ def build_server(root, max_running_jobs=2):
         return _result({'ok': True, **status})
 
     @server.tool(annotations=READS_ONLY)
-    async def diagnose(path: str = '.', quick: bool = False) -> CallToolResult:
+    async def diagnose(path: str = '.', quick: bool = False,
+                       mode: Literal['time', 'titration'] = 'time') -> CallToolResult:
         """Read-only pre-flight over a dataset folder: per-spectrum registration offset and
         capture rate, delays, peak-list hygiene, repeat-acquisition scale. Run it before
-        any fit. Changes nothing."""
+        any fit. Changes nothing. `path` is the folder that holds the spectra. Set `mode` to
+        'titration' when the filenames carry ligand ratios (0o5, 1o0), not time delays."""
         try:
             folder = root.existing(path)
         except PathRefused as error:
             return _failure(error)
-        return await _run(cli_call.diagnose_args(folder, quick=quick))
+        return await _run(cli_call.diagnose_args(folder, quick=quick, mode=mode))
 
     @server.tool(annotations=READS_ONLY)
     async def plan_series(spectra: str, peaks: str, out: str,

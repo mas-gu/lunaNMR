@@ -29,8 +29,9 @@ needs_binding_data = pytest.mark.skipif(
 def test_every_argument_vector_the_server_builds_is_accepted_by_the_cli_parser(tmp_path):
     parser = build_parser()
     for quick in (False, True):
-        argv = cli_call.diagnose_args(tmp_path, quick=quick)
-        parser.parse_args(argv)
+        for mode in ("time", "titration"):
+            argv = cli_call.diagnose_args(tmp_path, quick=quick, mode=mode)
+            parser.parse_args(argv)
 
 
 def test_the_server_lists_diagnose(tmp_path):
@@ -138,3 +139,12 @@ def test_tools_declare_whether_they_write(tmp_path):
         assert hints[starter].destructive_hint is False
     assert hints["cancel_job"].destructive_hint is True
     assert all(annotation.open_world_hint is False for annotation in hints.values())
+
+
+@needs_binding_data
+def test_diagnose_reads_titration_filenames_as_points_when_asked():
+    arguments = {"path": "DNAJA1_HSPA8", "quick": True}
+    as_time = call_tool(BINDING_ROOT, "diagnose", arguments)
+    as_titration = call_tool(BINDING_ROOT, "diagnose", {**arguments, "mode": "titration"})
+    assert as_time["experiments"][0]["delays"]["n_parsed"] == 0
+    assert as_titration["experiments"][0]["delays"]["n_parsed"] == 7
