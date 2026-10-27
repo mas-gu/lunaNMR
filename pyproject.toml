@@ -21,8 +21,12 @@ dependencies = [
     "numba>=0.57.0",
 ]
 
+[project.optional-dependencies]
+mcp = ["mcp>=2"]
+
 [project.scripts]
 lunanmr = "lunaNMR.cli:main"
+lunanmr-mcp = "lunaNMR.mcp.server:main"
 
 [tool.setuptools.packages.find]
 include = ["lunaNMR*"]
