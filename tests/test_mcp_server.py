@@ -2,7 +2,6 @@
 # ABOUTME: Also pins every CLI argument vector the server builds to the real parser, so a renamed flag fails here.
 
 import asyncio
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -18,19 +17,12 @@ from lunaNMR.cli import build_parser
 from lunaNMR.mcp import cli_call
 from lunaNMR.mcp.data_root import DataRoot
 from lunaNMR.mcp.server import build_server
+from mcp_helpers import call_tool
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BINDING_ROOT = REPO_ROOT.parent / "data_test" / "data_binding"
 needs_binding_data = pytest.mark.skipif(
     not BINDING_ROOT.is_dir(), reason="data_test/data_binding is absent")
-
-
-def _call(root, tool, arguments):
-    async def run():
-        async with Client(build_server(DataRoot(root))) as client:
-            result = await client.call_tool(tool, arguments)
-            return json.loads(result.content[0].text)
-    return asyncio.run(run())
 
 
 def test_every_argument_vector_the_server_builds_is_accepted_by_the_cli_parser(tmp_path):
@@ -50,27 +42,27 @@ def test_the_server_lists_diagnose(tmp_path):
 def test_a_path_outside_the_root_comes_back_as_an_error_envelope(tmp_path):
     root = tmp_path / "dataset"
     root.mkdir()
-    summary = _call(root, "diagnose", {"path": "../elsewhere"})
+    summary = call_tool(root, "diagnose", {"path": "../elsewhere"})
     assert summary["ok"] is False
     assert summary["error"]["type"] == "PathRefused"
     assert "outside the data root" in summary["error"]["message"]
 
 
 def test_a_missing_path_comes_back_as_an_error_envelope(tmp_path):
-    summary = _call(tmp_path, "diagnose", {"path": "nothing_here"})
+    summary = call_tool(tmp_path, "diagnose", {"path": "nothing_here"})
     assert summary["ok"] is False
     assert summary["error"]["type"] == "PathRefused"
 
 
 def test_the_cli_failure_envelope_is_relayed(tmp_path):
-    summary = _call(tmp_path, "diagnose", {"path": "."})
+    summary = call_tool(tmp_path, "diagnose", {"path": "."})
     assert summary["ok"] is False
     assert summary["error"]["message"]
 
 
 @needs_binding_data
 def test_diagnose_runs_the_real_cli_on_real_spectra():
-    summary = _call(BINDING_ROOT, "diagnose", {"path": "DNAJA1_HSPA8", "quick": True})
+    summary = call_tool(BINDING_ROOT, "diagnose", {"path": "DNAJA1_HSPA8", "quick": True})
     assert summary["ok"] is True
     assert summary["command"] == "diagnose"
     assert summary["experiments"][0]["n_spectra"] == 7

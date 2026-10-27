@@ -15,6 +15,30 @@ def diagnose_args(path, quick=False):
     return args
 
 
+def plan_series_args(spectra, peaks, out, mode='time', peak_source='reference', deep=True):
+    args = ['series', '--dry-run', '--spectra', str(spectra), '--peaks', str(peaks),
+            '--out', str(out), '--mode', mode, '--peak-source', peak_source,
+            '--format', 'json']
+    if deep:
+        args.append('--deep')
+    return args
+
+
+def kd_survey_args(input_file, p0, conc_units, out, conc=None):
+    args = ['kd', '--survey', '--input', str(input_file), '--out', str(out),
+            '--p0', str(p0), '--conc-units', conc_units, '--format', 'json']
+    if conc is not None:
+        args += ['--conc', ','.join(str(value) for value in conc)]
+    return args
+
+
+def export_kd_args(fit_json, out, kinds=None):
+    args = ['export', 'kd', '--json', str(fit_json), '--out', str(out), '--format', 'json']
+    if kinds is not None:
+        args += ['--kind', ','.join(kinds)]
+    return args
+
+
 async def run_cli(args):
     """Run one CLI command and return its JSON envelope.
 
