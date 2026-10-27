@@ -6,7 +6,7 @@ import sys
 from mcp.server.mcpserver import MCPServer
 
 from lunaNMR.mcp import (check, tools_dynamixs, tools_jobs, tools_kd, tools_peaks,
-                         tools_series)
+                         tools_project, tools_series)
 from lunaNMR.mcp.command_line import build_parser
 from lunaNMR.mcp.context import ToolContext
 from lunaNMR.mcp.data_root import DataRoot, PathRefused
@@ -21,7 +21,7 @@ def build_server(root, max_running_jobs=2, wait_seconds=WAIT_SECONDS):
         instructions='NMR peak fitting and analysis on the data folder this server was '
                      'started with. Every path is relative to that folder.')
     ctx = ToolContext(root, JobManager(max_running_jobs), wait_seconds)
-    for tools in (tools_series, tools_kd, tools_peaks, tools_dynamixs, tools_jobs):
+    for tools in (tools_series, tools_kd, tools_peaks, tools_dynamixs, tools_project, tools_jobs):
         tools.register(server, ctx)
     return server
 

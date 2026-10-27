@@ -255,6 +255,19 @@ def dynamixs_modelfree_args(out, f1_t1=None, f1_t2=None, f1_r2_table=None, f1_no
     return args
 
 
+def project_build_args(run_dir, out, spectrum, peaks):
+    return ['project', 'build', str(run_dir), '--out', str(out), '--spectrum', str(spectrum),
+            '--peaks', str(peaks), '--format', 'json']
+
+
+def project_inventory_args(bundle):
+    return ['project', 'inventory', str(bundle), '--format', 'json']
+
+
+def project_export_args(bundle, out):
+    return ['project', 'export', str(bundle), '--out', str(out), '--format', 'json']
+
+
 def trimmed(envelope):
     """The envelope without the parts that grow with the dataset and that a client does not
     act on: the echoed parameter block and each peak list's assignment names (the count stays)."""
