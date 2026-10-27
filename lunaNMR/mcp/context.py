@@ -29,6 +29,12 @@ class ToolContext:
     async def run(self, args):
         return result(await cli_call.run_cli(args))
 
+    async def launch(self, kind, cli_args, out_folder, dry_run, files=None):
+        """A dry run only validates, so it answers at once; a real run is a job."""
+        if dry_run:
+            return await self.run(cli_args)
+        return await self.start_job(kind, cli_args, out_folder, files=files)
+
     async def start_job(self, kind, cli_args, out_folder, files=None):
         """Start a job and wait up to `wait_seconds` for it: a quick analysis answers in one
         call, a slow one returns while still running and is polled with `job_status`."""

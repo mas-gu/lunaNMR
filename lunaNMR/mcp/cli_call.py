@@ -74,7 +74,7 @@ def start_series_args(spectra, peaks, out, mode='time', peak_source='reference',
 
 def _kd_args(input_file, p0, conc_units, out, conc, observables, intensity_scales, prefix,
              alpha, intensity_from, bootstrap, csp_sigma_multiple, kd_outlier_z,
-             noise_quantile, dd_runaway_ratio, ref_max_ratio):
+             noise_quantile, dd_runaway_ratio, ref_max_ratio, dry_run=False):
     args = ['kd', '--input', str(input_file), '--out', str(out), '--p0', str(p0),
             '--conc-units', conc_units, '--format', 'json']
     if conc is not None:
@@ -92,6 +92,7 @@ def _kd_args(input_file, p0, conc_units, out, conc, observables, intensity_scale
     _value(args, '--noise-quantile', noise_quantile)
     _value(args, '--dd-runaway-ratio', dd_runaway_ratio)
     _value(args, '--ref-max-ratio', ref_max_ratio)
+    _flag(args, '--dry-run', dry_run)
     return args
 
 
@@ -99,10 +100,10 @@ def kd_survey_args(input_file, p0, conc_units, out, conc=None, intensity_scales=
                    selection_file=None, observables=None, prefix=None, alpha=None,
                    intensity_from=None, bootstrap=None, csp_sigma_multiple=None,
                    kd_outlier_z=None, noise_quantile=None, dd_runaway_ratio=None,
-                   ref_max_ratio=None):
+                   ref_max_ratio=None, dry_run=False):
     args = _kd_args(input_file, p0, conc_units, out, conc, observables, intensity_scales, prefix,
                     alpha, intensity_from, bootstrap, csp_sigma_multiple, kd_outlier_z,
-                    noise_quantile, dd_runaway_ratio, ref_max_ratio)
+                    noise_quantile, dd_runaway_ratio, ref_max_ratio, dry_run)
     args.insert(1, '--survey')
     _value(args, '--selection', selection_file)
     return args
@@ -112,16 +113,16 @@ def kd_fit_args(input_file, p0, conc_units, out, conc=None, residues_file=None,
                 observables=None, intensity_scales=None, prefix=None, alpha=None,
                 intensity_from=None, bootstrap=None, csp_sigma_multiple=None,
                 kd_outlier_z=None, noise_quantile=None, dd_runaway_ratio=None,
-                ref_max_ratio=None):
+                ref_max_ratio=None, dry_run=False):
     args = _kd_args(input_file, p0, conc_units, out, conc, observables, intensity_scales, prefix,
                     alpha, intensity_from, bootstrap, csp_sigma_multiple, kd_outlier_z,
-                    noise_quantile, dd_runaway_ratio, ref_max_ratio)
+                    noise_quantile, dd_runaway_ratio, ref_max_ratio, dry_run)
     _value(args, '--residues', residues_file)
     return args
 
 
 def export_kd_args(fit_json, out, kinds=None, observables=None, fig_format=None, per_page=None,
-                   prefix=None, summary_only=False):
+                   prefix=None, summary_only=False, dry_run=False):
     args = ['export', 'kd', '--json', str(fit_json), '--out', str(out), '--format', 'json']
     if kinds is not None:
         args += ['--kind', _csv(kinds)]
@@ -132,21 +133,24 @@ def export_kd_args(fit_json, out, kinds=None, observables=None, fig_format=None,
     _value(args, '--per-page', per_page)
     _value(args, '--prefix', prefix)
     _flag(args, '--summary-only', summary_only)
+    _flag(args, '--dry-run', dry_run)
     return args
 
 
-def peaks_shift_args(peaks, out, dx=None, dy=None, auto=False, spectrum=None, quick=False):
+def peaks_shift_args(peaks, out, dx=None, dy=None, auto=False, spectrum=None, quick=False,
+                     dry_run=False):
     args = ['peaks', 'shift', '--peaks', str(peaks), '--out', str(out), '--format', 'json']
     _value(args, '--dx', dx)
     _value(args, '--dy', dy)
     _flag(args, '--auto', auto)
     _value(args, '--spectrum', spectrum)
     _flag(args, '--quick', quick)
+    _flag(args, '--dry-run', dry_run)
     return args
 
 
 def integrate_1d_args(spectra, out, peaks=None, detect=False, prefix=None, min_snr=None,
-                      value=None):
+                      value=None, dry_run=False):
     args = ['integrate-1d', '--spectra', str(spectra), '--out', str(out), '--format', 'json']
     if peaks is not None:
         args += ['--peaks', _csv(peaks)]
@@ -154,6 +158,7 @@ def integrate_1d_args(spectra, out, peaks=None, detect=False, prefix=None, min_s
     _value(args, '--prefix', prefix)
     _value(args, '--min-snr', min_snr)
     _value(args, '--value', value)
+    _flag(args, '--dry-run', dry_run)
     return args
 
 
@@ -171,32 +176,35 @@ def _relaxation_options(args, prefix, field_name, field_freq, time_units, allow_
 
 def dynamixs_t1t2_args(input_file, out, exp, prefix=None, field_name=None, field_freq=None,
                        time_units=None, allow_unparsed_delays=False, error_method=None,
-                       bootstrap=None):
+                       bootstrap=None, dry_run=False):
     args = ['dynamixs', 't1t2', '--input', str(input_file), '--out', str(out), '--exp', exp,
             '--format', 'json']
+    _flag(args, '--dry-run', dry_run)
     return _relaxation_options(args, prefix, field_name, field_freq, time_units,
                                allow_unparsed_delays, error_method, bootstrap)
 
 
 def dynamixs_methyl_t2_args(input_file, out, prefix=None, field_name=None, field_freq=None,
                             time_units=None, allow_unparsed_delays=False, error_method=None,
-                            bootstrap=None):
+                            bootstrap=None, dry_run=False):
     args = ['dynamixs', 'methyl-t2', '--input', str(input_file), '--out', str(out),
             '--format', 'json']
+    _flag(args, '--dry-run', dry_run)
     return _relaxation_options(args, prefix, field_name, field_freq, time_units,
                                allow_unparsed_delays, error_method, bootstrap)
 
 
-def dynamixs_hetnoe_args(sat, unsat, out, prefix=None):
+def dynamixs_hetnoe_args(sat, unsat, out, prefix=None, dry_run=False):
     args = ['dynamixs', 'hetnoe', '--sat', str(sat), '--unsat', str(unsat), '--out', str(out),
             '--format', 'json']
     _value(args, '--prefix', prefix)
+    _flag(args, '--dry-run', dry_run)
     return args
 
 
 def dynamixs_t1rho_args(input_file, t1, peaks, omega1, carrier, theta, out, prefix=None,
                         field_freq=None, time_units=None, allow_unparsed_delays=False,
-                        error_method=None, bootstrap=None):
+                        error_method=None, bootstrap=None, dry_run=False):
     args = ['dynamixs', 't1rho', '--input', str(input_file), '--t1', str(t1),
             '--peaks', str(peaks), '--omega1', str(omega1), '--carrier', str(carrier),
             '--theta', str(theta), '--out', str(out), '--format', 'json']
@@ -206,12 +214,13 @@ def dynamixs_t1rho_args(input_file, t1, peaks, omega1, carrier, theta, out, pref
     _flag(args, '--allow-unparsed-delays', allow_unparsed_delays)
     _value(args, '--error-method', error_method)
     _value(args, '--bootstrap', bootstrap)
+    _flag(args, '--dry-run', dry_run)
     return args
 
 
 def dynamixs_density_args(input_file, out, input2=None, prefix=None, dual=False, use_087=True,
                           monte_carlo=False, n_samples=None, plot=True, parallel=True,
-                          field1_freq=None, field2_freq=None, rnh=None, csa=None):
+                          field1_freq=None, field2_freq=None, rnh=None, csa=None, dry_run=False):
     args = ['dynamixs', 'density', '--input', str(input_file), '--out', str(out),
             '--format', 'json']
     _value(args, '--input2', input2)
@@ -226,6 +235,7 @@ def dynamixs_density_args(input_file, out, input2=None, prefix=None, dual=False,
     _value(args, '--field2-freq', field2_freq)
     _value(args, '--rnh', rnh)
     _value(args, '--csa', csa)
+    _flag(args, '--dry-run', dry_run)
     return args
 
 
@@ -236,7 +246,7 @@ def dynamixs_modelfree_args(out, f1_t1=None, f1_t2=None, f1_r2_table=None, f1_no
                             allow_unparsed_delays=False, prefix=None, dual=False, method=None,
                             init_amp=None, init_t1=None, init_t2=None, n_bootstrap=None,
                             error_method=None, n_monte_carlo=None, field1_freq=None,
-                            field2_freq=None, rnh=None, csa=None):
+                            field2_freq=None, rnh=None, csa=None, dry_run=False):
     args = ['dynamixs', 'modelfree', '--out', str(out), '--format', 'json']
     for flag, value in (('--f1-t1', f1_t1), ('--f1-t2', f1_t2), ('--f1-r2-table', f1_r2_table),
                         ('--f1-noe-sat', f1_noe_sat), ('--f1-noe-unsat', f1_noe_unsat),
@@ -252,21 +262,24 @@ def dynamixs_modelfree_args(out, f1_t1=None, f1_t2=None, f1_r2_table=None, f1_no
         _value(args, flag, value)
     _flag(args, '--allow-unparsed-delays', allow_unparsed_delays)
     _flag(args, '--dual', dual)
+    _flag(args, '--dry-run', dry_run)
     return args
 
 
-def project_build_args(run_dir, out, spectrum, peaks):
-    return ['project', 'build', str(run_dir), '--out', str(out), '--spectrum', str(spectrum),
+def project_build_args(run_dir, out, spectrum, peaks, dry_run=False):
+    args = ['project', 'build', str(run_dir), '--out', str(out), '--spectrum', str(spectrum),
             '--peaks', str(peaks), '--format', 'json']
-
+    _flag(args, '--dry-run', dry_run)
+    return args
 
 def project_inventory_args(bundle):
     return ['project', 'inventory', str(bundle), '--format', 'json']
 
 
-def project_export_args(bundle, out):
-    return ['project', 'export', str(bundle), '--out', str(out), '--format', 'json']
-
+def project_export_args(bundle, out, dry_run=False):
+    args = ['project', 'export', str(bundle), '--out', str(out), '--format', 'json']
+    _flag(args, '--dry-run', dry_run)
+    return args
 
 def trimmed(envelope):
     """The envelope without the parts that grow with the dataset and that a client does not

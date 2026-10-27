@@ -1,6 +1,7 @@
 # ABOUTME: The shape of every MCP tool result: the CLI envelope, an error flag, and a size bound.
 # ABOUTME: Also the read/write annotations tools declare, so a client can tell what each one changes.
 
+import inspect
 import json
 
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
@@ -23,6 +24,16 @@ def result(envelope):
         content=[TextContent(type='text', text=text)],
         structured_content=envelope,
         is_error=not envelope.get('ok', False))
+
+
+DRY_RUN = ("`dry_run` checks the inputs and reports what would run, without running or "
+           "writing anything.")
+
+
+def describe(function):
+    """Fill the shared dry-run sentence into a tool's docstring (`@DRY_RUN@`)."""
+    function.__doc__ = inspect.cleandoc(function.__doc__).replace('@DRY_RUN@', DRY_RUN)
+    return function
 
 
 def failure(error):
