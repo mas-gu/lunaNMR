@@ -21,10 +21,12 @@ LINE_CHARS = 300
 STDERR_TAIL_LINES = 40
 KILL_GRACE_S = 5
 
-ENRICHMENTS = {'series': ('series_quality', summaries.series_quality),
-               'kd': ('kd_quality', summaries.kd_quality),
-               't1t2': ('relaxation_quality', summaries.relaxation_quality),
-               'hetnoe': ('hetnoe_quality', summaries.hetnoe_quality)}
+ENRICHMENTS = {'series': ('series_quality', lambda folder, root: summaries.series_quality(folder)),
+               'kd': ('kd_quality', lambda folder, root: summaries.kd_quality(folder)),
+               't1t2': ('relaxation_quality',
+                        lambda folder, root: summaries.relaxation_quality(folder)),
+               'hetnoe': ('hetnoe_quality', lambda folder, root: summaries.hetnoe_quality(folder)),
+               'modelfree': ('modelfree_quality', summaries.modelfree_quality)}
 
 
 class NotAJob(ValueError):
@@ -92,8 +94,9 @@ def _process_exists(pid):
 
 
 class JobManager:
-    def __init__(self, max_running_jobs=2):
+    def __init__(self, max_running_jobs=2, root=None):
         self.max_running_jobs = max_running_jobs
+        self.root = root
         self._started = {}
 
     def _running_here(self):
@@ -130,6 +133,8 @@ class JobManager:
         record = _read_record(job_folder / 'job.json')
         if record is None:
             raise NotAJob(f'no job record in {out_folder}')
+        if self.root is not None:
+            self.root.refuse_escaping_links(out_folder)
         status = {'job': str(out_folder), 'kind': record['kind'], 'started': record['started']}
         result = _read_result(job_folder / 'result.json')
         if (job_folder / 'cancelled.json').exists():
@@ -154,8 +159,7 @@ class JobManager:
             return process.poll() is None
         return _process_exists(pid)
 
-    @staticmethod
-    def _add_outcome(status, kind, out_folder, job_folder):
+    def _add_outcome(self, status, kind, out_folder, job_folder):
         envelope = _read_json(job_folder / 'stdout.json')
         if envelope is not None:
             status['result'] = trimmed(envelope)
@@ -164,7 +168,10 @@ class JobManager:
         else:
             if kind in ENRICHMENTS:
                 key, enrich = ENRICHMENTS[kind]
-                status[key] = enrich(out_folder)
+                try:
+                    status[key] = enrich(out_folder, self.root)
+                except Exception as error:
+                    status['summary_error'] = f'{type(error).__name__}: {error}'[:LINE_CHARS]
             status['files'] = summaries.output_files(out_folder)
 
     async def cancel(self, out_folder):

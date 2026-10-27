@@ -58,6 +58,7 @@ def series_quality(out_folder):
 
 MAX_LISTED_FILES = 50
 HETNOE_PLAUSIBLE = (-0.2, 1.05)
+WINDOW_MARGINAL_BELOW = 2
 
 
 def output_files(out_folder):
@@ -78,7 +79,8 @@ def _finite(text):
 
 def relaxation_quality(out_folder):
     """The residues of a T1/T2 fit that fail the usual gate (fitted, finite T above zero, error
-    below the value), from the results table the fit wrote."""
+    below the value), and those whose longest delay is under twice the fitted T (the delay window
+    is marginal), from the results table the fit wrote."""
     tables = sorted(Path(out_folder).glob('*_fit_results.txt'))
     if not tables:
         return None
@@ -88,14 +90,53 @@ def relaxation_quality(out_folder):
     if time_column is None:
         return None
     failing = []
+    marginal = []
     for row in rows:
+        window_ratio = _finite(row.get('WindowRatio'))
+        if window_ratio is not None and window_ratio < WINDOW_MARGINAL_BELOW:
+            marginal.append(_cut(row['Residue'], NAME_CHARS))
         value = _finite(row.get(time_column))
         error = _finite(row.get(f'{time_column}_err'))
         if row.get('Success') != 'Yes' or value is None or value <= 0 or error is None \
                 or error >= value:
             failing.append(_cut(row['Residue'], NAME_CHARS))
     return {'n_residues': len(rows), 'n_failing_gate': len(failing),
-            'residues_failing_gate': failing[:MAX_NAMED_RESIDUES]}
+            'residues_failing_gate': failing[:MAX_NAMED_RESIDUES],
+            'n_window_marginal': len(marginal),
+            'residues_window_marginal': marginal[:MAX_NAMED_RESIDUES]}
+
+
+def _residues_in(path):
+    """Residue names in a model-free input: the Assignment column of a matrix, else the first
+    column of every row (a hetNOE intensity table has no header)."""
+    with open(path, newline='') as handle:
+        rows = list(csv.reader(handle))
+    column = rows[0].index('Assignment') if rows and 'Assignment' in rows[0] else 0
+    return {row[column] for row in rows if len(row) > column}
+
+
+def modelfree_quality(out_folder, root):
+    """For each residue dropped when a model-free run merged its inputs, the input files that
+    do not hold it (a residue must be in all of a field's inputs to be kept). The input paths come
+    from the run's record, so each must lie inside `root`."""
+    records = sorted(Path(out_folder).glob('*_dynamixs.json'))
+    if not records:
+        return None
+    record = json.loads(records[0].read_text())
+    arguments = record.get('args', {})
+    excluded = record.get('summary', {}).get('excluded_residues', {})
+    missing_from = {}
+    for field, residues in excluded.items():
+        number = field.removeprefix('field')
+        inputs = {}
+        for name in ('t1', 't2', 'r2_table', 'noe_sat', 'noe_unsat'):
+            key = f'f{number}_{name}'
+            if arguments.get(key):
+                inputs[key] = _residues_in(root.existing(arguments[key]))
+        missing_from[field] = {
+            _cut(residue, NAME_CHARS): [key for key, held in inputs.items() if residue not in held]
+            for residue in residues[:MAX_NAMED_RESIDUES]}
+    return {'missing_from': missing_from}
 
 
 def hetnoe_quality(out_folder):

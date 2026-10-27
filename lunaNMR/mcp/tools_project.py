@@ -23,6 +23,7 @@ def register(server, ctx):
         try:
             run_folder = root.existing(run_dir)
             root.refuse_escaping_links(run_folder)
+            root.refuse_recorded_paths_outside(run_folder)
             spectrum_file = root.existing(spectrum)
             peak_list = root.existing(peaks)
             out_folder = root.new_output(out)

@@ -1,12 +1,24 @@
 # ABOUTME: Confines every path an MCP client names to one data folder, symlinks resolved.
 # ABOUTME: Refuses an output folder that already exists, so a client cannot overwrite a run.
 
+import json
 import os
 from pathlib import Path
 
 
 class PathRefused(ValueError):
     """A path the client named is not one the server will touch."""
+
+
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
 
 
 class DataRoot:
@@ -70,6 +82,32 @@ class DataRoot:
                     raise PathRefused(
                         f"{link.relative_to(self.path)} is a link to {target}, outside the "
                         f"data root ({self.path}); remove the link or copy the data in")
+
+    def input_file(self, name):
+        """An existing file a tool reads. The CLI also reads sidecar files beside it (such as
+        series_metadata.json), so a link among its neighbours that leaves the root is refused."""
+        resolved = self.existing(name)
+        for sibling in resolved.parent.iterdir():
+            if sibling.is_symlink():
+                target = sibling.resolve()
+                if target != self.path and self.path not in target.parents:
+                    raise PathRefused(
+                        f"{sibling.relative_to(self.path)} is a link to {target}, outside the "
+                        f"data root ({self.path}); remove the link or copy the data in")
+        return resolved
+
+    def refuse_recorded_paths_outside(self, folder):
+        """Run records (`*_dynamixs.json`) name result files that a project build copies. A
+        record planted in a dataset could name any file, so an absolute path in a record's
+        summary must lie inside the root."""
+        for record_file in Path(folder).rglob('*_dynamixs.json'):
+            try:
+                summary = json.loads(record_file.read_text()).get('summary', {})
+            except (OSError, ValueError, AttributeError):
+                continue
+            for text in _strings(summary):
+                if os.path.isabs(text):
+                    self._inside(text)
 
     def relative(self, path):
         return Path(path).resolve().relative_to(self.path)

@@ -79,6 +79,19 @@ def test_t1_fit_reports_the_residues_that_fail_the_usual_gate(dataset):
 
 
 @needs_relaxation_data
+def test_t1_fit_names_the_residues_whose_delay_window_is_marginal(dataset):
+    summary = _run(dataset, "dynamixs_t1t2", {
+        "input": "in/600_T1_matrix.csv", "out": "t1_600_window", "exp": "T1", "field_freq": 600})
+    table = dataset / "t1_600_window" / "field1_fit_results.txt"
+    rows = list(csv.DictReader(open(table), delimiter="\t"))
+    marginal = [r["Residue"] for r in rows if float(r["WindowRatio"]) < 2]
+    assert marginal, "the data must hold a marginal residue for this test to mean anything"
+    quality = summary["relaxation_quality"]
+    assert quality["n_window_marginal"] == summary["result"]["n_window_marginal"]
+    assert sorted(quality["residues_window_marginal"]) == sorted(marginal)[:30]
+
+
+@needs_relaxation_data
 def test_a_tidy_csv_is_refused_with_the_reason(dataset):
     summary = _run(dataset, "dynamixs_t1t2", {
         "input": "in/tidy.csv", "out": "t1_tidy", "exp": "T1"})
@@ -114,6 +127,16 @@ def test_single_field_model_free_runs_and_reports_its_attrition(modelfree_single
     assert modelfree_single["result"]["n_successful"] == 55
     assert modelfree_single["result"]["n_at_iteration_cap"] == 0
     assert any(name.endswith("spectral_density_basic.csv") for name in modelfree_single["files"])
+
+
+@needs_relaxation_data
+def test_model_free_says_which_inputs_lack_each_residue_it_dropped(modelfree_single, dataset):
+    reasons = modelfree_single["modelfree_quality"]["missing_from"]["field1"]
+    assert set(reasons) == set(modelfree_single["result"]["excluded_residues"]["field1"])
+    noe_residues = {line.split(",")[0] for line in
+                    (dataset / "in" / "600_noe_sat.csv").read_text().splitlines()[1:]}
+    assert "10ValH" not in noe_residues
+    assert reasons["10ValH"] == ["f1_noe_sat", "f1_noe_unsat"]
 
 
 @needs_relaxation_data
