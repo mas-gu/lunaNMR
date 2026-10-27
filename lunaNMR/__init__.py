@@ -19,7 +19,7 @@ import importlib
 import os
 import sys
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Guillaume Mas"
 __description__ = "Advanced NMR Peak Analysis and Integration"
 

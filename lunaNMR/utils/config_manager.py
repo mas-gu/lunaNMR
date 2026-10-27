@@ -29,7 +29,7 @@ class ConfigurationManager:
         os.makedirs(self.config_folder, exist_ok=True)
 
         self.default_config = {
-            "version": "1.0.0",
+            "version": "1.1.0",
             "last_updated": None,
             "user_preferences": {
                 "window_geometry": "1400x900",

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lunaNMR"
-version = "1.0.0"
+version = "1.1.0"
 description = "Advanced NMR peak analysis and integration suite (PySide6/Qt)"
 readme = "README.md"
 requires-python = ">=3.9"

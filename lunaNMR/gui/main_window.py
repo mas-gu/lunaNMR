@@ -5559,7 +5559,7 @@ For more information, visit the project documentation.
 
         about_text = """
 LunaNMR - NMR Peaks Series Analysis
-Version 1.0.0 (Qt Port)
+Version 1.1.0 (Qt Port)
 
 Enhanced Multi-Mode NMR Peak Detection and Analysis
 

@@ -21,7 +21,7 @@ Usage:
     processor.process_folder("/path/to/spectra")
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "lunaNMR Development Team"
 
 from .batch_processor import BatchProcessor
