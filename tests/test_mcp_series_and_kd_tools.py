@@ -41,7 +41,7 @@ def test_every_argument_vector_is_accepted_by_the_cli_parser():
             "spectra", "peaks.txt", "out", mode=mode, peak_source=source, deep=deep))
     for conc in (None, [0, 25, 50]):
         parser.parse_args(cli_call.kd_survey_args(
-            "tidy.csv", 50, "absolute", "out", conc=conc))
+            "tidy.csv", 50, "absolute", "out", conc=conc, intensity_scales=[1, 0.5]))
     for kinds in (None, ["curves", "kd-bars"]):
         parser.parse_args(cli_call.export_kd_args("fit.json", "out", kinds=kinds))
 

@@ -24,12 +24,18 @@ def plan_series_args(spectra, peaks, out, mode='time', peak_source='reference', 
     return args
 
 
-def kd_survey_args(input_file, p0, conc_units, out, conc=None):
+def _scale_args(intensity_scales):
+    if intensity_scales is None:
+        return []
+    return ['--intensity-scale', ','.join(str(value) for value in intensity_scales)]
+
+
+def kd_survey_args(input_file, p0, conc_units, out, conc=None, intensity_scales=None):
     args = ['kd', '--survey', '--input', str(input_file), '--out', str(out),
             '--p0', str(p0), '--conc-units', conc_units, '--format', 'json']
     if conc is not None:
         args += ['--conc', ','.join(str(value) for value in conc)]
-    return args
+    return args + _scale_args(intensity_scales)
 
 
 def export_kd_args(fit_json, out, kinds=None):
@@ -48,7 +54,7 @@ def start_series_args(spectra, peaks, out, mode='time', peak_source='reference',
 
 
 def kd_fit_args(input_file, p0, conc_units, out, conc=None, residues=None,
-                residues_file=None, observables=None):
+                residues_file=None, observables=None, intensity_scales=None):
     args = ['kd', '--input', str(input_file), '--out', str(out), '--p0', str(p0),
             '--conc-units', conc_units, '--format', 'json']
     if conc is not None:
@@ -59,7 +65,7 @@ def kd_fit_args(input_file, p0, conc_units, out, conc=None, residues=None,
         args += ['--residues', ','.join(residues)]
     if observables is not None:
         args += ['--observable', ','.join(observables)]
-    return args
+    return args + _scale_args(intensity_scales)
 
 
 def trimmed(envelope):

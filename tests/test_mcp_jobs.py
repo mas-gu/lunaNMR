@@ -68,7 +68,8 @@ def test_every_job_argument_vector_is_accepted_by_the_cli_parser():
         "tidy.csv", 50, "absolute", "out", conc=[0, 25, 50], residues=["4GluH", "5ThrH"],
         observables=["csp"]))
     parser.parse_args(cli_call.kd_fit_args(
-        "tidy.csv", 50, "equivalents", "out", residues_file="kd_residues.txt"))
+        "tidy.csv", 50, "equivalents", "out", residues_file="kd_residues.txt",
+        intensity_scales=[1, 1, 0.5]))
 
 
 @needs_binding_data
@@ -128,15 +129,44 @@ def test_a_finished_kd_job_reports_the_shared_kd_and_its_pool(dataset, kd_job):
     assert status["status"] == "done"
     fit = json.loads(next((dataset / "runs" / "kd_1").glob("data/*_kd_fit_data.json")).read_text())
     quality = status["kd_quality"]
-    assert quality["n_fitted"] == len(fit["fits"])
+    assert quality["n_total"] == len(fit["fits"]) == status["result"]["n_total"]
     for observable in ("csp", "intensity"):
         shared = fit["global"][observable]
         assert quality[observable]["kd"] == shared["Kd"]
         assert quality[observable]["reliable"] == shared["reliable"]
         assert quality[observable]["n_in_shared_fit"] == shared["n_residues"]
-        r_squared = [f[observable].get("r_squared") for f in fit["fits"]]
+        fitted = [f[observable] for f in fit["fits"] if f[observable].get("success")]
         assert quality[observable]["n_fitted_below_r2_0.8"] == sum(
-            1 for value in r_squared if value is None or value < 0.8)
+            1 for f in fitted if f.get("r_squared") is None or f["r_squared"] < 0.8)
+
+
+@needs_binding_data
+def test_the_intensity_kd_is_labelled_as_an_apparent_decay_constant(kd_job):
+    _, status = kd_job
+    assert "apparent" in status["kd_quality"]["intensity"]["meaning"]
+    assert "1:1" in status["kd_quality"]["csp"]["meaning"]
+
+
+@needs_binding_data
+def test_an_unfittable_residue_is_named_not_counted_as_fitted(dataset):
+    started = call_tool(dataset, "kd_fit", {
+        **KD, "out": "runs/kd_unfittable", "residues": ["A17", "A25", "D36"]})
+    status = wait_for_job(dataset, started["job"])
+    assert status["status"] == "done"
+    assert status["result"]["n_fitted"] == 2
+    assert status["result"]["n_total"] == status["kd_quality"]["n_total"] == 3
+    assert "D36" in status["kd_quality"]["unfitted"]
+
+
+@needs_binding_data
+def test_scan_count_scales_reach_the_fit_and_are_recorded(dataset):
+    scales = [1, 1, 1, 1, 0.5, 0.5, 0.5]
+    started = call_tool(dataset, "kd_fit", {
+        **KD, "out": "runs/kd_scaled", "intensity_scales": scales})
+    status = wait_for_job(dataset, started["job"])
+    assert status["status"] == "done"
+    fit = json.loads(next((dataset / "runs" / "kd_scaled").glob("data/*_kd_fit_data.json")).read_text())
+    assert fit["metadata"]["intensity_scales"] == scales
 
 
 @needs_binding_data
@@ -145,7 +175,7 @@ def test_kd_fit_can_be_limited_to_named_residues(dataset):
         **KD, "out": "runs/kd_subset", "residues": ["A17", "A25", "A30"]})
     status = wait_for_job(dataset, started["job"])
     assert status["status"] == "done"
-    assert status["kd_quality"]["n_fitted"] == 3
+    assert status["result"]["n_fitted"] == status["kd_quality"]["n_total"] == 3
 
 
 @needs_binding_data
