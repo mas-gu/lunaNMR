@@ -93,3 +93,11 @@ def test_a_missing_root_is_a_usage_error():
         capture_output=True, text=True)
     assert completed.returncode == 2
     assert "data root" in completed.stderr
+
+
+@needs_binding_data
+def test_diagnose_leaves_out_the_assignment_list_but_keeps_the_count():
+    summary = call_tool(BINDING_ROOT, "diagnose", {"path": "DNAJA1_HSPA8", "quick": True})
+    peak_list = summary["experiments"][0]["peak_list"]
+    assert peak_list["n_peaks"] == 68
+    assert "assignments" not in peak_list

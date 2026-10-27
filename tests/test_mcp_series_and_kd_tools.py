@@ -69,6 +69,16 @@ def test_plan_series_checks_the_inputs_and_creates_nothing(dataset):
 
 
 @needs_binding_data
+def test_plan_series_leaves_out_the_parameter_block_and_the_assignment_list(dataset):
+    summary = call_tool(dataset, "plan_series", {
+        "spectra": "series", "peaks": "series/DNAJA1.txt", "out": "plan_trimmed"})
+    assert "params" not in summary
+    assert summary["checks"]["peak_list"]["n_peaks"] == 68
+    assert "assignments" not in summary["checks"]["peak_list"]
+    assert summary["spectra_found"] == 7
+
+
+@needs_binding_data
 def test_plan_series_refuses_an_output_folder_that_exists(dataset):
     summary = call_tool(dataset, "plan_series", {
         "spectra": "series", "peaks": "series/DNAJA1.txt", "out": "series"})

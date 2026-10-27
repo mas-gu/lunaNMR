@@ -39,6 +39,18 @@ def export_kd_args(fit_json, out, kinds=None):
     return args
 
 
+def trimmed(envelope):
+    """The envelope without the parts that grow with the dataset and that a client does not
+    act on: the echoed parameter block and each peak list's assignment names (the count stays)."""
+    envelope = {key: value for key, value in envelope.items() if key != 'params'}
+    peak_lists = [envelope.get('checks', {}).get('peak_list')]
+    peak_lists += [experiment.get('peak_list') for experiment in envelope.get('experiments', [])]
+    for peak_list in peak_lists:
+        if isinstance(peak_list, dict):
+            peak_list.pop('assignments', None)
+    return envelope
+
+
 async def run_cli(args):
     """Run one CLI command and return its JSON envelope.
 
@@ -50,7 +62,7 @@ async def run_cli(args):
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     stdout, stderr = await process.communicate()
     try:
-        return json.loads(stdout.decode())
+        return trimmed(json.loads(stdout.decode()))
     except ValueError:
         tail = '\n'.join(stderr.decode().splitlines()[-STDERR_TAIL_LINES:])
         return {'ok': False,
