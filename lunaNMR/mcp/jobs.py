@@ -24,7 +24,8 @@ KILL_GRACE_S = 5
 ENRICHMENTS = {'series': ('series_quality', summaries.series_quality),
                'kd': ('kd_quality', summaries.kd_quality),
                't1t2': ('relaxation_quality', summaries.relaxation_quality),
-               'hetnoe': ('hetnoe_quality', summaries.hetnoe_quality)}
+               'hetnoe': ('hetnoe_quality', summaries.hetnoe_quality),
+               'modelfree': ('modelfree_quality', summaries.modelfree_quality)}
 
 
 class NotAJob(ValueError):

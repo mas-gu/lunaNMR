@@ -130,6 +130,16 @@ def test_single_field_model_free_runs_and_reports_its_attrition(modelfree_single
 
 
 @needs_relaxation_data
+def test_model_free_says_which_inputs_lack_each_residue_it_dropped(modelfree_single, dataset):
+    reasons = modelfree_single["modelfree_quality"]["missing_from"]["field1"]
+    assert set(reasons) == set(modelfree_single["result"]["excluded_residues"]["field1"])
+    noe_residues = {line.split(",")[0] for line in
+                    (dataset / "in" / "600_noe_sat.csv").read_text().splitlines()[1:]}
+    assert "10ValH" not in noe_residues
+    assert reasons["10ValH"] == ["f1_noe_sat", "f1_noe_unsat"]
+
+
+@needs_relaxation_data
 def test_spectral_density_runs_on_a_table_a_model_free_run_wrote(modelfree_single, dataset):
     summary = _run(dataset, "dynamixs_density", {
         "input": "mf600/modelfree_field1_input.csv", "out": "density_600", "field1_freq": 600,
