@@ -128,7 +128,7 @@ def modelfree_quality(out_folder):
     for field, residues in excluded.items():
         number = field.removeprefix('field')
         inputs = {}
-        for name in ('t1', 't2', 'noe_sat', 'noe_unsat'):
+        for name in ('t1', 't2', 'r2_table', 'noe_sat', 'noe_unsat'):
             key = f'f{number}_{name}'
             if arguments.get(key):
                 inputs[key] = _residues_in(arguments[key])
