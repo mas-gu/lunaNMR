@@ -60,3 +60,32 @@ def wait_for_job(root, job, timeout_s=600):
             return status
         time.sleep(2)
     raise TimeoutError(f"job {job} still running after {timeout_s} s")
+
+
+DATA_TEST = BINDING.parent
+PREVIOUS_RUN = DATA_TEST / "_JA1_previous_run" / "analysis"
+METHYL_MATRIX = (DATA_TEST / "methyl" / "sampleNBD" / "series_results_sampleNBD_20260818_124619"
+                 / "peak_intensity_matrix.csv")
+T1_PEAK_LIST = DATA_TEST / "data_JA1_relaxation" / "600_WT" / "T1" / "600_T1_assignment.txt"
+
+
+def relaxation_data_present():
+    return PREVIOUS_RUN.is_dir() and METHYL_MATRIX.is_file() and T1_PEAK_LIST.is_file()
+
+
+def stage_relaxation_dataset(root):
+    """A private copy of the real A1_WT relaxation inputs: matrices from an earlier series run,
+    the hetNOE planes, a real methyl matrix and the T1 peak list, all under `root/in`."""
+    inputs = root / "in"
+    inputs.mkdir()
+    for field in ("600", "700"):
+        for experiment in ("T1", "T2"):
+            shutil.copy(PREVIOUS_RUN / "series" / f"{field}_{experiment}" / "peak_intensity_matrix.csv",
+                        inputs / f"{field}_{experiment}_matrix.csv")
+        for plane in ("sat", "unsat"):
+            shutil.copy(PREVIOUS_RUN / "results" / f"{field}_noe_{plane}.csv",
+                        inputs / f"{field}_noe_{plane}.csv")
+    shutil.copy(METHYL_MATRIX, inputs / "methyl_matrix.csv")
+    shutil.copy(T1_PEAK_LIST, inputs / "peaks.txt")
+    shutil.copy(BINDING / "tidy" / "DNAJA1_HSPA8_tidy.csv", inputs / "tidy.csv")
+    return root

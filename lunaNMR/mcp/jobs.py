@@ -22,7 +22,9 @@ STDERR_TAIL_LINES = 40
 KILL_GRACE_S = 5
 
 ENRICHMENTS = {'series': ('series_quality', summaries.series_quality),
-               'kd': ('kd_quality', summaries.kd_quality)}
+               'kd': ('kd_quality', summaries.kd_quality),
+               't1t2': ('relaxation_quality', summaries.relaxation_quality),
+               'hetnoe': ('hetnoe_quality', summaries.hetnoe_quality)}
 
 
 class NotAJob(ValueError):
@@ -159,10 +161,10 @@ class JobManager:
             status['result'] = trimmed(envelope)
         if status['status'] == 'failed':
             status['stderr_tail'] = _tail(job_folder / 'stderr.log', STDERR_TAIL_LINES)
-        elif kind in ENRICHMENTS:
-            key, enrich = ENRICHMENTS[kind]
-            status[key] = enrich(out_folder)
         else:
+            if kind in ENRICHMENTS:
+                key, enrich = ENRICHMENTS[kind]
+                status[key] = enrich(out_folder)
             status['files'] = summaries.output_files(out_folder)
 
     async def cancel(self, out_folder):

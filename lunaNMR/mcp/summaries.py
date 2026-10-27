@@ -57,6 +57,7 @@ def series_quality(out_folder):
 
 
 MAX_LISTED_FILES = 50
+HETNOE_PLAUSIBLE = (-0.2, 1.05)
 
 
 def output_files(out_folder):
@@ -65,6 +66,53 @@ def output_files(out_folder):
     names = sorted(str(path.relative_to(out_folder)) for path in out_folder.rglob('*')
                    if path.is_file() and 'mcp_job' not in path.relative_to(out_folder).parts)
     return [_cut(name, 200) for name in names[:MAX_LISTED_FILES]]
+
+
+def _finite(text):
+    try:
+        value = float(text)
+    except (TypeError, ValueError):
+        return None
+    return value if value == value and abs(value) != float('inf') else None
+
+
+def relaxation_quality(out_folder):
+    """The residues of a T1/T2 fit that fail the usual gate (fitted, finite T above zero, error
+    below the value), from the results table the fit wrote."""
+    tables = sorted(Path(out_folder).glob('*_fit_results.txt'))
+    if not tables:
+        return None
+    with open(tables[0], newline='') as handle:
+        rows = list(csv.DictReader(handle, delimiter='\t'))
+    time_column = next((name for name in rows[0] if name in ('T1', 'T2')), None) if rows else None
+    if time_column is None:
+        return None
+    failing = []
+    for row in rows:
+        value = _finite(row.get(time_column))
+        error = _finite(row.get(f'{time_column}_err'))
+        if row.get('Success') != 'Yes' or value is None or value <= 0 or error is None \
+                or error >= value:
+            failing.append(_cut(row['Residue'], NAME_CHARS))
+    return {'n_residues': len(rows), 'n_failing_gate': len(failing),
+            'residues_failing_gate': failing[:MAX_NAMED_RESIDUES]}
+
+
+def hetnoe_quality(out_folder):
+    """The median hetNOE and how many residues fall outside the physically possible range."""
+    tables = sorted(Path(out_folder).glob('*_hetnoe.csv'))
+    if not tables:
+        return None
+    with open(tables[0], newline='') as handle:
+        values = [_finite(row.get('hetNOE')) for row in csv.DictReader(handle)]
+    values = sorted(value for value in values if value is not None)
+    if not values:
+        return None
+    low, high = HETNOE_PLAUSIBLE
+    middle = len(values) // 2
+    median = values[middle] if len(values) % 2 else (values[middle - 1] + values[middle]) / 2
+    return {'n_residues': len(values), 'median': round(median, 4),
+            'n_outside_plausible': sum(1 for value in values if not low <= value <= high)}
 
 
 def _poorly_fitted(fit):
