@@ -160,6 +160,9 @@ def load_peak_list(path) -> Dict:
     return dict(path=str(path), assignments=names, peaks=peaks, findings=findings)
 
 
+_NAMES_SHOWN = 5
+
+
 def read_delays(spectrum_names: Sequence[str], series_mode: str = 'time') -> Dict:
     """Parse delays with the extractor `series` uses, so the two cannot disagree."""
     from lunaNMR.utils.delay_extractor import DelayExtractor
@@ -360,6 +363,15 @@ def check_experiment(spectra_dir, peaks_path, *, quick: bool = False,
         if hetnoe:
             result['hetnoe'] = hetnoe
             result['findings'].extend(hetnoe['findings'])
+        elif len(names) > 1:
+            shown = ', '.join(sorted(names)[:_NAMES_SHOWN])
+            more = f', ... ({len(names) - _NAMES_SHOWN} more)' if len(names) > _NAMES_SHOWN else ''
+            result['findings'].append(Finding(
+                'WARN', 'delay_parsing',
+                f'none of the {len(names)} spectra has a parseable value in --mode {series_mode} '
+                f'({shown}{more}); their matrix columns will be named after the file stems. '
+                f'Check that --mode (time or titration) matches how the filenames encode the '
+                f'series value'))
 
     subseries = _subseries_scale(spectra_dir, names, delays, peaks)
     if subseries:
@@ -402,9 +414,14 @@ def check_dataset(root, *, quick: bool = False, sample: bool = False,
     """
     root = str(root)
     skip = ('/analysis/', '/lunaNMR_analysis/', '/staging/', '/series/', '/run_')
+
+    def below_root(path):
+        # Only folders below the root can be run output; where the root itself sits is the user's.
+        return '/' + os.path.relpath(path, root).replace(os.sep, '/')
+
     folders = sorted({os.path.dirname(p) for ext in SPECTRUM_EXTENSIONS
                       for p in glob.glob(f'{root}/**/*.{ext}', recursive=True)
-                      if not any(k in p for k in skip)})
+                      if not any(k in below_root(p) for k in skip)})
 
     result: Dict = dict(root=root, experiments=[], assignments=None, findings=[])
     if not folders:

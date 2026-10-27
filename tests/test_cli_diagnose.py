@@ -116,6 +116,35 @@ class TestDiagnoseSubcommand:
         assert p.returncode == 1
 
 
+class TestOnlyFoldersBelowTheRootAreTakenForRunOutput:
+    """Output and staging folders are skipped, but the folders the root sits in are the
+    user's own business: a dataset in `series/` or under `run_1/analysis/` is still a dataset."""
+
+    def _experiments(self, root):
+        p = _run('diagnose', str(root), '--quick', '--format', 'json')
+        assert p.returncode == 0, p.stdout + p.stderr
+        return sorted(e['experiment'] for e in json.loads(p.stdout)['experiments'])
+
+    def test_a_root_named_like_an_output_folder_is_scanned(self, tmp_path):
+        root = tmp_path / 'series'
+        root.mkdir()
+        _folder(root, 'T1', {'T1_50ms.ft': {}, 'T1_100ms.ft': {}}, _peaks())
+        assert self._experiments(root) == ['T1']
+
+    def test_a_root_under_output_like_ancestors_is_scanned(self, tmp_path):
+        root = tmp_path / 'run_1' / 'analysis' / 'data'
+        root.mkdir(parents=True)
+        _folder(root, 'T1', {'T1_50ms.ft': {}, 'T1_100ms.ft': {}}, _peaks())
+        assert self._experiments(root) == ['T1']
+
+    def test_an_output_folder_below_the_root_is_still_skipped(self, tmp_path):
+        _folder(tmp_path, 'T1', {'T1_50ms.ft': {}, 'T1_100ms.ft': {}}, _peaks())
+        output = tmp_path / 'RUN' / 'series'
+        output.mkdir(parents=True)
+        _folder(output, 'T1_copy', {'T1_50ms.ft': {}}, _peaks())
+        assert self._experiments(tmp_path) == ['T1']
+
+
 class TestTheGateActuallyGates:
     """`diagnose && series` is the documented pre-flight. It only gates if a FAIL
     changes the exit code -- otherwise the shell sails straight past the failure the

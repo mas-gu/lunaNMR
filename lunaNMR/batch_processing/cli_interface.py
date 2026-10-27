@@ -182,7 +182,7 @@ Examples:
         parser.add_argument(
             '--version',
             action='version',
-            version='LunaNMR Batch Processing v1.0.0'
+            version='LunaNMR Batch Processing v1.1.0'
         )
 
         return parser

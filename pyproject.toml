@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lunaNMR"
-version = "1.0.0"
+version = "1.1.0"
 description = "Advanced NMR peak analysis and integration suite (PySide6/Qt)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -21,8 +21,12 @@ dependencies = [
     "numba>=0.57.0",
 ]
 
+[project.optional-dependencies]
+mcp = ["mcp>=2"]
+
 [project.scripts]
 lunanmr = "lunaNMR.cli:main"
+lunanmr-mcp = "lunaNMR.mcp.server:main"
 
 [tool.setuptools.packages.find]
 include = ["lunaNMR*"]
