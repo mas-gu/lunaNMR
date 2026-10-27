@@ -1,5 +1,5 @@
 # ABOUTME: The relaxation tools of the MCP server (T1/T2, methyl T2, hetNOE, T1rho, density, model-free).
-# ABOUTME: Real A1_WT inputs from an earlier series run; each result is checked against the files it wrote.
+# ABOUTME: Real relaxation test inputs from an earlier series run; each result is checked against the files it wrote.
 
 import csv
 import json
@@ -13,7 +13,7 @@ from lunaNMR.mcp import cli_call
 from mcp_helpers import call_tool, relaxation_data_present, stage_relaxation_dataset, wait_for_job
 
 needs_relaxation_data = pytest.mark.skipif(
-    not relaxation_data_present(), reason="the A1_WT relaxation test data is absent")
+    not relaxation_data_present(), reason="the relaxation relaxation test data is absent")
 
 WAIT = 180
 

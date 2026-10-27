@@ -74,7 +74,7 @@ def relaxation_data_present():
 
 
 def stage_relaxation_dataset(root):
-    """A private copy of the real A1_WT relaxation inputs: matrices from an earlier series run,
+    """A private copy of the real relaxation test inputs: matrices from an earlier series run,
     the hetNOE planes, a real methyl matrix and the T1 peak list, all under `root/in`."""
     inputs = root / "in"
     inputs.mkdir()
