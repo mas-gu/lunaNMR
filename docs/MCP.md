@@ -11,6 +11,8 @@ subprocess, so results are identical to running the commands yourself.
 
 ## Install
 
+The server needs Python 3.10 or newer (the MCP SDK's requirement); the rest of lunaNMR runs on 3.9.
+
 ```bash
 pip install -e ".[mcp]"          # from the lunaNMR_v1o0 folder, inside your lunaNMR environment
 lunanmr-mcp --check              # verifies the modules and a real CLI call
@@ -41,7 +43,8 @@ Claude Desktop (`claude_desktop_config.json`):
 `--root` is the one folder the server may read or write. Start it on the folder that holds
 the spectra, peak lists and where results should go.
 
-Verified through the SDK's stdio transport; not yet confirmed with the clients themselves.
+Tested in Claude Code (connect, every tool, refusals, cancel). Not yet tried in Claude Desktop; its
+config above follows the documented format.
 
 ## Tools
 
@@ -68,6 +71,14 @@ flag and how many residues are in the shared fit. Read those before trusting a n
 - **One data root.** Every path is resolved (symlinks included) and refused if it leaves
   `--root`.
 - **No overwriting.** An output folder that already exists is refused; choose a new name.
+- **Links stay inside.** A symbolic link anywhere in a folder a tool will scan, or beside a Kd
+  input, that points outside `--root` blocks that folder: scanning follows links on its own, so
+  the folder would otherwise read outside the root. Remove the link or copy the data in.
+- **Residue names are names.** `kd_fit(residues=[...])` accepts letters, digits and `_ . + -`
+  (up to 64 characters, not starting with `-`). The server writes them to a selection file it
+  owns; they are never passed as a file path. To use a survey's selection, pass `residues_file`.
+- **Bounded output.** Text from the dataset (log lines, residue names, reasons) is cut to a fixed
+  length, and a result over 200,000 characters is replaced by an error.
 - **Failures are failures.** A refused path or a failed run comes back with the protocol's
   error flag and the reason, not as a success.
 

@@ -9,6 +9,12 @@ from pathlib import Path
 DETECTION_SIGMA_FLOOR = 3.0
 KD_R2_FLOOR = 0.8
 MAX_NAMED_RESIDUES = 30
+NAME_CHARS = 64
+REASON_CHARS = 200
+
+
+def _cut(text, limit):
+    return str(text)[:limit]
 
 
 def _is_true(cell):
@@ -39,7 +45,7 @@ def series_quality(out_folder):
         intensity_pinned += pinned_intensity
         below_3_sigma += undetected
         if pinned_position or pinned_intensity or undetected:
-            flagged[row['assignment']] += 1
+            flagged[_cut(row['assignment'], NAME_CHARS)] += 1
     return {'points': len(rows),
             'quality': dict(Counter(row['quality'] for row in rows)),
             'position_pinned': position_pinned,
@@ -71,8 +77,10 @@ def kd_quality(out_folder):
         return None
     fit = json.loads(fit_files[0].read_text())
     summary = {'n_total': len(fit['fits']),
-               'unfitted': fit['metadata'].get('unfitted', {}),
-               'quality_warnings': fit['metadata'].get('quality_warnings', [])}
+               'unfitted': {_cut(name, NAME_CHARS): [_cut(reason, REASON_CHARS) for reason in reasons]
+                            for name, reasons in fit['metadata'].get('unfitted', {}).items()},
+               'quality_warnings': [_cut(warning, 2000)
+                                    for warning in fit['metadata'].get('quality_warnings', [])]}
     for observable, shared in fit['global'].items():
         fitted = [residue[observable] for residue in fit['fits']
                   if residue.get(observable, {}).get('success')]

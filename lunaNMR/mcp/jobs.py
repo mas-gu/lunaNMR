@@ -12,11 +12,12 @@ import time
 from pathlib import Path
 
 from lunaNMR.mcp import summaries
+from lunaNMR.mcp.data_root import PathRefused
 from lunaNMR.mcp.cli_call import trimmed
 
 JOB_FOLDER = 'mcp_job'
 PROGRESS_LINES = 3
-PROGRESS_LINE_CHARS = 200
+LINE_CHARS = 300
 STDERR_TAIL_LINES = 40
 KILL_GRACE_S = 5
 
@@ -49,11 +50,33 @@ def _read_json(path):
         return None
 
 
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _read_record(path):
+    """The job record, or None when the file is missing or is not one this server wrote."""
+    record = _read_json(path)
+    if (isinstance(record, dict) and isinstance(record.get('kind'), str)
+            and isinstance(record.get('pid'), int) and _is_number(record.get('started'))):
+        return record
+    return None
+
+
+def _read_result(path):
+    result = _read_json(path)
+    if isinstance(result, dict) and isinstance(result.get('exit_code'), int) \
+            and _is_number(result.get('finished')):
+        return result
+    return None
+
+
 def _tail(path, lines):
     try:
-        return path.read_text(errors='replace').splitlines()[-lines:]
+        text = path.read_text(errors='replace')
     except OSError:
         return []
+    return [line[:LINE_CHARS] for line in text.splitlines()[-lines:]]
 
 
 def _process_exists(pid):
@@ -74,13 +97,22 @@ class JobManager:
     def _running_here(self):
         return [folder for folder, process in self._started.items() if process.poll() is None]
 
-    def start(self, kind, cli_args, out_folder):
-        """Create the output folder, launch the command detached, and return the job's path."""
+    def start(self, kind, cli_args, out_folder, files=None):
+        """Create the output folder, launch the command detached, and return the job's path.
+
+        `files` maps names to text written into the job folder first, for inputs the command
+        must read from a file this server owns.
+        """
         if len(self._running_here()) >= self.max_running_jobs:
             raise TooManyJobs(
                 f'{len(self._running_here())} jobs already running; wait for one or cancel it')
         job_folder = Path(out_folder) / JOB_FOLDER
-        job_folder.mkdir(parents=True)
+        try:
+            job_folder.mkdir(parents=True)
+        except FileExistsError:
+            raise PathRefused(f'already exists, choose a new output folder: {out_folder}')
+        for name, text in (files or {}).items():
+            (job_folder / name).write_text(text)
         process = subprocess.Popen(
             [sys.executable, '-m', 'lunaNMR.mcp.job_runner', str(job_folder), *cli_args],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -93,20 +125,18 @@ class JobManager:
 
     def status(self, out_folder):
         job_folder = Path(out_folder) / JOB_FOLDER
-        record = _read_json(job_folder / 'job.json')
+        record = _read_record(job_folder / 'job.json')
         if record is None:
             raise NotAJob(f'no job record in {out_folder}')
         status = {'job': str(out_folder), 'kind': record['kind'], 'started': record['started']}
-        result = _read_json(job_folder / 'result.json')
+        result = _read_result(job_folder / 'result.json')
         if (job_folder / 'cancelled.json').exists():
             status['status'] = 'cancelled'
         elif result is not None:
             status['status'] = 'done' if result['exit_code'] == 0 else 'failed'
         elif self._is_alive(Path(out_folder), record['pid']):
             status['status'] = 'running'
-            status['progress'] = [
-                line[:PROGRESS_LINE_CHARS]
-                for line in _tail(job_folder / 'stderr.log', PROGRESS_LINES)]
+            status['progress'] = _tail(job_folder / 'stderr.log', PROGRESS_LINES)
         else:
             status['status'] = 'failed'
             status['note'] = 'the job process ended without recording a result'
@@ -136,7 +166,7 @@ class JobManager:
     async def cancel(self, out_folder):
         out_folder = Path(out_folder)
         job_folder = out_folder / JOB_FOLDER
-        if _read_json(job_folder / 'job.json') is None:
+        if _read_record(job_folder / 'job.json') is None:
             raise NotAJob(f'no job record in {out_folder}')
         process = self._started.get(out_folder)
         if process is None:

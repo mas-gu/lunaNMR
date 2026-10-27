@@ -11,14 +11,25 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from lunaNMR.mcp import check, cli_call
 from lunaNMR.mcp.command_line import build_parser
 from lunaNMR.mcp.data_root import DataRoot, PathRefused
-from lunaNMR.mcp.jobs import JobManager, NotAJob, NotCancellable, TooManyJobs
+from lunaNMR.mcp.jobs import JOB_FOLDER, JobManager, NotAJob, NotCancellable, TooManyJobs
+
+
+MAX_RESULT_CHARS = 200_000
 
 
 def _result(envelope):
     """A tool result whose error flag follows the envelope's `ok`, so a client treats a
-    failed run as a failure and still reads the reason."""
+    failed run as a failure and still reads the reason. Anything larger than a client should
+    be handed is replaced by an error: the text comes from files the dataset controls."""
+    text = json.dumps(envelope)
+    if len(text) > MAX_RESULT_CHARS:
+        envelope = {'ok': False, 'error': {
+            'type': 'ResultTooLarge',
+            'message': f'the result was {len(text)} characters; read the files in the output '
+                       f'folder instead'}}
+        text = json.dumps(envelope)
     return CallToolResult(
-        content=[TextContent(type='text', text=json.dumps(envelope))],
+        content=[TextContent(type='text', text=text)],
         structured_content=envelope,
         is_error=not envelope.get('ok', False))
 
@@ -61,6 +72,7 @@ def build_server(root, max_running_jobs=2):
         'titration' when the filenames carry ligand ratios (0o5, 1o0), not time delays."""
         try:
             folder = root.existing(path)
+            root.refuse_escaping_links(folder)
         except PathRefused as error:
             return _failure(error)
         return await _run(cli_call.diagnose_args(folder, quick=quick, mode=mode))
@@ -77,6 +89,7 @@ def build_server(root, max_running_jobs=2):
         not exist yet."""
         try:
             spectra_folder = root.existing(spectra)
+            root.refuse_escaping_links(spectra_folder)
             peak_list = root.existing(peaks)
             out_folder = root.new_output(out)
         except PathRefused as error:
@@ -100,6 +113,7 @@ def build_server(root, max_running_jobs=2):
         (new folder); the residue list and a settings file are written beside `input`."""
         try:
             input_file = root.existing(input)
+            root.refuse_escaping_links(input_file.parent)
             out_folder = root.new_output(out)
         except PathRefused as error:
             return _failure(error)
@@ -131,6 +145,7 @@ def build_server(root, max_running_jobs=2):
         Many peaks per spectrum may justify `parallel`; on a short list it is slower."""
         try:
             spectra_folder = root.existing(spectra)
+            root.refuse_escaping_links(spectra_folder)
             peak_list = root.existing(peaks)
             out_folder = root.new_output(out)
             started = jobs.start('series', cli_call.start_series_args(
@@ -156,13 +171,17 @@ def build_server(root, max_running_jobs=2):
             return _failure(ValueError('give residues or residues_file, not both'))
         try:
             input_file = root.existing(input)
+            root.refuse_escaping_links(input_file.parent)
             selection = root.existing(residues_file) if residues_file is not None else None
+            named = cli_call.selection_text(residues) if residues is not None else None
             out_folder = root.new_output(out)
+            if named is not None:
+                selection = out_folder / JOB_FOLDER / 'residues.txt'
             started = jobs.start('kd', cli_call.kd_fit_args(
-                input_file, p0, conc_units, out_folder, conc=conc, residues=residues,
-                residues_file=selection, observables=observables,
-                intensity_scales=intensity_scales), out_folder)
-        except (PathRefused, TooManyJobs) as error:
+                input_file, p0, conc_units, out_folder, conc=conc, residues_file=selection,
+                observables=observables, intensity_scales=intensity_scales), out_folder,
+                files=None if named is None else {'residues.txt': named})
+        except (PathRefused, TooManyJobs, cli_call.InvalidResidueName) as error:
             return _failure(error)
         return _job_envelope(jobs.status(started))
 
