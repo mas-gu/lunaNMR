@@ -50,7 +50,7 @@ PySide6/Qt6 suite for NMR peak detection, Voigt profile fitting, and integration
 - **1D integration**: peak picking on a 1D spectrum, then height / region-sum / Voigt-area measurement across a series.
 - **Parallel processing**: two-pass cluster-based, ~2.7× speedup on large peak lists; sequential mode runs the same pipeline in process and gives identical results.
 - **Headless CLI**: `python -m lunaNMR` — every analysis is scriptable with no display. Subcommand reference: [docs/CLI.md](docs/CLI.md).
-- **MCP server** (optional): lets an AI app such as Claude Code run `diagnose`, series fits and Kd analysis on your machine through typed tools, confined to one data folder. Setup: [docs/MCP.md](docs/MCP.md).
+- **MCP server** (optional): lets an AI app such as Claude Code run every analysis the CLI offers (diagnose, series, Kd, T1/T2, model-free, hetNOE, 1D integration, project bundles) on your machine through typed tools, confined to one data folder. Setup: [docs/MCP.md](docs/MCP.md).
 
 **File formats**: Bruker TopSpin (`.2ii`, `.2rr`), Varian/Agilent (`.fid`, `.ft`), NMRPipe (`.ft`, `.pipe`), SPARKY (`.ucsf`). Export: CSV, JSON, PNG, PDF, SVG, EPS.
 
