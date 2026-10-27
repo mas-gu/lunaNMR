@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from lunaNMR.mcp import cli_call, jobs, server, summaries
+from lunaNMR.mcp import cli_call, jobs, results, summaries
 from lunaNMR.mcp.data_root import DataRoot, PathRefused
 from mcp_helpers import call_result, call_tool
 
@@ -143,7 +143,7 @@ class TestWhatReachesTheModelIsBounded:
         assert len(envelope["error"]["message"]) <= cli_call.MESSAGE_CHARS + 200
 
     def test_an_oversized_result_becomes_an_error_not_a_flood(self):
-        result = server._result({"ok": True, "blob": "y" * (server.MAX_RESULT_CHARS + 1)})
+        result = results.result({"ok": True, "blob": "y" * (results.MAX_RESULT_CHARS + 1)})
         assert result.is_error is True
         assert json.loads(result.content[0].text)["error"]["type"] == "ResultTooLarge"
 
