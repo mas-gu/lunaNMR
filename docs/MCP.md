@@ -139,6 +139,10 @@ of whichever experiment was fitted, T1 included.
 - **Links stay inside.** A symbolic link anywhere in a folder a tool will scan, or beside a Kd
   input, that points outside `--root` blocks that folder: scanning follows links on its own, so
   the folder would otherwise read outside the root. Remove the link or copy the data in.
+- **Records are not trusted.** `job_status` refuses a job folder holding a link that leaves the
+  root, and reads an input file named by a run's record only if it is inside the root.
+  `project_build` refuses a run folder whose records name a file outside it. A relaxation input
+  is refused when a link beside it (a `series_metadata.json`, say) leaves the root.
 - **Residue names are names.** `kd_fit(residues=[...])` accepts letters, digits and `_ . + -`
   (up to 64 characters, not starting with `-`). The server writes them to a selection file it
   owns; they are never passed as a file path. To use a survey's selection, pass `residues_file`.

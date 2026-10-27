@@ -115,9 +115,10 @@ def _residues_in(path):
     return {row[column] for row in rows if len(row) > column}
 
 
-def modelfree_quality(out_folder):
+def modelfree_quality(out_folder, root):
     """For each residue dropped when a model-free run merged its inputs, the input files that
-    do not hold it (a residue must be in all of a field's inputs to be kept)."""
+    do not hold it (a residue must be in all of a field's inputs to be kept). The input paths come
+    from the run's record, so each must lie inside `root`."""
     records = sorted(Path(out_folder).glob('*_dynamixs.json'))
     if not records:
         return None
@@ -131,7 +132,7 @@ def modelfree_quality(out_folder):
         for name in ('t1', 't2', 'r2_table', 'noe_sat', 'noe_unsat'):
             key = f'f{number}_{name}'
             if arguments.get(key):
-                inputs[key] = _residues_in(arguments[key])
+                inputs[key] = _residues_in(root.existing(arguments[key]))
         missing_from[field] = {
             _cut(residue, NAME_CHARS): [key for key, held in inputs.items() if residue not in held]
             for residue in residues[:MAX_NAMED_RESIDUES]}

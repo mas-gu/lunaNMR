@@ -29,7 +29,7 @@ def register(server, ctx):
         return server.tool(annotations=WRITES_NEW_FOLDER)(describe(function))
 
     def _optional(path):
-        return root.existing(path) if path is not None else None
+        return root.input_file(path) if path is not None else None
 
     def _name(value, what):
         return safe_name(value, what) if value is not None else None
@@ -48,7 +48,7 @@ def register(server, ctx):
         `field_freq` is the 1H frequency in MHz, `error_method` analytical or bootstrap with
         `bootstrap` iterations. @DELAYS@ `out` is a new folder. @DRY_RUN@"""
         try:
-            matrix = root.existing(input)
+            matrix = root.input_file(input)
             out_folder = root.new_output(out)
             names = (_name(prefix, 'prefix'), _name(field_name, 'field_name'))
             return await ctx.launch('t1t2', cli_call.dynamixs_t1t2_args(
@@ -72,7 +72,7 @@ def register(server, ctx):
         those residues collapsed to a single exponential, so read it before trusting the
         slow/fast split. @DELAYS@ `out` is a new folder. @DRY_RUN@"""
         try:
-            matrix = root.existing(input)
+            matrix = root.input_file(input)
             out_folder = root.new_output(out)
             names = (_name(prefix, 'prefix'), _name(field_name, 'field_name'))
             return await ctx.launch('methyl-t2', cli_call.dynamixs_methyl_t2_args(
@@ -92,8 +92,8 @@ def register(server, ctx):
         the median hetNOE and how many residues fall outside the possible range. `out` is a new
         folder. @DRY_RUN@"""
         try:
-            sat_file = root.existing(sat)
-            unsat_file = root.existing(unsat)
+            sat_file = root.input_file(sat)
+            unsat_file = root.input_file(unsat)
             out_folder = root.new_output(out)
             name = _name(prefix, 'prefix')
             return await ctx.launch('hetnoe', cli_call.dynamixs_hetnoe_args(
@@ -117,9 +117,9 @@ def register(server, ctx):
         rather than guessing. The R2 table it writes feeds model-free as `f1_r2_table`.
         @DELAYS@ `out` is a new folder. @DRY_RUN@"""
         try:
-            rho = root.existing(input)
-            t1_matrix = root.existing(t1)
-            peak_list = root.existing(peaks)
+            rho = root.input_file(input)
+            t1_matrix = root.input_file(t1)
+            peak_list = root.input_file(peaks)
             out_folder = root.new_output(out)
             name = _name(prefix, 'prefix')
             return await ctx.launch('t1rho', cli_call.dynamixs_t1rho_args(
@@ -146,7 +146,7 @@ def register(server, ctx):
         `field2_freq` are 1H frequencies in MHz, `rnh` the N-H bond length in Angstrom and `csa`
         the 15N CSA in ppm. `out` is a new folder. @DRY_RUN@"""
         try:
-            table = root.existing(input)
+            table = root.input_file(input)
             table2 = _optional(input2)
             out_folder = root.new_output(out)
             name = _name(prefix, 'prefix')
