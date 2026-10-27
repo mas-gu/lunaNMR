@@ -50,6 +50,7 @@ PySide6/Qt6 suite for NMR peak detection, Voigt profile fitting, and integration
 - **1D integration**: peak picking on a 1D spectrum, then height / region-sum / Voigt-area measurement across a series.
 - **Parallel processing**: two-pass cluster-based, ~2.7× speedup on large peak lists; sequential mode runs the same pipeline in process and gives identical results.
 - **Headless CLI**: `python -m lunaNMR` — every analysis is scriptable with no display. Subcommand reference: [docs/CLI.md](docs/CLI.md).
+- **MCP server** (optional): lets an AI app such as Claude Code run `diagnose`, series fits and Kd analysis on your machine through typed tools, confined to one data folder. Setup: [docs/MCP.md](docs/MCP.md).
 
 **File formats**: Bruker TopSpin (`.2ii`, `.2rr`), Varian/Agilent (`.fid`, `.ft`), NMRPipe (`.ft`, `.pipe`), SPARKY (`.ucsf`). Export: CSV, JSON, PNG, PDF, SVG, EPS.
 
@@ -65,6 +66,7 @@ pip install -r requirements.txt                          # dependencies
 python3 lunaNMR/validation/verify_installation.py        # verify
 python3 launch_lunaNMR.py                                 # GUI (starts the LunaNMR main window)
 python -m lunaNMR --help                                  # headless CLI
+pip install -e ".[mcp]" && lunanmr-mcp --check            # optional: MCP server (Python 3.10+)
 ```
 
 Requires **numba** (2D multi-peak fitting) and **PySide6** (GUI).
@@ -92,6 +94,8 @@ Start with **[AGENTS.md](AGENTS.md)**, then:
 
 - [docs/CLI_AGENT.md](docs/CLI_AGENT.md) — the machine contract: JSON output shapes, exit codes, input/output file shapes, and the gotchas.
 - [docs/CLI_AGENTS_DEEP/](docs/CLI_AGENTS_DEEP/) — step-by-step guides (playbooks) and prompts for relaxation and affinity, with the physical QC bands.
+
+An AI app that speaks MCP (Claude Code, Claude Desktop) can use the same analyses as typed tools through the optional server instead of a shell: [docs/MCP.md](docs/MCP.md).
 
 Most failure modes here exit 0 rather than raising: a wrong peak list gives zero heights,
 a mislabelled concentration unit gives a confident Kd wrong by a constant factor, and a fit
@@ -152,7 +156,7 @@ Fork → feature branch → add tests → PR. PEP 8, NumPy-style docstrings.
   title = {LunaNMR: Advanced NMR Peak Analysis and Integration Suite},
   author = {LunaNMR Contributors},
   year = {2025},
-  version = {1.0},
+  version = {1.1},
   url = {https://github.com/mas-gu/lunaNMR},
   license = {MIT}
 }
