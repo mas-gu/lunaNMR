@@ -148,3 +148,9 @@ def test_diagnose_reads_titration_filenames_as_points_when_asked():
     as_titration = call_tool(BINDING_ROOT, "diagnose", {**arguments, "mode": "titration"})
     assert as_time["experiments"][0]["delays"]["n_parsed"] == 0
     assert as_titration["experiments"][0]["delays"]["n_parsed"] == 7
+
+
+def test_every_tool_describes_itself_for_the_model(tmp_path):
+    undescribed = {tool.name: len(tool.description or "") for tool in list_tools(tmp_path)
+                   if len(tool.description or "") < 80}
+    assert undescribed == {}

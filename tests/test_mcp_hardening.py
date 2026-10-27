@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from lunaNMR.mcp import cli_call, jobs, server, summaries
+from lunaNMR.mcp import cli_call, jobs, results, summaries
 from lunaNMR.mcp.data_root import DataRoot, PathRefused
 from mcp_helpers import call_result, call_tool
 
@@ -143,7 +143,7 @@ class TestWhatReachesTheModelIsBounded:
         assert len(envelope["error"]["message"]) <= cli_call.MESSAGE_CHARS + 200
 
     def test_an_oversized_result_becomes_an_error_not_a_flood(self):
-        result = server._result({"ok": True, "blob": "y" * (server.MAX_RESULT_CHARS + 1)})
+        result = results.result({"ok": True, "blob": "y" * (results.MAX_RESULT_CHARS + 1)})
         assert result.is_error is True
         assert json.loads(result.content[0].text)["error"]["type"] == "ResultTooLarge"
 
@@ -182,3 +182,17 @@ class TestPackaging:
         requirement = re.search(r'(?m)^mcp = \["([^"]+)"\]', text).group(1)
         assert "<3" in requirement
         assert "python_version" in requirement and "3.10" in requirement
+
+
+class TestNamesThatBecomePartOfAFilename:
+    @pytest.mark.parametrize("name", ["field1", "600_T1", "run.2", "a-b_c", "x" * 64])
+    def test_ordinary_names_pass(self, name):
+        from lunaNMR.mcp.names import safe_name
+        assert safe_name(name, "prefix") == name
+
+    @pytest.mark.parametrize("name", ["", "../x", "a/b", "a\\b", ".hidden", "-x", "a b", "x" * 65,
+                                      "line\nbreak", "tilde~"])
+    def test_names_that_could_leave_the_folder_or_be_read_as_a_flag_are_refused(self, name):
+        from lunaNMR.mcp.names import InvalidName, safe_name
+        with pytest.raises(InvalidName, match="prefix"):
+            safe_name(name, "prefix")
