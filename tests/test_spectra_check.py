@@ -95,6 +95,42 @@ class TestDelayReporting:
         assert 'WARN' in _sev(r, 'delay_parsing')
 
 
+class TestNoParseableValueAtAll:
+    """A series whose every filename gave no value was read in the wrong mode, or is not named
+    as a series; silence there is how a titration passed as time delays."""
+
+    def test_a_series_with_no_parseable_value_warns_and_names_the_mode(self, tmp_path):
+        d = _folder(tmp_path, 'S', {'sampleA.ft': {}, 'sampleB.ft': {}, 'sampleC.ft': {}}, _peaks())
+        r = check_experiment(d, d / 'S_assignment.txt', quick=True)
+        assert r['delays']['n_parsed'] == 0
+        assert 'WARN' in _sev(r, 'delay_parsing')
+        message = next(f.message for f in r['findings'] if f.check == 'delay_parsing')
+        assert 'none of the 3 spectra' in message and '--mode' in message
+
+    def test_titration_names_read_as_time_delays_warn(self, tmp_path):
+        d = _folder(tmp_path, 'Kd', {'p_0o0.ft': {}, 'p_0o5.ft': {}, 'p_1o0.ft': {}}, _peaks())
+        r = check_experiment(d, d / 'Kd_assignment.txt', quick=True)
+        assert 'WARN' in _sev(r, 'delay_parsing')
+
+    def test_the_same_names_read_as_a_titration_do_not_warn(self, tmp_path):
+        d = _folder(tmp_path, 'Kd', {'p_0o0.ft': {}, 'p_0o5.ft': {}, 'p_1o0.ft': {}}, _peaks())
+        r = check_experiment(d, d / 'Kd_assignment.txt', quick=True, series_mode='titration')
+        assert r['delays']['n_parsed'] == 3
+        assert _sev(r, 'delay_parsing') == []
+
+    def test_a_hetnoe_pair_has_no_delays_by_design_and_does_not_warn(self, tmp_path):
+        d = _folder(tmp_path, 'hetNOE', {'plane_001.ft': {}, 'plane_002.ft': {'amps': [8e5] * 6}},
+                    _peaks())
+        r = check_experiment(d, d / 'hetNOE_assignment.txt', quick=True)
+        assert r['hetnoe'] is not None
+        assert _sev(r, 'delay_parsing') == []
+
+    def test_a_single_spectrum_does_not_warn(self, tmp_path):
+        d = _folder(tmp_path, 'One', {'sample.ft': {}}, _peaks())
+        r = check_experiment(d, d / 'One_assignment.txt', quick=True)
+        assert _sev(r, 'delay_parsing') == []
+
+
 class TestPeakListHygiene:
     """Hygiene is judged on what the loader returns, not on the raw bytes."""
 
