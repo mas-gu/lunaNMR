@@ -2,16 +2,39 @@
 # ABOUTME: Run it as `lunanmr-mcp --root <dataset folder>`; it speaks MCP over stdio.
 
 import argparse
+import json
 from typing import Literal
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from lunaNMR.mcp import cli_call
 from lunaNMR.mcp.data_root import DataRoot, PathRefused
 
 
+def _result(envelope):
+    """A tool result whose error flag follows the envelope's `ok`, so a client treats a
+    failed run as a failure and still reads the reason."""
+    return CallToolResult(
+        content=[TextContent(type='text', text=json.dumps(envelope))],
+        structured_content=envelope,
+        is_error=not envelope.get('ok', False))
+
+
 def _refused(error):
-    return {'ok': False, 'error': {'type': 'PathRefused', 'message': str(error)}}
+    return _result({'ok': False, 'error': {'type': 'PathRefused', 'message': str(error)}})
+
+
+READS_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+# Rewrites the residue list and settings file beside its input (merging, so decisions survive).
+REWRITES_BESIDE_INPUT = ToolAnnotations(
+    read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
+WRITES_NEW_FOLDER = ToolAnnotations(
+    read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
+
+
+async def _run(args):
+    return _result(await cli_call.run_cli(args))
 
 
 def build_server(root):
@@ -20,8 +43,8 @@ def build_server(root):
         instructions='NMR peak fitting and analysis on the data folder this server was '
                      'started with. Every path is relative to that folder.')
 
-    @server.tool()
-    async def diagnose(path: str = '.', quick: bool = False) -> dict:
+    @server.tool(annotations=READS_ONLY)
+    async def diagnose(path: str = '.', quick: bool = False) -> CallToolResult:
         """Read-only pre-flight over a dataset folder: per-spectrum registration offset and
         capture rate, delays, peak-list hygiene, repeat-acquisition scale. Run it before
         any fit. Changes nothing."""
@@ -29,14 +52,14 @@ def build_server(root):
             folder = root.existing(path)
         except PathRefused as error:
             return _refused(error)
-        return await cli_call.run_cli(cli_call.diagnose_args(folder, quick=quick))
+        return await _run(cli_call.diagnose_args(folder, quick=quick))
 
-    @server.tool()
+    @server.tool(annotations=READS_ONLY)
     async def plan_series(spectra: str, peaks: str, out: str,
                           mode: Literal['time', 'titration'] = 'time',
                           peak_source: Literal['reference', 'cascade', 'detected',
                                                'independent'] = 'reference',
-                          deep: bool = True) -> dict:
+                          deep: bool = True) -> CallToolResult:
         """Dry run of a series fit: checks the spectra folder, the peak list and the
         parameters, runs the per-spectrum registration and capture checks, and reports
         the plan. Writes nothing. `out` is the folder the real run would create and must
@@ -47,13 +70,13 @@ def build_server(root):
             out_folder = root.new_output(out)
         except PathRefused as error:
             return _refused(error)
-        return await cli_call.run_cli(cli_call.plan_series_args(
+        return await _run(cli_call.plan_series_args(
             spectra_folder, peak_list, out_folder, mode=mode, peak_source=peak_source,
             deep=deep))
 
-    @server.tool()
+    @server.tool(annotations=REWRITES_BESIDE_INPUT)
     async def kd_survey(input: str, p0: float, conc_units: Literal['absolute', 'equivalents'],
-                        out: str, conc: list[float] | None = None) -> dict:
+                        out: str, conc: list[float] | None = None) -> CallToolResult:
         """Survey a titration before fitting a Kd: rates every residue ok / check /
         unusable and proposes a residue selection. `input` is series_analysis_tidy.csv.
         `p0` is the protein concentration and `conc_units` says whether the ligand
@@ -65,12 +88,12 @@ def build_server(root):
             out_folder = root.new_output(out)
         except PathRefused as error:
             return _refused(error)
-        return await cli_call.run_cli(cli_call.kd_survey_args(
+        return await _run(cli_call.kd_survey_args(
             input_file, p0, conc_units, out_folder, conc=conc))
 
-    @server.tool()
+    @server.tool(annotations=WRITES_NEW_FOLDER)
     async def export_kd(fit_json: str, out: str, kinds: list[Literal[
-            'curves', 'ref-bars', 'kd-bars', 'global-fit']] | None = None) -> dict:
+            'curves', 'ref-bars', 'kd-bars', 'global-fit']] | None = None) -> CallToolResult:
         """Figures and tables from a Kd fit JSON (`…_kd_fit_data.json`). `kinds` picks
         what to render (default: all four). `out` is a new folder."""
         try:
@@ -78,7 +101,7 @@ def build_server(root):
             out_folder = root.new_output(out)
         except PathRefused as error:
             return _refused(error)
-        return await cli_call.run_cli(cli_call.export_kd_args(
+        return await _run(cli_call.export_kd_args(
             fit_file, out_folder, kinds=kinds))
 
     return server

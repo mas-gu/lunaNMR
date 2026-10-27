@@ -2,6 +2,7 @@
 # ABOUTME: Also pins every CLI argument vector the server builds to the real parser, so a renamed flag fails here.
 
 import asyncio
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +18,7 @@ from lunaNMR.cli import build_parser
 from lunaNMR.mcp import cli_call
 from lunaNMR.mcp.data_root import DataRoot
 from lunaNMR.mcp.server import build_server
-from mcp_helpers import call_tool
+from mcp_helpers import call_result, call_tool, list_tools
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BINDING_ROOT = REPO_ROOT.parent / "data_test" / "data_binding"
@@ -101,3 +102,34 @@ def test_diagnose_leaves_out_the_assignment_list_but_keeps_the_count():
     peak_list = summary["experiments"][0]["peak_list"]
     assert peak_list["n_peaks"] == 68
     assert "assignments" not in peak_list
+
+
+def test_a_refused_path_sets_the_protocol_error_flag_and_keeps_the_reason(tmp_path):
+    result = call_result(tmp_path, "diagnose", {"path": "../elsewhere"})
+    assert result.is_error is True
+    assert json.loads(result.content[0].text)["error"]["type"] == "PathRefused"
+
+
+def test_a_failed_cli_run_sets_the_protocol_error_flag(tmp_path):
+    result = call_result(tmp_path, "diagnose", {"path": "."})
+    assert result.is_error is True
+    assert json.loads(result.content[0].text)["ok"] is False
+
+
+@needs_binding_data
+def test_a_successful_run_is_not_an_error_and_carries_structured_content():
+    result = call_result(BINDING_ROOT, "diagnose", {"path": "DNAJA1_HSPA8", "quick": True})
+    assert result.is_error is False
+    assert result.structured_content["command"] == "diagnose"
+    assert result.structured_content == json.loads(result.content[0].text)
+
+
+def test_tools_declare_whether_they_write(tmp_path):
+    hints = {tool.name: tool.annotations for tool in list_tools(tmp_path)}
+    assert hints["diagnose"].read_only_hint is True
+    assert hints["plan_series"].read_only_hint is True
+    assert hints["kd_survey"].read_only_hint is False
+    assert hints["kd_survey"].destructive_hint is True
+    assert hints["export_kd"].read_only_hint is False
+    assert hints["export_kd"].destructive_hint is False
+    assert all(annotation.open_world_hint is False for annotation in hints.values())
