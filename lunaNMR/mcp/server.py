@@ -1,8 +1,10 @@
 # ABOUTME: The lunaNMR MCP server: typed tools over the headless CLI, confined to one data folder.
 # ABOUTME: Run it as `lunanmr-mcp --root <dataset folder>`; it speaks MCP over stdio.
 
+import asyncio
 import json
 import sys
+import time
 from typing import Literal
 
 from mcp.server.mcpserver import MCPServer
@@ -52,7 +54,11 @@ async def _run(args):
     return _result(await cli_call.run_cli(args))
 
 
-def build_server(root, max_running_jobs=2):
+WAIT_SECONDS = 20
+POLL_SECONDS = 0.25
+
+
+def build_server(root, max_running_jobs=2, wait_seconds=WAIT_SECONDS):
     server = MCPServer(
         'lunaNMR',
         instructions='NMR peak fitting and analysis on the data folder this server was '
@@ -62,6 +68,17 @@ def build_server(root, max_running_jobs=2):
     def _job_envelope(status):
         status['job'] = str(root.relative(status['job']))
         return _result({'ok': True, **status})
+
+    async def _start_job(kind, cli_args, out_folder, files=None):
+        """Start a job and wait up to `wait_seconds` for it: a quick analysis answers in one
+        call, a slow one returns while still running and is polled with `job_status`."""
+        started = jobs.start(kind, cli_args, out_folder, files=files)
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            status = jobs.status(started)
+            if status['status'] != 'running' or time.monotonic() >= deadline:
+                return _job_envelope(status)
+            await asyncio.sleep(POLL_SECONDS)
 
     @server.tool(annotations=READS_ONLY)
     async def diagnose(path: str = '.', quick: bool = False,
@@ -148,12 +165,11 @@ def build_server(root, max_running_jobs=2):
             root.refuse_escaping_links(spectra_folder)
             peak_list = root.existing(peaks)
             out_folder = root.new_output(out)
-            started = jobs.start('series', cli_call.start_series_args(
+            return await _start_job('series', cli_call.start_series_args(
                 spectra_folder, peak_list, out_folder, mode=mode, peak_source=peak_source,
                 parallel=parallel), out_folder)
         except (PathRefused, TooManyJobs) as error:
             return _failure(error)
-        return _job_envelope(jobs.status(started))
 
     @server.tool(annotations=WRITES_NEW_FOLDER)
     async def kd_fit(input: str, p0: float, conc_units: Literal['absolute', 'equivalents'],
@@ -177,13 +193,12 @@ def build_server(root, max_running_jobs=2):
             out_folder = root.new_output(out)
             if named is not None:
                 selection = out_folder / JOB_FOLDER / 'residues.txt'
-            started = jobs.start('kd', cli_call.kd_fit_args(
+            return await _start_job('kd', cli_call.kd_fit_args(
                 input_file, p0, conc_units, out_folder, conc=conc, residues_file=selection,
                 observables=observables, intensity_scales=intensity_scales), out_folder,
                 files=None if named is None else {'residues.txt': named})
         except (PathRefused, TooManyJobs, cli_call.InvalidResidueName) as error:
             return _failure(error)
-        return _job_envelope(jobs.status(started))
 
     @server.tool(annotations=READS_ONLY)
     async def job_status(job: str) -> CallToolResult:

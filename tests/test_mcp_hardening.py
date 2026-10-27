@@ -182,3 +182,17 @@ class TestPackaging:
         requirement = re.search(r'(?m)^mcp = \["([^"]+)"\]', text).group(1)
         assert "<3" in requirement
         assert "python_version" in requirement and "3.10" in requirement
+
+
+class TestNamesThatBecomePartOfAFilename:
+    @pytest.mark.parametrize("name", ["field1", "600_T1", "run.2", "a-b_c", "x" * 64])
+    def test_ordinary_names_pass(self, name):
+        from lunaNMR.mcp.names import safe_name
+        assert safe_name(name, "prefix") == name
+
+    @pytest.mark.parametrize("name", ["", "../x", "a/b", "a\\b", ".hidden", "-x", "a b", "x" * 65,
+                                      "line\nbreak", "tilde~"])
+    def test_names_that_could_leave_the_folder_or_be_read_as_a_flag_are_refused(self, name):
+        from lunaNMR.mcp.names import InvalidName, safe_name
+        with pytest.raises(InvalidName, match="prefix"):
+            safe_name(name, "prefix")

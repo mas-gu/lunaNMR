@@ -13,16 +13,21 @@ from lunaNMR.mcp.data_root import DataRoot
 from lunaNMR.mcp.server import build_server
 
 
-def call_result(root, tool, arguments):
-    """The protocol-level result: content, structured content and the error flag."""
+def call_result(root, tool, arguments, **server_options):
+    """The protocol-level result: content, structured content and the error flag.
+
+    Jobs return at once unless `wait_seconds` is given, so tests that poll stay deterministic.
+    """
+    server_options.setdefault("wait_seconds", 0)
+
     async def run():
-        async with Client(build_server(DataRoot(root))) as client:
+        async with Client(build_server(DataRoot(root), **server_options)) as client:
             return await client.call_tool(tool, arguments)
     return asyncio.run(run())
 
 
-def call_tool(root, tool, arguments):
-    return json.loads(call_result(root, tool, arguments).content[0].text)
+def call_tool(root, tool, arguments, **server_options):
+    return json.loads(call_result(root, tool, arguments, **server_options).content[0].text)
 
 
 def list_tools(root):

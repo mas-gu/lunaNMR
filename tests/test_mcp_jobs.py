@@ -198,7 +198,7 @@ def test_kd_fit_refuses_residues_and_a_residue_file_together(dataset):
 @needs_binding_data
 def test_a_running_job_can_be_cancelled_and_its_process_dies(dataset):
     async def run():
-        async with Client(build_server(DataRoot(dataset))) as client:
+        async with Client(build_server(DataRoot(dataset), wait_seconds=0)) as client:
             started = json.loads((await client.call_tool(
                 "start_series", {**SERIES, "out": "runs/series_cancel"})).content[0].text)
             cancelled = json.loads((await client.call_tool(
@@ -214,7 +214,7 @@ def test_a_running_job_can_be_cancelled_and_its_process_dies(dataset):
 @needs_binding_data
 def test_a_job_can_only_be_cancelled_by_the_server_that_started_it(dataset):
     async def run():
-        async with Client(build_server(DataRoot(dataset))) as client:
+        async with Client(build_server(DataRoot(dataset), wait_seconds=0)) as client:
             return json.loads((await client.call_tool(
                 "start_series", {**SERIES, "out": "runs/series_foreign"})).content[0].text)
     started = asyncio.run(run())
@@ -228,7 +228,7 @@ def test_a_job_can_only_be_cancelled_by_the_server_that_started_it(dataset):
 @needs_binding_data
 def test_the_server_refuses_to_start_more_jobs_than_it_allows(dataset):
     async def run():
-        async with Client(build_server(DataRoot(dataset), max_running_jobs=1)) as client:
+        async with Client(build_server(DataRoot(dataset), max_running_jobs=1, wait_seconds=0)) as client:
             first = await client.call_tool("start_series", {**SERIES, "out": "runs/limit_1"})
             second = await client.call_tool("start_series", {**SERIES, "out": "runs/limit_2"})
             await client.call_tool("cancel_job", {"job": "runs/limit_1"})
