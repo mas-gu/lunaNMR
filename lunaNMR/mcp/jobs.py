@@ -162,6 +162,8 @@ class JobManager:
         elif kind in ENRICHMENTS:
             key, enrich = ENRICHMENTS[kind]
             status[key] = enrich(out_folder)
+        else:
+            status['files'] = summaries.output_files(out_folder)
 
     async def cancel(self, out_folder):
         out_folder = Path(out_folder)

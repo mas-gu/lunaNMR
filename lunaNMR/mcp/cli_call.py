@@ -135,6 +135,28 @@ def export_kd_args(fit_json, out, kinds=None, observables=None, fig_format=None,
     return args
 
 
+def peaks_shift_args(peaks, out, dx=None, dy=None, auto=False, spectrum=None, quick=False):
+    args = ['peaks', 'shift', '--peaks', str(peaks), '--out', str(out), '--format', 'json']
+    _value(args, '--dx', dx)
+    _value(args, '--dy', dy)
+    _flag(args, '--auto', auto)
+    _value(args, '--spectrum', spectrum)
+    _flag(args, '--quick', quick)
+    return args
+
+
+def integrate_1d_args(spectra, out, peaks=None, detect=False, prefix=None, min_snr=None,
+                      value=None):
+    args = ['integrate-1d', '--spectra', str(spectra), '--out', str(out), '--format', 'json']
+    if peaks is not None:
+        args += ['--peaks', _csv(peaks)]
+    _flag(args, '--detect', detect)
+    _value(args, '--prefix', prefix)
+    _value(args, '--min-snr', min_snr)
+    _value(args, '--value', value)
+    return args
+
+
 def trimmed(envelope):
     """The envelope without the parts that grow with the dataset and that a client does not
     act on: the echoed parameter block and each peak list's assignment names (the count stays)."""

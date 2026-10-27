@@ -56,6 +56,17 @@ def series_quality(out_folder):
                 name for name, _ in flagged.most_common(MAX_NAMED_RESIDUES)]}
 
 
+MAX_LISTED_FILES = 50
+
+
+def output_files(out_folder):
+    """The files a run wrote, relative to its folder (the job's own log folder left out)."""
+    out_folder = Path(out_folder)
+    names = sorted(str(path.relative_to(out_folder)) for path in out_folder.rglob('*')
+                   if path.is_file() and 'mcp_job' not in path.relative_to(out_folder).parts)
+    return [_cut(name, 200) for name in names[:MAX_LISTED_FILES]]
+
+
 def _poorly_fitted(fit):
     r_squared = fit.get('r_squared')
     return r_squared is None or not r_squared >= KD_R2_FLOOR

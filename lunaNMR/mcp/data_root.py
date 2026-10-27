@@ -39,6 +39,15 @@ class DataRoot:
             raise PathRefused(f"already exists, choose a new output folder: {name}")
         return resolved
 
+    def new_file(self, name):
+        """A file a run will create: inside the root, in a folder that exists, not yet there."""
+        resolved = self._inside(name)
+        if resolved.exists():
+            raise PathRefused(f"already exists, choose a new file name: {name}")
+        if not resolved.parent.is_dir():
+            raise PathRefused(f"its folder does not exist: {name}")
+        return resolved
+
     def writable_file(self, name):
         """A file path a run will write or merge into: inside the root, in a folder that exists."""
         resolved = self._inside(name)

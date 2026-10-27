@@ -62,3 +62,20 @@ def test_new_output_outside_the_root_is_refused(root, tmp_path):
 def test_the_root_must_be_an_existing_folder(tmp_path):
     with pytest.raises(PathRefused, match="data root"):
         DataRoot(tmp_path / "missing")
+
+
+def test_a_new_file_inside_the_root_resolves(root):
+    assert root.new_file("shifted.txt") == (root.path / "shifted.txt").resolve()
+
+
+def test_a_new_file_may_not_overwrite_an_existing_one(root):
+    (root.path / "taken.txt").write_text("x")
+    with pytest.raises(PathRefused, match="already exists"):
+        root.new_file("taken.txt")
+
+
+def test_a_new_file_needs_an_existing_folder_inside_the_root(root, tmp_path):
+    with pytest.raises(PathRefused, match="folder does not exist"):
+        root.new_file("no_such_folder/out.txt")
+    with pytest.raises(PathRefused, match="outside the data root"):
+        root.new_file(str(tmp_path / "out.txt"))
