@@ -1,7 +1,6 @@
 # ABOUTME: The MCP tools that plan a series, survey a titration and export a Kd fit, run on real data.
 # ABOUTME: Each tool's argument vector is also pinned to the real CLI parser, so a renamed flag fails here.
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -12,25 +11,15 @@ pytest.importorskip("mcp")
 
 from lunaNMR.cli import build_parser
 from lunaNMR.mcp import cli_call
-from mcp_helpers import call_tool
+from mcp_helpers import BINDING, call_tool, stage_binding_dataset
 
-BINDING = Path(__file__).resolve().parents[2] / "data_test" / "data_binding"
 needs_binding_data = pytest.mark.skipif(
     not BINDING.is_dir(), reason="data_test/data_binding is absent")
 
 
 @pytest.fixture(scope="module")
 def dataset(tmp_path_factory):
-    """A private copy of the DNAJA1 titration: the tools write beside their inputs."""
-    root = tmp_path_factory.mktemp("dataset")
-    series = root / "series"
-    series.mkdir()
-    source = BINDING / "DNAJA1_HSPA8"
-    for spectrum in source.glob("*.ft"):
-        shutil.copy(spectrum, series / spectrum.name)
-    shutil.copy(source / "DNAJA1.txt", series / "DNAJA1.txt")
-    shutil.copy(BINDING / "tidy" / "DNAJA1_HSPA8_tidy.csv", root / "tidy.csv")
-    return root
+    return stage_binding_dataset(tmp_path_factory.mktemp("dataset"))
 
 
 @pytest.fixture(scope="module")

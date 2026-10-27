@@ -37,3 +37,6 @@ class DataRoot:
         if resolved.exists():
             raise PathRefused(f"already exists, choose a new output folder: {name}")
         return resolved
+
+    def relative(self, path):
+        return Path(path).resolve().relative_to(self.path)

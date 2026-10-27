@@ -39,6 +39,29 @@ def export_kd_args(fit_json, out, kinds=None):
     return args
 
 
+def start_series_args(spectra, peaks, out, mode='time', peak_source='reference', parallel=False):
+    args = ['series', '--spectra', str(spectra), '--peaks', str(peaks), '--out', str(out),
+            '--mode', mode, '--peak-source', peak_source, '--format', 'json']
+    if parallel:
+        args.append('--parallel')
+    return args
+
+
+def kd_fit_args(input_file, p0, conc_units, out, conc=None, residues=None,
+                residues_file=None, observables=None):
+    args = ['kd', '--input', str(input_file), '--out', str(out), '--p0', str(p0),
+            '--conc-units', conc_units, '--format', 'json']
+    if conc is not None:
+        args += ['--conc', ','.join(str(value) for value in conc)]
+    if residues_file is not None:
+        args += ['--residues', str(residues_file)]
+    elif residues is not None:
+        args += ['--residues', ','.join(residues)]
+    if observables is not None:
+        args += ['--observable', ','.join(observables)]
+    return args
+
+
 def trimmed(envelope):
     """The envelope without the parts that grow with the dataset and that a client does not
     act on: the echoed parameter block and each peak list's assignment names (the count stays)."""

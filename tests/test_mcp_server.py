@@ -132,4 +132,9 @@ def test_tools_declare_whether_they_write(tmp_path):
     assert hints["kd_survey"].destructive_hint is True
     assert hints["export_kd"].read_only_hint is False
     assert hints["export_kd"].destructive_hint is False
+    assert hints["job_status"].read_only_hint is True
+    for starter in ("start_series", "kd_fit"):
+        assert hints[starter].read_only_hint is False
+        assert hints[starter].destructive_hint is False
+    assert hints["cancel_job"].destructive_hint is True
     assert all(annotation.open_world_hint is False for annotation in hints.values())
