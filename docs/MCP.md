@@ -113,7 +113,8 @@ Typical order: `diagnose` -> `plan_series` -> `start_series` -> `kd_survey` -> `
 - series: points pinned on a fit bound or below 3 sigma, and which residues;
 - Kd: each shared Kd with its `reliable` flag, how many residues are in the shared fit, and the
   residues that did not fit, with the reason;
-- T1/T2: the residues that fail the usual gate (fitted, finite T, error below the value);
+- T1/T2: the residues that fail the usual gate (fitted, finite T, error below the value), and those
+  whose longest delay is under twice the fitted T (marginal window), named;
 - hetNOE: the median and how many residues fall outside the possible range;
 - model-free: residues kept at each stage and any fit that hit the iteration cap;
 - methyl T2: how many fits were unidentifiable (collapsed to a single exponential);

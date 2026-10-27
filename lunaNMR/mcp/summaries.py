@@ -58,6 +58,7 @@ def series_quality(out_folder):
 
 MAX_LISTED_FILES = 50
 HETNOE_PLAUSIBLE = (-0.2, 1.05)
+WINDOW_MARGINAL_BELOW = 2
 
 
 def output_files(out_folder):
@@ -78,7 +79,8 @@ def _finite(text):
 
 def relaxation_quality(out_folder):
     """The residues of a T1/T2 fit that fail the usual gate (fitted, finite T above zero, error
-    below the value), from the results table the fit wrote."""
+    below the value), and those whose longest delay is under twice the fitted T (the delay window
+    is marginal), from the results table the fit wrote."""
     tables = sorted(Path(out_folder).glob('*_fit_results.txt'))
     if not tables:
         return None
@@ -88,14 +90,20 @@ def relaxation_quality(out_folder):
     if time_column is None:
         return None
     failing = []
+    marginal = []
     for row in rows:
+        window_ratio = _finite(row.get('WindowRatio'))
+        if window_ratio is not None and window_ratio < WINDOW_MARGINAL_BELOW:
+            marginal.append(_cut(row['Residue'], NAME_CHARS))
         value = _finite(row.get(time_column))
         error = _finite(row.get(f'{time_column}_err'))
         if row.get('Success') != 'Yes' or value is None or value <= 0 or error is None \
                 or error >= value:
             failing.append(_cut(row['Residue'], NAME_CHARS))
     return {'n_residues': len(rows), 'n_failing_gate': len(failing),
-            'residues_failing_gate': failing[:MAX_NAMED_RESIDUES]}
+            'residues_failing_gate': failing[:MAX_NAMED_RESIDUES],
+            'n_window_marginal': len(marginal),
+            'residues_window_marginal': marginal[:MAX_NAMED_RESIDUES]}
 
 
 def hetnoe_quality(out_folder):

@@ -79,6 +79,19 @@ def test_t1_fit_reports_the_residues_that_fail_the_usual_gate(dataset):
 
 
 @needs_relaxation_data
+def test_t1_fit_names_the_residues_whose_delay_window_is_marginal(dataset):
+    summary = _run(dataset, "dynamixs_t1t2", {
+        "input": "in/600_T1_matrix.csv", "out": "t1_600_window", "exp": "T1", "field_freq": 600})
+    table = dataset / "t1_600_window" / "field1_fit_results.txt"
+    rows = list(csv.DictReader(open(table), delimiter="\t"))
+    marginal = [r["Residue"] for r in rows if float(r["WindowRatio"]) < 2]
+    assert marginal, "the data must hold a marginal residue for this test to mean anything"
+    quality = summary["relaxation_quality"]
+    assert quality["n_window_marginal"] == summary["result"]["n_window_marginal"]
+    assert sorted(quality["residues_window_marginal"]) == sorted(marginal)[:30]
+
+
+@needs_relaxation_data
 def test_a_tidy_csv_is_refused_with_the_reason(dataset):
     summary = _run(dataset, "dynamixs_t1t2", {
         "input": "in/tidy.csv", "out": "t1_tidy", "exp": "T1"})
