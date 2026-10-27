@@ -39,6 +39,15 @@ class DataRoot:
             raise PathRefused(f"already exists, choose a new output folder: {name}")
         return resolved
 
+    def writable_file(self, name):
+        """A file path a run will write or merge into: inside the root, in a folder that exists."""
+        resolved = self._inside(name)
+        if resolved.is_dir():
+            raise PathRefused(f"is a folder, not a file: {name}")
+        if not resolved.parent.is_dir():
+            raise PathRefused(f"its folder does not exist: {name}")
+        return resolved
+
     def refuse_escaping_links(self, folder):
         """Scanning tools follow links on their own, so a link inside the folder that leads out
         of the root would read outside it. Refuse the folder, naming the first such link."""

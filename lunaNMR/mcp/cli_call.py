@@ -29,62 +29,110 @@ def selection_text(residues):
     return '\n'.join(residues) + '\n'
 
 
-def diagnose_args(path, quick=False, mode='time'):
+def _flag(args, name, enabled):
+    if enabled:
+        args.append(name)
+
+
+def _value(args, name, value):
+    if value is not None:
+        args += [name, str(value)]
+
+
+def _csv(values):
+    return ','.join(str(value) for value in values)
+
+
+def diagnose_args(path, quick=False, mode='time', sample=False, strict=False):
     args = ['diagnose', str(path), '--mode', mode, '--format', 'json']
-    if quick:
-        args.append('--quick')
+    _flag(args, '--quick', quick)
+    _flag(args, '--sample', sample)
+    _flag(args, '--strict', strict)
     return args
 
 
-def plan_series_args(spectra, peaks, out, mode='time', peak_source='reference', deep=True):
+def plan_series_args(spectra, peaks, out, mode='time', peak_source='reference', deep=True,
+                     quick=False, sample=False, params_file=None):
     args = ['series', '--dry-run', '--spectra', str(spectra), '--peaks', str(peaks),
             '--out', str(out), '--mode', mode, '--peak-source', peak_source,
             '--format', 'json']
-    if deep:
-        args.append('--deep')
+    _flag(args, '--deep', deep)
+    _flag(args, '--quick', quick)
+    _flag(args, '--sample', sample)
+    _value(args, '--params', params_file)
     return args
 
 
-def _scale_args(intensity_scales):
-    if intensity_scales is None:
-        return []
-    return ['--intensity-scale', ','.join(str(value) for value in intensity_scales)]
-
-
-def kd_survey_args(input_file, p0, conc_units, out, conc=None, intensity_scales=None):
-    args = ['kd', '--survey', '--input', str(input_file), '--out', str(out),
-            '--p0', str(p0), '--conc-units', conc_units, '--format', 'json']
-    if conc is not None:
-        args += ['--conc', ','.join(str(value) for value in conc)]
-    return args + _scale_args(intensity_scales)
-
-
-def export_kd_args(fit_json, out, kinds=None):
-    args = ['export', 'kd', '--json', str(fit_json), '--out', str(out), '--format', 'json']
-    if kinds is not None:
-        args += ['--kind', ','.join(kinds)]
-    return args
-
-
-def start_series_args(spectra, peaks, out, mode='time', peak_source='reference', parallel=False):
+def start_series_args(spectra, peaks, out, mode='time', peak_source='reference', parallel=False,
+                      params_file=None):
     args = ['series', '--spectra', str(spectra), '--peaks', str(peaks), '--out', str(out),
             '--mode', mode, '--peak-source', peak_source, '--format', 'json']
-    if parallel:
-        args.append('--parallel')
+    _flag(args, '--parallel', parallel)
+    _value(args, '--params', params_file)
+    return args
+
+
+def _kd_args(input_file, p0, conc_units, out, conc, observables, intensity_scales, prefix,
+             alpha, intensity_from, bootstrap, csp_sigma_multiple, kd_outlier_z,
+             noise_quantile, dd_runaway_ratio, ref_max_ratio):
+    args = ['kd', '--input', str(input_file), '--out', str(out), '--p0', str(p0),
+            '--conc-units', conc_units, '--format', 'json']
+    if conc is not None:
+        args += ['--conc', _csv(conc)]
+    if observables is not None:
+        args += ['--observable', _csv(observables)]
+    if intensity_scales is not None:
+        args += ['--intensity-scale', _csv(intensity_scales)]
+    _value(args, '--prefix', prefix)
+    _value(args, '--alpha', alpha)
+    _value(args, '--intensity-from', intensity_from)
+    _value(args, '--bootstrap', bootstrap)
+    _value(args, '--csp-sigma-multiple', csp_sigma_multiple)
+    _value(args, '--kd-outlier-z', kd_outlier_z)
+    _value(args, '--noise-quantile', noise_quantile)
+    _value(args, '--dd-runaway-ratio', dd_runaway_ratio)
+    _value(args, '--ref-max-ratio', ref_max_ratio)
+    return args
+
+
+def kd_survey_args(input_file, p0, conc_units, out, conc=None, intensity_scales=None,
+                   selection_file=None, observables=None, prefix=None, alpha=None,
+                   intensity_from=None, bootstrap=None, csp_sigma_multiple=None,
+                   kd_outlier_z=None, noise_quantile=None, dd_runaway_ratio=None,
+                   ref_max_ratio=None):
+    args = _kd_args(input_file, p0, conc_units, out, conc, observables, intensity_scales, prefix,
+                    alpha, intensity_from, bootstrap, csp_sigma_multiple, kd_outlier_z,
+                    noise_quantile, dd_runaway_ratio, ref_max_ratio)
+    args.insert(1, '--survey')
+    _value(args, '--selection', selection_file)
     return args
 
 
 def kd_fit_args(input_file, p0, conc_units, out, conc=None, residues_file=None,
-                observables=None, intensity_scales=None):
-    args = ['kd', '--input', str(input_file), '--out', str(out), '--p0', str(p0),
-            '--conc-units', conc_units, '--format', 'json']
-    if conc is not None:
-        args += ['--conc', ','.join(str(value) for value in conc)]
-    if residues_file is not None:
-        args += ['--residues', str(residues_file)]
+                observables=None, intensity_scales=None, prefix=None, alpha=None,
+                intensity_from=None, bootstrap=None, csp_sigma_multiple=None,
+                kd_outlier_z=None, noise_quantile=None, dd_runaway_ratio=None,
+                ref_max_ratio=None):
+    args = _kd_args(input_file, p0, conc_units, out, conc, observables, intensity_scales, prefix,
+                    alpha, intensity_from, bootstrap, csp_sigma_multiple, kd_outlier_z,
+                    noise_quantile, dd_runaway_ratio, ref_max_ratio)
+    _value(args, '--residues', residues_file)
+    return args
+
+
+def export_kd_args(fit_json, out, kinds=None, observables=None, fig_format=None, per_page=None,
+                   prefix=None, summary_only=False):
+    args = ['export', 'kd', '--json', str(fit_json), '--out', str(out), '--format', 'json']
+    if kinds is not None:
+        args += ['--kind', _csv(kinds)]
     if observables is not None:
-        args += ['--observable', ','.join(observables)]
-    return args + _scale_args(intensity_scales)
+        args += ['--observable', _csv(observables)]
+    if fig_format is not None:
+        args += ['--fig-format', _csv(fig_format)]
+    _value(args, '--per-page', per_page)
+    _value(args, '--prefix', prefix)
+    _flag(args, '--summary-only', summary_only)
+    return args
 
 
 def trimmed(envelope):
