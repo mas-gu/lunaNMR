@@ -212,6 +212,9 @@ class TestEveryDocumentedCommandIsReal:
         tree = _subcommand_tree()
         known = set().union(*(_accepted_flags(p) for p in tree.values()))
         known |= _batch_flags() | {'--help', '--version'}
+        # docs/MCP.md documents the MCP server's own command line.
+        from lunaNMR.mcp.command_line import build_parser as build_mcp_parser
+        known |= _accepted_flags(build_mcp_parser())
         # Installation instructions quote pip's flags, not this CLI's.
         pip_flags = {'--upgrade', '--user', '--editable'}
         bad = sorted({f"{doc.name}: {flag}" for doc in _agent_docs()

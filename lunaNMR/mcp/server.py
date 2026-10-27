@@ -1,14 +1,15 @@
 # ABOUTME: The lunaNMR MCP server: typed tools over the headless CLI, confined to one data folder.
 # ABOUTME: Run it as `lunanmr-mcp --root <dataset folder>`; it speaks MCP over stdio.
 
-import argparse
 import json
+import sys
 from typing import Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
-from lunaNMR.mcp import cli_call
+from lunaNMR.mcp import check, cli_call
+from lunaNMR.mcp.command_line import build_parser
 from lunaNMR.mcp.data_root import DataRoot, PathRefused
 from lunaNMR.mcp.jobs import JobManager, NotAJob, NotCancellable, TooManyJobs
 
@@ -180,10 +181,12 @@ def build_server(root, max_running_jobs=2):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog='lunanmr-mcp', description=__doc__)
-    parser.add_argument('--root', required=True,
-                        help='Dataset folder; the only place the server reads or writes')
+    parser = build_parser()
     args = parser.parse_args(argv)
+    if args.check:
+        sys.exit(check.report(check.run_checks()))
+    if args.root is None:
+        parser.error('--root is required unless --check is given')
     try:
         root = DataRoot(args.root)
     except PathRefused as error:
