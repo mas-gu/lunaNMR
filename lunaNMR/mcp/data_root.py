@@ -1,6 +1,7 @@
 # ABOUTME: Confines every path an MCP client names to one data folder, symlinks resolved.
 # ABOUTME: Refuses an output folder that already exists, so a client cannot overwrite a run.
 
+import os
 from pathlib import Path
 
 
@@ -37,6 +38,20 @@ class DataRoot:
         if resolved.exists():
             raise PathRefused(f"already exists, choose a new output folder: {name}")
         return resolved
+
+    def refuse_escaping_links(self, folder):
+        """Scanning tools follow links on their own, so a link inside the folder that leads out
+        of the root would read outside it. Refuse the folder, naming the first such link."""
+        for directory, subfolders, files in os.walk(folder):
+            for name in subfolders + files:
+                link = Path(directory) / name
+                if not link.is_symlink():
+                    continue
+                target = link.resolve()
+                if target != self.path and self.path not in target.parents:
+                    raise PathRefused(
+                        f"{link.relative_to(self.path)} is a link to {target}, outside the "
+                        f"data root ({self.path}); remove the link or copy the data in")
 
     def relative(self, path):
         return Path(path).resolve().relative_to(self.path)

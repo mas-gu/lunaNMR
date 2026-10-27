@@ -65,8 +65,7 @@ def test_every_job_argument_vector_is_accepted_by_the_cli_parser():
             "spectra", "peaks.txt", "out", mode="time", peak_source="reference",
             parallel=parallel))
     parser.parse_args(cli_call.kd_fit_args(
-        "tidy.csv", 50, "absolute", "out", conc=[0, 25, 50], residues=["4GluH", "5ThrH"],
-        observables=["csp"]))
+        "tidy.csv", 50, "absolute", "out", conc=[0, 25, 50], observables=["csp"]))
     parser.parse_args(cli_call.kd_fit_args(
         "tidy.csv", 50, "equivalents", "out", residues_file="kd_residues.txt",
         intensity_scales=[1, 1, 0.5]))
