@@ -376,7 +376,7 @@ class VoigtIntegrator(BaseIntegrator):
         1. Start with each peak as singleton cluster
         2. Iteratively merge closest overlapping clusters
         3. Stop merge if diameter exceeds threshold (prevents sprawl)
-        4. Split oversized clusters (>max_cluster_size)
+        4. Split oversized clusters (>max_cluster_size) at their longest links
 
         This prevents transitive closure from creating mega-clusters while
         still grouping genuinely overlapping peaks.
@@ -481,9 +481,8 @@ class VoigtIntegrator(BaseIntegrator):
             if len(cluster) <= max_cluster_size:
                 final_clusters.append(cluster)
             else:
-                # Split by spatial gaps (thresholds from centralized config)
-                # Uses gap detection to split large clusters
-                subclusters = self._split_cluster_by_gaps(cluster, max_size=max_cluster_size)
+                subclusters = self._split_cluster_at_longest_link(
+                    cluster, overlap_threshold_x, overlap_threshold_y, max_cluster_size)
                 final_clusters.extend(subclusters)
 
         n_isolated = sum(1 for c in final_clusters if len(c) == 1)
@@ -493,29 +492,22 @@ class VoigtIntegrator(BaseIntegrator):
 
         return final_clusters
 
-    def _split_cluster_by_gaps(self, cluster, gap_threshold_x=None, gap_threshold_y=None, max_size=None):
+    def _split_cluster_at_longest_link(self, cluster, overlap_threshold_x=None,
+                                       overlap_threshold_y=None, max_size=None):
         """
-        Split oversized cluster by finding spatial gaps.
-        If no suitable gap exists, force split at median.
+        Split an oversized cluster along its links.
 
-        Algorithm:
-        1. Sort peaks by F2 (1H) position, find largest gap
-        2. If gap ≥ threshold, split there
-        3. Otherwise try F1 (15N) position, find largest gap
-        4. If gap ≥ threshold, split there
-        5. If both fail AND cluster > max_size, force split at median
-        6. Recursively split each subcluster if still too large
-
-        Uses centralized PS2D configuration (nucleus-adaptive).
+        Two peaks are linked when they touch (_check_peaks_overlap); a link's length is
+        their elliptical distance, which weighs both dimensions. The longest link is
+        removed until the cluster falls apart, and each part is split again if still too
+        large, so every part stays connected through the links that remain.
 
         Parameters:
         -----------
         cluster : list of (x, y) tuples
             Oversized cluster to split
-        gap_threshold_x : float, optional
-            Minimum gap size in F2 (1H) to trigger split (default from config)
-        gap_threshold_y : float, optional
-            Minimum gap size in F1 (15N/13C) to trigger split (default from config)
+        overlap_threshold_x, overlap_threshold_y : float, optional
+            Overlap radii the links are made with (default from config)
         max_size : int, optional
             Maximum peaks per cluster (default from config)
 
@@ -523,75 +515,63 @@ class VoigtIntegrator(BaseIntegrator):
         --------
         list of subclusters : Each subcluster is list of (x, y) tuples
         """
-        if gap_threshold_x is None or gap_threshold_y is None or max_size is None:
-            config = get_ps2d_config()
-            if gap_threshold_x is None:
-                gap_threshold_x = config.gap_threshold_x
-            if gap_threshold_y is None:
-                gap_threshold_y = config.gap_threshold_y
-            if max_size is None:
-                max_size = config.max_cluster_size
+        config = get_ps2d_config()
+        if overlap_threshold_x is None:
+            overlap_threshold_x = config.overlap_threshold_x
+        if overlap_threshold_y is None:
+            overlap_threshold_y = config.overlap_threshold_y
+        if max_size is None:
+            max_size = config.max_cluster_size
 
         if len(cluster) <= max_size:
             return [cluster]
 
-        sorted_cluster_f2 = sorted(cluster, key=lambda p: p[0])
+        links = {}
+        for i in range(len(cluster)):
+            for j in range(i + 1, len(cluster)):
+                if self._check_peaks_overlap(cluster[i], cluster[j],
+                                             overlap_threshold_x, overlap_threshold_y):
+                    links[(i, j)] = (((cluster[i][0] - cluster[j][0]) / overlap_threshold_x) ** 2
+                                     + ((cluster[i][1] - cluster[j][1]) / overlap_threshold_y) ** 2) ** 0.5
 
-        max_gap_f2 = 0
-        split_idx_f2 = None
+        while links:
+            longest = max(links, key=lambda pair: (links[pair], pair))
+            del links[longest]
+            parts = self._connected_parts(len(cluster), links)
+            if len(parts) > 1:
+                subclusters = []
+                for part in parts:
+                    subclusters.extend(self._split_cluster_at_longest_link(
+                        [cluster[i] for i in part], overlap_threshold_x,
+                        overlap_threshold_y, max_size))
+                return subclusters
 
-        for i in range(len(sorted_cluster_f2) - 1):
-            gap = sorted_cluster_f2[i + 1][0] - sorted_cluster_f2[i][0]
-            if gap > max_gap_f2:
-                max_gap_f2 = gap
-                split_idx_f2 = i + 1
+        return [[peak] for peak in cluster]
 
-        # Strategy 1: Split at F2 gap if significant
-        if max_gap_f2 >= gap_threshold_x and split_idx_f2 is not None:
-            subcluster1 = sorted_cluster_f2[:split_idx_f2]
-            subcluster2 = sorted_cluster_f2[split_idx_f2:]
-            # Recursively split subclusters (pass parameters to maintain consistency)
-            result = []
-            result.extend(self._split_cluster_by_gaps(subcluster1, gap_threshold_x, gap_threshold_y, max_size))
-            result.extend(self._split_cluster_by_gaps(subcluster2, gap_threshold_x, gap_threshold_y, max_size))
-            return result
+    def _connected_parts(self, count, links):
+        """The indices 0..count-1 grouped by the links joining them, each group sorted.
 
-        # Strategy 2: Try splitting by F1 if F2 split didn't work
-        sorted_cluster_f1 = sorted(cluster, key=lambda p: p[1])
-        max_gap_f1 = 0
-        split_idx_f1 = None
-
-        for i in range(len(sorted_cluster_f1) - 1):
-            gap = sorted_cluster_f1[i + 1][1] - sorted_cluster_f1[i][1]
-            if gap > max_gap_f1:
-                max_gap_f1 = gap
-                split_idx_f1 = i + 1
-
-        if max_gap_f1 >= gap_threshold_y and split_idx_f1 is not None:
-            subcluster1 = sorted_cluster_f1[:split_idx_f1]
-            subcluster2 = sorted_cluster_f1[split_idx_f1:]
-            # Recursively split subclusters
-            result = []
-            result.extend(self._split_cluster_by_gaps(subcluster1, gap_threshold_x, gap_threshold_y, max_size))
-            result.extend(self._split_cluster_by_gaps(subcluster2, gap_threshold_x, gap_threshold_y, max_size))
-            return result
-
-        # Strategy 3: Force split at median if cluster still too large
-        # This prevents pathological cases where no gaps exist but cluster > max_size
-        if len(cluster) > max_size:
-            mid = len(cluster) // 2
-            log_warning(f"No spatial gap found, forcing median split: {len(cluster)} peaks → {mid} + {len(cluster)-mid}")
-            # Use F2-sorted order for median split (1H dimension is typically more informative)
-            subcluster1 = sorted_cluster_f2[:mid]
-            subcluster2 = sorted_cluster_f2[mid:]
-            # Recursively split subclusters
-            result = []
-            result.extend(self._split_cluster_by_gaps(subcluster1, gap_threshold_x, gap_threshold_y, max_size))
-            result.extend(self._split_cluster_by_gaps(subcluster2, gap_threshold_x, gap_threshold_y, max_size))
-            return result
-
-        # Cluster is small enough now
-        return [cluster]
+        `links` holds the pairs (i, j) that are joined.
+        """
+        neighbours = [[] for _ in range(count)]
+        for i, j in links:
+            neighbours[i].append(j)
+            neighbours[j].append(i)
+        parts, seen = [], set()
+        for start in range(count):
+            if start in seen:
+                continue
+            part, pending = [], [start]
+            seen.add(start)
+            while pending:
+                current = pending.pop()
+                part.append(current)
+                for other in neighbours[current]:
+                    if other not in seen:
+                        seen.add(other)
+                        pending.append(other)
+            parts.append(sorted(part))
+        return parts
 
     def check_if_peaks_need_2d_fitting(self, peak_x_ppm, peak_y_ppm,
                                         all_peaks_context=None,
