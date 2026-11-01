@@ -80,7 +80,7 @@ Without a noise level every peak is treated as positive. Mixed-sign clusters are
 
 **Overlap test** (`_check_peaks_overlap`): elliptical distance `√((Δx/tx)² + (Δy/ty)²) ≤ 2.0`, with thresholds `overlap_threshold_x/y` (15N: x=0.04 (1H), y=0.4 (15N); 13C: x=0.04, y=0.15).
 
-**Merging**: start singletons → repeatedly merge the closest overlapping pair whose merged **diameter** stays within `max_cluster_diameter_x=0.20` (1H), `max_cluster_diameter_y=1.5` (15N); oversized clusters (>`max_cluster_size`, default 20) are split. Diameter/size constraints deliberately bound transitive closure so it can't form mega-clusters. Result = disjoint partition, each peak in exactly one cluster.
+**Merging**: start singletons → repeatedly merge the closest overlapping pair whose merged **diameter** stays within `max_cluster_diameter_x=0.20` (1H), `max_cluster_diameter_y=1.5` (15N); oversized clusters (>`max_cluster_size`, default 10) are split. Diameter/size constraints deliberately bound transitive closure so it can't form mega-clusters. Result = disjoint partition, each peak in exactly one cluster.
 
 **Routing**: `needs_2d = len(cluster) > 1`.
 - size 1 → `enhanced_peak_fitting` → single-peak PS2D fit.
