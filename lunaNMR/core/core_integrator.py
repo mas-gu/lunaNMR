@@ -13,6 +13,8 @@ Classes:
 - EnhancedVoigtIntegrator: Advanced integrator with enhanced features
 """
 
+import time
+
 import numpy as np
 import pandas as pd
 from typing import List, Tuple
@@ -1161,15 +1163,6 @@ class VoigtIntegrator(BaseIntegrator):
                 'near_noise': sign == 0  # Shape held, intensity of either sign
             })
 
-        # Estimate fitting time and warn user for large clusters
-        n_peaks = len(overlap_group)
-        n_points = region['intensity'].size
-        # Empirical formula: ~40 seconds per 1000 points per peak² (calibrated from real data)
-        estimated_time_sec = 40.0 * (n_points / 1000.0) * (n_peaks**2 / 81.0)
-
-        if estimated_time_sec > 20:
-            log_info(f"Estimated fitting time: ~{estimated_time_sec:.0f} seconds ({estimated_time_sec/60:.1f} minutes)")
-
         # CRITICAL: Normalize data to [0,1] range for numerical stability
         # Without this, χ² values explode to 1e15 and damping fails
         max_intensity = np.max(np.abs(region['intensity']))
@@ -1230,6 +1223,7 @@ class VoigtIntegrator(BaseIntegrator):
         fitter = Ps2dMultiPeakFitter2D(verbose=True)
         # Get noise level for weak peak detection (robust corner-based estimation)
         spectrum_noise_level = getattr(self, 'noise_level', None)
+        fit_started = time.perf_counter()
         result = fitter.fit_multi_peak_2d(
             region['f1_grid'], region['f2_grid'], normalized_data,
             initial_peaks,
@@ -1252,6 +1246,9 @@ class VoigtIntegrator(BaseIntegrator):
             # fitted. Bounds the TOTAL FWHM, which is what the volume depends on.
             lw_margins=self._growth_margins_for(peak_assignments)
         )
+        fit_seconds = time.perf_counter() - fit_started
+        if fit_seconds > 20:
+            log_info(f"Fitted {len(overlap_group)} peaks in {fit_seconds:.0f} seconds ({fit_seconds/60:.1f} minutes)")
 
         # Denormalize fitted intensities AND derived quantities
         # Height/volume/amplitude were calculated with normalized intensity,
