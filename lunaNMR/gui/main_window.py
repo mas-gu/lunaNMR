@@ -69,19 +69,6 @@ from lunaNMR.utils.recent_projects_manager import RecentProjectsManager
 
 logger = logging.getLogger(__name__)
 
-# The cluster size spin box shows this value as "No limit"
-NO_CLUSTER_LIMIT_VALUE = 1
-
-
-def cluster_size_from_spin(value):
-    """The cluster size limit a spin box value stands for: None for "No limit"."""
-    return None if value == NO_CLUSTER_LIMIT_VALUE else int(value)
-
-
-def cluster_size_to_spin(max_cluster_size):
-    """The spin box value that shows a cluster size limit; None is "No limit"."""
-    return NO_CLUSTER_LIMIT_VALUE if max_cluster_size is None else int(max_cluster_size)
-
 
 class PeakDetectionWorker(QThread):
     """Worker thread for peak detection to prevent GUI freezing.
@@ -2505,14 +2492,10 @@ class LunaNMRMainWindow(BaseWindow):
         ps2d_params_layout.addWidget(cluster_size_label, 4, 0)
 
         self.expert_max_cluster_spin = QSpinBox()
-        self.expert_max_cluster_spin.setRange(NO_CLUSTER_LIMIT_VALUE, 50)
-        self.expert_max_cluster_spin.setSpecialValueText("No limit")
+        self.expert_max_cluster_spin.setRange(2, 50)
         self.expert_max_cluster_spin.setSingleStep(1)
-        self.expert_max_cluster_spin.setValue(cluster_size_to_spin(self.ps2d_max_cluster_size))
-        self.expert_max_cluster_spin.setToolTip(
-            "Maximum peaks in overlap cluster for simultaneous 2D fitting.\n"
-            "No limit: a cluster grows as far as its peaks overlap (the cluster diameter "
-            "limits are lifted too); large clusters fit slowly.")
+        self.expert_max_cluster_spin.setValue(self.ps2d_max_cluster_size)
+        self.expert_max_cluster_spin.setToolTip("Maximum peaks in overlap cluster for simultaneous 2D fitting")
         ps2d_params_layout.addWidget(self.expert_max_cluster_spin, 4, 2)
 
         self.expert_ps2d_config_frame.setVisible(False)
@@ -2808,7 +2791,7 @@ class LunaNMRMainWindow(BaseWindow):
         if hasattr(self, 'expert_max_iter_spin'):
             self.expert_max_iter_spin.setValue(self.ps2d_max_iterations)
         if hasattr(self, 'expert_max_cluster_spin'):
-            self.expert_max_cluster_spin.setValue(cluster_size_to_spin(self.ps2d_max_cluster_size))
+            self.expert_max_cluster_spin.setValue(self.ps2d_max_cluster_size)
 
         # PS2D fit parameters (checkboxes) - block signals during sync to avoid duplicate logs
         if hasattr(self, 'expert_fix_lw_check'):
@@ -3041,7 +3024,7 @@ class LunaNMRMainWindow(BaseWindow):
             self.expert_overlap_x_spin.setValue(config.overlap_threshold_x)
             self.expert_overlap_y_spin.setValue(config.overlap_threshold_y)
         if hasattr(self, 'expert_max_cluster_spin'):
-            self.expert_max_cluster_spin.setValue(cluster_size_to_spin(config.max_cluster_size))
+            self.expert_max_cluster_spin.setValue(config.max_cluster_size)
 
     def _apply_auto_detected_nucleus(self):
         """Apply auto-detected nucleus type from integrator to GUI.
@@ -3083,7 +3066,7 @@ class LunaNMRMainWindow(BaseWindow):
             radF1 = self.expert_radF1_spin.value()
             radF2 = self.expert_radF2_spin.value()
             max_iterations = self.expert_max_iter_spin.value()
-            max_cluster_size = cluster_size_from_spin(self.expert_max_cluster_spin.value())
+            max_cluster_size = self.expert_max_cluster_spin.value()
             overlap_x = self.expert_overlap_x_spin.value()
             overlap_y = self.expert_overlap_y_spin.value()
 
@@ -3092,6 +3075,9 @@ class LunaNMRMainWindow(BaseWindow):
                 return
             if max_iterations < 50:
                 self.update_status("PS2D max iterations must be >= 50")
+                return
+            if max_cluster_size < 2:
+                self.update_status("PS2D max cluster size must be >= 2")
                 return
             if overlap_x <= 0 or overlap_y <= 0:
                 self.update_status("PS2D overlap thresholds must be positive")
@@ -3117,8 +3103,8 @@ class LunaNMRMainWindow(BaseWindow):
             # The user's own settings are what every fresh fit starts from
             mark_ps2d_config_as_base()
 
-            logger.info(f"PS2D params applied: radF1={radF1:.4f}, radF2={radF2:.4f}, max_iter={max_iterations}, max_cluster={max_cluster_size or 'no limit'}")
-            self.update_status(f"PS2D params: radF1={radF1:.3f}, radF2={radF2:.4f}, cluster_size={max_cluster_size or 'no limit'}")
+            logger.info(f"PS2D params applied: radF1={radF1:.4f}, radF2={radF2:.4f}, max_iter={max_iterations}, max_cluster={max_cluster_size}")
+            self.update_status(f"PS2D params: radF1={radF1:.3f}, radF2={radF2:.4f}, cluster_size={max_cluster_size}")
 
             self.update_spectrum_plot()
 
@@ -5741,7 +5727,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     pass
             if hasattr(self, 'expert_max_cluster_spin') and self.expert_max_cluster_spin is not None:
                 try:
-                    ps2d_config.max_cluster_size = cluster_size_from_spin(self.expert_max_cluster_spin.value())
+                    ps2d_config.max_cluster_size = int(self.expert_max_cluster_spin.value())
                 except (ValueError, AttributeError):
                     pass
             if hasattr(self, 'expert_radF1_spin') and self.expert_radF1_spin is not None:

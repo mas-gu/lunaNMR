@@ -246,6 +246,20 @@ class TestTheExpertPanelIsWhatTheFitUses:
         assert (config.nucleus_type, config.radF1, config.max_cluster_size) == ('13C', 0.2, 5)
 
 
+    @staticmethod
+    def _chain(count, spacing=0.02):
+        """`count` peaks in a row along 1H, each touching the next."""
+        return [{'x_ppm': 7.5 + index * spacing, 'y_ppm': 121.0,
+                 'pos_x': 7.5 + index * spacing, 'pos_y': 121.0} for index in range(count)]
+
+    def test_a_number_in_the_panel_is_the_cluster_size_the_integrator_uses(self, expert):
+        expert.expert_max_cluster_spin.setValue(7)
+        expert._on_ps2d_params_apply()
+
+        clusters = expert.integrator.identify_overlap_clusters(self._chain(30))
+        assert max(len(cluster) for cluster in clusters) <= 7
+
+
 class TestCancelStopsTheRunFromCounting:
     """Cancel closes the progress dialog. A fit stops before its next cluster, a detection
     before its next peak. Neither one's results may land, and no second run may start

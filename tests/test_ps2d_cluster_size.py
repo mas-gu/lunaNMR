@@ -30,9 +30,3 @@ def _chain(count, spacing=0.02):
 def test_a_chain_is_split_at_the_cap():
     clusters = VoigtIntegrator().identify_overlap_clusters(_chain(30))
     assert max(len(cluster) for cluster in clusters) <= MAX_CLUSTER_SIZE
-
-
-def test_no_limit_lets_a_chain_grow_to_every_peak():
-    set_ps2d_config('15N').max_cluster_size = None
-    clusters = VoigtIntegrator().identify_overlap_clusters(_chain(30))
-    assert [len(cluster) for cluster in clusters] == [30]
