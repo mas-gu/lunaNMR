@@ -392,7 +392,9 @@ class VoigtIntegrator(BaseIntegrator):
         max_cluster_diameter_x, max_cluster_diameter_y : float
             Maximum spatial extent of cluster (prevents sprawl)
         max_cluster_size : int, optional
-            Maximum peaks per cluster (default from PS2D config)
+            Maximum peaks per cluster (default from PS2D config). None in the config
+            means no limit: the diameter limits are lifted too, so a cluster grows as
+            far as its peaks overlap.
 
         Returns:
         --------
@@ -406,6 +408,8 @@ class VoigtIntegrator(BaseIntegrator):
                 overlap_threshold_y = config.overlap_threshold_y
             if max_cluster_size is None:
                 max_cluster_size = config.max_cluster_size
+        if max_cluster_size is None:
+            max_cluster_diameter_x = max_cluster_diameter_y = float('inf')
 
         # Log overlap threshold values being used for clustering
         config = get_ps2d_config()
@@ -478,7 +482,7 @@ class VoigtIntegrator(BaseIntegrator):
         # Enforce max cluster size by splitting large clusters
         final_clusters = []
         for cluster in clusters:
-            if len(cluster) <= max_cluster_size:
+            if max_cluster_size is None or len(cluster) <= max_cluster_size:
                 final_clusters.append(cluster)
             else:
                 subclusters = self._split_cluster_at_longest_link(
@@ -509,7 +513,7 @@ class VoigtIntegrator(BaseIntegrator):
         overlap_threshold_x, overlap_threshold_y : float, optional
             Overlap radii the links are made with (default from config)
         max_size : int, optional
-            Maximum peaks per cluster (default from config)
+            Maximum peaks per cluster (default from config; None there is no limit)
 
         Returns:
         --------
@@ -523,7 +527,7 @@ class VoigtIntegrator(BaseIntegrator):
         if max_size is None:
             max_size = config.max_cluster_size
 
-        if len(cluster) <= max_size:
+        if max_size is None or len(cluster) <= max_size:
             return [cluster]
 
         links = {}
