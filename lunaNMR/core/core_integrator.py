@@ -365,8 +365,8 @@ class VoigtIntegrator(BaseIntegrator):
     def identify_overlap_clusters(self, all_peaks_context,
                                    overlap_threshold_x=None,
                                    overlap_threshold_y=None,
-                                   max_cluster_diameter_x=0.20,
-                                   max_cluster_diameter_y=1.5,
+                                   max_cluster_diameter_x=0.40,
+                                   max_cluster_diameter_y=3.0,
                                    max_cluster_size=None) -> List[List[Tuple[float, float]]]:
         """
         Identify clusters of overlapping peaks using hierarchical clustering

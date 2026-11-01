@@ -114,7 +114,7 @@ class PS2DConfig:
             'max_drift_f2': 0.005,         # Max 1H drift from original reference (ppm)
 
             # Cluster size limits
-            'max_cluster_size': 10,       # Maximum peaks in overlap group
+            'max_cluster_size': 20,       # Maximum peaks in overlap group
 
             # Levenberg-Marquardt optimizer settings
             'max_iterations': 500,        # Maximum LM iterations per stage
@@ -189,7 +189,7 @@ class PS2DConfig:
             'max_drift_f2': 0.005,        # Max 1H drift from original reference (ppm)
 
             # Cluster size limits
-            'max_cluster_size': 10,       # Maximum peaks in overlap group
+            'max_cluster_size': 20,       # Maximum peaks in overlap group
 
             # Levenberg-Marquardt optimizer settings
             'max_iterations': 500,        # Maximum LM iterations per stage
