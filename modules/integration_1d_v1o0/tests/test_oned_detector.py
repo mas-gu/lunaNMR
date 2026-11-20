@@ -207,3 +207,29 @@ class TestRealSpectrumIntensities:
         heights = [m['height'] for m in matched if m['matched']]
         assert len(heights) == 2
         assert max(heights) / min(heights) > 1.2
+
+
+class TestWidthIsThatOfThePeakAsked:
+    """A taller resonance inside the search range must not lend its width: the window
+    and the drift bound of the weaker peak are both derived from this number."""
+
+    @staticmethod
+    def _weak_beside_tall():
+        from oned_loader import from_arrays
+        from oned_voigt import voigt_1d
+        ppm = np.linspace(5.2, 4.8, 40001)
+        narrow = voigt_1d(ppm, 1.0, 5.000, 0.0006, 0.0, 0.0)      # FWHM 0.0014
+        tall = voigt_1d(ppm, 8.0, 5.012, 0.0017, 0.0, 0.0)        # FWHM 0.0040
+        return from_arrays(narrow + tall, ppm)
+
+    @pytest.mark.parametrize('search', [0.05, 0.01])
+    def test_a_weak_peak_beside_a_tall_one_reports_its_own_width(self, search):
+        from oned_detector import estimate_fwhm
+        fwhm = estimate_fwhm(self._weak_beside_tall(), 5.000, search=search)
+        assert fwhm == pytest.approx(0.0014, abs=0.0002)
+
+    def test_the_tall_peak_still_reports_its_own(self):
+        from oned_detector import estimate_fwhm
+        fwhm = estimate_fwhm(self._weak_beside_tall(), 5.012, search=0.05)
+        assert fwhm == pytest.approx(0.0040, abs=0.0003)
+
