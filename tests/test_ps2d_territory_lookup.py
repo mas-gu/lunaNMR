@@ -4,6 +4,8 @@
 import numpy as np
 
 from lunaNMR.core.core_integrator import VoigtIntegrator
+from lunaNMR.core.ps2d_config import set_ps2d_config
+from test_ps2d_seed_and_bounds_reporting import AMPLITUDE, _integrator as _plane_integrator
 
 
 def _integrator(territories=None):
@@ -41,3 +43,14 @@ def test_one_missing_peak_disables_the_whole_cluster():
     """A peak left on the shared margin can still reach a neighbour that gave up
     room for it, so a partial set is not a weaker guarantee - it is none."""
     assert _integrator(TERRITORIES)._territory_margins_for(['3', 'unseen']) is None
+
+
+def test_a_cluster_with_a_missing_territory_says_so_once(capsys):
+    set_ps2d_config('15N')
+    integrator = _plane_integrator([(121.50, 7.700, AMPLITUDE), (121.50, 7.720, AMPLITUDE)])
+    integrator.titration_pos_margins = {'a': (0.10, 0.008)}
+    integrator.fit_overlap_group_2d([{'x_ppm': 7.700, 'y_ppm': 121.50},
+                                     {'x_ppm': 7.720, 'y_ppm': 121.50}],
+                                    assignment='pair', peak_assignments=['a', 'b'])
+    assert capsys.readouterr().out.count('No tracking territory for b') == 1
+

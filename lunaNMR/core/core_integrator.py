@@ -1241,7 +1241,7 @@ class VoigtIntegrator(BaseIntegrator):
             # One margin per peak, narrow enough that no two peaks of the cluster
             # can reach the same position - so the optimiser cannot put two of
             # them on one maximum, and neither can take the other's identity.
-            pos_margins=self._territory_margins_for(peak_assignments),
+            pos_margins=territories,
             # How much wider than the previous point of the series this peak may be
             # fitted. Bounds the TOTAL FWHM, which is what the volume depends on.
             lw_margins=self._growth_margins_for(peak_assignments)
