@@ -1150,7 +1150,7 @@ class VoigtIntegrator(BaseIntegrator):
                     if local_intensity <= 0:
                         local_intensity = SEED_FLOOR_FRACTION * float(
                             np.max(np.abs(region['intensity'])))
-                initial_intensity = max(local_intensity * 0.8, 100.0)
+                initial_intensity = local_intensity * 0.8
 
             initial_peaks.append({
                 'pos_f1': y_ppm,  # NMRPipe: F1=Y=15N
