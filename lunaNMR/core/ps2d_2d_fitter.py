@@ -405,19 +405,19 @@ class Ps2dMultiPeakFitter2D:
         NPAR_VOIGT = 8
 
         # VECTORIZED: Extract all L/G ratios at once using NumPy indexing
-        # Parameter order: pos_f1(0), lw_lor_f1(1), pos_f2(2), lw_lor_f2(3),
-        #                  lw_gau_f1(4), lw_gau_f2(5), intensity(6), baseline(7)
+        # Parameter order: pos_f1(0), lw_lor_f1(1), lw_gau_f1(2), pos_f2(3),
+        #                  lw_lor_f2(4), lw_gau_f2(5), intensity(6), baseline(7)
         offsets = np.arange(n_peaks) * NPAR_VOIGT
 
-        # F1 dimension (15N/13C): lw_lor_f1 at index 1, lw_gau_f1 at index 4
+        # F1 dimension (15N/13C): lw_lor_f1 at index 1, lw_gau_f1 at index 2
         lw_lor_f1 = params[offsets + 1]
-        lw_gau_f1 = params[offsets + 4]
+        lw_gau_f1 = params[offsets + 2]
         total_f1 = lw_lor_f1 + lw_gau_f1
         # Vectorized L/G ratio with safe division
         lg_ratios_f1 = np.where(total_f1 > 1e-10, lw_lor_f1 / total_f1, 0.5)
 
-        # F2 dimension (1H): lw_lor_f2 at index 3, lw_gau_f2 at index 5
-        lw_lor_f2 = params[offsets + 3]
+        # F2 dimension (1H): lw_lor_f2 at index 4, lw_gau_f2 at index 5
+        lw_lor_f2 = params[offsets + 4]
         lw_gau_f2 = params[offsets + 5]
         total_f2 = lw_lor_f2 + lw_gau_f2
         lg_ratios_f2 = np.where(total_f2 > 1e-10, lw_lor_f2 / total_f2, 0.5)

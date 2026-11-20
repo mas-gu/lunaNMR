@@ -84,6 +84,22 @@ class TestTheTotalIsWhatIsCapped:
         assert np.isfinite(capped).all()
 
 
+class TestTheLorentzianShareIsReadFromTheLinewidthSlots:
+    """Each peak is (pos_f1, lw_lor_f1, lw_gau_f1, pos_f2, lw_lor_f2, lw_gau_f2,
+    intensity, spare) - the layout `_params` builds."""
+
+    def test_peaks_with_one_lorentzian_share_differ_by_nothing(self):
+        params = _params([(0.05, 0.15, 0.004, 0.012), (0.10, 0.30, 0.008, 0.024)])
+        fitter = Ps2dMultiPeakFitter2D(verbose=False)
+        assert fitter._calculate_lg_penalty(params, 2) == pytest.approx(0.0, abs=1e-15)
+
+    def test_peaks_with_different_shares_are_told_apart(self):
+        params = _params([(0.05, 0.15, 0.004, 0.012), (0.15, 0.05, 0.004, 0.012)])
+        fitter = Ps2dMultiPeakFitter2D(verbose=False)
+        # F1 shares 0.25 and 0.75: variance 0.0625; F2 shares equal.
+        assert fitter._calculate_lg_penalty(params, 2) == pytest.approx(0.0625)
+
+
 class TestTheCapReachesTheFitter:
 
     @staticmethod
