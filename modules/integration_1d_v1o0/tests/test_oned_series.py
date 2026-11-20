@@ -236,6 +236,17 @@ class TestWindowRespectsUnpickedNeighbours:
         listed = [r['fit_area'] for r in both if r['assignment'] == 'A'][0]
         assert alone[0]['fit_area'] == pytest.approx(listed, rel=1e-6)
 
+    def test_a_vanished_peak_keeps_its_unpicked_neighbour_out_of_its_window(self):
+        """Once the picked peak is gone, the nearest detected maximum is its neighbour,
+        not the peak itself, and still has to cap the window."""
+        from oned_series import integrate_series
+        table = integrate_series(_conversion_series(),
+                                 [{'assignment': 'substrate', 'position': 8.1752}])
+        assert table[-1]['matched'] is False
+        assert table[-1]['window'] == pytest.approx(table[-2]['window'], rel=0.05)
+        assert abs(table[-1]['area']) < 0.02 * table[0]['area'], (
+            "the vanished peak's region sum is its neighbour's flank")
+
     def test_an_isolated_peak_still_gets_a_linewidth_sized_window(self):
         from oned_loader import from_arrays
         from oned_series import integrate_series
