@@ -335,8 +335,8 @@ class Ps2dMultiPeakFitter2D:
             Print detailed fitting progress
         lg_penalty_weight : float
             Penalty weight for enforcing similar L/G ratios across cluster.
-            Default 10.0 provides gentle guidance (peaks encouraged to similar shapes).
-            Set to 0.0 to disable constraint (unconstrained optimization).
+            Default 0.0 leaves the shapes unconstrained; a positive weight encourages
+            the peaks of a cluster towards similar shapes.
             Only applied when heavy overlap detected.
         constrain_intensity_ratios : bool
             If True, add soft penalty to guide intensity ratios toward measured ratios.
@@ -975,7 +975,8 @@ class Ps2dMultiPeakFitter2D:
             offset = i * NPAR_VOIGT
             peak = initial_peaks[i]
 
-            # F1 position bounds - constrain to ~1 linewidth of movement
+            # F1 position bounds: the peak's own margin, else the shared one (at least
+            # 0.04 x its width)
             # lw_gau holds half the seeded FWHM (core_integrator sets it), so the
             # width is recovered by doubling it.
             fwhm_f1 = 2.0 * peak['lw_gau_f1']
@@ -992,7 +993,7 @@ class Ps2dMultiPeakFitter2D:
             lower_bounds.extend([absolute_min_lw_f1, absolute_min_lw_f1])  # Lor, Gau
             upper_bounds.extend([absolute_max_lw_f1, absolute_max_lw_f1])  # Lor, Gau
 
-            # F2 position bounds - constrain to ~1 linewidth of movement
+            # F2 position bounds, as for F1
             fwhm_f2 = 2.0 * peak['lw_gau_f2']
             if pos_margins is not None:
                 pos_f2_margin = float(pos_margins[i][1])
@@ -1042,7 +1043,6 @@ class Ps2dMultiPeakFitter2D:
         # Bounds intersection: final_bound = max(per_spectrum_bound, absolute_bound)
         # This clips positions to stay within max_drift of original reference.
         if reference_positions and peak_assignments:
-            drift_clipped_count = 0
             for i in range(n_peaks):
                 if i < len(peak_assignments):
                     assignment = peak_assignments[i]
@@ -1068,10 +1068,6 @@ class Ps2dMultiPeakFitter2D:
                         new_upper_f1 = min(current_upper_f1, absolute_upper_f1)
                         new_lower_f2 = max(current_lower_f2, absolute_lower_f2)
                         new_upper_f2 = min(current_upper_f2, absolute_upper_f2)
-
-                        if (new_lower_f1 != current_lower_f1 or new_upper_f1 != current_upper_f1 or
-                            new_lower_f2 != current_lower_f2 or new_upper_f2 != current_upper_f2):
-                            drift_clipped_count += 1
 
                         bounds[0][f1_idx] = new_lower_f1
                         bounds[1][f1_idx] = new_upper_f1
@@ -1100,7 +1096,7 @@ class Ps2dMultiPeakFitter2D:
         # This stage runs whether or not the linewidths are held. It fits linewidths
         # AND INTENSITIES, and skipping it on fix_linewidths throws the intensity fit
         # away with the linewidth fit - a weak peak then carries its initial intensity
-        # GUESS into Stages 2-4 and fails to converge. Measured on a T1 series: the
+        # GUESS into Stages 2 and 3 and fails to converge. Measured on a T1 series: the
         # 2000 ms point, the weakest, dropped from 3 fitted peaks to 2 the moment
         # linewidths were held. fix_linewidths adds the four linewidth parameters to
         # the fixed set instead, which is what fixed_params exists to express.
@@ -1426,13 +1422,9 @@ class Ps2dMultiPeakFitter2D:
 
         # χ² reduction from the initial parameters: 100× is taken as evidence of
         # convergence
-        chi2_reduction_success = False
-        chi2_initial = 0.0
-        chi2_reduction_factor = 0.0
-        if hasattr(self, '_initial_chi2'):
-            chi2_initial = self._initial_chi2
-            chi2_reduction_factor = chi2_initial / info['final_chi2'] if info['final_chi2'] > 0 else 0.0
-            chi2_reduction_success = chi2_reduction_factor > 100
+        chi2_initial = self._initial_chi2
+        chi2_reduction_factor = chi2_initial / info['final_chi2'] if info['final_chi2'] > 0 else 0.0
+        chi2_reduction_success = chi2_reduction_factor > 100
 
         # A cluster of near-noise peaks only (core_integrator.peak_sign) is a LINEAR
         # least-squares problem in their intensities, shapes held, and is solved by the

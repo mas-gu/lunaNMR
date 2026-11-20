@@ -1158,7 +1158,6 @@ class VoigtIntegrator(BaseIntegrator):
                 'lw_lor_f1': lw_lor_f1, 'lw_gau_f1': lw_gau_f1,  # Data-driven
                 'lw_lor_f2': lw_lor_f2, 'lw_gau_f2': lw_gau_f2,  # Data-driven
                 'intensity': initial_intensity,
-                'heavily_overlapping': heavily_overlapping,  # Flag for linewidth estimation strategy
                 'tooclose': tooclose,  # Flag for L/G and intensity constraints
                 'near_noise': sign == 0  # Shape held, intensity of either sign
             })

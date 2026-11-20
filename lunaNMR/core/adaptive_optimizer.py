@@ -21,8 +21,9 @@ Future Improvement:
   Current grid search is optimal for 9 combinations (~1s total).
 
 Usage:
-    optimizer = AdaptiveOptimizer(spectrum_data, noise_level)
-    optimal_params = optimizer.optimize(isolated_peaks, median_lw_f1, median_lw_f2)
+    optimizer = AdaptiveOptimizer(noise_level)
+    optimal_params = optimizer.optimize(isolated_peaks, median_lw_f1, median_lw_f2,
+                                        fit_function)
 """
 
 import numpy as np
@@ -31,6 +32,7 @@ from datetime import datetime
 import multiprocessing as mp
 
 from lunaNMR.utils.cancellation import Cancelled, raise_if_stopped, result_unless_stopped
+from lunaNMR.utils.output_manager import log_warning
 
 
 def _fit_peak_worker(args):
@@ -224,10 +226,10 @@ class AdaptiveOptimizer:
     MIN_PEAKS_FOR_OPTIMIZATION = 10
 
     # Composite score weights
-    WEIGHT_R2 = 0.2  # was 0.4
-    WEIGHT_SNR = 0.6  # was 0.3
-    WEIGHT_POSITION = 0.1  # was 0.2
-    WEIGHT_LINEWIDTH = 0.1  # was 0.1
+    WEIGHT_R2 = 0.2
+    WEIGHT_SNR = 0.6
+    WEIGHT_POSITION = 0.1
+    WEIGHT_LINEWIDTH = 0.1
 
     def __init__(self, noise_level: float, config=None):
         """
@@ -332,6 +334,7 @@ class AdaptiveOptimizer:
         best_score = -np.inf
         best_params = None
         self.search_history = []
+        raised = []
 
         for combo_idx, (mult_f1, mult_f2) in enumerate([(m1, m2) for m1 in self.MULTIPLIERS for m2 in self.MULTIPLIERS]):
             raise_if_stopped(stop)
@@ -340,7 +343,6 @@ class AdaptiveOptimizer:
 
             # Evaluate on training set
             train_scores = []
-            train_failures = 0
             for peak_idx, peak in enumerate(train_peaks):
                 if progress_callback:
                     fits_done = combo_idx * n_fits_per_combo + peak_idx
@@ -354,7 +356,6 @@ class AdaptiveOptimizer:
                 try:
                     result = fit_function(peak, radF1, radF2)
                     if result is None:
-                        train_failures += 1
                         continue
 
                     r_squared = self._extract_r_squared(result)
@@ -364,10 +365,8 @@ class AdaptiveOptimizer:
                             initial_pos=(peak.get('x_ppm'), peak.get('y_ppm'))
                         )
                         train_scores.append(score)
-                    else:
-                        train_failures += 1
-                except Exception:
-                    train_failures += 1
+                except Exception as error:
+                    raised.append(error)
                     continue
 
             if len(train_scores) == 0:
@@ -377,7 +376,6 @@ class AdaptiveOptimizer:
 
             # Evaluate on validation set
             val_scores = []
-            val_failures = 0
             for peak_idx, peak in enumerate(val_peaks):
                 if progress_callback:
                     fits_done = combo_idx * n_fits_per_combo + len(train_peaks) + peak_idx
@@ -391,7 +389,6 @@ class AdaptiveOptimizer:
                 try:
                     result = fit_function(peak, radF1, radF2)
                     if result is None:
-                        val_failures += 1
                         continue
 
                     r_squared = self._extract_r_squared(result)
@@ -401,10 +398,8 @@ class AdaptiveOptimizer:
                             initial_pos=(peak.get('x_ppm'), peak.get('y_ppm'))
                         )
                         val_scores.append(score)
-                    else:
-                        val_failures += 1
-                except Exception:
-                    val_failures += 1
+                except Exception as error:
+                    raised.append(error)
                     continue
 
             if len(val_scores) == 0:
@@ -435,6 +430,10 @@ class AdaptiveOptimizer:
                     'train_score': train_score,
                     'val_score': val_score
                 }
+
+        if raised:
+            log_warning(f"Adaptive search: {len(raised)} fit(s) raised and were skipped "
+                        f"(first: {raised[0]})")
 
         if best_params is None or best_score < 0.6:
             return self._get_fallback_params(median_lw_f1, median_lw_f2, reason="poor_score")
@@ -577,8 +576,7 @@ class AdaptiveOptimizer:
         except Cancelled:
             raise
         except Exception as e:
-            from lunaNMR.utils.output_manager import log_warning
-            log_warning(f"Parallel optimization failed: {e}. Falling back to sequential.")
+            log_warning(f"Parallel optimization failed: {e}. Using the fallback radii.")
             return self._get_fallback_params(median_lw_f1, median_lw_f2, reason="parallel_failed")
 
         # Aggregate results across combinations
@@ -701,9 +699,9 @@ class AdaptiveOptimizer:
         Compute composite fit score for parameter optimization.
 
         Combines multiple metrics to prevent R²-only pathologies:
-        - R² (40%): goodness of fit
-        - Residual SNR (30%): should be ~1.0 (residuals = noise)
-        - Position stability (20%): small shift from initial
+        - R² (20%): goodness of fit
+        - Residual SNR (60%): should be ~1.0 (residuals = noise)
+        - Position stability (10%): small shift from initial
         - Linewidth physicality (10%): not hitting bounds
 
         Parameters
@@ -718,11 +716,11 @@ class AdaptiveOptimizer:
         -------
         float : Composite score in [0, 1]
         """
-        # 1. R² component (40%)
+        # 1. R² component (20%)
         r2 = self._extract_r_squared(result) or 0
         r2_score = max(0, min(1, r2))
 
-        # 2. Residual SNR component (30%)
+        # 2. Residual SNR component (60%)
         # Target: residual_snr ≈ 1.0 (residuals should look like pure noise)
         residuals = result.get('residuals', None)
         if residuals is not None and len(residuals) > 0 and self.noise_level > 0:
@@ -731,7 +729,7 @@ class AdaptiveOptimizer:
         else:
             snr_score = 0.5  # Neutral if can't compute
 
-        # 3. Position stability component (20%)
+        # 3. Position stability component (10%)
         # Penalize large shifts from initial position
         fitted_x = result.get('pos_x') or result.get('pos_f2', initial_pos[0])
         fitted_y = result.get('pos_y') or result.get('pos_f1', initial_pos[1])
