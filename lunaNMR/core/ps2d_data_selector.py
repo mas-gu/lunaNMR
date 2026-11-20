@@ -11,7 +11,8 @@ fixed elliptical window selection.
 1. FIXED integration radius (radF1, radF2) - never changes during fitting
 2. Elliptical boundary test: radius = (F1-pos)²/radF1² + (F2-pos)²/radF2² <= 1.0
 3. Include data points inside ellipse, exclude outside
-4. NO adaptive windows, NO multipliers, NO linewidth-based scaling
+4. NO linewidth-based scaling; the radii grow with the number of peaks in the cluster
+   (scale_by_cluster_size, on by default)
 
 
 - radF1 = 0.6 ppm (indirect dimension, 15N/13C)

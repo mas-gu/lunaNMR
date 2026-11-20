@@ -215,7 +215,7 @@ class PS2DConfig:
         >>> print(config.radF1)  # 0.4
         >>>
         >>> config = PS2DConfig('13C')
-        >>> print(config.radF1)  # 0.12 (scaled for narrower peaks)
+        >>> print(config.radF1)  # 0.15 (scaled for narrower peaks)
         """
         if nucleus_type not in self.NUCLEUS_PARAMS:
             valid_types = ', '.join(self.NUCLEUS_PARAMS.keys())
@@ -268,9 +268,8 @@ class PS2DConfig:
         lines = [f"PS2D Configuration: {self.nucleus_type}"]
         lines.append("-" * 40)
 
-        params = self.NUCLEUS_PARAMS[self.nucleus_type]
-        for key, value in params.items():
-            lines.append(f"  {key:30s} = {value}")
+        for key in self.NUCLEUS_PARAMS[self.nucleus_type]:
+            lines.append(f"  {key:30s} = {getattr(self, key)}")
 
         return "\n".join(lines)
 
@@ -289,7 +288,7 @@ class PS2DConfig:
         >>> params['radF1']
         0.4
         >>> params['gap_threshold_x']  # Computed property
-        0.05
+        0.02
         """
         result = {k: getattr(self, k)
                   for k in self.NUCLEUS_PARAMS[self.nucleus_type].keys()}
@@ -298,23 +297,6 @@ class PS2DConfig:
         result['gap_threshold_y'] = self.gap_threshold_y
 
         return result
-
-    def get_scaling_factor(self) -> float:
-        """
-        Get scaling factor relative to 15N baseline.
-
-        Returns:
-        --------
-        float : 1.0 for 15N, 0.3 for 13C
-
-        Useful for understanding parameter relationships.
-        """
-        if self.nucleus_type == '15N':
-            return 1.0
-        elif self.nucleus_type == '13C':
-            return 0.3 #was 0.3
-        else:
-            return 1.0  # Default to no scaling
 
 
 # Global configuration instance (singleton pattern)
@@ -426,30 +408,6 @@ def applied_ps2d_config(values: Optional[Dict[str, Any]]):
 
 # Convenience functions for parameter access
 
-def get_ellipse_radii() -> tuple:
-    """Get current ellipse radii (radF1, radF2)"""
-    config = get_ps2d_config()
-    return config.radF1, config.radF2
-
-
-def get_overlap_thresholds() -> tuple:
-    """Get current overlap thresholds (x, y)"""
-    config = get_ps2d_config()
-    return config.overlap_threshold_x, config.overlap_threshold_y
-
-
-def get_gap_thresholds() -> tuple:
-    """Get current gap thresholds (x, y)"""
-    config = get_ps2d_config()
-    return config.gap_threshold_x, config.gap_threshold_y
-
-
-def get_min_linewidths() -> tuple:
-    """Get current minimum linewidths (f1, f2)"""
-    config = get_ps2d_config()
-    return config.min_linewidth_f1, config.min_linewidth_f2
-
-
 def distance_in_linewidths(delta_f2, delta_f1):
     """Distance in linewidths of the current nucleus: each dimension's ppm offset over
     its PS2D radius (radF2 in 1H, radF1 in the indirect dimension), so an indirect ppm
@@ -468,10 +426,6 @@ __all__ = [
     'mark_ps2d_config_as_base',
     'restore_base_ps2d_config',
     'applied_ps2d_config',
-    'get_ellipse_radii',
-    'get_overlap_thresholds',
-    'get_gap_thresholds',
-    'get_min_linewidths',
     'distance_in_linewidths',
 ]
 
@@ -496,7 +450,6 @@ if __name__ == "__main__":
     print(f"\nNucleus: {config_13c.nucleus_type}")
     print(f"radF1: {config_13c.radF1}, radF2: {config_13c.radF2}")
     print(f"min_linewidth_f1: {config_13c.min_linewidth_f1}")
-    print(f"Scaling factor: {config_13c.get_scaling_factor()}")
 
     print("\n--- Test 3: Verify Scaling (15N vs 13C) ---")
     config_15n = PS2DConfig('15N')
