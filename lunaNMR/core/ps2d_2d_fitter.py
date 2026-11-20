@@ -732,7 +732,6 @@ class Ps2dMultiPeakFitter2D:
                           spectrum_statistics: Dict = None,
                           reference_positions: Dict = None,
                           peak_assignments: List[str] = None,
-                          noise_level: float = None,
                           pos_margin_f1: float = None,
                           pos_margin_f2: float = None,
                           pos_margins: List[Tuple[float, float]] = None,

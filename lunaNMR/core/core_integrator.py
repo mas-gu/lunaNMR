@@ -1221,8 +1221,6 @@ class VoigtIntegrator(BaseIntegrator):
         spectrum_stats = getattr(self, 'spectrum_statistics', None)
 
         fitter = Ps2dMultiPeakFitter2D(verbose=True)
-        # Get noise level for weak peak detection (robust corner-based estimation)
-        spectrum_noise_level = getattr(self, 'noise_level', None)
         fit_started = time.perf_counter()
         result = fitter.fit_multi_peak_2d(
             region['f1_grid'], region['f2_grid'], normalized_data,
@@ -1233,7 +1231,6 @@ class VoigtIntegrator(BaseIntegrator):
             spectrum_statistics=spectrum_stats,  # PASS1 learned statistics for bounds
             reference_positions=reference_positions,  # Cascade mode absolute drift limits
             peak_assignments=peak_assignments,  # Needed for reference_positions lookup
-            noise_level=spectrum_noise_level,  # For weak peak detection (S/N < 5)
             # Titration tracking: wider per-step position freedom so the fit can
             # follow a moving peak (None = relaxation config defaults).
             pos_margin_f1=getattr(self, 'titration_pos_margin_f1', None),
