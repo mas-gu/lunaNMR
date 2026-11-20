@@ -1150,7 +1150,7 @@ class VoigtIntegrator(BaseIntegrator):
                     if local_intensity <= 0:
                         local_intensity = SEED_FLOOR_FRACTION * float(
                             np.max(np.abs(region['intensity'])))
-                initial_intensity = max(local_intensity * 0.8, 100.0)
+                initial_intensity = local_intensity * 0.8
 
             initial_peaks.append({
                 'pos_f1': y_ppm,  # NMRPipe: F1=Y=15N
@@ -1158,7 +1158,6 @@ class VoigtIntegrator(BaseIntegrator):
                 'lw_lor_f1': lw_lor_f1, 'lw_gau_f1': lw_gau_f1,  # Data-driven
                 'lw_lor_f2': lw_lor_f2, 'lw_gau_f2': lw_gau_f2,  # Data-driven
                 'intensity': initial_intensity,
-                'heavily_overlapping': heavily_overlapping,  # Flag for linewidth estimation strategy
                 'tooclose': tooclose,  # Flag for L/G and intensity constraints
                 'near_noise': sign == 0  # Shape held, intensity of either sign
             })
@@ -1221,8 +1220,6 @@ class VoigtIntegrator(BaseIntegrator):
         spectrum_stats = getattr(self, 'spectrum_statistics', None)
 
         fitter = Ps2dMultiPeakFitter2D(verbose=True)
-        # Get noise level for weak peak detection (robust corner-based estimation)
-        spectrum_noise_level = getattr(self, 'noise_level', None)
         fit_started = time.perf_counter()
         result = fitter.fit_multi_peak_2d(
             region['f1_grid'], region['f2_grid'], normalized_data,
@@ -1233,7 +1230,6 @@ class VoigtIntegrator(BaseIntegrator):
             spectrum_statistics=spectrum_stats,  # PASS1 learned statistics for bounds
             reference_positions=reference_positions,  # Cascade mode absolute drift limits
             peak_assignments=peak_assignments,  # Needed for reference_positions lookup
-            noise_level=spectrum_noise_level,  # For weak peak detection (S/N < 5)
             # Titration tracking: wider per-step position freedom so the fit can
             # follow a moving peak (None = relaxation config defaults).
             pos_margin_f1=getattr(self, 'titration_pos_margin_f1', None),
@@ -1241,7 +1237,7 @@ class VoigtIntegrator(BaseIntegrator):
             # One margin per peak, narrow enough that no two peaks of the cluster
             # can reach the same position - so the optimiser cannot put two of
             # them on one maximum, and neither can take the other's identity.
-            pos_margins=self._territory_margins_for(peak_assignments),
+            pos_margins=territories,
             # How much wider than the previous point of the series this peak may be
             # fitted. Bounds the TOTAL FWHM, which is what the volume depends on.
             lw_margins=self._growth_margins_for(peak_assignments)

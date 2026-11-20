@@ -21,7 +21,8 @@ PARAM_NAMES = ('area', 'center', 'sigma', 'gamma', 'baseline')
 BASELINE_REGION_FACTOR = 5.0
 BASELINE_PERCENTILE = 10.0
 
-# Same thresholds as the rest of LunaNMR so the marker colours agree across viewers.
+# R-squared bands of the 1D fit's label. Fair starts at 0.5 here; the 2D fits' label
+# (quality_categories.fit_quality_label) starts it above 0.6.
 QUALITY_THRESHOLDS = ((0.9, 'Excellent'), (0.8, 'Good'), (0.5, 'Fair'))
 
 

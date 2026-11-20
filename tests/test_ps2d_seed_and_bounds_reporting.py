@@ -78,6 +78,22 @@ def test_a_negative_sample_at_the_picked_point_does_not_decide_the_answer():
         'one bad sample decided the answer instead of the data around it')
 
 
+@pytest.mark.parametrize('scale', [1.0, 1.0e-3])
+def test_the_fit_does_not_depend_on_the_units_the_spectrum_is_stored_in(scale):
+    """A spectrum's intensities are in arbitrary units: the same plane stored a billion
+    times smaller must give the same fit, a billion times smaller."""
+    group = [{'x_ppm': 7.700, 'y_ppm': 121.50}]
+    large = _integrator([(121.50, 7.700, AMPLITUDE)]).fit_overlap_group_2d(
+        group, assignment='large')
+    small = _integrator([(121.50, 7.700, scale)]).fit_overlap_group_2d(
+        group, assignment='small')
+
+    assert large and large['success'] and small and small['success']
+    assert small['peaks'][0]['height'] / scale == pytest.approx(
+        large['peaks'][0]['height'] / AMPLITUDE, rel=1e-3)
+    assert small['r_squared'] == pytest.approx(large['r_squared'], abs=1e-3)
+
+
 def test_a_fit_reports_the_boxes_it_was_confined_to():
     """A fit that stopped on a wall is otherwise indistinguishable from one that found
     a minimum. The intensity is reported as a FRACTION of its interval, not as bounds:

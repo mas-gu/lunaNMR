@@ -335,8 +335,8 @@ class Ps2dMultiPeakFitter2D:
             Print detailed fitting progress
         lg_penalty_weight : float
             Penalty weight for enforcing similar L/G ratios across cluster.
-            Default 10.0 provides gentle guidance (peaks encouraged to similar shapes).
-            Set to 0.0 to disable constraint (unconstrained optimization).
+            Default 0.0 leaves the shapes unconstrained; a positive weight encourages
+            the peaks of a cluster towards similar shapes.
             Only applied when heavy overlap detected.
         constrain_intensity_ratios : bool
             If True, add soft penalty to guide intensity ratios toward measured ratios.
@@ -405,19 +405,19 @@ class Ps2dMultiPeakFitter2D:
         NPAR_VOIGT = 8
 
         # VECTORIZED: Extract all L/G ratios at once using NumPy indexing
-        # Parameter order: pos_f1(0), lw_lor_f1(1), pos_f2(2), lw_lor_f2(3),
-        #                  lw_gau_f1(4), lw_gau_f2(5), intensity(6), baseline(7)
+        # Parameter order: pos_f1(0), lw_lor_f1(1), lw_gau_f1(2), pos_f2(3),
+        #                  lw_lor_f2(4), lw_gau_f2(5), intensity(6), baseline(7)
         offsets = np.arange(n_peaks) * NPAR_VOIGT
 
-        # F1 dimension (15N/13C): lw_lor_f1 at index 1, lw_gau_f1 at index 4
+        # F1 dimension (15N/13C): lw_lor_f1 at index 1, lw_gau_f1 at index 2
         lw_lor_f1 = params[offsets + 1]
-        lw_gau_f1 = params[offsets + 4]
+        lw_gau_f1 = params[offsets + 2]
         total_f1 = lw_lor_f1 + lw_gau_f1
         # Vectorized L/G ratio with safe division
         lg_ratios_f1 = np.where(total_f1 > 1e-10, lw_lor_f1 / total_f1, 0.5)
 
-        # F2 dimension (1H): lw_lor_f2 at index 3, lw_gau_f2 at index 5
-        lw_lor_f2 = params[offsets + 3]
+        # F2 dimension (1H): lw_lor_f2 at index 4, lw_gau_f2 at index 5
+        lw_lor_f2 = params[offsets + 4]
         lw_gau_f2 = params[offsets + 5]
         total_f2 = lw_lor_f2 + lw_gau_f2
         lg_ratios_f2 = np.where(total_f2 > 1e-10, lw_lor_f2 / total_f2, 0.5)
@@ -732,7 +732,6 @@ class Ps2dMultiPeakFitter2D:
                           spectrum_statistics: Dict = None,
                           reference_positions: Dict = None,
                           peak_assignments: List[str] = None,
-                          noise_level: float = None,
                           pos_margin_f1: float = None,
                           pos_margin_f2: float = None,
                           pos_margins: List[Tuple[float, float]] = None,
@@ -976,7 +975,8 @@ class Ps2dMultiPeakFitter2D:
             offset = i * NPAR_VOIGT
             peak = initial_peaks[i]
 
-            # F1 position bounds - constrain to ~1 linewidth of movement
+            # F1 position bounds: the peak's own margin, else the shared one (at least
+            # 0.04 x its width)
             # lw_gau holds half the seeded FWHM (core_integrator sets it), so the
             # width is recovered by doubling it.
             fwhm_f1 = 2.0 * peak['lw_gau_f1']
@@ -993,7 +993,7 @@ class Ps2dMultiPeakFitter2D:
             lower_bounds.extend([absolute_min_lw_f1, absolute_min_lw_f1])  # Lor, Gau
             upper_bounds.extend([absolute_max_lw_f1, absolute_max_lw_f1])  # Lor, Gau
 
-            # F2 position bounds - constrain to ~1 linewidth of movement
+            # F2 position bounds, as for F1
             fwhm_f2 = 2.0 * peak['lw_gau_f2']
             if pos_margins is not None:
                 pos_f2_margin = float(pos_margins[i][1])
@@ -1043,7 +1043,6 @@ class Ps2dMultiPeakFitter2D:
         # Bounds intersection: final_bound = max(per_spectrum_bound, absolute_bound)
         # This clips positions to stay within max_drift of original reference.
         if reference_positions and peak_assignments:
-            drift_clipped_count = 0
             for i in range(n_peaks):
                 if i < len(peak_assignments):
                     assignment = peak_assignments[i]
@@ -1069,10 +1068,6 @@ class Ps2dMultiPeakFitter2D:
                         new_upper_f1 = min(current_upper_f1, absolute_upper_f1)
                         new_lower_f2 = max(current_lower_f2, absolute_lower_f2)
                         new_upper_f2 = min(current_upper_f2, absolute_upper_f2)
-
-                        if (new_lower_f1 != current_lower_f1 or new_upper_f1 != current_upper_f1 or
-                            new_lower_f2 != current_lower_f2 or new_upper_f2 != current_upper_f2):
-                            drift_clipped_count += 1
 
                         bounds[0][f1_idx] = new_lower_f1
                         bounds[1][f1_idx] = new_upper_f1
@@ -1101,7 +1096,7 @@ class Ps2dMultiPeakFitter2D:
         # This stage runs whether or not the linewidths are held. It fits linewidths
         # AND INTENSITIES, and skipping it on fix_linewidths throws the intensity fit
         # away with the linewidth fit - a weak peak then carries its initial intensity
-        # GUESS into Stages 2-4 and fails to converge. Measured on a T1 series: the
+        # GUESS into Stages 2 and 3 and fails to converge. Measured on a T1 series: the
         # 2000 ms point, the weakest, dropped from 3 fitted peaks to 2 the moment
         # linewidths were held. fix_linewidths adds the four linewidth parameters to
         # the fixed set instead, which is what fixed_params exists to express.
@@ -1337,11 +1332,55 @@ class Ps2dMultiPeakFitter2D:
                 params[param_idx] = fixed_value
 
         # Nothing optimises after Stage 3, so a cap that fires from here on leaves the
-        # intensity describing a width the fit no longer has. Tracked and repaired
-        # below rather than at each site, because the intensity-ratio and L/G blocks
-        # in between may move the widths again.
+        # intensity describing a width the fit no longer has. Repaired directly below.
         params, width_capped = cap_linewidth_totals(params, n_peaks,
                                                     lw_caps_f1, lw_caps_f2)
+
+        # Stage 3's verdict, read before the refit below replaces `info`. That refit is
+        # linear in the intensities, so its optimiser leaves through the stagnation exit
+        # and reports no convergence whatever it found (see near_noise_only below).
+        formal_convergence = info['success']
+
+        # FINAL WIDTH CAP: re-derive the intensity, do not freeze it
+        # Narrowing a peak AFTER the last optimisation and leaving `intensity` alone
+        # reports a model nothing fitted: intensity IS the volume, so the volume comes
+        # back unchanged while the height rises to keep the same area in a narrower
+        # profile. Measured on DNAJA1/HSPA8 73LysH: F1 total 0.2670 -> 0.2438, volume
+        # bit-identical at 1.539e9, height +32%, residual 3.0% -> 11.6%.
+        #
+        # So when the cap actually bites, the intensities are refitted against the data
+        # with every position and linewidth held - a well-posed problem, one free
+        # parameter per peak, and the only one left after the widths are decided. A fit
+        # the cap did not touch skips this entirely and stays bit-identical.
+        if width_capped:
+            fixed_intensity_only = {}
+            for i in range(n_peaks):
+                offset = i * NPAR_VOIGT
+                for shift in (0, 1, 2, 3, 4, 5, 7):     # everything but intensity
+                    fixed_intensity_only[offset + shift] = params[offset + shift]
+            try:
+                # `cov` is deliberately NOT replaced. This refit floats one parameter
+                # per peak, so its covariance carries no variance for the positions or
+                # the linewidths, and the errors downstream are computed over the full
+                # parameter block. Keeping Stage 3's covariance means a capped peak's
+                # reported error describes the UNCONSTRAINED fit - it does not know the
+                # width was held - which overstates the freedom rather than inventing
+                # a certainty the constraint did not earn.
+                params, _, info = self.optimizer.fit(
+                    func=model_function,
+                    jacobian=jacobian_function,
+                    x=f1_flat,
+                    y=y_flat_masked,
+                    p0=params,
+                    bounds=bounds,
+                    fixed_params=fixed_intensity_only
+                )
+                total_iterations += info['iterations']
+            except Exception as error:                   # pragma: no cover
+                # A refit that fails leaves the capped widths with the pre-cap
+                # intensity, which is the defect above - so say so rather than
+                # reporting the numbers as if they were fitted together.
+                log_warning(f"intensity refit after the width cap failed: {error}")
 
         # Compute final R² and prepare results
         y_fit_flat = multi_voigt_profile_2d(f1_grid, f2_grid, params, n_peaks).ravel()
@@ -1379,18 +1418,13 @@ class Ps2dMultiPeakFitter2D:
         #
         # Rationale: For very narrow peaks on baseline-heavy regions, R² can be
         # negative even when fitting is excellent (proven by massive χ² reduction).
-        formal_convergence = info['success']
         pragmatic_r2_success = r_squared > 0.2
 
         # χ² reduction from the initial parameters: 100× is taken as evidence of
         # convergence
-        chi2_reduction_success = False
-        chi2_initial = 0.0
-        chi2_reduction_factor = 0.0
-        if hasattr(self, '_initial_chi2'):
-            chi2_initial = self._initial_chi2
-            chi2_reduction_factor = chi2_initial / info['final_chi2'] if info['final_chi2'] > 0 else 0.0
-            chi2_reduction_success = chi2_reduction_factor > 100
+        chi2_initial = self._initial_chi2
+        chi2_reduction_factor = chi2_initial / info['final_chi2'] if info['final_chi2'] > 0 else 0.0
+        chi2_reduction_success = chi2_reduction_factor > 100
 
         # A cluster of near-noise peaks only (core_integrator.peak_sign) is a LINEAR
         # least-squares problem in their intensities, shapes held, and is solved by the
@@ -1403,51 +1437,6 @@ class Ps2dMultiPeakFitter2D:
 
         final_success = (formal_convergence or pragmatic_r2_success or chi2_reduction_success
                          or near_noise_only)
-
-        # FINAL WIDTH CAP: re-derive the intensity, do not freeze it
-        # Narrowing a peak AFTER the last optimisation and leaving `intensity` alone
-        # reports a model nothing fitted: intensity IS the volume, so the volume comes
-        # back unchanged while the height rises to keep the same area in a narrower
-        # profile. Measured on DNAJA1/HSPA8 73LysH: F1 total 0.2670 -> 0.2438, volume
-        # bit-identical at 1.539e9, height +32%, residual 3.0% -> 11.6%.
-        #
-        # So when the cap actually bites, the intensities are refitted against the data
-        # with every position and linewidth held - a well-posed problem, one free
-        # parameter per peak, and the only one left after the widths are decided. A fit
-        # the cap did not touch skips this entirely and stays bit-identical.
-        params, capped = cap_linewidth_totals(params, n_peaks,
-                                              lw_caps_f1, lw_caps_f2)
-        if capped or width_capped:
-            fixed_intensity_only = {}
-            for i in range(n_peaks):
-                offset = i * NPAR_VOIGT
-                for shift in (0, 1, 2, 3, 4, 5, 7):     # everything but intensity
-                    fixed_intensity_only[offset + shift] = params[offset + shift]
-            try:
-                # `cov` is deliberately NOT replaced. This refit floats one parameter
-                # per peak, so its covariance carries no variance for the positions or
-                # the linewidths, and the errors downstream are computed over the full
-                # parameter block. Keeping Stage 3's covariance means a capped peak's
-                # reported error describes the UNCONSTRAINED fit - it does not know the
-                # width was held - which overstates the freedom rather than inventing
-                # a certainty the constraint did not earn.
-                params, _, info = self.optimizer.fit(
-                    func=model_function,
-                    jacobian=jacobian_function,
-                    x=f1_flat,
-                    y=y_flat_masked,
-                    p0=params,
-                    bounds=bounds,
-                    fixed_params=fixed_intensity_only
-                )
-                total_iterations += info['iterations']
-                y_fit_2d = multi_voigt_profile_2d(
-                    f1_grid, f2_grid, params, n_peaks).reshape(f1_grid.shape)
-            except Exception as error:                   # pragma: no cover
-                # A refit that fails leaves the capped widths with the pre-cap
-                # intensity, which is the defect above - so say so rather than
-                # reporting the numbers as if they were fitted together.
-                log_warning(f"intensity refit after the width cap failed: {error}")
 
         # Measured beside the analytic integral, from the same mask the fit used.
         try:

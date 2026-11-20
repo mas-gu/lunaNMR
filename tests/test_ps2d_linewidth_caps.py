@@ -84,6 +84,22 @@ class TestTheTotalIsWhatIsCapped:
         assert np.isfinite(capped).all()
 
 
+class TestTheLorentzianShareIsReadFromTheLinewidthSlots:
+    """Each peak is (pos_f1, lw_lor_f1, lw_gau_f1, pos_f2, lw_lor_f2, lw_gau_f2,
+    intensity, spare) - the layout `_params` builds."""
+
+    def test_peaks_with_one_lorentzian_share_differ_by_nothing(self):
+        params = _params([(0.05, 0.15, 0.004, 0.012), (0.10, 0.30, 0.008, 0.024)])
+        fitter = Ps2dMultiPeakFitter2D(verbose=False)
+        assert fitter._calculate_lg_penalty(params, 2) == pytest.approx(0.0, abs=1e-15)
+
+    def test_peaks_with_different_shares_are_told_apart(self):
+        params = _params([(0.05, 0.15, 0.004, 0.012), (0.15, 0.05, 0.004, 0.012)])
+        fitter = Ps2dMultiPeakFitter2D(verbose=False)
+        # F1 shares 0.25 and 0.75: variance 0.0625; F2 shares equal.
+        assert fitter._calculate_lg_penalty(params, 2) == pytest.approx(0.0625)
+
+
 class TestTheCapReachesTheFitter:
 
     @staticmethod
@@ -196,6 +212,41 @@ class TestCappingReDerivesWhatDependsOnTheWidth:
         assert heightRatio < areaRatio / 2, (
             f'height rose {heightRatio:.1f}x against an area ratio of {areaRatio:.1f}x '
             f'- the intensity was not re-derived')
+
+
+class TestACappedFitIsJudgedOnTheModelItReturns:
+    """The intensities are refitted after the cap narrows a peak, so R-squared and the
+    success it decides must describe that refitted model, not the one before it."""
+
+    @staticmethod
+    def _capped():
+        """Two overlapping peaks, the broad one capped: the refit changes their relative
+        intensities, which a correlation sees (it cannot see one peak rescaled)."""
+        n = 36
+        f1 = np.linspace(119.5, 120.7, n)
+        f2 = np.linspace(7.94, 8.09, n)
+        F2, F1 = np.meshgrid(f2, f1)
+        data = (np.exp(-((F1 - 120.0) / 0.30) ** 2 - ((F2 - 8.0) / 0.040) ** 2)
+                + 0.6 * np.exp(-((F1 - 120.25) / 0.12) ** 2 - ((F2 - 8.035) / 0.015) ** 2))
+        peaks = [{'pos_f1': 120.0, 'lw_lor_f1': 0.03, 'lw_gau_f1': 0.20,
+                  'pos_f2': 8.0, 'lw_lor_f2': 0.005, 'lw_gau_f2': 0.030,
+                  'intensity': 1.0},
+                 {'pos_f1': 120.25, 'lw_lor_f1': 0.03, 'lw_gau_f1': 0.10,
+                  'pos_f2': 8.035, 'lw_lor_f2': 0.005, 'lw_gau_f2': 0.012,
+                  'intensity': 0.6}]
+        fitter = Ps2dMultiPeakFitter2D(verbose=False)
+        return data, fitter.fit_multi_peak_2d(F1, F2, data, peaks,
+                                              lw_margins=[(0.12, 0.018), None])
+
+    def test_r_squared_is_that_of_the_returned_surface(self):
+        data, result = self._capped()
+        correlation = np.corrcoef(data.ravel(), result['fitted_2d'].ravel())[0, 1]
+        assert result['r_squared'] == pytest.approx(correlation ** 2, abs=1e-9)
+
+    def test_the_chi2_reduction_is_measured_to_the_returned_chi2(self):
+        data, result = self._capped()
+        assert result['chi2_reduction_factor'] == pytest.approx(
+            result['chi2_initial'] / result['chi2'])
 
 
 class TestHoldingLinewidthsKeepsTheIntensityFit:

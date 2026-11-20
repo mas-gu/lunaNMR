@@ -5,7 +5,7 @@ PS2D-Style High-Performance Voigt Fitter for LunaNMR
 =====================================================
 
 1. Multi-stage fitting (3 stages, run by ps2d_2d_fitter) - prevents local minima
-2. Relative numerical derivatives (1e-6 step) - handles parameter scales correctly
+2. Relative numerical derivatives (1e-5 step) - handles parameter scales correctly
 3. Additive Levenberg-Marquardt damping - better convergence
 4. Exact Faddeeva-based Voigt profiles - matches  math
 5. Analytical derivatives for intensity - zero numerical error
@@ -73,7 +73,7 @@ LAMBDA_UP = 5.0           # Increase factor on rejection
 LAMBDA_DOWN = 0.2         # Decrease factor on acceptance
 MAX_ITER = 500            # Default max iterations
 CONV_TOL = 1e-4           # Convergence tolerance
-NDONE = 2                 # Must converge for 1 consecutive iteration
+NDONE = 2                 # Accepted steps within CONV_TOL needed to call it converged
 SLOW_PROGRESS_TOL = 1e-5 # Slow progress threshold: Δχ²/χ² < 1e-5 (0.001%)
 SLOW_PROGRESS_LIMIT = 15 # Exit after 15 consecutive slow-progress iterations
 STAGNATION_LIMIT = 150   # Give up after this many consecutive rejected steps
@@ -170,9 +170,9 @@ def multi_voigt_profile_2d(f1: np.ndarray, f2: np.ndarray,
     Parameter mapping :
     - a[0+i*8] = pos_f1
     - a[1+i*8] = lw_lor_f1
-    - a[2+i*8] = pos_f2
-    - a[3+i*8] = lw_lor_f2
-    - a[4+i*8] = lw_gau_f1
+    - a[2+i*8] = lw_gau_f1
+    - a[3+i*8] = pos_f2
+    - a[4+i*8] = lw_lor_f2
     - a[5+i*8] = lw_gau_f2
     - a[6+i*8] = intensity
     - a[7+i*8] = spare (unused)
@@ -240,8 +240,7 @@ def compute_multi_voigt_jacobian_2d(f1: np.ndarray, f2: np.ndarray,
     - 2×n_peaks wofz calls instead of 7×n_peaks
 
     Numerical mode (fallback):
-    - Adaptive step sizing: step = sqrt(eps) × max(|param|, typical_scale)
-    - Parameter-specific scales prevent underflow/overflow
+    - Relative step: param × (DERIV_STEP_MULTIPLIER - 1)
     - Derivative: (f(param+step) - f(param)) / step
     - Intensity: analytical ∂y/∂A = y/A (no numerical error)
     """
@@ -608,7 +607,7 @@ class Ps2dStyleLevenbergMarquardt:
             'iterations': iteration + 1,
             'final_chi2': final_chi2,
             'final_lambda': lam,
-            'message': f'Converged in {iteration+1} iterations' if done_count >= self.ndone else 'Max iterations reached'
+            'message': f'Converged in {iteration+1} iterations' if done_count >= self.ndone else 'Stopped without converging'
         }
 
         return params_final, covariance_final, info

@@ -58,7 +58,13 @@ def estimate_fwhm(spectrum, target, search=0.05):
 
     offset = int(np.argmax(mask))
     segment = data[mask]
-    peak = int(np.argmax(segment))
+    # Uphill from the sample nearest the target, so a taller neighbour inside the
+    # search range is not measured in its place.
+    peak = int(np.argmin(np.abs(ppm[mask] - target)))
+    while peak > 0 and segment[peak - 1] > segment[peak]:
+        peak -= 1
+    while peak < len(segment) - 1 and segment[peak + 1] > segment[peak]:
+        peak += 1
     half = segment[peak] / 2.0
 
     left = peak

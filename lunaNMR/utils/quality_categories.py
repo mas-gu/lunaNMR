@@ -94,9 +94,8 @@ def usable_points(frame, observable):
     columns = ('position_pinned', 'intensity_pinned') if positional else ('intensity_pinned',)
     for column in columns:
         if column in frame:
-            # `== True` and not truthiness: NaN must not read as pinned, and None
-            # must not read as "not pinned" by accident either - both are unknown,
-            # and unknown is kept.
+            # NaN and None are unknown, and unknown is kept: only a recorded flag
+            # drops the row.
             keep &= ~(frame[column].fillna(False).astype(bool))
 
     if positional and 'detection_sigma' in frame:

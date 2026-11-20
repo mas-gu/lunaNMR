@@ -91,7 +91,7 @@ def locate_peaks(spectrum, peaks, track_window=DEFAULT_TRACK_WINDOW_PPM):
                                  window=_drift_limits(spectrum, peaks, track_window))
 
 
-def _windows_for(spectrum, peaks):
+def _windows_for(spectrum, peaks, matches):
     """Measurement half-width per peak, linewidth-driven and clear of its neighbours.
 
     Neighbours are every resonance detected in the spectrum, not only the ones the
@@ -100,13 +100,14 @@ def _windows_for(spectrum, peaks):
     gave a window half again as wide, R2 falling to 0.64, and a fitted area 19% off
     the value obtained when both were picked.
     """
-    detected = [p['ppm'] for p in detect_peaks(spectrum)]
+    detected = detect_peaks(spectrum)
     positions = [float(p['position']) for p in peaks]
 
     windows = []
-    for i, position in enumerate(positions):
-        # the nearest detected maximum is this peak itself, so it is not a neighbour
-        nearby = sorted(detected, key=lambda found: abs(found - position))[1:]
+    for i, (position, match) in enumerate(zip(positions, matches)):
+        # the maximum this peak was matched to is the peak itself; every other one is
+        # a neighbour, and all of them are when the peak was not found
+        nearby = [found['ppm'] for found in detected if found['index'] != match['index']]
         neighbours = positions[:i] + positions[i + 1:] + nearby
         windows.append(estimate_window(spectrum, position, neighbours=neighbours))
 
@@ -135,7 +136,7 @@ def integrate_series(spectra, peaks, names=None, track_window=DEFAULT_TRACK_WIND
     for point, (spectrum, name) in enumerate(zip(spectra, names)):
         rows_before = len(table)
         matched = match_reference_peaks(spectrum, current, window=limits)
-        windows = _windows_for(spectrum, current)
+        windows = _windows_for(spectrum, current, matched)
         scale = spectrum.intensity_scale
 
         for peak, match, window in zip(current, matched, windows):

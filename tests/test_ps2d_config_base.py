@@ -101,3 +101,13 @@ def test_two_identical_runs_give_the_same_series(tmp_path):
                      "--out", str(tmp_path / out)]) == 0
         runs.append(pd.read_csv(tmp_path / out / "series_analysis_tidy.csv"))
     pd.testing.assert_frame_equal(runs[0], runs[1])
+
+
+def test_the_printed_configuration_is_the_one_in_force():
+    """A radius changed on the instance (the expert panel, the adaptive search) is what
+    a fit uses, so it is what printing the configuration must show."""
+    from lunaNMR.core.ps2d_config import PS2DConfig
+
+    config = PS2DConfig('15N')
+    config.radF1 = 0.123
+    assert '0.123' in str(config)
