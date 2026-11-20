@@ -1337,11 +1337,55 @@ class Ps2dMultiPeakFitter2D:
                 params[param_idx] = fixed_value
 
         # Nothing optimises after Stage 3, so a cap that fires from here on leaves the
-        # intensity describing a width the fit no longer has. Tracked and repaired
-        # below rather than at each site, because the intensity-ratio and L/G blocks
-        # in between may move the widths again.
+        # intensity describing a width the fit no longer has. Repaired directly below.
         params, width_capped = cap_linewidth_totals(params, n_peaks,
                                                     lw_caps_f1, lw_caps_f2)
+
+        # Stage 3's verdict, read before the refit below replaces `info`. That refit is
+        # linear in the intensities, so its optimiser leaves through the stagnation exit
+        # and reports no convergence whatever it found (see near_noise_only below).
+        formal_convergence = info['success']
+
+        # FINAL WIDTH CAP: re-derive the intensity, do not freeze it
+        # Narrowing a peak AFTER the last optimisation and leaving `intensity` alone
+        # reports a model nothing fitted: intensity IS the volume, so the volume comes
+        # back unchanged while the height rises to keep the same area in a narrower
+        # profile. Measured on DNAJA1/HSPA8 73LysH: F1 total 0.2670 -> 0.2438, volume
+        # bit-identical at 1.539e9, height +32%, residual 3.0% -> 11.6%.
+        #
+        # So when the cap actually bites, the intensities are refitted against the data
+        # with every position and linewidth held - a well-posed problem, one free
+        # parameter per peak, and the only one left after the widths are decided. A fit
+        # the cap did not touch skips this entirely and stays bit-identical.
+        if width_capped:
+            fixed_intensity_only = {}
+            for i in range(n_peaks):
+                offset = i * NPAR_VOIGT
+                for shift in (0, 1, 2, 3, 4, 5, 7):     # everything but intensity
+                    fixed_intensity_only[offset + shift] = params[offset + shift]
+            try:
+                # `cov` is deliberately NOT replaced. This refit floats one parameter
+                # per peak, so its covariance carries no variance for the positions or
+                # the linewidths, and the errors downstream are computed over the full
+                # parameter block. Keeping Stage 3's covariance means a capped peak's
+                # reported error describes the UNCONSTRAINED fit - it does not know the
+                # width was held - which overstates the freedom rather than inventing
+                # a certainty the constraint did not earn.
+                params, _, info = self.optimizer.fit(
+                    func=model_function,
+                    jacobian=jacobian_function,
+                    x=f1_flat,
+                    y=y_flat_masked,
+                    p0=params,
+                    bounds=bounds,
+                    fixed_params=fixed_intensity_only
+                )
+                total_iterations += info['iterations']
+            except Exception as error:                   # pragma: no cover
+                # A refit that fails leaves the capped widths with the pre-cap
+                # intensity, which is the defect above - so say so rather than
+                # reporting the numbers as if they were fitted together.
+                log_warning(f"intensity refit after the width cap failed: {error}")
 
         # Compute final R² and prepare results
         y_fit_flat = multi_voigt_profile_2d(f1_grid, f2_grid, params, n_peaks).ravel()
@@ -1379,7 +1423,6 @@ class Ps2dMultiPeakFitter2D:
         #
         # Rationale: For very narrow peaks on baseline-heavy regions, R² can be
         # negative even when fitting is excellent (proven by massive χ² reduction).
-        formal_convergence = info['success']
         pragmatic_r2_success = r_squared > 0.2
 
         # χ² reduction from the initial parameters: 100× is taken as evidence of
@@ -1403,51 +1446,6 @@ class Ps2dMultiPeakFitter2D:
 
         final_success = (formal_convergence or pragmatic_r2_success or chi2_reduction_success
                          or near_noise_only)
-
-        # FINAL WIDTH CAP: re-derive the intensity, do not freeze it
-        # Narrowing a peak AFTER the last optimisation and leaving `intensity` alone
-        # reports a model nothing fitted: intensity IS the volume, so the volume comes
-        # back unchanged while the height rises to keep the same area in a narrower
-        # profile. Measured on DNAJA1/HSPA8 73LysH: F1 total 0.2670 -> 0.2438, volume
-        # bit-identical at 1.539e9, height +32%, residual 3.0% -> 11.6%.
-        #
-        # So when the cap actually bites, the intensities are refitted against the data
-        # with every position and linewidth held - a well-posed problem, one free
-        # parameter per peak, and the only one left after the widths are decided. A fit
-        # the cap did not touch skips this entirely and stays bit-identical.
-        params, capped = cap_linewidth_totals(params, n_peaks,
-                                              lw_caps_f1, lw_caps_f2)
-        if capped or width_capped:
-            fixed_intensity_only = {}
-            for i in range(n_peaks):
-                offset = i * NPAR_VOIGT
-                for shift in (0, 1, 2, 3, 4, 5, 7):     # everything but intensity
-                    fixed_intensity_only[offset + shift] = params[offset + shift]
-            try:
-                # `cov` is deliberately NOT replaced. This refit floats one parameter
-                # per peak, so its covariance carries no variance for the positions or
-                # the linewidths, and the errors downstream are computed over the full
-                # parameter block. Keeping Stage 3's covariance means a capped peak's
-                # reported error describes the UNCONSTRAINED fit - it does not know the
-                # width was held - which overstates the freedom rather than inventing
-                # a certainty the constraint did not earn.
-                params, _, info = self.optimizer.fit(
-                    func=model_function,
-                    jacobian=jacobian_function,
-                    x=f1_flat,
-                    y=y_flat_masked,
-                    p0=params,
-                    bounds=bounds,
-                    fixed_params=fixed_intensity_only
-                )
-                total_iterations += info['iterations']
-                y_fit_2d = multi_voigt_profile_2d(
-                    f1_grid, f2_grid, params, n_peaks).reshape(f1_grid.shape)
-            except Exception as error:                   # pragma: no cover
-                # A refit that fails leaves the capped widths with the pre-cap
-                # intensity, which is the defect above - so say so rather than
-                # reporting the numbers as if they were fitted together.
-                log_warning(f"intensity refit after the width cap failed: {error}")
 
         # Measured beside the analytic integral, from the same mask the fit used.
         try:
