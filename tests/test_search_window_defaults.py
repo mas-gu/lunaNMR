@@ -145,7 +145,9 @@ def test_the_parameter_manager_starts_at_the_default():
 
 
 def test_the_preflight_check_matches_the_default():
-    """spectra_check keeps its own literal so that `diagnose` does not import lunaNMR.core.
-    Its registration is a 15N check."""
-    from lunaNMR.validation.spectra_check import SEARCH_WINDOW
-    assert SEARCH_WINDOW == _default('15N')
+    """`diagnose` reads the window of the spectrum's nucleus from the PS2D config."""
+    from lunaNMR.validation.spectra_check import search_window
+    spectrum = Path(__file__).resolve().parents[1] / "data_example" / "2DHSQC" / "600_T1_0o0.ft"
+    if not spectrum.exists():
+        pytest.skip("data_example/2DHSQC not present")
+    assert search_window(spectrum) == _default('15N')

@@ -189,24 +189,8 @@ class InPlaceAdvancedNMRIntegrator:
             x_center = (x_min + x_max) / 2.0
             y_center = (y_min + y_max) / 2.0
 
-            # Priority 1: Classic 15N-HSQC (amide region)
-            # X: 5-12 ppm (amide protons), Y: 100-140 ppm (backbone/sidechain nitrogens)
-            if (5 <= x_center <= 12) and (100 <= y_center <= 140):
-                return '15N'
-
-            # Priority 2: Classic 13C-HSQC (aliphatic region)
-            # X: -2 to 5 ppm (aliphatic CH), Y: 0-80 ppm (aliphatic carbons)
-            if (-2 <= x_center <= 5) and (0 <= y_center <= 80):
-                return '13C'
-
-            # Priority 3: Edge cases based on Y-dimension
-            if y_center < 90:  # 13C aliphatic likely
-                return '13C'
-            if y_center > 95:  # 15N backbone likely
-                return '15N'
-
-            # Cannot determine with confidence
-            return None
+            from lunaNMR.core.ps2d_config import nucleus_of_spectral_window
+            return nucleus_of_spectral_window(x_center, y_center)
 
         except Exception as e:
             log_warning(f"Error during nucleus auto-detection: {e}")
