@@ -28,6 +28,7 @@ def _peak(assignment, height, position_pinned=False, intensity_pinned=False):
 def _write_matrices(tmp_path):
     p = MultiSpectrumProcessor.__new__(MultiSpectrumProcessor)
     p.output_folder = str(tmp_path)
+    p.dummy_peaks = pd.DataFrame()
     p.reference_peaks = pd.DataFrame({
         'Assignment': ['Healthy', 'Decayed', 'PosPinned', 'IntPinned', 'Legacy'],
         'Position_X': [8.0] * 5, 'Position_Y': [120.0] * 5})
@@ -96,6 +97,7 @@ def test_every_output_the_series_summary_names_is_written(tmp_path):
     _write_matrices(tmp_path)
     p = MultiSpectrumProcessor.__new__(MultiSpectrumProcessor)
     p.output_folder = str(tmp_path)
+    p.dummy_peaks = pd.DataFrame()
     p.reference_peaks = pd.DataFrame({'Assignment': ['A'], 'Position_X': [8.0],
                                       'Position_Y': [120.0]})
     p._create_detection_matrix(p._create_peak_tracking_table(
@@ -109,6 +111,7 @@ def test_every_output_the_series_summary_names_is_written(tmp_path):
 def _tracking_csv(tmp_path, pinned_peak):
     p = MultiSpectrumProcessor.__new__(MultiSpectrumProcessor)
     p.output_folder = str(tmp_path)
+    p.dummy_peaks = pd.DataFrame()
     p.reference_peaks = pd.DataFrame({'Assignment': ['Healthy', 'Pinned'],
                                       'Position_X': [8.0, 8.5], 'Position_Y': [120.0, 121.0]})
     batch = {'results': {

@@ -38,9 +38,20 @@ from lunaNMR.gui.styles.design_system import (
     # Spacing
     SPACING_XS, SPACING_SM, BUTTON_WIDTH_ICON, FONT_SIZE_SECTION_LABEL, FONT_SIZE_BODY, FONT_SIZE_SMALL
 )
-from lunaNMR.gui.styles.quality_colors import navigator_row_display, peak_quality_label
+from lunaNMR.gui.styles.quality_colors import (
+    navigator_row_display, peak_quality_label, quality_symbol
+)
 
 logger = logging.getLogger(__name__)
+
+
+def quality_legend() -> str:
+    """The legend under a navigator: each quality label beside the symbol its rows carry."""
+    labels_of = {}
+    for label in ('Excellent', 'Good', 'Fair', 'Poor', 'Failed'):
+        labels_of.setdefault(quality_symbol(label), []).append(label)
+    return "Quality: " + "  ".join(f"{symbol} {' / '.join(labels)}"
+                                   for symbol, labels in labels_of.items())
 
 
 class PeakNavigator(QWidget):
@@ -168,7 +179,7 @@ class PeakNavigator(QWidget):
         layout.addWidget(self.status_label)
 
         # Quality legend
-        legend = QLabel("Quality: ✅ R²≥0.85  🟠 R²<0.85  ❌ Failed")
+        legend = QLabel(quality_legend())
         legend_font = QFont()
         legend_font.setPointSize(FONT_SIZE_SMALL)
         legend.setFont(legend_font)

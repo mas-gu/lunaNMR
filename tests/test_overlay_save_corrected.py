@@ -178,6 +178,30 @@ class TestRefitFlags:
         assert math.isclose(row['3_SNR'], sigma, rel_tol=1e-9)
 
 
+class TestRefitLinewidths:
+    def test_a_refit_saves_the_total_linewidth_as_the_series_does(self, titration):
+        """LW_X / LW_Y of a series are Lorentzian + Gaussian FWHM per dimension."""
+        folder, viewer = titration
+        idx = _spectrum_index(viewer, '2D_DNAJA1_HSPA8_3o0.ft')
+        viewer._load_spectrum_data(viewer.spectra[idx])
+        integ = viewer.spectra[idx]['integrator']
+        fit, fitted = integ.fit_overlap_group_2d, []
+
+        def recording_fit(*args, **kwargs):
+            fitted.append(fit(*args, **kwargs))
+            return fitted[-1]
+        integ.fit_overlap_group_2d = recording_fit
+        _refit_in_place(viewer, idx, '42GlyH')
+        fp = next(p for p in fitted[-1]['peaks'] if p['assignment'] == '42GlyH')
+        assert fp['lw_lor_f2'] > 0 and fp['lw_lor_f1'] > 0
+        viewer._on_save_corrected()
+
+        tracking = pd.read_csv(folder / "comprehensive_peak_tracking.csv")
+        row = tracking[tracking['Assignment'] == '42GlyH'].iloc[0]
+        assert math.isclose(row['3_LW_X'], fp['lw_lor_f2'] + fp['lw_gau_f2'], rel_tol=1e-9)
+        assert math.isclose(row['3_LW_Y'], fp['lw_lor_f1'] + fp['lw_gau_f1'], rel_tol=1e-9)
+
+
 def _metadata(folder):
     return json.loads((folder / "series_metadata.json").read_text())
 
@@ -228,8 +252,8 @@ class TestRefitFitsAsTheSeriesDid:
             other.deleteLater()
 
     def test_a_refit_keeps_the_linewidth_caps_of_its_point(self, titration):
-        """Caps are (max total F1, max total F2); lw_y/lw_x are the Gaussian parts,
-        which a capped total bounds. Uncapped, 42GlyH at 3 eq fits 0.135/0.031 ppm."""
+        """Caps are (max total F1, max total F2); lw_y/lw_x are the totals.
+        Uncapped, the Gaussian parts of 42GlyH at 3 eq fit 0.135/0.031 ppm."""
         folder, viewer = titration
         caps = (0.12, 0.028)
 

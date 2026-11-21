@@ -25,10 +25,6 @@ from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import numpy as np
 
-# ppm, the detection default (1H, 15N). Must equal ps2d_config.SEARCH_WINDOW_PPM and the
-# 15N search_window_f1: a literal, because importing lunaNMR.core pulls PySide6 into this
-# light module
-SEARCH_WINDOW = (0.070, 0.3)
 _STRONG_SNR = 20.0             # peaks this far above noise carry the intensity comparisons
 _DETECT_SNR = 10.0             # a local maximum this far above noise counts as detected
 _DECAYED_FRACTION = 0.10       # this many peaks under the detection threshold = decay setting in
@@ -51,6 +47,20 @@ def _read(path):
     return (dic, data,
             ng.pipe.make_uc(dic, data, dim=0),
             ng.pipe.make_uc(dic, data, dim=1))
+
+
+def _window_of(ux, uy) -> Tuple[float, float]:
+    from lunaNMR.core.ps2d_config import PS2DConfig, nucleus_of_spectral_window
+    nucleus = nucleus_of_spectral_window(sum(ux.ppm_limits()) / 2.0, sum(uy.ppm_limits()) / 2.0)
+    config = PS2DConfig(nucleus or '15N')
+    return config.search_window_f2, config.search_window_f1
+
+
+def search_window(path) -> Tuple[float, float]:
+    """(1H, indirect) window in ppm the pipeline searches a listed peak in on this
+    spectrum: its nucleus's, from the PS2D config; 15N's when the axes name no nucleus."""
+    _, _, uy, ux = _read(path)
+    return _window_of(ux, uy)
 
 
 def estimate_noise(data: np.ndarray) -> float:
@@ -123,15 +133,16 @@ def _capture(path, peaks) -> Dict:
     iy, ix = np.where(local)
     found_y = np.array([uy.ppm(i) for i in iy])
     found_x = np.array([ux.ppm(i) for i in ix])
+    window = _window_of(ux, uy)
     captured = sum(1 for _, x, y in peaks
-                   if ((np.abs(found_x - x) <= SEARCH_WINDOW[0])
-                       & (np.abs(found_y - y) <= SEARCH_WINDOW[1])).any())
+                   if ((np.abs(found_x - x) <= window[0])
+                       & (np.abs(found_y - y) <= window[1])).any())
     snr = np.array([_box_max(magnitude, uy(y, 'ppm'), ux(x, 'ppm')) / noise
                     for _, x, y in peaks])
     outside = [name for (name, _, _), v in zip(peaks, snr) if np.isnan(v)]
     return dict(captured=captured, n_peaks=len(peaks), noise=noise,
                 median_snr=float(np.nanmedian(snr)) if len(outside) < len(peaks) else 0.0,
-                weak=int((snr < _DETECT_SNR).sum()), outside=outside)
+                weak=int((snr < _DETECT_SNR).sum()), outside=outside, window=window)
 
 
 # ------------------------------------------------------------------- peaks and delays
@@ -338,12 +349,13 @@ def check_experiment(spectra_dir, peaks_path, *, quick: bool = False,
                 f'{name}: {len(cap["outside"])} listed peak(s) lie outside the spectral '
                 f'window and were not measured ({", ".join(cap["outside"])}) — folded, '
                 f'or from a different experiment'))
-        offset = max(abs(dx) / SEARCH_WINDOW[0], abs(dy) / SEARCH_WINDOW[1])
+        window = cap['window']
+        offset = max(abs(dx) / window[0], abs(dy) / window[1])
         if offset > 0.5:
             result['findings'].append(Finding(
                 'FAIL', 'registration',
                 f'{name}: peak list off by ({dx:+.4f}, {dy:+.3f}) ppm = {offset:.1f}x the '
-                f'{SEARCH_WINDOW[0]}/{SEARCH_WINDOW[1]} ppm window — wrong list for these spectra'))
+                f'{window[0]}/{window[1]} ppm window — wrong list for these spectra'))
         elif offset > 0.15:
             result['findings'].append(Finding(
                 'WARN', 'registration',

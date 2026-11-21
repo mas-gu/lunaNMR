@@ -94,7 +94,7 @@ Examples:
 
         parser.add_argument(
             '--preset',
-            choices=['15N1H', '13C1H', '1H', 'conservative', 'aggressive', 'high_throughput'],
+            choices=['15N1H', '13C1H', '1H', 'conservative', 'aggressive'],
             help='Use a preset configuration optimized for specific conditions'
         )
 
@@ -116,8 +116,7 @@ Examples:
         parser.add_argument(
             '--log-level',
             choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-            default='INFO',
-            help='Set logging level (default: INFO)'
+            help="Set logging level (default: the configuration's, INFO unless a --config file sets it)"
         )
 
         parser.add_argument(
@@ -136,8 +135,8 @@ Examples:
         parser.add_argument(
             '--extensions',
             nargs='+',
-            default=['.ft2', '.ft', '.pipe', '.ucsf', '.nmrpipe'],
-            help='File extensions to process (default: .ft2 .ft .pipe .ucsf .nmrpipe)'
+            help="File extensions to process (default: the configuration's, "
+                 ".ft2 .ft .pipe .ucsf .nmrpipe unless a --config file sets them)"
         )
 
         parser.add_argument(
@@ -187,7 +186,7 @@ Examples:
 
         return parser
 
-    def validate_arguments(self, args: argparse.Namespace) -> bool:
+    def validate_arguments(self, args: argparse.Namespace) -> int:
         """
         Validate command line arguments.
 
@@ -195,33 +194,36 @@ Examples:
             args: Parsed command line arguments
 
         Returns:
-            True if arguments are valid, False otherwise
+            0 if the arguments are valid, 2 for a combination of flags batch refuses,
+            1 for a folder or configuration file that does not exist
         """
         if args.quiet and args.verbose:
-            print("Error: --quiet and --verbose options are mutually exclusive")
-            return False
+            return self._refuse("--quiet and --verbose options are mutually exclusive", 2)
 
         if args.skip_errors and args.strict:
-            print("Error: --skip-errors and --strict options are mutually exclusive")
-            return False
+            return self._refuse("--skip-errors and --strict options are mutually exclusive", 2)
 
         if args.preset and args.config:
-            print("Error: --preset and --config options are mutually exclusive")
-            return False
+            return self._refuse("--preset and --config options are mutually exclusive", 2)
 
         if not args.create_examples and not args.list_presets and not args.folder:
-            print("Error: folder argument is required unless using --create-examples or --list-presets")
-            return False
+            return self._refuse(
+                "folder argument is required unless using --create-examples or --list-presets", 2)
 
         if args.folder and not Path(args.folder).exists():
-            print(f"Error: Folder '{args.folder}' does not exist")
-            return False
+            return self._refuse(f"Folder '{args.folder}' does not exist", 1)
 
         if args.config and not Path(args.config).exists():
-            print(f"Error: Configuration file '{args.config}' does not exist")
-            return False
+            return self._refuse(f"Configuration file '{args.config}' does not exist", 1)
 
-        return True
+        return 0
+
+    def _refuse(self, reason: str, exit_code: int) -> int:
+        """Print why the command line is refused, keep the reason for a caller that
+        reports it as data, and return the exit code of the refusal."""
+        self.last_error = reason
+        print(f"Error: {reason}")
+        return exit_code
 
     def setup_logging(self, args: argparse.Namespace):
         """
@@ -235,7 +237,7 @@ Examples:
         elif args.verbose:
             console_level = logging.DEBUG
         else:
-            console_level = getattr(logging, args.log_level)
+            console_level = getattr(logging, args.log_level or 'INFO')
 
         # Console handler
         console_handler = logging.StreamHandler(sys.stdout)
@@ -290,9 +292,13 @@ Examples:
         elif args.strict:
             config['processing']['skip_on_error'] = False
 
-        # Logging configuration
-        config['logging']['level'] = args.log_level
-        config['logging']['detailed_logging'] = args.verbose
+        # The console level of the processing log: the flags', else the configuration's
+        if args.quiet:
+            config['logging']['level'] = 'ERROR'
+        elif args.verbose:
+            config['logging']['level'] = 'DEBUG'
+        elif args.log_level:
+            config['logging']['level'] = args.log_level
 
         return config
 
@@ -440,7 +446,8 @@ Examples:
             argv: Optional command line arguments (uses sys.argv if None)
 
         Returns:
-            Exit code (0 for success, 1 for error)
+            Exit code (0 for success, 1 for a failed run or a path that does not exist,
+            2 for a command line batch refuses)
         """
         with self._process_state_restored():
             return self._run(argv)
@@ -490,13 +497,15 @@ Examples:
             argv: Optional command line arguments (uses sys.argv if None)
 
         Returns:
-            Exit code (0 for success, 1 for error)
+            Exit code (0 for success, 1 for a failed run or a path that does not exist,
+            2 for a command line batch refuses)
         """
         parser = self.create_parser()
         args = parser.parse_args(argv)
 
-        if not self.validate_arguments(args):
-            return 1
+        refusal = self.validate_arguments(args)
+        if refusal:
+            return refusal
 
         self.setup_logging(args)
 

@@ -273,6 +273,12 @@ class FitViewer(QMainWindow):
         self.t2_checkbox.stateChanged.connect(self._update_max_residues)
         type_layout.addWidget(self.t2_checkbox)
 
+        # Ticked when T1rho fits are loaded (_update_field_controls)
+        self.t1rho_checkbox = QCheckBox("T1ρ")
+        self.t1rho_checkbox.setFont(get_font(FONT_SIZE_BODY))
+        self.t1rho_checkbox.stateChanged.connect(self._update_max_residues)
+        type_layout.addWidget(self.t1rho_checkbox)
+
         scroll_layout.addWidget(type_section)
 
         # === Residue Selection ===
@@ -410,6 +416,14 @@ class FitViewer(QMainWindow):
     # be absent): the viewer files it under <field>_<experiment>, e.g. 'field1_T1'.
     _DATA_KEY = re.compile(r'(field\d+_(?:T1rho|T1|T2))_fit_data$')
 
+    # The experiments a data key ends with, in the order their panels are drawn
+    _EXPERIMENTS = ("T1", "T2", "T1rho")
+
+    def _shown_experiments(self):
+        """The experiments whose Measurement Type box is ticked."""
+        boxes = {"T1": self.t1_checkbox, "T2": self.t2_checkbox, "T1rho": self.t1rho_checkbox}
+        return [exp for exp in self._EXPERIMENTS if boxes[exp].isChecked()]
+
     @classmethod
     def _data_key(cls, json_file):
         """The <field>_<experiment> a fit JSON holds, read off the end of its name."""
@@ -504,6 +518,8 @@ class FitViewer(QMainWindow):
             self.field2_radio.setChecked(True)
             self.field_mode = "field2"
 
+        self.t1rho_checkbox.setChecked(any(key.endswith('_T1rho') for key in self.data))
+
     def _populate_residue_list(self):
         """Populate the residue selection list"""
         self.residue_list.clear()
@@ -543,7 +559,7 @@ class FitViewer(QMainWindow):
 
     def _display_residue(self, residue: str):
         """Display the selected residue's fit data"""
-        if not self.t1_checkbox.isChecked() and not self.t2_checkbox.isChecked():
+        if not self._shown_experiments():
             return
 
         self._generate_plots([residue])
@@ -571,7 +587,7 @@ class FitViewer(QMainWindow):
 
         # Auto-update current plot
         current_item = self.residue_list.currentItem()
-        if current_item and (self.t1_checkbox.isChecked() or self.t2_checkbox.isChecked()):
+        if current_item and self._shown_experiments():
             residue = current_item.data(Qt.UserRole)
             if residue:
                 self._display_residue(residue)
@@ -716,7 +732,9 @@ class FitViewer(QMainWindow):
                 # Convert field_key to data_key format (e.g., 'field1_t1' -> 'field1_T1')
                 parts = field_key.split('_')
                 if len(parts) >= 2:
-                    data_key = f"{parts[0]}_{parts[1].upper()}"
+                    experiment = next((exp for exp in self._EXPERIMENTS
+                                       if exp.lower() == parts[1].lower()), parts[1].upper())
+                    data_key = f"{parts[0]}_{experiment}"
                     series_to_data_key[series_name] = data_key
 
         if len(available_series) == 0:
@@ -779,10 +797,7 @@ class FitViewer(QMainWindow):
 
         plots = []
         for residue in sorted(residues, key=self._residue_sort_key):
-            if self.t1_checkbox.isChecked():
-                plots.append((residue, "T1"))
-            if self.t2_checkbox.isChecked():
-                plots.append((residue, "T2"))
+            plots.extend((residue, exp) for exp in self._shown_experiments())
 
         n_plots = len(plots)
         if n_plots == 0:
@@ -1024,11 +1039,7 @@ class FitViewer(QMainWindow):
     def _currently_visible_data_keys(self):
         """The (field, meas_type) data_keys actually shown on screen."""
         fields = ["field1", "field2"] if self.field_mode == "overlay" else [self.field_mode]
-        keys = []
-        if self.t1_checkbox.isChecked():
-            keys.extend(f"{f}_T1" for f in fields)
-        if self.t2_checkbox.isChecked():
-            keys.extend(f"{f}_T2" for f in fields)
+        keys = [f"{f}_{exp}" for exp in self._shown_experiments() for f in fields]
         return [k for k in keys if k in self.data]
 
     def _find_tsv_for(self, data_key):

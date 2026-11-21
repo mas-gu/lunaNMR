@@ -12,6 +12,7 @@ Built with PySide6 (Qt) following LunaNMR v1.0 Style Guide
 for cross-platform compatibility (macOS, Windows, Linux)
 """
 
+import json
 import os
 import sys
 import glob
@@ -60,14 +61,14 @@ from workers import (
     IntegratedAnalysisWorker, IntegratedAnalysisParams
 )
 from dynamiXs_T1_T2.delay_units import (
-    TIME_UNITS_DEFAULT, resolve_time_units, series_sidecar
+    MS_TO_UNITS, TIME_UNITS_DEFAULT, resolve_time_units, series_sidecar
 )
 from dynamiXs_T1_T2.series_inputs import tidy_table_refusal
+from dynamiXs_integrated.data_converters import hetnoe_plane
 
-# The delay units a page can state for its series, and the factor turning ms into each:
+# The delay units a page can state for its series. MS_TO_UNITS turns ms into each:
 # the initial-guess fields are in ms, the fitters work in the series' own units.
 DELAY_UNITS = ('ms', 's', 'us')
-MS_TO_UNITS = {'ms': 1.0, 's': 1e-3, 'us': 1e3}
 
 # The intensity a page fits, its series column, and the series matrix that holds it.
 OBSERVABLES = (('Height', 'height', 'peak_intensity_matrix.csv'),
@@ -796,6 +797,8 @@ class T1T2FittingPage(BasePage):
     def __init__(self, main_window: DynamiXsMainWindow):
         super().__init__(main_window, "T1/T2 Fitting Analysis")
         self.worker = None
+        # The (field, experiment) fits an "All" selection has still to start
+        self._fits_waiting = []
         self._init_session_state()
         self._init_file_vars()
         self._setup_content()
@@ -1539,24 +1542,27 @@ class T1T2FittingPage(BasePage):
 
         if selection.startswith("Field 1"):
             field_name = "field1"
-            field_freq = self.field1_freq_spin.value()
         else:
             field_name = "field2"
-            field_freq = self.field2_freq_spin.value()
 
         if "All" in selection:
-            self._run_all_analyses(field_name)
+            fields = ("field1", "field2") if selection.startswith("Both") else (field_name,)
+            self._run_all_analyses(fields)
             return
 
         if "T1ρ" in selection:
             exp_type = "T1rho"
-            data_field_key = f"{field_name}_t1rho"
         elif "T2" in selection:
             exp_type = "T2"
-            data_field_key = f"{field_name}_t2"
         else:  # T1
             exp_type = "T1"
-            data_field_key = f"{field_name}_t1"
+        self._start_fit(field_name, exp_type)
+
+    def _start_fit(self, field_name: str, exp_type: str) -> bool:
+        """Start the fit of one experiment (T1, T2 or T1rho) of one field. False when it
+        was refused, the reason shown."""
+        field_freq = getattr(self, f"{field_name}_freq_spin").value()
+        data_field_key = f"{field_name}_{exp_type.lower()}"
 
         # Try to get data from memory (series) first, then fall back to file path
         input_df = None
@@ -1577,12 +1583,12 @@ class T1T2FittingPage(BasePage):
 
         if input_df is None and not input_file:
             show_error(self, "Error", f"Please select a {exp_type} data file for {field_name.replace('field', 'Field ')}.")
-            return
+            return False
 
         # The slot's file - a dropped series' tidy CSV - sits beside the series' record
         time_units = self._checked_units([getattr(self, f"{data_field_key}_file", None)])
         if time_units is None:
-            return
+            return False
 
         output_dir = self.output_dir
 
@@ -1626,6 +1632,7 @@ class T1T2FittingPage(BasePage):
         self.worker.finished.connect(self._on_finished)
         self.worker.error.connect(self._on_error)
         self.worker.start()
+        return True
 
     def _run_prefix(self) -> str:
         """The Results Prefix every file of the next run starts with."""
@@ -1643,32 +1650,30 @@ class T1T2FittingPage(BasePage):
         return sorted({e['file_prefix'] for e in self._session_entries()
                        if e.get('file_prefix')})
 
-    def _run_all_analyses(self, field_name: str):
-        """Run all analyses (T1, T2) for the specified field."""
-        self.results_text.appendPlainText(f"Running all analyses for {field_name}...")
+    def _run_all_analyses(self, fields):
+        """Fit T1 then T2, one after the other, for each of `fields` that has the data."""
+        source_series_map = getattr(self, 'source_series_map', {})
+        self._fits_waiting = [
+            (field_name, exp_type) for field_name in fields for exp_type in ("T1", "T2")
+            if f"{field_name}_{exp_type.lower()}" in source_series_map
+            or getattr(self, f"{field_name}_{exp_type.lower()}_file", None)]
 
-        t1_file = getattr(self, f"{field_name}_t1_file", None)
-        t2_file = getattr(self, f"{field_name}_t2_file", None)
-
-        analyses_to_run = []
-        if t1_file:
-            analyses_to_run.append(("T1", t1_file))
-        if t2_file:
-            analyses_to_run.append(("T2", t2_file))
-
-        if not analyses_to_run:
-            show_error(self, "Error", f"No data files selected for {field_name.replace('field', 'Field ')}.")
+        if not self._fits_waiting:
+            labels = ' and '.join(f.replace('field', 'Field ') for f in fields)
+            show_error(self, "Error", f"No data files selected for {labels}.")
             return
+        self._start_next_fit()
 
-        # For now, just run the first one (batch processing will be added later)
-        exp_type, input_file = analyses_to_run[0]
-        self.results_text.appendPlainText(f"Starting {exp_type} analysis...")
-
-        # Update combo to match and call regular analysis
-        index = 0 if exp_type == "T1" else 1
-        if field_name == "field1":
-            self.analysis_combo.setCurrentIndex(index)
-        self._start_analysis()
+    def _start_next_fit(self):
+        """Start the next fit an "All" selection left waiting, if there is one. A fit
+        that is refused ends the selection: the fits after it are not started."""
+        if not self._fits_waiting:
+            return
+        field_name, exp_type = self._fits_waiting.pop(0)
+        self.results_text.appendPlainText(
+            f"\nStarting {exp_type} analysis for {field_name.replace('field', 'Field ')}...")
+        if not self._start_fit(field_name, exp_type):
+            self._fits_waiting = []
 
     def _calculate_t2_from_t1rho(self):
         """Calculate T2 from the T1 and T1ρ fit results of every field that has both.
@@ -1730,9 +1735,12 @@ class T1T2FittingPage(BasePage):
             f"  θ = {theta}°, ω₁ = {omega1} Hz, carrier = {carrier:.3f} ppm, "
             f"{spec_freq_mhz} MHz")
 
-        r1_data = self._normalize_relaxation_columns(self._load_relaxation_results(t1_file), 'R1')
+        time_units = self.units_combo.currentText() or TIME_UNITS_DEFAULT
+        self.results_text.appendPlainText(f"  fitted times read in {time_units}")
+        r1_data = self._normalize_relaxation_columns(
+            self._load_relaxation_results(t1_file), 'R1', time_units)
         r1rho_data = self._normalize_relaxation_columns(
-            self._load_relaxation_results(t1rho_file), 'R1rho')
+            self._load_relaxation_results(t1rho_file), 'R1rho', time_units)
         result = calculate_T2_from_T1rho(
             r1_data=r1_data,
             r1rho_data=r1rho_data,
@@ -1797,14 +1805,16 @@ class T1T2FittingPage(BasePage):
         else:
             return pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES)
 
-    def _normalize_relaxation_columns(self, df: 'pd.DataFrame', rate_type: str) -> 'pd.DataFrame':
+    def _normalize_relaxation_columns(self, df: 'pd.DataFrame', rate_type: str,
+                                      time_units: str = TIME_UNITS_DEFAULT) -> 'pd.DataFrame':
         """Normalize column names in relaxation data DataFrame.
 
         Handles both rate data (R1, R1rho) and time data (T1, T1rho) by
-        converting times to rates if necessary. Times are assumed to be in ms.
+        converting times to rates if necessary. Times are in `time_units`.
         """
         import numpy as np
         df = df.copy()
+        per_second = 1000.0 * MS_TO_UNITS[time_units]
 
         # Common column name variations
         residue_cols = ['residue', 'Residue', 'res', 'assignment', 'Assignment']
@@ -1836,12 +1846,12 @@ class T1T2FittingPage(BasePage):
         if not found_rate:
             for col in time_cols:
                 if col in df.columns:
-                    # Convert T (ms) to R (s^-1): R = 1000/T
-                    df[rate_type] = 1000.0 / df[col]
-                    # Also convert error: dR/dT = -1000/T^2, so R_err = T_err * 1000/T^2
+                    # Convert T to R (s^-1): R = per_second/T, 1000/T for T in ms
+                    df[rate_type] = per_second / df[col]
+                    # Also convert error: dR/dT = -per_second/T^2, so R_err = T_err * per_second/T^2
                     for err_col in time_err_cols:
                         if err_col in df.columns:
-                            df[f'{rate_type}_err'] = df[err_col] * 1000.0 / (df[col] ** 2)
+                            df[f'{rate_type}_err'] = df[err_col] * per_second / (df[col] ** 2)
                             break
                     found_rate = True
                     break
@@ -1890,7 +1900,7 @@ class T1T2FittingPage(BasePage):
             if ext == '.peaks':
                 # SPARKY format: typically space/tab delimited with header
                 # Format: Assignment w1 w2 [other columns...]
-                df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, delim_whitespace=True, comment='#')
+                df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, sep=r'\s+', comment='#')
                 col_map = {
                     'Assignment': 'residue',
                     'w1': 'N_ppm',
@@ -1911,7 +1921,7 @@ class T1T2FittingPage(BasePage):
                     df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, sep='\t', skipinitialspace=True)
                 else:
                     # Whitespace-delimited
-                    df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, delim_whitespace=True)
+                    df = pd.read_csv(file_path, dtype=RESIDUE_NAME_DTYPES, sep=r'\s+')
 
             else:
                 # CSV - try comma first, then semicolon
@@ -1968,7 +1978,7 @@ class T1T2FittingPage(BasePage):
         if not n_fitted:
             # Nothing to view or to feed model-free: the session keeps what it had.
             self.progress_bar.setFormat("Nothing fitted")
-            self._release_worker()
+            self._fit_ended()
             return
         self.progress_bar.setFormat("Complete!")
 
@@ -2003,7 +2013,7 @@ class T1T2FittingPage(BasePage):
 
         self.results_text.appendPlainText(f"\nSession updated: {session_key} stored")
         self.results_text.appendPlainText(f"Fitted experiments: {sorted(self.fitted_experiments)}")
-        self._release_worker()
+        self._fit_ended()
 
     @staticmethod
     def _fit_report(results: dict) -> list:
@@ -2037,12 +2047,18 @@ class T1T2FittingPage(BasePage):
             self.worker.deleteLater()
             self.worker = None
 
+    def _fit_ended(self):
+        """Release the fit's thread, then start the next fit an "All" selection left
+        waiting."""
+        self._release_worker()
+        self._start_next_fit()
+
     @Slot(str)
     def _on_error(self, error_msg: str):
         """Handle analysis error."""
         self.progress_bar.hide()
         self.results_text.appendPlainText(f"\nError during analysis:\n{error_msg}")
-        self._release_worker()
+        self._fit_ended()
 
     def _update_status_indicators(self):
         """Update visual status indicators for fitted experiments."""
@@ -2228,7 +2244,8 @@ class T1T2FittingPage(BasePage):
                         viewer_session[key] = {
                             'results_file': result_entry.get('results_file'),
                             'frequency_mhz': result_entry.get('frequency_mhz'),
-                            'experiment_type': exp_type.upper().replace('T1RHO', 'T1rho')
+                            'experiment_type': exp_type.upper().replace('T1RHO', 'T1rho'),
+                            'time_units': self._fitted_time_units(result_entry)
                         }
 
             if viewer_session:
@@ -2245,6 +2262,18 @@ class T1T2FittingPage(BasePage):
             self.results_text.appendPlainText(f"Could not open Results Viewer: {e}")
         except Exception as e:
             self.results_text.appendPlainText(f"Error opening Results Viewer: {e}")
+
+    @staticmethod
+    def _fitted_time_units(result_entry: dict) -> str:
+        """The units a stored fit's times are in, as its fit JSON records them. ms where
+        the entry has no JSON on disk: a T2 derived from T1ρ is written in ms."""
+        json_file = result_entry.get('json_file')
+        if json_file and os.path.exists(json_file):
+            with open(json_file) as fh:
+                recorded = json.load(fh).get('metadata', {}).get('time_units')
+            if recorded in DELAY_UNITS:
+                return recorded
+        return TIME_UNITS_DEFAULT
 
     def _browse_output_dir(self):
         """Browse for output directory."""
@@ -2587,13 +2616,15 @@ class SpectralDensityPage(BasePage):
         self.results_text.appendPlainText("\nAnalysis completed successfully!")
 
         results_prefix = self.prefix_edit.text()
-        results_file = os.path.join(self.output_dir, f"{results_prefix}_spectral_density_basic.csv")
+        # The table the worker names: <prefix>_detailed.csv of a dual-field run,
+        # <prefix>_results.csv of a single-field one
+        results_file = results.get('output_file')
 
         self.session_results = {
             'analysis_complete': True,
             'results_prefix': results_prefix,
             'output_dir': self.output_dir,
-            'results_file': results_file if os.path.exists(results_file) else None,
+            'results_file': results_file if results_file and os.path.exists(results_file) else None,
         }
 
     @Slot(str)
@@ -3163,9 +3194,9 @@ class IntegratedAnalysisPage(BasePage):
                 t1_file = f
             elif 'T2' in name:
                 t2_file = f
-            elif 'NOSAT' in name or 'UNSATURATED' in name:
+            elif hetnoe_plane(name) == 'unsat':
                 noe_unsat_file = f
-            elif 'SAT' in name or 'SATURATED' in name:
+            elif hetnoe_plane(name) == 'sat':
                 noe_sat_file = f
 
         files_found = []

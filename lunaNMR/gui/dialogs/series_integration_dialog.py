@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QThread, QObject
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
+from lunaNMR.gui.dialogs.spectrum_files import spectrum_extensions
 from lunaNMR.utils.cancellation import Cancelled
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
@@ -640,7 +641,7 @@ class SeriesIntegrationDialog(BaseDialog):
         Based on v0.9 get_all_nmr_files() (main_gui.py:2813-2830)
         """
         files = []
-        for ext in ["ft", "ft2", "fid"]:
+        for ext in spectrum_extensions():
             pattern = os.path.join(folder, f"*.{ext}")
             files.extend(glob.glob(pattern))
 

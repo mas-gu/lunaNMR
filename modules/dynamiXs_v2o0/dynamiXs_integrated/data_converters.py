@@ -233,16 +233,33 @@ def read_hetnoe_csv(path):
                 for row in csv.DictReader(fh)}
 
 
+def hetnoe_plane(name):
+    """The hetNOE plane a column or file name states: 'unsat', 'sat', or None.
+
+    'unsat' and 'nosat' anywhere in the name ('..._unsaturated', 'NOE_NOSAT') mark the
+    unsaturated plane and are looked for first: both contain 'sat', which alone marks
+    the saturated one.
+    """
+    lowered = str(name).lower()
+    if 'unsat' in lowered or 'nosat' in lowered:
+        return 'unsat'
+    if 'sat' in lowered:
+        return 'sat'
+    return None
+
+
 def intensities_from_matrix(matrix_csv, column):
     """{residue: intensity} for one point column of a series intensity matrix.
 
     An empty cell is a point the series did not measure (a fit on a bound); it is left
-    out, never read as zero.
+    out, never read as zero. So is a `dummy_*` row: a peak detection added, not a
+    residue, left out as the relaxation and Kd fitters leave it out.
     """
     import pandas as pd
     df = pd.read_csv(matrix_csv, dtype={'Assignment': str})
     values = df.set_index('Assignment')[column].dropna()
-    return {str(res): float(v) for res, v in values.items()}
+    return {str(res): float(v) for res, v in values.items()
+            if not str(res).lower().startswith('dummy')}
 
 
 def parse_intensity_csv(csv_file: str) -> Tuple[Dict[str, float], Optional[Dict[str, float]]]:

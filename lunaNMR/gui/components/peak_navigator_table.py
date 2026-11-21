@@ -32,6 +32,7 @@ from lunaNMR.gui.styles.design_system import (
     FONT_SIZE_LARGE_HEADER, FONT_SIZE_BODY, FONT_SIZE_SMALL
 )
 from lunaNMR.gui.styles.quality_colors import navigator_row_display, peak_quality_label
+from lunaNMR.gui.components.peak_navigator import quality_legend
 
 
 def _to_scalar(value):
@@ -89,7 +90,7 @@ class PeakNavigatorTable(QWidget):
         layout.addWidget(self.status_label)
 
         # Quality legend
-        legend = QLabel("Quality: ✅ R²≥0.85  🟠 R²<0.85  ❌ Failed")
+        legend = QLabel(quality_legend())
         legend.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}pt; color: {PRIMARY_TEXT};")
         layout.addWidget(legend)
 

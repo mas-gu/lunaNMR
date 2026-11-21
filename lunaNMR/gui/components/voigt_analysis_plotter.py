@@ -34,6 +34,7 @@ from matplotlib.ticker import MaxNLocator
 from scipy.special import wofz
 
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibMultiAxesWidget
+from lunaNMR.gui.styles.quality_colors import peak_quality_label
 
 
 # The default Axes3D cage is heavier than the data drawn inside it: three filled panes,
@@ -550,7 +551,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         if '2d_simultaneous' in method and 'region_2d' in voigt_result:
             self._plot_2d_contour(voigt_result)
         else:
-            self._plot_1d_fits(voigt_result)
+            self._plot_unfitted(voigt_result)
 
     def plot_voigt_analysis_3d(self, voigt_result):
         """
@@ -570,8 +571,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             # Use 3D surface visualization for 2D simultaneous fits
             self._plot_2d_surface_3d(voigt_result)
         else:
-            # For 1D cross-sections, show message that 3D view is only for 2D fits
-            self._plot_1d_not_applicable_3d(voigt_result)
+            self._plot_unfitted(voigt_result)
 
     def _plot_1d_fits(self, voigt_result):
         """Plot 1D cross-section fitting results"""
@@ -819,7 +819,8 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.figure.suptitle(f'2D Simultaneous Voigt Fitting: {assignment}',
                             fontsize=10, fontweight='bold')
 
-        self.figure.tight_layout(rect=[0, 0, 1, 0.96])
+        # The gridspec's own hspace/wspace lay the panels out; tight_layout cannot act
+        # on such a grid and only warns.
         self.canvas.draw()
 
     def _plot_2d_surface_3d(self, voigt_result):
@@ -1214,41 +1215,26 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.figure.tight_layout(rect=[0, 0, 1, 0.96])
         self.canvas.draw()
 
-    def _plot_1d_not_applicable_3d(self, voigt_result):
-        """Show message that 3D view is only applicable for 2D simultaneous fits"""
+    def _plot_unfitted(self, voigt_result):
+        """Say, in place of a plot, that the result carries no 2D fit to draw, and the
+        reason the fit gave when it failed."""
         self.figure.clear()
 
         ax = self.figure.add_subplot(111)
         ax.axis('off')
 
-        assignment = voigt_result.get('assignment', 'Unknown')
-        quality = voigt_result.get('fitting_quality', 'Unknown')
+        lines = [f"No 2D fit to display for {voigt_result.get('assignment', 'Unknown')}"]
+        quality = peak_quality_label(voigt_result)
+        if quality:
+            lines.append(f"Quality: {quality}")
+        if voigt_result.get('error'):
+            lines.append(str(voigt_result['error']))
 
-        message_text = f"""
-3D Surface View
-
-This view is only available for 2D simultaneous
-multi-peak fitting results.
-
-The current peak ({assignment}) was fitted using
-1D cross-section fitting, which is best visualized
-in the standard 2D Contour view.
-
-Quality: {quality}
-
-Please use the "2D Voigt Analysis" tab for
-detailed 1D cross-section visualization.
-"""
-
-        ax.text(0.5, 0.5, message_text, transform=ax.transAxes,
-               ha='center', va='center', fontsize=11,
+        ax.text(0.5, 0.5, "\n\n".join(lines), transform=ax.transAxes,
+               ha='center', va='center', fontsize=11, wrap=True,
                bbox=dict(boxstyle='round,pad=1.0', facecolor='lightyellow',
                         alpha=0.9, edgecolor='gray'))
 
-        self.figure.suptitle('3D Voigt Analysis - Not Applicable',
-                            fontsize=12, fontweight='bold')
-
-        self.figure.tight_layout(rect=[0, 0, 1, 0.96])
         self.canvas.draw()
 
     def _plot_no_data(self):

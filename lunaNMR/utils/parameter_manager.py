@@ -24,7 +24,7 @@ class NMRParameterManager:
         self.parameter_definitions = {
             # Detection Parameters
             'search_window_x': {'default': SEARCH_WINDOW_PPM, 'min': 0.001, 'max': 1.0, 'type': float},  # F2/1H
-            'search_window_y': {'default': get_ps2d_config().search_window_f1, 'min': 0.001, 'max': 2.0, 'type': float},  # F1/15N or 13C
+            'search_window_y': {'default': get_ps2d_config().search_window_f1, 'min': 0.001, 'max': 4.0, 'type': float},  # F1/15N or 13C
 
             # Fitting Parameters
             'fitting_window_x': {'default': 0.15, 'min': 0.01, 'max': 0.5, 'type': float},  # Increased from 0.05 to ensure adequate data points
@@ -45,7 +45,7 @@ class NMRParameterManager:
             'use_centroid_refinement': {'default': True, 'type': bool},
 
             # Advanced Parameters
-            'centroid_window_x_ppm': {'default': 0.02, 'min': 0.005, 'max': 0.1, 'type': float},
+            'centroid_window_x_ppm': {'default': 0.02, 'min': 0.005, 'max': 0.2, 'type': float},
             'centroid_window_y_ppm': {'default': 1.0, 'min': 0.01, 'max': 5.0, 'type': float},
             'centroid_noise_multiplier': {'default': 2.0, 'min': 1.0, 'max': 5.0, 'type': float},
 

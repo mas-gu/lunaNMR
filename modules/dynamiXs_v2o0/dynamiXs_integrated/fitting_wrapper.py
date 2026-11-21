@@ -22,7 +22,8 @@ def fit_relaxation_data(input_csv: str,
                         output_prefix: Optional[str] = None,
                         json_folder: Optional[str] = None,
                         field_name: str = 'field1',
-                        field_freq: float = 600.0) -> Tuple[Dict[str, Dict], str]:
+                        field_freq: float = 600.0,
+                        time_units: str = 'ms') -> Tuple[Dict[str, Dict], str]:
     """
     Fit T1 or T2 relaxation data from a CSV file.
 
@@ -46,6 +47,9 @@ def fit_relaxation_data(input_csv: str,
         Number of bootstrap iterations for error estimation
     output_prefix : str, optional
         Prefix for output files (if None, uses temp file)
+    time_units : str
+        Units of the series' delays ('ms', 's' or 'us'): what the fit JSON and the fit
+        figures label their times with
 
     Returns
     -------
@@ -92,7 +96,7 @@ def fit_relaxation_data(input_csv: str,
         'output_prefix': output_prefix,
         'results_txt_file': results_file,
         'experiment_type': experiment_type,
-        'time_units': 'ms',
+        'time_units': time_units,
         'signal_units': 'Intensity',
         'initial_A': initial_amplitude,
         'initial_t2': initial_time_constant,
@@ -163,7 +167,8 @@ def run_t1_fitting(input_csv: str,
                    output_prefix: Optional[str] = None,
                    json_folder: Optional[str] = None,
                    field_name: str = 'field1',
-                   field_freq: float = 600.0) -> Tuple[Dict[str, Dict], str]:
+                   field_freq: float = 600.0,
+                   time_units: str = 'ms') -> Tuple[Dict[str, Dict], str]:
     """
     Convenience function for T1 fitting.
 
@@ -187,6 +192,8 @@ def run_t1_fitting(input_csv: str,
         Field identifier ('field1' or 'field2')
     field_freq : float
         Magnetic field frequency in MHz
+    time_units : str
+        Units of the series' delays
 
     Returns
     -------
@@ -203,7 +210,8 @@ def run_t1_fitting(input_csv: str,
         output_prefix=output_prefix,
         json_folder=json_folder,
         field_name=field_name,
-        field_freq=field_freq
+        field_freq=field_freq,
+        time_units=time_units
     )
 
 
@@ -215,7 +223,8 @@ def run_t2_fitting(input_csv: str,
                    output_prefix: Optional[str] = None,
                    json_folder: Optional[str] = None,
                    field_name: str = 'field1',
-                   field_freq: float = 600.0) -> Tuple[Dict[str, Dict], str]:
+                   field_freq: float = 600.0,
+                   time_units: str = 'ms') -> Tuple[Dict[str, Dict], str]:
     """
     Convenience function for T2 fitting.
 
@@ -239,6 +248,8 @@ def run_t2_fitting(input_csv: str,
         Field identifier ('field1' or 'field2')
     field_freq : float
         Magnetic field frequency in MHz
+    time_units : str
+        Units of the series' delays
 
     Returns
     -------
@@ -255,7 +266,8 @@ def run_t2_fitting(input_csv: str,
         output_prefix=output_prefix,
         json_folder=json_folder,
         field_name=field_name,
-        field_freq=field_freq
+        field_freq=field_freq,
+        time_units=time_units
     )
 
 

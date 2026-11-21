@@ -406,6 +406,23 @@ def applied_ps2d_config(values: Optional[Dict[str, Any]]):
         vars(_ps2d_config).update(saved)
 
 
+def nucleus_of_spectral_window(x_center, y_center):
+    """'15N', '13C' or None for a 2D spectrum whose 1H axis is centred at `x_center` ppm
+    and whose indirect axis is centred at `y_center` ppm."""
+    # Classic 15N-HSQC: amide protons 5-12 ppm, backbone/sidechain nitrogens 100-140 ppm
+    if (5 <= x_center <= 12) and (100 <= y_center <= 140):
+        return '15N'
+    # Classic 13C-HSQC: aliphatic CH -2 to 5 ppm, aliphatic carbons 0-80 ppm
+    if (-2 <= x_center <= 5) and (0 <= y_center <= 80):
+        return '13C'
+    # Edge cases, by the indirect dimension alone
+    if y_center < 90:
+        return '13C'
+    if y_center > 95:
+        return '15N'
+    return None
+
+
 # Convenience functions for parameter access
 
 def distance_in_linewidths(delta_f2, delta_f1):

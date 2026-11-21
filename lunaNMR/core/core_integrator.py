@@ -1784,9 +1784,8 @@ class VoigtIntegrator(BaseIntegrator):
     def load_peak_list_file(self, peak_list_file):
         """Load peak list file (convenience method for GUI)"""
         try:
-            import pandas as pd
-            self.peak_list = pd.read_csv(peak_list_file, skipinitialspace=True)
-            self.peak_list.columns = self.peak_list.columns.str.strip()
+            from lunaNMR.utils.file_manager import NMRFileManager
+            self.peak_list = NMRFileManager().load_peak_list(peak_list_file)
             log_info(f"Loaded peak list: {len(self.peak_list)} peaks from {peak_list_file}")
 
             # Ensure all peaks have stable IDs for undo/redo

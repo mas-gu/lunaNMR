@@ -1,4 +1,4 @@
-# ABOUTME: dynamiXs page for methyl bi-exp T2 fitting analysis (I(t) = A_a*exp(-t/T2a) + A_b*exp(-t/T2b) + C).
+# ABOUTME: dynamiXs page for methyl bi-exp T2 fitting analysis (I(t) = 0.5*A*[exp(-t/T2a) + exp(-t/T2b)]).
 # ABOUTME: Mirrors the T1/T2 page visual pattern but exposes only initial guesses relevant to bi-exp fitting.
 
 import os
@@ -30,7 +30,8 @@ class MethylT2FittingPage(BasePage):
     """Page for bi-exponential methyl T2 fitting.
 
     Streamlined version of the T1/T2 page: single experiment, single series,
-    bi-exp-specific initial guesses (A_a fraction, T2_a, T2_b), and one Run button.
+    bi-exp-specific initial guesses (T2a, T2b; the shared amplitude A starts from the
+    data), and one Run button.
     """
 
     def __init__(self, main_window):
@@ -161,8 +162,8 @@ class MethylT2FittingPage(BasePage):
                                                    clicked=self._open_viewer_with_summary, width=200)
         self.summary_btn.setEnabled(False)
         self.summary_btn.setToolTip(
-            "Open the Methyl T2 viewer with the T2a, T2b, and η across-residues "
-            "panels pre-enabled."
+            "Open the across-residues bar chart: one quantity at a time "
+            "(T2_avg, ΔT2, T2a, T2b or η), with residues ticked in or out."
         )
         run_row.addWidget(self.summary_btn)
         self.open_prev_btn = create_secondary_button("Open previous dataset…",

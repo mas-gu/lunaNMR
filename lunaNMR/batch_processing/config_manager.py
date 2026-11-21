@@ -23,8 +23,7 @@ class UnreadConfigKeys(ValueError):
 
 
 # Keys BatchProcessor reads beside the default configuration's own
-_READ_PROCESSING_KEYS = {'max_iterations', 'max_iter', 'max_optimization_iterations',
-                         'baseline_max_iter', 'convergence_tolerance'}
+_READ_PROCESSING_KEYS = {'max_iterations', 'max_iter'}
 # Sections whose keys are names (nuclei, fit parameters) rather than settings
 _FREE_FORM_SECTIONS = {('processing', 'sn_thresholds'), ('processing', 'expected_peaks'),
                        ('processing_parameters',)}
@@ -76,7 +75,6 @@ class ConfigManager:
                     'default': 150
                 },
                 'quality_threshold': 0.8,
-                'max_fitting_attempts': 3,
                 'skip_on_error': True
             },
             'file_handling': {
@@ -87,14 +85,7 @@ class ConfigManager:
             },
             'logging': {
                 'level': 'INFO',
-                'detailed_logging': True,
-                'progress_interval': 5,
-                'log_file': None  # If None, auto-generate
-            },
-            'output': {
-                'generate_summary': True,
-                'summary_format': 'text',  # 'text', 'json', 'both'
-                'backup_results': False
+                'progress_interval': 5
             }
         }
 
@@ -155,17 +146,6 @@ class ConfigManager:
                         'default': 300
                     },
                     'quality_threshold': 0.6
-                }
-            },
-            'high_throughput': {
-                'description': 'Settings optimized for processing speed',
-                'processing': {
-                    'max_fitting_attempts': 1,
-                    'skip_on_error': True
-                },
-                'logging': {
-                    'progress_interval': 10,
-                    'detailed_logging': False
                 }
             }
         }
@@ -388,8 +368,7 @@ class ConfigManager:
             "_description": {
                 "processing": "Core processing parameters",
                 "file_handling": "File discovery and filtering settings",
-                "logging": "Logging and progress reporting settings",
-                "output": "Output and result handling settings"
+                "logging": "Logging and progress reporting settings"
             },
             **self.default_config
         }

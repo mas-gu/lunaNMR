@@ -79,3 +79,35 @@ def test_reset_leaves_the_window_as_a_newly_opened_one(make_window, monkeypatch)
 def test_the_window_restores_no_preferences_nothing_saves():
     from lunaNMR.gui.main_window import LunaNMRMainWindow
     assert not hasattr(LunaNMRMainWindow, 'apply_user_preferences')
+
+
+def test_reset_leaves_no_series_and_no_kd_analysis_in_the_session(make_window, monkeypatch):
+    """A project saved after a Reset writes what the session holds: neither may outlive it."""
+    from PySide6.QtWidgets import QMessageBox
+    from lunaNMR.processors.multi_spectrum_processor import BatchResults
+    fresh = make_window()
+    window = make_window()
+    window.saved_series = {'T1': BatchResults()}
+    window.batch_results = window.saved_series['T1']
+    window.kd_analyses = {'titration': {'fit_data': {}, 'meta': {}}}
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+
+    window.on_reset_results()
+
+    assert not window.saved_series and not window.kd_analyses
+    for name in ('saved_series', 'batch_results', 'kd_analyses'):
+        assert getattr(window, name) == getattr(fresh, name), name
+
+
+def test_reset_closes_the_kd_window_whose_fit_a_project_save_would_capture(make_window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    window = make_window()
+    window.launch_kd_titration()
+    dialog = window.kd_titration_dialog
+    assert dialog.isVisible()
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+
+    window.on_reset_results()
+
+    assert not dialog.isVisible()
+    assert window.kd_titration_dialog is None

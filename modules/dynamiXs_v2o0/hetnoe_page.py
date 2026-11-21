@@ -5,7 +5,7 @@ import os
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QFileDialog, QDoubleSpinBox, QComboBox, QLineEdit,
+    QFrame, QHBoxLayout, QLabel, QFileDialog, QComboBox, QLineEdit,
     QPlainTextEdit, QStackedWidget, QTableWidget, QTableWidgetItem, QHeaderView,
 )
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -22,9 +22,9 @@ from gui_components import (
 )
 from dynamiXs_gui import BasePage, DropTargetLabel
 from dynamiXs_integrated.data_converters import (
-    calculate_hetnoe_from_intensities, draw_hetnoe_vs_residue, in_sequence_order,
-    intensities_from_matrix, parse_intensity_csv, plot_hetnoe_vs_residue, read_hetnoe_csv,
-    write_hetnoe_csv,
+    calculate_hetnoe_from_intensities, draw_hetnoe_vs_residue, hetnoe_plane,
+    in_sequence_order, intensities_from_matrix, parse_intensity_csv, plot_hetnoe_vs_residue,
+    read_hetnoe_csv, write_hetnoe_csv,
 )
 
 MATRIX_MODE, FILES_MODE = 0, 1
@@ -101,11 +101,6 @@ class HetNOEPage(BasePage):
         outb.addLayout(out_row)
         self.prefix_edit = QLineEdit("field1")
         outb.addWidget(self._make_field_row("Results prefix", self.prefix_edit, width=260))
-        self.field_freq_spin = QDoubleSpinBox()
-        self.field_freq_spin.setRange(100.0, 1500.0)
-        self.field_freq_spin.setDecimals(2)
-        self.field_freq_spin.setValue(600.0)
-        outb.addWidget(self._make_field_row("Field frequency (MHz)", self.field_freq_spin, width=260))
         layout.addWidget(out_section)
 
         run_row = QHBoxLayout()
@@ -220,9 +215,8 @@ class HetNOEPage(BasePage):
         for combo in (self.sat_combo, self.unsat_combo):
             combo.clear()
             combo.addItems(columns)
-        unsat = unsat_column or next((c for c in columns if 'unsat' in c.lower()), None)
-        sat = sat_column or next((c for c in columns if 'sat' in c.lower()
-                                  and 'unsat' not in c.lower()), None)
+        unsat = unsat_column or next((c for c in columns if hetnoe_plane(c) == 'unsat'), None)
+        sat = sat_column or next((c for c in columns if hetnoe_plane(c) == 'sat'), None)
         if sat:
             self.sat_combo.setCurrentText(sat)
         if unsat:
@@ -349,7 +343,6 @@ class HetNOEPage(BasePage):
             'unsat_file': self.unsat_file,
             'output_dir': self.output_dir,
             'prefix': self.prefix_edit.text(),
-            'field_freq': self.field_freq_spin.value(),
             'source_series_map': dict(self.source_series_map),
             'last_results_file': self.last_results_file,
             'fit_on': self._observable(),
@@ -380,7 +373,6 @@ class HetNOEPage(BasePage):
         if self.output_dir:
             self.outdir_label.setText(self.output_dir)
         self.prefix_edit.setText(state.get('prefix', 'field1'))
-        self.field_freq_spin.setValue(state.get('field_freq', 600.0))
         self.last_results_file = state.get('last_results_file')
         if self.last_results_file and os.path.exists(self.last_results_file):
             self._show(read_hetnoe_csv(self.last_results_file))

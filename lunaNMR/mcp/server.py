@@ -3,12 +3,8 @@
 
 import sys
 
-from mcp.server.mcpserver import MCPServer
-
-from lunaNMR.mcp import (check, tools_dynamixs, tools_jobs, tools_kd, tools_peaks,
-                         tools_project, tools_series)
+from lunaNMR.mcp import check
 from lunaNMR.mcp.command_line import build_parser
-from lunaNMR.mcp.context import ToolContext
 from lunaNMR.mcp.data_root import DataRoot, PathRefused
 from lunaNMR.mcp.jobs import JobManager
 
@@ -16,6 +12,14 @@ WAIT_SECONDS = 20
 
 
 def build_server(root, max_running_jobs=2, wait_seconds=WAIT_SECONDS):
+    # The MCP SDK and the modules built on it are imported here, not with this module:
+    # `--check` has to start without the SDK to report that it is missing.
+    from mcp.server.mcpserver import MCPServer
+
+    from lunaNMR.mcp import (tools_dynamixs, tools_jobs, tools_kd, tools_peaks,
+                             tools_project, tools_series)
+    from lunaNMR.mcp.context import ToolContext
+
     server = MCPServer(
         'lunaNMR',
         instructions='NMR peak fitting and analysis on the data folder this server was '

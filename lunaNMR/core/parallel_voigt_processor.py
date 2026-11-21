@@ -877,8 +877,8 @@ class ParallelVoigtProcessor:
             # Original reference positions: the cascade's absolute drift limit
             'reference_positions': reference_positions,
 
-            # Path information for worker imports
-            'lunaNMR_path': os.path.dirname(os.path.dirname(__file__)),
+            # The folder holding the lunaNMR package, for worker imports
+            'lunaNMR_path': os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         }
 
         return shared_context

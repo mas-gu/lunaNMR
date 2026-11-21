@@ -13,10 +13,10 @@ from lunaNMR.mcp.names import safe_name
 from lunaNMR.mcp.results import DRY_RUN, REWRITES_BESIDE_INPUT, WRITES_NEW_FOLDER, failure
 
 THRESHOLDS = """`alpha` scales the N shift against H in the CSP (default 0.14). `intensity_from` picks
-        height or volume for the intensity ratio. `bootstrap` sets the bootstrap iterations for
-        errors. `csp_sigma_multiple`, `kd_outlier_z`, `noise_quantile`, `dd_runaway_ratio` and
-        `ref_max_ratio` tune which residues enter the shared fit and which are flagged; leave
-        them unset for the defaults. `prefix` names the output files."""
+        height or volume for the intensity ratio. `csp_sigma_multiple`, `kd_outlier_z`,
+        `noise_quantile`, `dd_runaway_ratio` and `ref_max_ratio` tune which residues enter the
+        shared fit and which are flagged; leave them unset for the defaults. `prefix` names the
+        output files."""
 
 
 KD_SURVEY_DESCRIPTION = inspect.cleandoc("""Survey a titration before fitting a Kd: rates every residue ok / check /
@@ -33,7 +33,8 @@ KD_SURVEY_DESCRIPTION = inspect.cleandoc("""Survey a titration before fitting a 
 KD_FIT_DESCRIPTION = inspect.cleandoc("""Start a Kd fit in the background; a quick one returns finished, a slow one
         returns a job to poll with `job_status`. Fit all residues, or only
         those named in `residues` or listed in `residues_file` (the selection file
-        `kd_survey` writes beside its input) -- not both. `observables` defaults to both.
+        `kd_survey` writes beside its input) -- not both. `observables` defaults to both;
+        `bootstrap` sets the bootstrap iterations for errors.
         The finished job reports each shared Kd with its `reliable` flag and how many
         residues are in the shared fit. `intensity_scales` is the same scan-count correction
         as in `kd_survey` and must match the survey's. """ + THRESHOLDS + """ `out` is a new folder. """ + DRY_RUN)
@@ -54,10 +55,9 @@ def register(server, ctx):
                         out: str, conc: list[float] | None = None,
                         intensity_scales: list[float] | None = None,
                         selection_file: str | None = None,
-                        observables: list[Literal['csp', 'intensity']] | None = None,
                         prefix: str | None = None, alpha: float | None = None,
                         intensity_from: Literal['height', 'volume'] | None = None,
-                        bootstrap: int | None = None, csp_sigma_multiple: float | None = None,
+                        csp_sigma_multiple: float | None = None,
                         kd_outlier_z: float | None = None, noise_quantile: float | None = None,
                         dd_runaway_ratio: float | None = None,
                         ref_max_ratio: float | None = None,
@@ -72,8 +72,7 @@ def register(server, ctx):
             return failure(error)
         return await ctx.run(cli_call.kd_survey_args(
             input_file, p0, conc_units, out_folder, conc=conc, intensity_scales=intensity_scales,
-            selection_file=selection, observables=observables, prefix=name, alpha=alpha,
-            intensity_from=intensity_from, bootstrap=bootstrap,
+            selection_file=selection, prefix=name, alpha=alpha, intensity_from=intensity_from,
             csp_sigma_multiple=csp_sigma_multiple, kd_outlier_z=kd_outlier_z,
             noise_quantile=noise_quantile, dd_runaway_ratio=dd_runaway_ratio,
             ref_max_ratio=ref_max_ratio, dry_run=dry_run))

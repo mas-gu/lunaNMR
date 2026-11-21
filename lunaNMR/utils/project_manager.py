@@ -9,6 +9,8 @@ from typing import Optional, Dict, Any, List, Tuple
 import numpy as np
 import pandas as pd
 
+from lunaNMR import __version__
+
 logger = logging.getLogger(__name__)
 
 
@@ -441,7 +443,7 @@ class ProjectManager:
             process_events()
 
             if self._save_peak_list(project_path):
-                peak_count = len(getattr(self.main_window, 'peaks', []))
+                peak_count = self._bundled_peak_count(project_path)
                 if peak_count > 0:
                     summary['saved_items'].append(f'Peak list ({peak_count} peaks)')
             process_events()
@@ -482,7 +484,7 @@ class ProjectManager:
             "project_name": bundle_path.stem,
             "created_at": datetime.now().isoformat(),
             "modified_at": datetime.now().isoformat(),
-            "lunaNMR_version": "1.0",
+            "lunaNMR_version": __version__,
 
             "file_references": {
                 "nmr_spectrum": self._get_safe_attr('current_nmr_file'),
@@ -723,7 +725,7 @@ class ProjectManager:
             summary['loaded_items'].append('GUI state')
 
             if self._load_peak_list(project_path):
-                peak_count = len(getattr(self.main_window, 'peaks', []))
+                peak_count = self._bundled_peak_count(project_path)
                 if peak_count > 0:
                     summary['loaded_items'].append(f'Peak list ({peak_count} peaks)')
 
@@ -877,6 +879,12 @@ class ProjectManager:
 
         self._apply_gui_params(params)
         return True
+
+    @staticmethod
+    def _bundled_peak_count(bundle_path: Path) -> int:
+        """Number of peaks in the bundle's peak_list.csv, 0 without one."""
+        peak_list_path = bundle_path / "peak_list.csv"
+        return len(pd.read_csv(peak_list_path)) if peak_list_path.exists() else 0
 
     def _load_peak_list(self, bundle_path: Path) -> bool:
         """Load peak list DataFrame from CSV."""

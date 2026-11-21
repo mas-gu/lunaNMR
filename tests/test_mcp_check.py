@@ -39,3 +39,17 @@ def test_the_server_without_a_root_or_check_is_a_usage_error():
                                capture_output=True, text=True)
     assert completed.returncode == 2
     assert "--root" in completed.stderr
+
+
+def test_the_command_line_check_names_a_missing_mcp_sdk_without_a_traceback():
+    """An install without the `mcp` extra: `None` in sys.modules makes `import mcp` fail in
+    the child as it does when the package is absent."""
+    completed = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.modules['mcp'] = None; "
+         "from lunaNMR.mcp.server import main; main(['--check'])"],
+        capture_output=True, text=True)
+    assert completed.returncode == 1, completed.stdout + completed.stderr
+    assert "FAIL mcp: cannot import mcp" in completed.stdout
+    assert "ok   cli" in completed.stdout
+    assert "Traceback" not in completed.stderr

@@ -21,6 +21,7 @@ from PySide6.QtGui import QColor
 
 from lunaNMR.gui.base.base_window import BaseWindow
 from lunaNMR.gui.components.signed_contours import draw_signed_contours
+from lunaNMR.gui.dialogs.spectrum_files import spectrum_file_filter
 from lunaNMR.gui.styles.design_system import (
     PRIMARY_TEXT, FRAME_BG_COLOR,
     SPACING_XS, SPACING_SM, SPACING_MD,
@@ -752,7 +753,7 @@ class SpectrumLibraryPanel(QWidget):
 
         paths, _ = QFileDialog.getOpenFileNames(
             self, 'Load NMR Spectra', '',
-            'NMR files (*.ft2 *.ft1 *.ft *.pipe *.ucsf *.fid);;All files (*)'
+            f'{spectrum_file_filter()};;All files (*)'
         )
         for path in paths:
             self.load_spectrum_requested.emit(path, group_id)

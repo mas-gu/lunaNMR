@@ -108,7 +108,7 @@ then tracks them across a <em>series</em> of spectra to extract quantitative obs
 relaxation rates, binding affinities (K<sub>d</sub>), chemical-shift perturbations (CSP), and intensities.</p>
 <div class="grid">
   <div class="card"><h4>Detect</h4><p class="muted">Prominence / S-N peak picking, per sign (negative peaks are kept), with top-contour centroid refinement.</p></div>
-  <div class="card"><h4>Fit</h4><p class="muted">Professional Voigt profiles (Gaussian + Lorentzian) with ArPLS baseline correction; 2D simultaneous deconvolution of overlapping clusters (PS2D).</p></div>
+  <div class="card"><h4>Fit</h4><p class="muted">Professional Voigt profiles (Gaussian + Lorentzian); 2D simultaneous deconvolution of overlapping clusters (PS2D).</p></div>
   <div class="card"><h4>Track</h4><p class="muted">Cascade propagation across a series so moving peaks (titration) stay locked to the right signal.</p></div>
   <div class="card"><h4>Analyze</h4><p class="muted">DynamiXs (T1/T2, T1ρ, methyl T2, hetNOE, spectral density, model-free), a Kd/titration module (CSP + intensity binding fits) and 1D integration across a series.</p></div>
 </div>
@@ -122,6 +122,7 @@ relaxation rates, binding affinities (K<sub>d</sub>), chemical-shift perturbatio
 pip install -r requirements.txt
 python3 lunaNMR/validation/verify_installation.py   # verify
 python3 launch_lunaNMR.py                            # run
+pip install pytest                                   # the test runner; requirements.txt does not install it
 QT_QPA_PLATFORM=offscreen python -m pytest \
     tests/ modules/dynamiXs_v2o0/tests/ modules/integration_1d_v1o0/tests/ -q   # tests (all three roots)</code></pre>
 <p><strong>Key dependencies:</strong> numpy, pandas, scipy, lmfit (DynamiXs relaxation fits), matplotlib (backend
@@ -152,7 +153,7 @@ analysis modules (DynamiXs, Kd) consume.</p>
 ├── lunaNMR/
 │   ├── core/                    # processing engines
 │   │   ├── enhanced_peak_picker.py        # prominence / S-N peak detection
-│   │   ├── enhanced_voigt_fitter.py       # 1D Voigt + ArPLS baseline
+│   │   ├── enhanced_voigt_fitter.py       # peak-list fit entry (enhanced_peak_fitting_parallel)
 │   │   ├── core_integrator.py             # master orchestrator (EnhancedVoigtIntegrator)
 │   │   ├── parallel_voigt_processor.py    # two-pass cluster pipeline, sequential or parallel
 │   │   ├── ps2d_*.py                       # 2D simultaneous multi-peak fitting
@@ -201,9 +202,9 @@ listed position, so a decayed peak cannot take a neighbour. Cancel stops a detec
 <section id="voigt">
 <h2>Voigt fitting</h2>
 <p>Each peak is modelled as a 2D <strong>Voigt profile</strong> (convolution of Gaussian and
-Lorentzian in each dimension), with <strong>ArPLS baseline correction</strong> (Asymmetrically
-Reweighted Penalized Least Squares). Overlapping peaks are fitted together, as one cluster,
-rather than one at a time.</p>
+Lorentzian in each dimension). The fit models no baseline; only the data-summed region volume
+subtracts one, a plane fitted outside the peaks, and only when its tilt stands above the noise.
+Overlapping peaks are fitted together, as one cluster, rather than one at a time.</p>
 <p><code>core/core_integrator.py</code> (<code>EnhancedVoigtIntegrator</code>) is the master orchestrator:
 it runs detection, centroid refinement, overlap clustering, and fits every cluster, a single peak
 included, with the 2D PS2D path.</p>
@@ -220,7 +221,7 @@ accuracy &lt; 10 ppb.</p>
 <h3>Clustering (critical)</h3>
 <p><code>identify_overlap_clusters()</code> is called <strong>once</strong> before fitting and builds
 clusters by agglomerative closest-pair merging: two peaks overlap when their ellipses touch, and clusters
-keep merging while the merged diameter (0.20 ppm ¹H / 1.5 ppm ¹⁵N) and size (20) limits allow, so overlap
+keep merging while the merged diameter (0.40 ppm ¹H / 3.0 ppm ¹⁵N) and size (20) limits allow, so overlap
 is transitive within those limits: if A overlaps B and B overlaps C, then {A,B,C} form one cluster.
 Clusters are <em>disjoint</em> — each peak appears in exactly one. This is <em>not</em> a simple radial search.</p>
 <h3>Parameter normalization</h3>

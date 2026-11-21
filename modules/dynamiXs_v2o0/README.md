@@ -274,7 +274,7 @@ dynamiXs_v2o0/
 - Use the analytical error method, or fewer bootstrap iterations, for faster results
 
 ### Threading Warnings
-- The T1/T2 fitters, the spectral density / model-free scripts, `compare_datasets.py` and `plot_dual_field_datasets.py` select matplotlib's non-interactive Agg backend
+- The T1/T2 fitters and the spectral density / model-free scripts select no matplotlib backend: they draw on a bare `Figure`, so they plot from a worker thread and leave the application's backend as it is. `compare_datasets.py` and `plot_dual_field_datasets.py` select none either and draw through pyplot, on the backend in use
 - Generated plots are saved as PDF files without requiring GUI interaction
 
 ## Future Enhancements

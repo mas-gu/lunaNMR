@@ -285,7 +285,8 @@ class IntegratedAnalysisPipeline:
             # The fit JSON is <prefix>_<field>_T1_fit_data.json, as every file of the
             # run starts with its prefix: runs sharing a JSON folder keep their own.
             field_name=f"{self.params.output_prefix}_{field_label}",
-            field_freq=field_freq
+            field_freq=field_freq,
+            time_units=t1_units
         )
         self.log_progress(f"  │  ✓ {len(t1_params)} residues fitted")
 
@@ -316,7 +317,8 @@ class IntegratedAnalysisPipeline:
                 output_prefix=str(self.work_dir / f"{self.params.output_prefix}_{field_label}_T2"),
                 json_folder=self.params.json_folder,
                 field_name=f"{self.params.output_prefix}_{field_label}",
-                field_freq=field_freq
+                field_freq=field_freq,
+                time_units=t2_units
             )
             self.log_progress(f"  │  ✓ {len(t2_params)} residues fitted")
 
@@ -400,6 +402,12 @@ class IntegratedAnalysisPipeline:
             warnings_field1,
             self.field1_results['excluded_residues']
         )
+        if self.params.enable_dual_field:
+            report = "\n".join([
+                f"Field 1 ({self.params.field1_freq_mhz} MHz)", report,
+                f"\nField 2 ({self.params.field2_freq_mhz} MHz)",
+                generate_validation_report(warnings_field2,
+                                           self.field2_results['excluded_residues'])])
 
         return report
 

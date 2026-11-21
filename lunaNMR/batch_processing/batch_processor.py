@@ -20,6 +20,7 @@ from typing import List, Dict, Optional, Union, Any
 from datetime import datetime
 
 from ..core.core_integrator import EnhancedVoigtIntegrator
+from .config_manager import ConfigManager
 
 # Note: Processor imports will be done dynamically in methods to avoid import issues
 
@@ -46,40 +47,17 @@ class BatchProcessor:
         """
         self.output_dir = Path(output_dir) if output_dir else Path.cwd()
         self.logger = logging.getLogger(__name__)
-        self._setup_logging(self.output_dir)
 
+        # The defaults are the command line's: a setting `config` leaves out takes them
+        defaults = ConfigManager().default_config
         self.config = {
-            'sn_thresholds': {
-                '15N1H': 2.5,
-                '13C1H': 2.0,
-                '1H': 2.0,
-                'default': 2.2
-            },
-            'expected_peaks': {
-                '15N1H': 100,
-                '13C1H': 80,
-                '1H': 60,
-                'default': 150
-            },
-            'quality_threshold': 0.6,
-            'max_fitting_attempts': 3,
-            'skip_on_error': True,
-            'detailed_logging': True,
-            'progress_interval': 5,
+            **defaults['processing'],
             'max_iterations': 1000,                    # Curve fitting max iterations
-            'max_optimization_iterations': 50,         # Parameter optimization iterations
-            'baseline_max_iter': 50,                   # Baseline correction iterations
-            'convergence_tolerance': 1e-8,             # Fitting convergence tolerance
             # Search/fitting window overrides; without them a spectrum is fitted with
             # the windows the GUI's Fit Spectrum uses
-            'processing_parameters': {}
-        }
-
-        self.default_file_handling = {
-            'extensions': ['.ft2', '.ft', '.pipe', '.ucsf', '.nmrpipe'],
-            'recursive_search': True,
-            'pattern_filters': [],
-            'exclude_patterns': ['*backup*', '*temp*']
+            'processing_parameters': {},
+            'file_handling': defaults['file_handling'],
+            'logging': defaults['logging']
         }
 
         if config:
@@ -91,34 +69,21 @@ class BatchProcessor:
                     self.config['expected_peaks'] = processing_config['expected_peaks']
                 if 'quality_threshold' in processing_config:
                     self.config['quality_threshold'] = processing_config['quality_threshold']
-                if 'max_fitting_attempts' in processing_config:
-                    self.config['max_fitting_attempts'] = processing_config['max_fitting_attempts']
                 if 'skip_on_error' in processing_config:
                     self.config['skip_on_error'] = processing_config['skip_on_error']
                 if 'max_iterations' in processing_config:
                     self.config['max_iterations'] = processing_config['max_iterations']
                 if 'max_iter' in processing_config:
                     self.config['max_iterations'] = processing_config['max_iter']
-                if 'max_optimization_iterations' in processing_config:
-                    self.config['max_optimization_iterations'] = processing_config['max_optimization_iterations']
-                if 'baseline_max_iter' in processing_config:
-                    self.config['baseline_max_iter'] = processing_config['baseline_max_iter']
-                if 'convergence_tolerance' in processing_config:
-                    self.config['convergence_tolerance'] = processing_config['convergence_tolerance']
 
             if 'processing_parameters' in config:
                 self.config['processing_parameters'].update(config['processing_parameters'])
 
-            for key in ['file_handling', 'logging', 'output']:
+            for key in ['file_handling', 'logging']:
                 if key in config:
-                    self.config[key] = config[key]
+                    self.config[key] = {**self.config[key], **config[key]}
 
-        if 'file_handling' not in self.config:
-            self.config['file_handling'] = self.default_file_handling
-        else:
-            for key, default_value in self.default_file_handling.items():
-                if key not in self.config['file_handling']:
-                    self.config['file_handling'][key] = default_value
+        self._setup_logging(self.output_dir, getattr(logging, self.config['logging']['level']))
 
         # Processing statistics
         self.stats = {
@@ -176,23 +141,26 @@ class BatchProcessor:
 
         self.logger.info("Batch processor initialized")
 
-    def _setup_logging(self, log_dir: Path):
+    def _setup_logging(self, log_dir: Path, console_level: int):
         """Set up logging system for batch processing, logging to a file in `log_dir`.
 
         The logger is shared by every processor in the process, so the handlers a previous
         processor added are closed first: otherwise each line is printed once per processor
         and every earlier log file stays open. Its lines are printed and written here
         only: propagated, the root logger's handlers would print each again.
+
+        The console prints from `console_level` up. The file keeps every INFO line
+        whatever the console shows, and the DEBUG ones when the console asks for them.
         """
         logger = logging.getLogger(__name__)
-        logger.setLevel(logging.INFO)
+        logger.setLevel(min(logging.INFO, console_level))
         logger.propagate = False
         for handler in list(logger.handlers):
             logger.removeHandler(handler)
             handler.close()
 
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
+        console_handler.setLevel(console_level)
 
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"batch_processing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -243,8 +211,7 @@ class BatchProcessor:
             'nucleus_type': nucleus_type,
             'sn_threshold': sn_threshold,
             'expected_peak_count': expected_peaks,
-            'quality_threshold': self.config['quality_threshold'],
-            'max_attempts': self.config['max_fitting_attempts']
+            'quality_threshold': self.config['quality_threshold']
         }
 
         self.logger.debug(f"Parameters for {nucleus_type}: {parameters}")
@@ -562,7 +529,7 @@ class BatchProcessor:
             for i, spectrum_file in enumerate(spectrum_files):
                 try:
                     # Progress reporting
-                    if i % self.config['progress_interval'] == 0:
+                    if i % self.config['logging']['progress_interval'] == 0:
                         progress = (i / len(spectrum_files)) * 100
                         self.logger.info(f"Progress: {progress:.1f}% ({i}/{len(spectrum_files)})")
 

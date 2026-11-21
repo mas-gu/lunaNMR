@@ -343,23 +343,24 @@ class SingleSpectrumProcessor:
         return (fitted_results, learned_statistics)
 
     def get_processing_summary(self, fitted_results: List[Dict], total_peaks: int) -> Dict[str, Any]:
-        """Generate comprehensive processing summary"""
+        """Counts of a fit run: the fits that succeeded, their mean R-squared, and how many
+        carry each quality label. A peak whose fit failed keeps a row in `fitted_results`,
+        so the number of rows is not the number of successes."""
 
-        successful_count = len(fitted_results)
+        successful = [result for result in fitted_results if result and result.get('success')]
+        successful_count = len(successful)
         success_rate = (successful_count / total_peaks * 100) if total_peaks > 0 else 0
 
         quality_scores = []
-        for result in fitted_results:
+        for result in successful:
             r_squared = result.get('avg_r_squared', 0)
             if r_squared > 0:
                 quality_scores.append(r_squared)
 
         avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
 
-        # Categorize quality
-        excellent_count = sum(1 for score in quality_scores if score >= 0.95)
-        good_count = sum(1 for score in quality_scores if 0.85 <= score < 0.95)
-        poor_count = sum(1 for score in quality_scores if score < 0.85)
+        labels = [(result or {}).get('fitting_quality', (result or {}).get('quality', 'Failed'))
+                  for result in fitted_results]
 
         return {
             'total_peaks': total_peaks,
@@ -367,11 +368,8 @@ class SingleSpectrumProcessor:
             'failed_peaks': total_peaks - successful_count,
             'success_rate': success_rate,
             'average_r_squared': avg_quality,
-            'quality_distribution': {
-                'excellent': excellent_count,  # R² >= 0.95
-                'good': good_count,           # 0.85 <= R² < 0.95
-                'poor': poor_count            # R² < 0.85
-            },
+            'quality_distribution': {label: labels.count(label)
+                                     for label in ('Excellent', 'Good', 'Fair', 'Poor', 'Failed')},
             'results': fitted_results,
             'processing_stats': self.stats.copy()
         }

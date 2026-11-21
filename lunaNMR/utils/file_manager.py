@@ -108,6 +108,29 @@ class NMRFileManager:
         except Exception as e:
             return False, f"Validation error: {str(e)}"
 
+    def _read_peak_table(self, file_path):
+        """A peak list file as a frame with stripped, standardised column names.
+
+        A .csv is comma-separated; any other extension is tried comma-separated first
+        and, when that gives a single column, tab-separated.
+        """
+        ext = os.path.splitext(file_path)[1].lower().lstrip('.')
+        if ext == 'csv':
+            df = pd.read_csv(file_path)
+        else:
+            try:
+                df = pd.read_csv(file_path, sep=',')
+                if len(df.columns) == 1:
+                    df = pd.read_csv(file_path, sep='\t')
+            except Exception:
+                try:
+                    df = pd.read_csv(file_path, sep='\t')
+                except Exception:
+                    raise ValueError("Could not parse file with comma or tab separators")
+
+        df.columns = df.columns.str.strip()
+        return self.standardize_peak_columns(df)
+
     def validate_peak_file(self, file_path):
         """Validate peak list file"""
         if not os.path.exists(file_path):
@@ -118,25 +141,7 @@ class NMRFileManager:
             if ext not in self.supported_peak_formats:
                 return False, f"Unsupported format: {ext}"
 
-            # Try to read the file with different separators
-            df = None
-            if ext == 'csv':
-                df = pd.read_csv(file_path)
-            else:
-                # Try comma-separated first (more common), then tab-separated
-                try:
-                    df = pd.read_csv(file_path, sep=',')
-                    # Check if we got multiple columns (successful comma separation)
-                    if len(df.columns) == 1:
-                        # Probably not comma-separated, try tab
-                        df = pd.read_csv(file_path, sep='\t')
-                except Exception:
-                    try:
-                        df = pd.read_csv(file_path, sep='\t')
-                    except Exception:
-                        return False, "Could not parse file with comma or tab separators"
-
-            df.columns = df.columns.str.strip()
+            df = self._read_peak_table(file_path)
 
             required_cols = ['Position_X', 'Position_Y']
             missing_cols = [col for col in required_cols if col not in df.columns]
@@ -193,28 +198,7 @@ class NMRFileManager:
             if not valid:
                 raise ValueError(message)
 
-            ext = os.path.splitext(file_path)[1].lower().lstrip('.')
-
-            if ext == 'csv':
-                df = pd.read_csv(file_path)
-            else:
-                # Try comma-separated first (more common), then tab-separated
-                try:
-                    df = pd.read_csv(file_path, sep=',')
-                    # Check if we got multiple columns (successful comma separation)
-                    if len(df.columns) == 1:
-                        # Probably not comma-separated, try tab
-                        df = pd.read_csv(file_path, sep='\t')
-                except Exception:
-                    try:
-                        df = pd.read_csv(file_path, sep='\t')
-                    except Exception:
-                        raise ValueError("Could not parse file with comma or tab separators")
-
-            df.columns = df.columns.str.strip()
-
-            # Standardize column names
-            df = self.standardize_peak_columns(df)
+            df = self._read_peak_table(file_path)
 
             # Strip whitespace from assignments: a list written "3LysH, 8.2, 126.3"
             # otherwise carries the space into every output CSV, and residue

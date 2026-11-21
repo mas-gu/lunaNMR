@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
+from lunaNMR.gui.dialogs.spectrum_files import spectrum_extensions, spectrum_file_filter
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
     FONT_SIZE_LARGE_HEADER, FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
@@ -360,9 +361,9 @@ class MissingFilesDialog(BaseDialog):
         # Handle Bruker files (no extension)
         basename = Path(suffix).name if suffix else ""
         if basename in ('2rr', '2ri', '2ir', '2ii', '1r', '1i'):
-            return "Bruker Processed (2rr 2ri 2ir 2ii 1r 1i);;NMR Files (*.ft *.ft2 *.ft3);;All Files (*)"
-        if suffix_lower in [".ft", ".ft2", ".ft3"]:
-            return "NMR Files (*.ft *.ft2 *.ft3);;Bruker Processed (2rr 2ri 2ir 2ii);;All Files (*)"
+            return f"Bruker Processed (2rr 2ri 2ir 2ii 1r 1i);;{spectrum_file_filter()};;All Files (*)"
+        if suffix_lower.lstrip(".") in spectrum_extensions():
+            return f"{spectrum_file_filter()};;Bruker Processed (2rr 2ri 2ir 2ii);;All Files (*)"
         elif suffix_lower in [".txt", ".csv"]:
             return "Text Files (*.txt *.csv);;All Files (*)"
         elif suffix_lower == ".json":
