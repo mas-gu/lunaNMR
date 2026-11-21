@@ -132,6 +132,13 @@ def prior_states(text, known):
     return states
 
 
+def count_selected(rows, prior=None):
+    """How many of `rows` their selection file selects: every residue the survey does
+    not call unusable, except where `prior`, a person's own ruling, says otherwise."""
+    prior = prior or {}
+    return sum(1 for r in rows if prior.get(r['residue'], r['verdict'] != 'unusable'))
+
+
 def format_residues_file(rows, prior=None):
     """Render a survey as an editable selection file, preserving human decisions.
 
@@ -168,8 +175,7 @@ def format_residues_file(rows, prior=None):
             # valid entry with a trailing comment rather than a corrupt residue name.
             lines_out.append(f"# {r['residue']:<10} # excluded: {note}")
 
-    n_selected = sum(1 for r in rows
-                     if prior.get(r['residue'], r['verdict'] != 'unusable'))
+    n_selected = count_selected(rows, prior)
     header = [
         '# lunaNMR Kd residue selection',
         '#',
@@ -275,5 +281,5 @@ def run_kd_survey_with_params(params):
               for v in ('ok', 'check', 'unusable')}
     return {'rows': rows, 'residues_file': residues_file, 'survey_file': survey_file,
             'params_file': params_file,
-            'n_total': len(rows), 'n_selected': len(rows) - counts['unusable'],
+            'n_total': len(rows), 'n_selected': count_selected(rows, prior),
             'counts': counts, 'points': data_in['points'], 'L': data_in['L']}
