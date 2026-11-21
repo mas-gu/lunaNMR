@@ -819,7 +819,8 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.figure.suptitle(f'2D Simultaneous Voigt Fitting: {assignment}',
                             fontsize=10, fontweight='bold')
 
-        self.figure.tight_layout(rect=[0, 0, 1, 0.96])
+        # The gridspec's own hspace/wspace lay the panels out; tight_layout cannot act
+        # on such a grid and only warns.
         self.canvas.draw()
 
     def _plot_2d_surface_3d(self, voigt_result):
