@@ -14,7 +14,7 @@ subprocess, so results are identical to running the commands yourself.
 The server needs Python 3.10 or newer (the MCP SDK's requirement); the rest of lunaNMR runs on 3.9.
 
 ```bash
-pip install -e ".[mcp]"          # from the lunaNMR_v1o0 folder, inside your lunaNMR environment
+pip install -e ".[mcp]"          # from the repository root, inside your lunaNMR environment
 lunanmr-mcp --check              # verifies the modules and a real CLI call
 ```
 

@@ -60,7 +60,7 @@ PySide6/Qt6 suite for NMR peak detection, Voigt profile fitting, and integration
 
 ```bash
 git clone https://github.com/mas-gu/lunaNMR.git
-cd lunaNMR/lunaNMR_v1o0
+cd lunaNMR
 
 pip install -r requirements.txt                          # dependencies
 python3 lunaNMR/validation/verify_installation.py        # verify
@@ -107,7 +107,7 @@ anything else, and gate residues on the flags in `series_analysis_tidy.csv`, not
 ## Package Structure
 
 ```
-lunaNMR_v1o0/
+lunaNMR/
 ├── launch_lunaNMR.py          # GUI launcher (starts the Qt app)
 ├── lunaNMR/
 │   ├── cli.py / __main__.py   # headless CLI (python -m lunaNMR)

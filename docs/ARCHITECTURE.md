@@ -7,7 +7,7 @@
 ## 1. Directory Structure
 
 ```
-lunaNMR_v1o0/
+lunaNMR/
 ├── launch_lunaNMR.py       # Launcher: opens the Qt main window
 ├── docs/
 ├── lunaNMR/                # Main package

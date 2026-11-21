@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ABOUTME: Single-file HTML reference guide for LunaNMR v1.0 — architecture, workflow, algorithms, modules. -->
-<!-- ABOUTME: Self-contained (inline CSS); open in any browser. Built from the codebase + CLAUDE.md. -->
+<!-- ABOUTME: Self-contained (inline CSS); open in any browser. Built from the codebase. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -112,13 +112,13 @@ relaxation rates, binding affinities (K<sub>d</sub>), chemical-shift perturbatio
   <div class="card"><h4>Track</h4><p class="muted">Cascade propagation across a series so moving peaks (titration) stay locked to the right signal.</p></div>
   <div class="card"><h4>Analyze</h4><p class="muted">DynamiXs (T1/T2, T1ρ, methyl T2, hetNOE, spectral density, model-free), a Kd/titration module (CSP + intensity binding fits) and 1D integration across a series.</p></div>
 </div>
-<p>The active, production codebase is <code>lunaNMR_v1o0/</code> (released at
-<a href="https://github.com/mas-gu/lunaNMR.git">github.com/mas-gu/lunaNMR</a>).</p>
+<p>The codebase is released at
+<a href="https://github.com/mas-gu/lunaNMR.git">github.com/mas-gu/lunaNMR</a>.</p>
 </section>
 
 <section id="install">
 <h2>Install &amp; launch</h2>
-<pre><code>cd lunaNMR_v1o0/
+<pre><code>cd lunaNMR/
 pip install -r requirements.txt
 python3 lunaNMR/validation/verify_installation.py   # verify
 python3 launch_lunaNMR.py                            # run
@@ -147,7 +147,7 @@ analysis modules (DynamiXs, Kd) consume.</p>
 
 <section id="arch">
 <h2>Architecture — layers &amp; packages</h2>
-<pre><code>lunaNMR_v1o0/
+<pre><code>lunaNMR/
 ├── launch_lunaNMR.py            # launcher: opens the Qt main window
 ├── lunaNMR/
 │   ├── core/                    # processing engines
@@ -416,9 +416,8 @@ lists apart), while single-spectrum views use the quality colors above.</p>
 </section>
 
 <footer>
-LunaNMR v1.0 — generated reference guide. For the canonical engineering notes see
-<code>CLAUDE.md</code> and <code>JOURNAL.md</code> at the repository root, and the markdown docs in
-<code>docs/</code>. This file is self-contained; open it in any browser.
+LunaNMR v1.0 — generated reference guide. The markdown docs in <code>docs/</code> are the
+reference set. This file is self-contained; open it in any browser.
 </footer>
 </main>
 </div>
