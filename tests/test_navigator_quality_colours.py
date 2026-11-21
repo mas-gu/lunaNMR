@@ -95,3 +95,19 @@ def test_the_main_navigator_keeps_the_label_through_a_fit_update(app, fitted_pea
                   enumerate(zip(fitted_peaks, markers))
                   if _row_rgb(navigator.table, row) != _lightened(rgb)]
     assert not mismatched, f"rows coloured unlike their markers: {mismatched[:10]}"
+
+
+@pytest.mark.parametrize("navigator_class", ["PeakNavigator", "PeakNavigatorTable"])
+def test_the_legend_shows_each_label_beside_the_symbol_its_rows_carry(app, navigator_class):
+    from PySide6.QtWidgets import QLabel
+    from lunaNMR.gui import components
+    from lunaNMR.gui.styles.quality_colors import quality_symbol
+    navigator = getattr(components, navigator_class)()
+    legend = next(label.text() for label in navigator.findChildren(QLabel)
+                  if label.text().startswith("Quality:"))
+    entries = legend[len("Quality:"):].strip().split("  ")
+    for label in ("Excellent", "Good", "Fair", "Poor", "Failed"):
+        entry = [e for e in entries if label in e]
+        assert len(entry) == 1, f"{label} is not in the legend: {legend}"
+        assert entry[0].split()[0] == quality_symbol(label)
+    assert "0.85" not in legend
