@@ -15,17 +15,25 @@ TimeUnits = Literal['ms', 's', 'us']
 ErrorMethod = Literal['analytical', 'bootstrap']
 
 DELAYS = """Delay values are read from the matrix column headers or its series_metadata.json;
-`time_units` states them when neither does, and RESCALES the fitted rates, so a wrong unit gives
-a confidently wrong number. `allow_unparsed_delays` fits anyway when some spectra carried no
-delay (those points are dropped)."""
+`time_units` states them when neither does. @UNITS_EFFECT@ `allow_unparsed_delays` fits anyway
+when some spectra carried no delay (those points are dropped)."""
+# What stating the units does to the result: a time constant is reported in them, a rate is
+# computed from them.
+UNITS_LABEL = "Stating the units labels the fitted time constants; it does not rescale them."
+UNITS_RESCALE = ("Stating the units RESCALES the fitted rates, so a wrong unit gives a "
+                 "confidently wrong number.")
 
 
 def register(server, ctx):
     root = ctx.root
 
     def analysis_tool(function):
-        """Register `function` as a tool whose docstring has the shared delay text filled in."""
-        function.__doc__ = function.__doc__.replace('@DELAYS@', DELAYS)
+        """Register `function` as a tool whose docstring has the shared delay text filled in:
+        `@DELAYS@` for a fit that reports time constants, `@DELAYS_TO_RATES@` for one that
+        converts them to rates."""
+        function.__doc__ = (function.__doc__
+                            .replace('@DELAYS_TO_RATES@', DELAYS.replace('@UNITS_EFFECT@', UNITS_RESCALE))
+                            .replace('@DELAYS@', DELAYS.replace('@UNITS_EFFECT@', UNITS_LABEL)))
         return server.tool(annotations=WRITES_NEW_FOLDER)(describe(function))
 
     def _optional(path):
@@ -115,7 +123,7 @@ def register(server, ctx):
         carrier in ppm and `theta` the nominal tilt angle in degrees: these are acquisition
         parameters recoverable from neither the spectra nor the filenames, so ask for them
         rather than guessing. The R2 table it writes feeds model-free as `f1_r2_table`.
-        @DELAYS@ `out` is a new folder. @DRY_RUN@"""
+        @DELAYS_TO_RATES@ `out` is a new folder. @DRY_RUN@"""
         try:
             rho = root.input_file(input)
             t1_matrix = root.input_file(t1)

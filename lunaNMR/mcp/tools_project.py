@@ -46,8 +46,9 @@ def register(server, ctx):
     @server.tool(annotations=WRITES_NEW_FOLDER)
     @describe
     async def project_export(bundle: str, out: str, dry_run: bool = False) -> CallToolResult:
-        """Copy a bundle's contents to a plain folder `out` (new) with a manifest. The bundle
-        itself is not changed. @DRY_RUN@"""
+        """Copy a bundle's contents to a plain folder `out` (new): every file of the bundle,
+        and no other. The result counts them (`n_files`) and names the ones the inventory puts
+        in no category (`unclassified`). The bundle itself is not changed. @DRY_RUN@"""
         try:
             bundle_folder = root.existing(bundle)
             root.refuse_escaping_links(bundle_folder)

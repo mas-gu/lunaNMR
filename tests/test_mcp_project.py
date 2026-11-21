@@ -99,3 +99,13 @@ def test_an_export_copies_the_bundle_to_a_new_folder_only(dataset, built):
     assert summary["n_files"] > 0 and (dataset / "plain").is_dir()
     again = call_tool(dataset, "project_export", {"bundle": "bundle.lunaNMR", "out": "plain"})
     assert again["error"]["type"] == "PathRefused"
+
+
+@needs_binding_data
+def test_an_export_holds_the_bundles_files_and_no_other(dataset, built):
+    def files(folder):
+        return sorted(str(path.relative_to(folder)) for path in folder.rglob("*") if path.is_file())
+    summary = call_tool(dataset, "project_export", {"bundle": "bundle.lunaNMR", "out": "plain_listing"})
+    assert summary["ok"] is True
+    assert files(dataset / "plain_listing") == files(dataset / "bundle.lunaNMR")
+    assert summary["n_files"] == len(files(dataset / "bundle.lunaNMR"))
