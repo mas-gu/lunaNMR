@@ -29,14 +29,14 @@ def test_a_relaxation_fit(tmp_path):
 def test_a_density_analysis(tmp_path):
     from dynamiXs_integrated.integrated_analysis import (IntegratedAnalysisPipeline,
                                                          IntegratedAnalysisParameters)
-    folder = str(_DIR / "dynamiXs_density_functions")
     p = IntegratedAnalysisParameters()
     p.output_dir = str(tmp_path)
     p.analysis_method = "unknown"
     pipeline = IntegratedAnalysisPipeline(p)
-    counts = []
+    paths = []
     for _ in range(2):
         with pytest.raises(ValueError, match="Unknown analysis method"):
             pipeline._run_spectral_density_analysis({})
-        counts.append(sys.path.count(folder))
-    assert counts[0] == counts[1] >= 1
+        paths.append(list(sys.path))
+    assert paths[0] == paths[1]
+    assert sys.path.count(str(_DIR)) >= 1
