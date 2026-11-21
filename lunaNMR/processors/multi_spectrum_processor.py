@@ -1131,7 +1131,7 @@ class MultiSpectrumProcessor:
         and 17 of its 140 clustered points ended on the position bound, against 9 here.
 
         In a time series peaks do not move, and a cluster member keeps the position it
-        was seeded from. Following the fit there moved KRASB 600 T1 further from the
+        was seeded from. Following the fit there moved a 600 MHz T1 series further from the
         reference-mode values (median 0.95% to 1.95%, q90 5.1% to 8.9%) at unchanged
         fit errors.
         """

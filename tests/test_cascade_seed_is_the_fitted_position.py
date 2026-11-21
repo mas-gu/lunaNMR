@@ -49,7 +49,7 @@ class TestATitrationSeedIsTheFittedPosition:
 
 class TestATimeSeriesHoldsAClusterMemberWhereItWasSeeded:
     """Relaxation peaks do not move. Measured in cascade mode, letting cluster members
-    follow their fits moved KRASB 600 T1 further from the reference-mode values
+    follow their fits moved a 600 MHz T1 series further from the reference-mode values
     (median 0.95% to 1.95%) at unchanged fit errors."""
 
     def test_a_cluster_member_keeps_the_position_it_was_seeded_from(self):
