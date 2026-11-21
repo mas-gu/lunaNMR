@@ -69,6 +69,9 @@ from lunaNMR.utils.recent_projects_manager import RecentProjectsManager
 
 logger = logging.getLogger(__name__)
 
+# What the Processing Statistics panel reads while no detection or fit has run on the data
+NO_STATISTICS_TEXT = "No processing performed yet"
+
 
 class PeakDetectionWorker(QThread):
     """Worker thread for peak detection to prevent GUI freezing.
@@ -340,6 +343,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.current_voigt_result = None
         self.last_fitting_results = None  # Store last fitting results for series integration
         self.batch_results = None
+        self.saved_series = {}  # name -> BatchResults of each series run or loaded
         self.series_output_folder = None
 
         # Project management
@@ -354,6 +358,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.dynamixs_dialog = None  # Reference to open DynamiXs dialog
         self.dynamixs_analyses = None  # name -> {state, file_refs} saved DynamiXs runs
         self.kd_titration_dialog = None  # Reference to open Kd/titration dialog
+        self.kd_analyses = None  # name -> {fit_data, meta} saved Kd fits
         self.kd_state = None  # Kd/titration dialog parameters
         self.kd_file_refs = None  # Kd/titration input file paths
         self._spectral_inspector = None  # Reference to open Spectral Inspector window
@@ -405,10 +410,6 @@ class LunaNMRMainWindow(BaseWindow):
         # Nucleus-adaptive search windows (from ps2d_config)
         self.search_window_x = SEARCH_WINDOW_PPM  # 1H dimension (ppm) - F2
         self.search_window_y = get_ps2d_config().search_window_f1  # 15N/13C dimension (ppm) - F1
-        self.detection_square_size = 3  # X-dimension/1H (pixels)
-        self.detection_rectangle_y = 1  # Y-dimension/15N (pixels)
-        self.detection_square_ppm_x = "0.000"  # Auto-calculated ppm conversion
-        self.detection_square_ppm_y = "0.000"  # Auto-calculated ppm conversion
 
         # Peak Centroid Detection parameters
         self.centroid_window_x_ppm = 0.01  # X-window size in ppm (1H dimension)
@@ -418,9 +419,6 @@ class LunaNMRMainWindow(BaseWindow):
 
         # Auto-add dummy peaks (for peak_list mode only)
         self.auto_add_dummy_peaks = True  # Auto-add nearby unmatched peaks
-
-        # S/N threshold for peak_list mode initial detection (Expert Mode)
-        self.peak_list_sn_threshold = 10.0  # Multiplier for noise level
 
         # Manual detection region (Expert Mode)
         # When enabled, overrides automatic nucleus-based region filtering
@@ -455,13 +453,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.ps2d_overlap_x = ps2d_config.overlap_threshold_x
         self.ps2d_overlap_y = ps2d_config.overlap_threshold_y
 
-        # ===== Custom Linewidth Parameters (Expert Mode) =====
-        self.use_custom_linewidths = False
-        self.lw_lorentz_1h = 0.001
-        self.lw_gauss_1h = 0.03    # 1H Gaussian (ppm)
-        self.lw_lorentz_15n = 0.0001
-        self.lw_gauss_15n = 0.3    # 15N Gaussian (ppm)
-
         # ===== Series Integration Parameters (Expert Mode) =====
         self.use_ps2d_linewidth_reuse = False  # Per-Peak Linewidth Reuse as initial guess (OFF by default)
         self.enable_cascade_drift_limit = True  # Enforce absolute drift limits in cascade mode (ON by default)
@@ -473,7 +464,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.params_visible = False           # Peak Detection Parameters visibility
         self.ps2d_config_params_visible = False  # PS2D Config Parameters visibility
         self.ps2d_fit_params_visible = False  # PS2D Fit Parameters visibility
-        self.custom_lw_visible = False        # Custom linewidth inputs visibility
 
         # ===== Shift Peak List Parameters =====
         self.shift_1h_value = 0.0  # 1H offset in ppm
@@ -828,7 +818,7 @@ class LunaNMRMainWindow(BaseWindow):
         # S/N Threshold spinbox
         self.sn_threshold_spin = QDoubleSpinBox()
         self.sn_threshold_spin.setRange(1.0, 100.0)
-        self.sn_threshold_spin.setValue(10.0)
+        self.sn_threshold_spin.setValue(self.sn_threshold)
         self.sn_threshold_spin.setSingleStep(0.5)
         self.sn_threshold_spin.setDecimals(1)
         self.sn_threshold_spin.setStyleSheet(f"""
@@ -846,12 +836,13 @@ class LunaNMRMainWindow(BaseWindow):
                 border: 1px solid #CCCCCC;
             }}
         """)
+        self.sn_threshold_spin.valueChanged.connect(self._on_sn_parameters_changed)
         params_layout.addRow("S/N Threshold:", self.sn_threshold_spin)
 
         # Expected peak count spinbox
         self.expected_peaks_spin = QSpinBox()
         self.expected_peaks_spin.setRange(10, 1000)
-        self.expected_peaks_spin.setValue(50)
+        self.expected_peaks_spin.setValue(self.expected_peak_count)
         self.expected_peaks_spin.setSingleStep(10)
         self.expected_peaks_spin.setStyleSheet(f"""
             QSpinBox {{
@@ -868,6 +859,7 @@ class LunaNMRMainWindow(BaseWindow):
                 border: 1px solid #CCCCCC;
             }}
         """)
+        self.expected_peaks_spin.valueChanged.connect(self._on_sn_parameters_changed)
         params_layout.addRow("Expected Peaks:", self.expected_peaks_spin)
 
         # From-GUI threshold checkbox
@@ -974,6 +966,11 @@ class LunaNMRMainWindow(BaseWindow):
         self._update_auto_add_dummy_enabled()
 
         self.update_status(f"Workflow mode: {self.workflow_mode}")
+
+    def _on_sn_parameters_changed(self):
+        """Keep the S/N threshold and the expected peak count the spin boxes show."""
+        self.sn_threshold = self.sn_threshold_spin.value()
+        self.expected_peak_count = self.expected_peaks_spin.value()
 
     def on_sn_from_gui_toggled(self, checked: bool):
         """Handle 'From GUI' checkbox toggle.
@@ -1984,7 +1981,7 @@ class LunaNMRMainWindow(BaseWindow):
         layout.setSpacing(SPACING_SM)
 
         # Statistics label
-        self.stats_label = QLabel("No processing performed yet")
+        self.stats_label = QLabel(NO_STATISTICS_TEXT)
         self.stats_label.setStyleSheet(f"""
             QLabel {{
                 font-size: {FONT_SIZE_BODY}pt;
@@ -2202,26 +2199,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.expert_search_y_spin.valueChanged.connect(self._on_expert_param_change)
         params_frame_layout.addWidget(self.expert_search_y_spin, 0, 2)
 
-        # Row 2: Detection rectangle size (pixels)
-        params_frame_layout.addWidget(QLabel("X×Y (pixels):"), 2, 0)
-        self.expert_det_x_spin = QSpinBox()
-        self.expert_det_x_spin.setRange(1, 9)
-        self.expert_det_x_spin.setSingleStep(2)
-        self.expert_det_x_spin.setValue(self.detection_square_size)
-        self.expert_det_x_spin.valueChanged.connect(self._on_expert_detection_size_change)
-        params_frame_layout.addWidget(self.expert_det_x_spin, 2, 1)
-
-        self.expert_det_y_spin = QSpinBox()
-        self.expert_det_y_spin.setRange(1, 5)
-        self.expert_det_y_spin.setSingleStep(1)
-        self.expert_det_y_spin.setValue(self.detection_rectangle_y)
-        self.expert_det_y_spin.valueChanged.connect(self._on_expert_detection_size_change)
-        params_frame_layout.addWidget(self.expert_det_y_spin, 2, 2)
-
-        self.expert_det_ppm_label = QLabel(self.detection_square_ppm_x)
-        self.expert_det_ppm_label.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: gray;")
-        params_frame_layout.addWidget(self.expert_det_ppm_label, 2, 3)
-
         # Row 3: Peak Centroid Detection header
         centroid_label = QLabel("🎯 Peak Centroid Detection:")
         centroid_label.setStyleSheet("font-weight: bold;")
@@ -2250,28 +2227,12 @@ class LunaNMRMainWindow(BaseWindow):
         self.expert_auto_add_dummy_cb.setChecked(self.auto_add_dummy_peaks)
         self.expert_auto_add_dummy_cb.setToolTip(
             "Automatically add peaks detected in spectrum but not in user peak list.\n"
-            "Uses 3rd percentile intensity threshold and 3× overlap proximity.\n"
+            "Adds a peak at or above the 10th percentile of the matched peaks' intensity,\n"
+            "within one PS2D radius of a listed peak in each dimension.\n"
             "Only applies to Peak List mode (grayed out in S/N Threshold mode)."
         )
         self.expert_auto_add_dummy_cb.stateChanged.connect(self._on_auto_add_dummy_change)
         params_frame_layout.addWidget(self.expert_auto_add_dummy_cb, 5, 0, 1, 4)
-
-        # Row 6: S/N threshold for peak_list mode
-        peak_list_sn_label = QLabel("Peak List S/N threshold:")
-        peak_list_sn_label.setToolTip(
-            "S/N threshold multiplier for initial peak detection in Peak List mode.\n"
-            "Higher values = fewer peaks detected, more selective matching."
-        )
-        params_frame_layout.addWidget(peak_list_sn_label, 6, 0, 1, 2)
-
-        self.expert_peak_list_sn_spin = QDoubleSpinBox()
-        self.expert_peak_list_sn_spin.setRange(1.0, 100.0)
-        self.expert_peak_list_sn_spin.setSingleStep(1.0)
-        self.expert_peak_list_sn_spin.setDecimals(1)
-        self.expert_peak_list_sn_spin.setValue(self.peak_list_sn_threshold)
-        self.expert_peak_list_sn_spin.setToolTip("S/N threshold for Peak List mode detection")
-        self.expert_peak_list_sn_spin.valueChanged.connect(self._on_peak_list_sn_change)
-        params_frame_layout.addWidget(self.expert_peak_list_sn_spin, 6, 2, 1, 2)
 
         # Row 7: Separator line
         separator = QFrame()
@@ -2554,66 +2515,6 @@ class LunaNMRMainWindow(BaseWindow):
         fix_pos_row.addStretch()
         fit_params_layout.addLayout(fix_pos_row)
 
-        # Custom Initial Linewidths checkbox
-        custom_lw_row = QHBoxLayout()
-        self.expert_custom_lw_check = QCheckBox("Custom Initial Linewidths")
-        self.expert_custom_lw_check.setChecked(self.use_custom_linewidths)
-        self.expert_custom_lw_check.stateChanged.connect(self._on_custom_lw_toggle)
-        custom_lw_row.addWidget(self.expert_custom_lw_check)
-        custom_lw_hint = QLabel("(Override defaults: Lor/Gauss 1H=0.001/0.03, 15N=0.0001/0.3)")
-        custom_lw_hint.setStyleSheet(f"font-size: {FONT_SIZE_BODY}pt; color: gray;")
-        custom_lw_row.addWidget(custom_lw_hint)
-        custom_lw_row.addStretch()
-        fit_params_layout.addLayout(custom_lw_row)
-
-        # Custom linewidth input fields (collapsible)
-        self.expert_custom_lw_frame = QWidget()
-        custom_lw_layout = QGridLayout(self.expert_custom_lw_frame)
-        custom_lw_layout.setSpacing(SPACING_SM)
-
-        # 1H linewidths
-        custom_lw_layout.addWidget(QLabel("1H:"), 0, 0)
-        custom_lw_layout.addWidget(QLabel("Lor:"), 0, 1)
-        self.expert_lw_lor_1h_spin = QDoubleSpinBox()
-        self.expert_lw_lor_1h_spin.setRange(0.0001, 0.1)
-        self.expert_lw_lor_1h_spin.setSingleStep(0.001)
-        self.expert_lw_lor_1h_spin.setDecimals(4)
-        self.expert_lw_lor_1h_spin.setValue(self.lw_lorentz_1h)
-        self.expert_lw_lor_1h_spin.valueChanged.connect(self._on_custom_lw_change)
-        custom_lw_layout.addWidget(self.expert_lw_lor_1h_spin, 0, 2)
-
-        custom_lw_layout.addWidget(QLabel("Gauss:"), 0, 3)
-        self.expert_lw_gauss_1h_spin = QDoubleSpinBox()
-        self.expert_lw_gauss_1h_spin.setRange(0.001, 1.0)
-        self.expert_lw_gauss_1h_spin.setSingleStep(0.01)
-        self.expert_lw_gauss_1h_spin.setDecimals(3)
-        self.expert_lw_gauss_1h_spin.setValue(self.lw_gauss_1h)
-        self.expert_lw_gauss_1h_spin.valueChanged.connect(self._on_custom_lw_change)
-        custom_lw_layout.addWidget(self.expert_lw_gauss_1h_spin, 0, 4)
-
-        # 15N linewidths
-        custom_lw_layout.addWidget(QLabel("15N:"), 1, 0)
-        custom_lw_layout.addWidget(QLabel("Lor:"), 1, 1)
-        self.expert_lw_lor_15n_spin = QDoubleSpinBox()
-        self.expert_lw_lor_15n_spin.setRange(0.00001, 0.01)
-        self.expert_lw_lor_15n_spin.setSingleStep(0.0001)
-        self.expert_lw_lor_15n_spin.setDecimals(5)
-        self.expert_lw_lor_15n_spin.setValue(self.lw_lorentz_15n)
-        self.expert_lw_lor_15n_spin.valueChanged.connect(self._on_custom_lw_change)
-        custom_lw_layout.addWidget(self.expert_lw_lor_15n_spin, 1, 2)
-
-        custom_lw_layout.addWidget(QLabel("Gauss:"), 1, 3)
-        self.expert_lw_gauss_15n_spin = QDoubleSpinBox()
-        self.expert_lw_gauss_15n_spin.setRange(0.001, 0.5)
-        self.expert_lw_gauss_15n_spin.setSingleStep(0.005)
-        self.expert_lw_gauss_15n_spin.setDecimals(3)
-        self.expert_lw_gauss_15n_spin.setValue(self.lw_gauss_15n)
-        self.expert_lw_gauss_15n_spin.valueChanged.connect(self._on_custom_lw_change)
-        custom_lw_layout.addWidget(self.expert_lw_gauss_15n_spin, 1, 4)
-
-        self.expert_custom_lw_frame.setVisible(False)
-        fit_params_layout.addWidget(self.expert_custom_lw_frame)
-
         # Parallel processing checkbox
         parallel_row = QHBoxLayout()
         self.expert_parallel_check = QCheckBox("🚀 Use Parallel Processing (75% cores)")
@@ -2663,9 +2564,10 @@ class LunaNMRMainWindow(BaseWindow):
         adaptive_row = QHBoxLayout()
         self.expert_rerun_adaptive_check = QCheckBox("🔄 Rerun Adaptive Optimization per Spectrum")
         self.expert_rerun_adaptive_check.setToolTip(
-            "When enabled, runs full PASS 1 learning and adaptive grid search\n"
-            "(radF1/radF2 optimization) for EACH spectrum in the series.\n"
+            "When enabled, EACH spectrum in the series learns its own linewidth statistics\n"
+            "(PASS 1).\n"
             "When disabled (default), spectrum 1 statistics are reused for all spectra.\n"
+            "The adaptive radius search (radF1/radF2) does not run in a series.\n"
             "Enable this if linewidth characteristics vary significantly across the series."
         )
         self.expert_rerun_adaptive_check.setChecked(self.rerun_adaptive_per_spectrum)
@@ -2707,7 +2609,7 @@ class LunaNMRMainWindow(BaseWindow):
             "When enabled in Independent mode:\n"
             "- Cluster assignments from spectrum 1 are used for all spectra\n"
             "- Prevents volume variation from cluster membership changes\n"
-            "- Still runs fresh adaptive optimization per spectrum\n"
+            "- Each spectrum still learns its own linewidth statistics\n"
             "Recommended for titration/relaxation series where peak groupings should be consistent."
         )
         lock_clusters_row.addWidget(self.expert_lock_clusters_check)
@@ -2734,14 +2636,6 @@ class LunaNMRMainWindow(BaseWindow):
         series_layout.addLayout(lock_threshold_row)
 
         content_layout.addWidget(series_group)
-
-        # =================== ADDITIONAL EXPERT OPTIONS SECTION ===================
-        future_group = QGroupBox("Additional Expert Options")
-        future_layout = QVBoxLayout(future_group)
-        future_label = QLabel("More expert options will be added here...")
-        future_label.setStyleSheet("color: gray;")
-        future_layout.addWidget(future_label)
-        content_layout.addWidget(future_group)
 
         content_layout.addStretch()
 
@@ -2771,19 +2665,37 @@ class LunaNMRMainWindow(BaseWindow):
     def _sync_expert_dialog_values(self):
         """Sync Expert Mode dialog widgets to current parameter values.
 
-        Called when reopening a cached dialog to ensure UI matches internal state.
+        Called when reopening a cached dialog and after a project load to ensure UI
+        matches internal state.
         """
-        # Detection parameters
-        if hasattr(self, 'expert_search_x_spin'):
-            self.expert_search_x_spin.setValue(self.search_window_x)
-        if hasattr(self, 'expert_search_y_spin'):
-            self.expert_search_y_spin.setValue(self.search_window_y)
+        # Detection parameters - signals blocked: a change of any of the four spin boxes
+        # reads all four into the state
+        for spin, value in ((getattr(self, 'expert_search_x_spin', None), self.search_window_x),
+                            (getattr(self, 'expert_search_y_spin', None), self.search_window_y),
+                            (getattr(self, 'expert_centroid_x_spin', None), self.centroid_window_x_ppm),
+                            (getattr(self, 'expert_centroid_y_spin', None), self.centroid_window_y_ppm)):
+            if spin is not None:
+                spin.blockSignals(True)
+                spin.setValue(value)
+                spin.blockSignals(False)
+        if hasattr(self, 'expert_auto_add_dummy_cb'):
+            self.expert_auto_add_dummy_cb.blockSignals(True)
+            self.expert_auto_add_dummy_cb.setChecked(self.auto_add_dummy_peaks)
+            self.expert_auto_add_dummy_cb.blockSignals(False)
 
         # PS2D config parameters
+        if hasattr(self, 'expert_nucleus_combo'):
+            self.expert_nucleus_combo.blockSignals(True)
+            self.expert_nucleus_combo.setCurrentText(self.nucleus_type)
+            self.expert_nucleus_combo.blockSignals(False)
         if hasattr(self, 'expert_rad_x_spin'):
             self.expert_rad_x_spin.setValue(self.ps2d_rad_x)
         if hasattr(self, 'expert_rad_y_spin'):
             self.expert_rad_y_spin.setValue(self.ps2d_rad_y)
+        if hasattr(self, 'expert_show_ellipses_check'):
+            self.expert_show_ellipses_check.blockSignals(True)
+            self.expert_show_ellipses_check.setChecked(self.show_ellipses)
+            self.expert_show_ellipses_check.blockSignals(False)
         if hasattr(self, 'expert_overlap_x_spin'):
             self.expert_overlap_x_spin.setValue(self.ps2d_overlap_x)
         if hasattr(self, 'expert_overlap_y_spin'):
@@ -2810,10 +2722,6 @@ class LunaNMRMainWindow(BaseWindow):
             self.expert_adaptive_check.blockSignals(True)
             self.expert_adaptive_check.setChecked(self.use_adaptive_optimization)
             self.expert_adaptive_check.blockSignals(False)
-        if hasattr(self, 'expert_custom_lw_check'):
-            self.expert_custom_lw_check.blockSignals(True)
-            self.expert_custom_lw_check.setChecked(self.use_custom_linewidths)
-            self.expert_custom_lw_check.blockSignals(False)
         if hasattr(self, 'expert_lw_reuse_check'):
             self.expert_lw_reuse_check.blockSignals(True)
             self.expert_lw_reuse_check.setChecked(self.use_ps2d_linewidth_reuse)
@@ -2822,20 +2730,13 @@ class LunaNMRMainWindow(BaseWindow):
             self.expert_rerun_adaptive_check.blockSignals(True)
             self.expert_rerun_adaptive_check.setChecked(self.rerun_adaptive_per_spectrum)
             self.expert_rerun_adaptive_check.blockSignals(False)
-
-        # Custom linewidth values
-        if hasattr(self, 'expert_lw_lor_1h_spin'):
-            self.expert_lw_lor_1h_spin.setValue(self.lw_lorentz_1h)
-        if hasattr(self, 'expert_lw_gauss_1h_spin'):
-            self.expert_lw_gauss_1h_spin.setValue(self.lw_gauss_1h)
-        if hasattr(self, 'expert_lw_lor_15n_spin'):
-            self.expert_lw_lor_15n_spin.setValue(self.lw_lorentz_15n)
-        if hasattr(self, 'expert_lw_gauss_15n_spin'):
-            self.expert_lw_gauss_15n_spin.setValue(self.lw_gauss_15n)
-
-        # Peak list S/N threshold
-        if hasattr(self, 'expert_peak_list_sn_spin'):
-            self.expert_peak_list_sn_spin.setValue(self.peak_list_sn_threshold)
+        for check, value in ((getattr(self, 'expert_cascade_drift_check', None), self.enable_cascade_drift_limit),
+                             (getattr(self, 'expert_lock_clusters_check', None), self.lock_cluster_assignments),
+                             (getattr(self, 'expert_lock_threshold_check', None), self.lock_detection_threshold)):
+            if check is not None:
+                check.blockSignals(True)
+                check.setChecked(value)
+                check.blockSignals(False)
 
         # Manual detection region
         if hasattr(self, 'expert_manual_region_check'):
@@ -2892,11 +2793,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.auto_add_dummy_peaks = (state == 2)
         logger.info(f"Auto-add dummy peaks: {self.auto_add_dummy_peaks}")
 
-    def _on_peak_list_sn_change(self, value):
-        """Handle peak_list S/N threshold spinbox change."""
-        self.peak_list_sn_threshold = value
-        logger.info(f"Peak List S/N threshold: {self.peak_list_sn_threshold}")
-
     def _on_manual_region_toggle(self, state):
         """Handle manual detection region checkbox toggle."""
         # In PySide6, stateChanged passes int: 0=Unchecked, 2=Checked
@@ -2946,35 +2842,6 @@ class LunaNMRMainWindow(BaseWindow):
                 logger.warning("Cannot reset region: no spectrum loaded")
         else:
             logger.warning("Cannot reset region: no integrator available")
-
-    def _on_expert_detection_size_change(self):
-        """Handle detection rectangle size changes."""
-        self.detection_square_size = self.expert_det_x_spin.value()
-        self.detection_rectangle_y = self.expert_det_y_spin.value()
-        self._update_detection_square_ppm()
-
-    def _update_detection_square_ppm(self):
-        """Update ppm conversion display for detection square size."""
-        if hasattr(self, 'integrator') and self.integrator:
-            if hasattr(self.integrator, 'ppm_x_axis') and hasattr(self.integrator, 'ppm_y_axis'):
-                try:
-                    x_axis = self.integrator.ppm_x_axis
-                    y_axis = self.integrator.ppm_y_axis
-                    x_ppm_per_pixel = abs(x_axis[-1] - x_axis[0]) / len(x_axis)
-                    y_ppm_per_pixel = abs(y_axis[-1] - y_axis[0]) / len(y_axis)
-
-                    standard_x_ppm = x_ppm_per_pixel * self.detection_square_size
-                    standard_y_ppm = y_ppm_per_pixel * self.detection_rectangle_y
-
-                    self.detection_square_ppm_x = f"(≈{standard_x_ppm:.3f}×{standard_y_ppm:.2f} ppm)"
-                    if hasattr(self, 'expert_det_ppm_label'):
-                        self.expert_det_ppm_label.setText(self.detection_square_ppm_x)
-                    return
-                except Exception:
-                    pass
-        self.detection_square_ppm_x = "(load data to see ppm)"
-        if hasattr(self, 'expert_det_ppm_label'):
-            self.expert_det_ppm_label.setText(self.detection_square_ppm_x)
 
     def _on_nucleus_type_change(self, nucleus: str):
         """Handle nucleus type selection change for PS2D configuration."""
@@ -3147,21 +3014,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.fix_positions = (state == 2)  # Qt.CheckState.Checked = 2
         logger.info(f"Fix positions: {self.fix_positions}")
 
-    def _on_custom_lw_toggle(self, state):
-        """Toggle visibility of custom linewidth inputs."""
-        self.use_custom_linewidths = (state == 2)  # Qt.CheckState.Checked = 2
-        if hasattr(self, 'expert_custom_lw_frame'):
-            self.expert_custom_lw_frame.setVisible(self.use_custom_linewidths)
-        logger.info(f"Custom linewidths: {self.use_custom_linewidths}")
-
-    def _on_custom_lw_change(self):
-        """Handle custom linewidth value changes."""
-        self.lw_lorentz_1h = self.expert_lw_lor_1h_spin.value()
-        self.lw_gauss_1h = self.expert_lw_gauss_1h_spin.value()
-        self.lw_lorentz_15n = self.expert_lw_lor_15n_spin.value()
-        self.lw_gauss_15n = self.expert_lw_gauss_15n_spin.value()
-        logger.info(f"Custom LW: 1H Lor={self.lw_lorentz_1h:.4f}, Gauss={self.lw_gauss_1h:.3f}")
-
     def _on_parallel_change(self, state):
         """Handle parallel processing checkbox change."""
         self.use_parallel_processing = (state == 2)  # Qt.CheckState.Checked = 2
@@ -3234,11 +3086,13 @@ class LunaNMRMainWindow(BaseWindow):
         if reply == QMessageBox.Yes:
             logger.info("Full application reset initiated")
 
-            if self.dynamixs_dialog is not None:
-                try:
-                    self.dynamixs_dialog.close()
-                except Exception:
-                    pass
+            # A project save captures what these windows show
+            for dialog in (self.dynamixs_dialog, self.kd_titration_dialog):
+                if dialog is not None:
+                    try:
+                        dialog.close()
+                    except Exception:
+                        pass
 
             # Save GUI component references (they already exist, don't null them)
             gui_refs = {
@@ -3373,8 +3227,7 @@ class LunaNMRMainWindow(BaseWindow):
             self.show_assigned_checkbox.setChecked(True)
 
         # Statistics display
-        if hasattr(self, 'statistics_display') and self.statistics_display:
-            self.statistics_display.setText("No results")
+        self.stats_label.setText(NO_STATISTICS_TEXT)
 
         logger.debug("GUI widgets reset to defaults")
 
@@ -4174,10 +4027,12 @@ class LunaNMRMainWindow(BaseWindow):
             logger.error(f"Failed to load data: {e}")
 
     def _forget_previous_results(self):
-        """Drop the detected peaks, fit results and fitted clusters of the data loaded before."""
+        """Drop the detected peaks, fit results and fitted clusters of the data loaded
+        before, and the statistics shown for them."""
         self.integrator.fitted_peaks = []
         self.integrator.enhanced_fitter.series_params = None
         self.last_fitting_results = None
+        self.stats_label.setText(NO_STATISTICS_TEXT)
         if self.peak_navigator is not None:
             self.peak_navigator.load_detected_peaks([])
 
@@ -4348,7 +4203,9 @@ class LunaNMRMainWindow(BaseWindow):
                 self.spectrum_plotter.plot_peaks(
                     self.integrator,
                     show_detected=has_detected,
-                    show_assigned=has_reference
+                    show_assigned=has_reference,
+                    show_ellipses=self.show_ellipses,
+                    nucleus_type=self.nucleus_type
                 )
 
                 if has_detected:
@@ -4612,34 +4469,29 @@ class LunaNMRMainWindow(BaseWindow):
                 QMessageBox.critical(self, "Export Error", str(e))
 
     def export_results(self):
-        """Export current processing results (v0o9 lines 6064-6094).
+        """Export the Fit Spectrum results to a CSV file the user names.
 
-        Exports integration_results to CSV or Excel file.
+        The table is the one Fit Spectrum saves beside the spectrum.
         """
         from PySide6.QtWidgets import QFileDialog, QMessageBox
-        import pandas as pd
+        from lunaNMR.processors.single_spectrum_processor import write_fitting_results_csv
 
-        if not hasattr(self.integrator, 'integration_results') or not self.integrator.integration_results:
-            QMessageBox.critical(self, "Error", "No integration results to export")
+        if not self.last_fitting_results:
+            QMessageBox.critical(self, "Error", "No fit results to export. Run Fit Spectrum first.")
             return
 
         filename, _ = QFileDialog.getSaveFileName(
             self,
-            "Export Integration Results",
+            "Export Fit Results",
             "",
-            "CSV files (*.csv);;Excel files (*.xlsx);;All files (*.*)"
+            "CSV files (*.csv);;All files (*.*)"
         )
 
         if filename:
             try:
-                df = pd.DataFrame(self.integrator.integration_results)
+                write_fitting_results_csv(self.last_fitting_results, filename)
 
-                if filename.endswith('.xlsx'):
-                    df.to_excel(filename, index=False)
-                else:
-                    df.to_csv(filename, index=False, float_format='%.6f')
-
-                self.update_status(f"Results exported: {len(df)} integrations")
+                self.update_status(f"Results exported: {len(self.last_fitting_results)} peaks")
                 QMessageBox.information(self, "Export Successful",
                     f"Results exported to:\n{filename}")
 
@@ -4959,6 +4811,17 @@ class LunaNMRMainWindow(BaseWindow):
 
         self.update_status("Series manager closed")
 
+    @staticmethod
+    def _exported_peak_rows(spectrum_data):
+        """The per-peak rows of one spectrum of a series that the exports write."""
+        return spectrum_data.get('integration_results') or spectrum_data.get('fitted_results', [])
+
+    @staticmethod
+    def _mean_over_peaks(peak_rows, key):
+        """The mean of `key` over the peak rows that carry it, 0 when none does."""
+        values = [row[key] for row in peak_rows if isinstance(row, dict) and key in row]
+        return sum(values) / len(values) if values else 0
+
     def export_data_matrix(self):
         """Export comprehensive data matrix (v0o9 lines 7100-7230).
 
@@ -4987,10 +4850,7 @@ class LunaNMRMainWindow(BaseWindow):
 
             if hasattr(self.batch_results, 'results'):
                 for spectrum_name, spectrum_data in self.batch_results.results.items():
-                    fitted_results = spectrum_data.get('fitted_results', [])
-                    integration_results = spectrum_data.get('integration_results', [])
-
-                    results_to_export = integration_results if integration_results else fitted_results
+                    results_to_export = self._exported_peak_rows(spectrum_data)
 
                     for peak_result in results_to_export:
                         if isinstance(peak_result, dict):
@@ -4998,8 +4858,9 @@ class LunaNMRMainWindow(BaseWindow):
 
                             result_row['spectrum'] = spectrum_name
                             result_row['spectrum_success'] = spectrum_data.get('status') == 'success'
-                            result_row['detection_rate'] = spectrum_data.get('detection_rate', 0)
                             result_row['total_peaks'] = spectrum_data.get('total_peaks', 0)
+                            result_row['successful_fits'] = spectrum_data.get('successful_fits', 0)
+                            result_row['success_rate'] = spectrum_data.get('success_rate', 0)
 
                             all_results.append(result_row)
 
@@ -5089,21 +4950,20 @@ class LunaNMRMainWindow(BaseWindow):
             # Quality statistics
             if hasattr(self.batch_results, 'results'):
                 r_squared_values = []
-                detection_rates = []
+                success_rates = []
 
                 for name, data in self.batch_results.results.items():
-                    if data.get('avg_r_squared'):
-                        r_squared_values.append(data['avg_r_squared'])
-                    if data.get('detection_rate'):
-                        detection_rates.append(data['detection_rate'])
+                    avg_r_squared = self._mean_over_peaks(self._exported_peak_rows(data), 'r_squared')
+                    if avg_r_squared:
+                        r_squared_values.append(avg_r_squared)
+                    success_rates.append(data.get('success_rate', 0))
 
                     report['spectra_details'][name] = {
                         'status': data.get('status', 'unknown'),
-                        'detected_peaks': data.get('detected_peaks', 0),
                         'total_peaks': data.get('total_peaks', 0),
-                        'detection_rate': data.get('detection_rate', 0),
-                        'avg_r_squared': data.get('avg_r_squared', 0),
-                        'processing_time': data.get('processing_time', 0)
+                        'successful_fits': data.get('successful_fits', 0),
+                        'success_rate': data.get('success_rate', 0),
+                        'avg_r_squared': avg_r_squared
                     }
 
                 if r_squared_values:
@@ -5115,13 +4975,13 @@ class LunaNMRMainWindow(BaseWindow):
                         'max': float(np.max(r_squared_values))
                     }
 
-                if detection_rates:
+                if success_rates:
                     import numpy as np
-                    report['quality_statistics']['detection_rate'] = {
-                        'mean': float(np.mean(detection_rates)),
-                        'std': float(np.std(detection_rates)),
-                        'min': float(np.min(detection_rates)),
-                        'max': float(np.max(detection_rates))
+                    report['quality_statistics']['success_rate'] = {
+                        'mean': float(np.mean(success_rates)),
+                        'std': float(np.std(success_rates)),
+                        'min': float(np.min(success_rates)),
+                        'max': float(np.max(success_rates))
                     }
 
             with open(filename, 'w') as f:
@@ -5214,39 +5074,24 @@ class LunaNMRMainWindow(BaseWindow):
 
             if hasattr(self.batch_results, 'results'):
                 for spectrum_name, spectrum_data in self.batch_results.results.items():
-                    fitted_results = spectrum_data.get('fitted_results', [])
-                    integration_results = spectrum_data.get('integration_results', [])
-                    results_to_export = integration_results if integration_results else fitted_results
+                    results_to_export = self._exported_peak_rows(spectrum_data)
 
                     # Summary row for this spectrum
                     summary_row = {
                         'spectrum': spectrum_name,
                         'status': spectrum_data.get('status', 'unknown'),
                         'total_peaks': spectrum_data.get('total_peaks', 0),
-                        'detected_peaks': spectrum_data.get('detected_peaks', 0),
-                        'detection_rate': spectrum_data.get('detection_rate', 0),
-                        'avg_r_squared': 0,
-                        'avg_snr': 0
+                        'successful_fits': spectrum_data.get('successful_fits', 0),
+                        'success_rate': spectrum_data.get('success_rate', 0),
+                        'avg_r_squared': self._mean_over_peaks(results_to_export, 'r_squared'),
+                        'avg_snr': self._mean_over_peaks(results_to_export, 'snr')
                     }
-
-                    r_squared_values = []
-                    snr_values = []
 
                     for peak_result in results_to_export:
                         if isinstance(peak_result, dict):
                             result_row = peak_result.copy()
                             result_row['spectrum'] = spectrum_name
                             all_results.append(result_row)
-
-                            if 'r_squared' in peak_result:
-                                r_squared_values.append(peak_result['r_squared'])
-                            if 'snr' in peak_result:
-                                snr_values.append(peak_result['snr'])
-
-                    if r_squared_values:
-                        summary_row['avg_r_squared'] = sum(r_squared_values) / len(r_squared_values)
-                    if snr_values:
-                        summary_row['avg_snr'] = sum(snr_values) / len(snr_values)
 
                     summary_data.append(summary_row)
 
@@ -5506,33 +5351,33 @@ class LunaNMRMainWindow(BaseWindow):
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit
 
         help_text = """
-NMR Peaks Series Analysis - User Guide
-
-PROCESSING MODES:
-• Full Detection: Complete spectrum analysis with validation
-• In-Place Fitting: Direct fitting to reference positions
+LunaNMR - User Guide
 
 BASIC WORKFLOW:
-1. Select NMR spectra folder and peak list folder
-2. Choose processing mode using radio buttons
-3. Load individual files or start series processing
-4. Adjust detection and fitting parameters
-5. View results in multiple visualization tabs
+1. Load Data: choose an NMR spectrum and, to work from one, a peak list
+2. Peak Detection Workflow: "With Peak List (Standard)" matches the listed
+   peaks to the spectrum; "S/N Threshold (Native Detection)" picks the peaks
+   from the spectrum alone
+3. Detect: find the peaks in the loaded spectrum
+4. Fit Spectrum: fit a 2D Voigt profile to every peak
+5. Fit Series: fit the same peaks in every spectrum of a folder
 
-KEY FEATURES:
-• Enhanced file management with preview
-• Dual-mode processing (Full/In-Place)
-• Advanced Voigt profile fitting
-• Comprehensive series integration
-• Statistics and quality assessment
-• Configuration management
+TABS:
+• Main Spectrum: the contours and the peaks
+• Voigt Analysis, 3D Voigt Analysis and Peak Parameters: the fit of the peak
+  picked in the peak navigator
+
+MENUS:
+• File menu: open and save projects, export the peak list and the fit results
+• Edit menu: undo and redo peak edits
+• Results Analysis menu: browse, overlay, manage and export series results
+• Modules menu: relaxation, Kd / titration, 1D integration, Spectral Inspector
 
 KEYBOARD SHORTCUTS:
-• F1: Show this help
-• F5: Refresh current view
-• Ctrl+O: Open file
-• Ctrl+S: Save results
-• Ctrl+Q: Quit
+• Ctrl+Z: Undo
+• Ctrl+Shift+Z: Redo
+• Esc: Clear the peak selection
+• Delete or Ctrl+D: Delete the selected peaks
 
 For more information, visit the project documentation.
         """
@@ -5621,23 +5466,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 if hasattr(self, 'use_adaptive_optimization'):
                     self.param_manager.current_params['use_adaptive_optimization'] = self.use_adaptive_optimization
 
-                if hasattr(self, 'use_custom_linewidths') and self.use_custom_linewidths:
-                    # Only pass custom linewidths if the feature is enabled
-                    if hasattr(self, 'lw_lorentz_1h'):
-                        self.param_manager.current_params['lw_lorentz_1h'] = self.lw_lorentz_1h
-                    if hasattr(self, 'lw_gauss_1h'):
-                        self.param_manager.current_params['lw_gauss_1h'] = self.lw_gauss_1h
-                    if hasattr(self, 'lw_lorentz_15n'):
-                        self.param_manager.current_params['lw_lorentz_15n'] = self.lw_lorentz_15n
-                    if hasattr(self, 'lw_gauss_15n'):
-                        self.param_manager.current_params['lw_gauss_15n'] = self.lw_gauss_15n
-                else:
-                    # Clear custom linewidths when feature is disabled (use defaults)
-                    self.param_manager.current_params['lw_lorentz_1h'] = None
-                    self.param_manager.current_params['lw_gauss_1h'] = None
-                    self.param_manager.current_params['lw_lorentz_15n'] = None
-                    self.param_manager.current_params['lw_gauss_15n'] = None
-
                 validation_errors = self.param_manager.validate_all_parameters()
                 if validation_errors:
                     logger.warning(f"Parameter validation warnings: {', '.join(validation_errors[:3])}")
@@ -5653,8 +5481,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 if hasattr(self.integrator, 'fitting_parameters'):
                     self.integrator.fitting_parameters.update(integrator_params['fitting_params'])
 
-                if hasattr(self.integrator, 'gui_params'):
-                    self.integrator.gui_params = integrator_params['gui_params']
+                self.integrator.gui_params = integrator_params['gui_params']
 
                 logger.debug(f"Parameter manager updated with {len(integrator_params)} parameter groups")
 
@@ -5736,9 +5563,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
             if hasattr(self, 'auto_add_dummy_peaks'):
                 self.integrator.auto_add_dummy_peaks = self.auto_add_dummy_peaks
-
-            if hasattr(self, 'peak_list_sn_threshold'):
-                self.integrator.peak_list_sn_threshold = self.peak_list_sn_threshold
 
             # Uses GUI contour minimum so "what you see is what you detect"
             if (hasattr(self, 'workflow_mode') and self.workflow_mode == 'peak_list' and
@@ -5922,29 +5746,36 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
     # ===== Peak Detection Helper Methods =====
 
-    def update_statistics_panel(self):
-        """Update the Statistics panel with detection/fitting results.
+    def update_statistics_panel(self, fit_summary=None):
+        """Show the counts of the operation that just ended in the Statistics panel.
 
-        Retrieves statistics from the integrator and updates the statistics
-        display labels in the left panel.
+        Args:
+            fit_summary: The summary of a fit; without one the integrator's detection
+                statistics are shown.
         """
         try:
-            stats = self.integrator.get_detection_statistics()
+            if fit_summary is not None:
+                stats_text = [
+                    f"Fitted: {fit_summary['successful_peaks']}/{fit_summary['total_peaks']}",
+                    f"Failed fits: {fit_summary['failed_peaks']}",
+                    f"Average R²: {fit_summary['average_r_squared']:.3f}"
+                ]
+            else:
+                stats = self.integrator.get_detection_statistics()
 
-            stats_text = []
-            if 'detected_peaks' in stats:
-                stats_text.append(f"Detected: {stats['detected_peaks']}")
-            if 'total_peaks' in stats:
-                stats_text.append(f"Total: {stats['total_peaks']}")
-            if 'detection_rate' in stats:
-                stats_text.append(f"Rate: {stats['detection_rate']:.1f}%")
-            if 'failed_peaks' in stats:
-                stats_text.append(f"Failed: {stats['failed_peaks']}")
+                stats_text = []
+                if 'detected_peaks' in stats:
+                    stats_text.append(f"Detected: {stats['detected_peaks']}")
+                if 'total_peaks' in stats:
+                    stats_text.append(f"Total: {stats['total_peaks']}")
+                if 'detection_rate' in stats:
+                    stats_text.append(f"Rate: {stats['detection_rate']:.1f}%")
+                if 'failed_peaks' in stats:
+                    stats_text.append(f"Failed: {stats['failed_peaks']}")
 
-            if hasattr(self, 'statistics_display'):
-                self.statistics_display.setText('\n'.join(stats_text))
+            self.stats_label.setText('\n'.join(stats_text))
 
-            logger.debug(f"Statistics panel updated: {stats}")
+            logger.debug(f"Statistics panel updated: {stats_text}")
 
         except Exception as e:
             logger.warning(f"Could not update statistics panel: {e}")
@@ -6085,7 +5916,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 - total_peaks: int
                 - successful_peaks: int
                 - failed_peaks: int
-                - average_quality: float
+                - average_r_squared: float
                 - fitted_results: list of fit results
             progress_dialog: Progress dialog to close
         """
@@ -6192,30 +6023,13 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             # Update main spectrum plot to show color-coded peaks (v0o9 line 4298)
             self.update_spectrum_plot()
 
-            self.update_statistics_panel()
+            self.update_statistics_panel(summary)
 
-            # Update Voigt Analysis plots with first successful fit (v0o9 lines 3886-3892)
-            if self.integrator.fitted_peaks and len(self.integrator.fitted_peaks) > 0:
-                for peak_result in self.integrator.fitted_peaks:
-                    quality = peak_result.get('quality', 0)
-                    if isinstance(quality, str):
-                        try:
-                            quality = float(quality)
-                        except (ValueError, TypeError):
-                            quality = 0
-                    if quality > 0:
-                        self.current_voigt_result = peak_result
-                        if hasattr(self, 'voigt_2d_plotter') and self.voigt_2d_plotter:
-                            self.voigt_2d_plotter.plot_voigt_analysis(peak_result)
-                            logger.debug(f"Updated 2D Voigt plot with peak: {peak_result.get('peak_id', 'unknown')}")
-                        if hasattr(self, 'voigt_3d_plotter') and self.voigt_3d_plotter:
-                            self.voigt_3d_plotter.plot_voigt_analysis_3d(peak_result)
-                            logger.debug(f"Updated 3D Voigt plot with peak: {peak_result.get('peak_id', 'unknown')}")
-                        break
+            self._show_first_successful_fit()
 
             status_msg = f"Fitting complete: {summary['successful_peaks']}/{summary['total_peaks']} peaks"
-            if 'average_quality' in summary and summary['average_quality'] > 0:
-                status_msg += f" (avg R²: {summary['average_quality']:.3f})"
+            if summary.get('average_r_squared', 0) > 0:
+                status_msg += f" (avg R²: {summary['average_r_squared']:.3f})"
             self.update_status(status_msg)
 
             # Save fitting results to CSV file (matching series integration output format)
@@ -6231,6 +6045,21 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             logger.error(f"Error handling fitting results: {e}", exc_info=True)
             from lunaNMR.gui.components import show_error
             show_error(self, "Update Error", f"Fitting succeeded but GUI update failed: {e}")
+
+    def _show_first_successful_fit(self):
+        """Show the first successful fit among the integrator's peaks in the two Voigt tabs."""
+        # Update Voigt Analysis plots with first successful fit (v0o9 lines 3886-3892)
+        if self.integrator.fitted_peaks and len(self.integrator.fitted_peaks) > 0:
+            for peak_result in self.integrator.fitted_peaks:
+                if peak_result.get('success'):
+                    self.current_voigt_result = peak_result
+                    if hasattr(self, 'voigt_2d_plotter') and self.voigt_2d_plotter:
+                        self.voigt_2d_plotter.plot_voigt_analysis(peak_result)
+                        logger.debug(f"Updated 2D Voigt plot with peak: {peak_result.get('peak_id', 'unknown')}")
+                    if hasattr(self, 'voigt_3d_plotter') and self.voigt_3d_plotter:
+                        self.voigt_3d_plotter.plot_voigt_analysis_3d(peak_result)
+                        logger.debug(f"Updated 3D Voigt plot with peak: {peak_result.get('peak_id', 'unknown')}")
+                    break
 
     @Slot(str)
     def on_fitting_failed(self, error_message, progress_dialog):
@@ -6383,7 +6212,7 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
             f"Successful: {successful}\n"
             f"Failed: {total - successful}\n"
             f"Success rate: {success_rate:.1f}%\n\n"
-            "Use View > Results Browser to analyze results."
+            "Use Results Analysis > Browse Series Results... to analyze results."
         )
 
         logger.info(f"Series processing: {successful}/{total} successful")
@@ -7527,6 +7356,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 dialog.deleteLater()
                 setattr(self, attr, None)
 
+        self._show_loaded_parameters()
+
         self.update_file_status_labels(
             nmr_file=self.current_nmr_file,
             peak_file=self.current_peak_file
@@ -7563,11 +7394,10 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 self.peak_navigator.refresh_peak_list()
 
         # Update Voigt analysis plotter if fit results exist
-        if hasattr(self, 'voigt_plotter') and self.last_fitting_results:
+        if self.last_fitting_results:
             try:
-                if len(self.last_fitting_results) > 0:
-                    self.voigt_plotter.display_results(self.last_fitting_results[0])
-                    logger.info(f"Loaded {len(self.last_fitting_results)} fit results into Voigt plotter")
+                self._show_first_successful_fit()
+                logger.info(f"Loaded {len(self.last_fitting_results)} fit results into Voigt plotter")
             except Exception as e:
                 logger.warning(f"Could not update Voigt plotter: {e}")
 
@@ -7580,6 +7410,53 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     getattr(self, 'spectral_inspector_state', None) or {})
             except Exception as e:
                 logger.warning(f"Could not refresh Spectral Inspector after load: {e}")
+
+    def _show_loaded_parameters(self):
+        """Put the parameters a project load restored into the widgets that show them
+        and into the PS2D config.
+
+        Detection and fitting are synchronised from the widgets and fit with the
+        config, so either left as it was would overrule the project.
+        """
+        sn_mode = self.workflow_mode == "sn_threshold"
+        # Read before any widget is set: a change of one spin box reads its neighbour
+        # into the state as well
+        shown = (
+            (self.sn_threshold_spin, self.sn_threshold),
+            (self.expected_peaks_spin, self.expected_peak_count),
+            (self.contour_levels_spin, self.contour_levels),
+            (self.contour_min_spin, self.contour_min),
+            (self.contour_inc_spin, self.contour_increment),
+            (self.shift_1h_spin, self.shift_1h_value),
+            (self.shift_15n_spin, self.shift_15n_value),
+        )
+        ticked = (
+            (self.workflow_sn_threshold_radio, sn_mode),
+            (self.workflow_peak_list_radio, not sn_mode),
+            (self.show_exp_3d_checkbox, self.show_exp_3d),
+            (self.show_fit_3d_checkbox, self.show_fit_3d),
+            (self.show_individual_3d_checkbox, self.show_individual_3d),
+            (self.show_resid_3d_checkbox, self.show_resid_3d),
+            (self.limit_peak_display_3d_checkbox, self.limit_peak_display_3d),
+        )
+        color_scheme = self.color_scheme_3d
+        for spin, value in shown:
+            spin.setValue(value)
+        for button, checked in ticked:
+            button.setChecked(checked)
+        self.color_scheme_3d_dropdown.setCurrentText(color_scheme)
+
+        config = set_ps2d_config(self.nucleus_type)
+        config.radF1 = self.ps2d_radF1
+        config.radF2 = self.ps2d_radF2
+        config.overlap_threshold_x = self.ps2d_overlap_x
+        config.overlap_threshold_y = self.ps2d_overlap_y
+        config.max_iterations = self.ps2d_max_iterations
+        config.max_cluster_size = self.ps2d_max_cluster_size
+        mark_ps2d_config_as_base()
+
+        self._show_ps2d_config()
+        self._sync_expert_dialog_values()
 
     # ===== Test Spectrum Creation =====
 
