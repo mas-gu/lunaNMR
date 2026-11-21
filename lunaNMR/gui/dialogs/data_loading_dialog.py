@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
+from lunaNMR.gui.dialogs.spectrum_files import spectrum_file_filter
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
@@ -359,7 +360,7 @@ class DataLoadingDialog(BaseDialog):
             self,
             "Select NMR Spectrum",
             initial_dir,
-            "NMR Files (*.ft2 *.ft *.pipe *.ucsf 2rr 2ri 2ir 2ii 1r 1i);;Bruker Processed (2rr 2ri 2ir 2ii);;NMRPipe (*.ft2 *.ft *.pipe);;Varian/Agilent (fid);;All Files (*)"
+            f"{spectrum_file_filter()};;Bruker Processed (2rr 2ri 2ir 2ii);;NMRPipe (*.ft2 *.ft *.pipe);;Varian/Agilent (fid);;All Files (*)"
         )
 
         if file_path:
