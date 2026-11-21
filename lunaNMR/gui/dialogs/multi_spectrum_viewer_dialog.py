@@ -591,15 +591,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         min_row.addWidget(self.min_spin)
         contour_layout.addLayout(min_row)
 
-        inc_row = QHBoxLayout()
-        inc_row.addWidget(QLabel("Inc:"))
-        self.increment_spin = QDoubleSpinBox()
-        self.increment_spin.setRange(1.01, 2.0)
-        self.increment_spin.setValue(2.0)
-        self.increment_spin.setSingleStep(0.01)
-        inc_row.addWidget(self.increment_spin)
-        contour_layout.addLayout(inc_row)
-
         update_btn = QPushButton("Update")
         update_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1290,9 +1281,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         all_peaks = voigt_result.get('all_peaks', [])
         r_squared = voigt_result.get('avg_r_squared', voigt_result.get('r_squared', 0.0))
 
-        # Color palette matching visualization
-        colors = ['red', 'orange', 'purple', 'brown', 'pink', 'olive', 'cyan', 'magenta']
-
         lines = []
 
         # Header
@@ -1314,7 +1302,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
             lines.append("")
 
             for i, peak in enumerate(all_peaks):
-                color = colors[i % len(colors)]
                 peak_assignment = peak.get('assignment', f'Peak {i+1}')
 
                 pos_f2 = peak.get('pos_f2', peak.get('center_x', 0.0))
@@ -1336,7 +1323,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
                 lg_ratio_f1 = lw_lor_f1 / lw_f1 if lw_f1 > 0 else 0.0
 
                 # Peak header
-                lines.append(f"{peak_assignment} ({color}):")
+                lines.append(f"{peak_assignment}:")
                 lines.append("-" * 50)
 
                 lines.append(f"  Position (F2, F1):     ({pos_f2:.4f}, {pos_f1:.2f}) ppm")
@@ -2464,10 +2451,13 @@ class MultiSpectrumViewerDialog(BaseDialog):
                     peak['r_squared'] = peak['R_Squared'] = r2
                 if quality is not None:
                     peak['quality'] = peak['Quality'] = quality
-                for src, dst in (('height', 'height'), ('volume', 'volume'),
-                                 ('lw_gau_f2', 'lw_x'), ('lw_gau_f1', 'lw_y')):
-                    if src in fp:
-                        peak[dst] = fp[src]
+                for key in ('height', 'volume'):
+                    if key in fp:
+                        peak[key] = fp[key]
+                # Total linewidth per dimension, Lorentzian + Gaussian, as the series reports it.
+                for dim, dst in (('f2', 'lw_x'), ('f1', 'lw_y')):
+                    if f'lw_gau_{dim}' in fp and f'lw_lor_{dim}' in fp:
+                        peak[dst] = fp[f'lw_gau_{dim}'] + fp[f'lw_lor_{dim}']
                 for key in ('position_pinned', 'intensity_pinned', 'detection_sigma'):
                     if key in fp:
                         peak[key] = fp[key]
