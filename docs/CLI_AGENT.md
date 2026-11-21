@@ -3,7 +3,7 @@
 
 # lunaNMR CLI — Agent Reference
 
-Scannable condensation of `docs/CLI.md` + `cli.py` for an agent. Run from `lunaNMR_v1o0/`.
+Scannable condensation of `docs/CLI.md` + `cli.py` for an agent. Run from the repository root.
 
 ## Invocation
 ```bash

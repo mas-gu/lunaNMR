@@ -44,14 +44,12 @@ def check_dependencies():
 
 
 def setup_paths():
-    """Setup Python paths for module imports"""
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(current_dir)
+    """Put the folder holding the lunaNMR package first on the import path.
 
-    sys.path.insert(0, current_dir)
-    sys.path.insert(0, parent_dir)
-
-    return current_dir, parent_dir
+    Only that folder: a checkout is itself called lunaNMR after `git clone`, so with its
+    parent on the path `import lunaNMR` finds the checkout instead of the package in it.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def launch_lunaNMR():
@@ -75,7 +73,7 @@ def main():
     # The terminal the app is started from shows lunaNMR's INFO records
     logging.basicConfig(level=logging.INFO)
 
-    current_dir, parent_dir = setup_paths()
+    setup_paths()
 
     missing = check_dependencies()
     if missing:

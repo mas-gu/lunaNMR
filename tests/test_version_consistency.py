@@ -23,7 +23,6 @@ def test_every_stated_version_is_the_same_number():
     stated = {
         "lunaNMR.__version__": lunaNMR.__version__,
         "batch_processing.__version__": batch_version,
-        "top-level __init__.py": _first_match("__init__.py", r'__version__ = "([\d.]+)"'),
         "batch --version text": _first_match(
             "lunaNMR/batch_processing/cli_interface.py", r"LunaNMR Batch Processing v([\d.]+)"),
         "About dialog": _first_match("lunaNMR/gui/main_window.py", r"Version ([\d.]+) \(Qt Port\)"),

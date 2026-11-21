@@ -6,7 +6,7 @@ One-page cheat sheet for common operations and parameters.
 
 ## Launch
 ```bash
-cd lunaNMR_v1o0
+cd lunaNMR
 python3 launch_lunaNMR.py
 ```
 

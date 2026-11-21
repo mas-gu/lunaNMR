@@ -4,7 +4,7 @@ LunaNMR is an NMR peak-analysis and integration suite. Every analysis the GUI pe
 also reachable headlessly, with no display, through one CLI.
 
 ```bash
-cd lunaNMR_v1o0
+cd lunaNMR
 python -m lunaNMR --help          # `lunanmr` also works after `pip install -e .`
 ```
 
@@ -43,7 +43,6 @@ later step depends on.
 - `lunaNMR/` — the package (`cli.py` is the CLI entry point; `core/` holds the fitting engines).
 - `modules/` — optional analysis modules (dynamiXs relaxation, Kd titration, 1D integration).
 - `docs/` — everything above.
-- `CLAUDE.md` (one level up) — engineering conventions for contributors, not usage.
 
 ## Tests
 

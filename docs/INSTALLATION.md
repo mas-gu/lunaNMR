@@ -1,6 +1,6 @@
 # Installation Guide – lunaNMR v1.0
 
-Runs on macOS, Linux, Windows. All commands run from the `lunaNMR_v1o0/` directory.
+Runs on macOS, Linux, Windows. All commands run from the repository root (the `lunaNMR/` folder `git clone` creates).
 
 ## 1. Prerequisites
 
@@ -12,7 +12,7 @@ Runs on macOS, Linux, Windows. All commands run from the `lunaNMR_v1o0/` directo
 
 ```bash
 git clone https://github.com/mas-gu/lunaNMR.git
-cd lunaNMR/lunaNMR_v1o0
+cd lunaNMR
 ```
 
 ## 3. Virtual Environment (recommended)
@@ -47,7 +47,7 @@ The shorter `lunanmr <subcommand>` is a console script declared in `pyproject.to
 it exists only after an editable install:
 
 ```bash
-pip install -e .        # from lunaNMR_v1o0/, adds `lunanmr` to PATH
+pip install -e .        # from the repository root, adds `lunanmr` to PATH
 ```
 
 Without it `which lunanmr` finds nothing, and every `lunanmr …` line in the docs must be
