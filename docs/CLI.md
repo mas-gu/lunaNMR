@@ -364,7 +364,7 @@ python -m lunaNMR dynamixs methyl-t2 --input <matrix.csv> --out <dir> \
     [--prefix field1] [--field-name field1] [--field-freq 600] [--time-units {s,ms,us}] \
     [--error-method {analytical,bootstrap}] [--bootstrap 1000]
 ```
-Input = a series `peak_intensity_matrix.csv` / `comprehensive_peak_tracking.csv`. Delay column
+Input = a series `peak_intensity_matrix.csv` (or `peak_volume_matrix.csv`, to fit volumes). Delay column
 headers are parsed by `parse_delay_column` (explicit `ms`/`s`/`us` unit + optional repeat
 marker `b` or `_2`), which returns every delay in ms. Exit code 1 if nothing fits.
 A series' `series_analysis_tidy.csv` (one row per spectrum and peak) is not a matrix: it is
@@ -557,9 +557,21 @@ separates `removed` from `missing` (named paths that were not there).
 python -m lunaNMR batch <folder> [--preset 1H] [--config ...] ...
 ```
 Flags pass straight through to `batch_processing`; one it does not know is a usage error
-(exit `2`). So is a `--config` file key batch does not read (a removed setting such as
-`optimization`, or a typo), named in the message; `description` and keys starting with `_`
-are notes and are accepted.
+(exit `2`). So is a combination it refuses (`--quiet` with `--verbose`, `--skip-errors` with
+`--strict`, `--preset` with `--config`, no folder), and a `--config` file key batch does not
+read (a removed setting such as `optimization`, or a typo), named in the message;
+`description` and keys starting with `_` are notes and are accepted. A folder or `--config`
+file that does not exist exits `1`, named in the message.
+
+A config file sets `processing.sn_thresholds`, `processing.expected_peaks`,
+`processing.quality_threshold`, `processing.skip_on_error`, `processing_parameters`,
+`file_handling.extensions` / `recursive_search` / `pattern_filters` / `exclude_patterns` and
+`logging.level` / `progress_interval` (a progress line every N spectra). `--extensions`,
+`--recursive`, `--skip-errors` / `--strict` and `--log-level` replace the file's value only
+when given. `--log-level` sets the level the processing log is printed from, `--quiet` limits
+it to errors and `--verbose` adds its DEBUG lines; the log file keeps every INFO line
+whichever is given. Presets: `15N1H`, `13C1H`, `1H`, `conservative`, `aggressive`
+(`--list-presets`).
 Each spectrum is detected by S/N (the threshold and peak count from the preset or config
 entry of its nucleus type), and its detected peaks
 are fitted as the GUI's **Fit Spectrum** fits them after a Detect: the same processor
