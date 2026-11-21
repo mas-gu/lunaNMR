@@ -22,9 +22,11 @@ T2_LOWER_BOUND_MS = 0.1
 
 try:
     from delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
+    from delay_units import MS_TO_UNITS
     from fit_Tx_NMRRE import measured_points, results_file_from_json
 except ImportError:  # imported as dynamiXs_T1_T2.fit_methyl_T2 (parent dir on path)
     from dynamiXs_T1_T2.delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
+    from dynamiXs_T1_T2.delay_units import MS_TO_UNITS
     from dynamiXs_T1_T2.fit_Tx_NMRRE import measured_points, results_file_from_json
 
 
@@ -36,7 +38,7 @@ def biexp_decay(x, A, t2_a, t2_b):
     return 0.5 * A * (np.exp(-x / t2_a) + np.exp(-x / t2_b))
 
 
-def biexp_decay_avg(x, A, T2_avg, dT2):
+def biexp_decay_avg(x, A, T2_avg, dT2, t2_floor=T2_LOWER_BOUND_MS):
     """Equivalent bi-exp model in (T2_avg, dT2) coordinates.
 
     t2_a = T2_avg + dT2/2  (slow component, dT2 >= 0 enforces ordering)
@@ -45,14 +47,23 @@ def biexp_decay_avg(x, A, T2_avg, dT2):
 
     The reparameterization diagonalizes the Hessian: T2_avg is the well-determined
     direction, dT2 is the soft direction that becomes unidentifiable as dT2 -> 0.
+    Neither component goes below `t2_floor`, in the units of x.
     """
     t2_a = T2_avg + dT2 / 2.0
     t2_b = T2_avg - dT2 / 2.0
-    if t2_b < T2_LOWER_BOUND_MS:
-        t2_b = T2_LOWER_BOUND_MS
-    if t2_a < T2_LOWER_BOUND_MS:
-        t2_a = T2_LOWER_BOUND_MS
+    if t2_b < t2_floor:
+        t2_b = t2_floor
+    if t2_a < t2_floor:
+        t2_a = t2_floor
     return 0.5 * A * (np.exp(-x / t2_a) + np.exp(-x / t2_b))
+
+
+def _biexp_model(t2_floor):
+    """The lmfit model of biexp_decay_avg in (A, T2_avg, dT2), its components kept at or
+    above `t2_floor`."""
+    def biexp_decay_avg_floored(x, A, T2_avg, dT2):
+        return biexp_decay_avg(x, A, T2_avg, dT2, t2_floor)
+    return Model(biexp_decay_avg_floored)
 
 
 def _derive_secondary_errors(T2_avg, dT2, covar, var_names):
@@ -100,7 +111,7 @@ def _derive_secondary_errors(T2_avg, dT2, covar, var_names):
     return t2_a_err, t2_b_err, eta_err
 
 
-def _mono_exp_refit(x, y, A_init, T2_init, A_max, t2_max):
+def _mono_exp_refit(x, y, A_init, T2_init, A_max, t2_max, t2_floor=T2_LOWER_BOUND_MS):
     """Fit a single-component model `A * exp(-t/T2)` to (x, y).
 
     Used when the bi-exp's t2_b hits the lower bound: in that regime the data
@@ -117,7 +128,7 @@ def _mono_exp_refit(x, y, A_init, T2_init, A_max, t2_max):
     model = Model(_mono)
     params = model.make_params(A=A_init, T2=T2_init)
     params["A"].min, params["A"].max = 0.0, A_max
-    params["T2"].min, params["T2"].max = T2_LOWER_BOUND_MS, t2_max
+    params["T2"].min, params["T2"].max = t2_floor, t2_max
     result = model.fit(y, params, x=x)
 
     def _se(name):
@@ -202,9 +213,10 @@ def bootstrap_errors_methyl(x, y, model, params, n_bootstrap=1000):
 
 def fit_single_residue_methyl(x, y, residue_name,
                               initial_A=None,
-                              initial_t2_a=DEFAULT_INITIAL_T2A,
-                              initial_t2_b=DEFAULT_INITIAL_T2B,
-                              n_bootstrap=1000, error_method="analytical"):
+                              initial_t2_a=None,
+                              initial_t2_b=None,
+                              n_bootstrap=1000, error_method="analytical",
+                              time_units="ms"):
     """Fit shared-amplitude bi-exponential T2 decay in (A, T2_avg, dT2) basis.
 
     Model: I(t) = 0.5 * A * (exp(-t/t2_a) + exp(-t/t2_b)) with
@@ -218,8 +230,19 @@ def fit_single_residue_methyl(x, y, residue_name,
     `bi_exp_unidentifiable` is True when dT2 cannot be distinguished from zero
     (mono-exp regime) — in that case T2_avg is well-determined but T2a, T2b
     individually are not.
+
+    `time_units` ('ms', 's' or 'us') is the unit of x, of the starting values given and
+    of every time returned. The starting values left out and the bounds are millisecond
+    constants, converted to it.
     """
     print(f"Fitting methyl residue: {residue_name}")
+
+    per_ms = MS_TO_UNITS[time_units]
+    t2_floor = T2_LOWER_BOUND_MS * per_ms
+    if initial_t2_a is None:
+        initial_t2_a = DEFAULT_INITIAL_T2A * per_ms
+    if initial_t2_b is None:
+        initial_t2_b = DEFAULT_INITIAL_T2B * per_ms
 
     x_all = np.asarray(x, dtype=float)
     y_all = np.asarray(y, dtype=float)
@@ -233,19 +256,19 @@ def fit_single_residue_methyl(x, y, residue_name,
 
     y_max = float(np.max(y))
     x_max = float(np.max(x)) if len(x) else 1.0
-    t2_max = max(5.0 * x_max, 1.0)
+    t2_max = max(5.0 * x_max, 1.0 * per_ms)
     A_max = max(5.0 * y_max, 1.0)
 
     initial_T2_avg = 0.5 * (float(initial_t2_a) + float(initial_t2_b))
     initial_dT2 = abs(float(initial_t2_a) - float(initial_t2_b))
 
-    initial_T2_avg = float(np.clip(initial_T2_avg, T2_LOWER_BOUND_MS, t2_max))
+    initial_T2_avg = float(np.clip(initial_T2_avg, t2_floor, t2_max))
     initial_dT2 = float(np.clip(initial_dT2, 0.0, t2_max))
 
-    model = Model(biexp_decay_avg)
+    model = _biexp_model(t2_floor)
     params = model.make_params(A=initial_A, T2_avg=initial_T2_avg, dT2=initial_dT2)
     params["A"].min, params["A"].max = 0.0, A_max
-    params["T2_avg"].min, params["T2_avg"].max = T2_LOWER_BOUND_MS, t2_max
+    params["T2_avg"].min, params["T2_avg"].max = t2_floor, t2_max
     params["dT2"].min, params["dT2"].max = 0.0, t2_max
 
     result = model.fit(y, params, x=x)
@@ -279,7 +302,7 @@ def fit_single_residue_methyl(x, y, residue_name,
     t2_a = T2_avg + dT2 / 2.0
     t2_b = T2_avg - dT2 / 2.0
 
-    t2_b_bound_active = t2_b < T2_LOWER_BOUND_MS
+    t2_b_bound_active = t2_b < t2_floor
     if t2_b_bound_active:
         # The optimizer pushed ΔT2 past 2·T2_avg; biexp_decay_avg internally
         # clipped t2_b at T2_LOWER_BOUND_MS, but lmfit's reported parameters
@@ -290,7 +313,7 @@ def fit_single_residue_methyl(x, y, residue_name,
         slow_T2 = T2_avg + dT2 / 2.0
         A_mono, T2_mono, A_mono_err, T2_mono_err = _mono_exp_refit(
             x, y, A_init=0.5 * A, T2_init=slow_T2,
-            A_max=A_max, t2_max=t2_max,
+            A_max=A_max, t2_max=t2_max, t2_floor=t2_floor,
         )
         A = A_mono
         A_err = A_mono_err
@@ -319,7 +342,7 @@ def fit_single_residue_methyl(x, y, residue_name,
     # smaller than any plausible methyl T2 separation, so it's a safe "at bound"
     # threshold that won't catch real-but-small bi-exp character.
     DT2_AT_BOUND_EPS = 1e-3
-    dT2_at_lower_bound = dT2 < DT2_AT_BOUND_EPS
+    dT2_at_lower_bound = dT2 < DT2_AT_BOUND_EPS * per_ms
     bound_active = t2_b_bound_active or dT2_at_lower_bound
     if bound_active:
         dT2_err = float("nan")
@@ -469,7 +492,8 @@ def run_methyl_t2_analysis_with_params(params, progress_callback=None):
         input_csv_file, output_prefix, results_txt_file, json_folder,
         field_name, field_freq
     Optional:
-        time_units (default 'ms'), signal_units (default 'Intensity'),
+        time_units (default 'ms'; the unit of the delays and of initial_t2_a/b),
+        signal_units (default 'Intensity'),
         initial_A, initial_t2_a, initial_t2_b,
         n_bootstrap (default 1000), error_method (default 'analytical')
     """
@@ -484,8 +508,8 @@ def run_methyl_t2_analysis_with_params(params, progress_callback=None):
     signal_units = params.get("signal_units", "Intensity")
 
     initial_A = params.get("initial_A")
-    initial_t2_a = params.get("initial_t2_a", DEFAULT_INITIAL_T2A)
-    initial_t2_b = params.get("initial_t2_b", DEFAULT_INITIAL_T2B)
+    initial_t2_a = params.get("initial_t2_a")
+    initial_t2_b = params.get("initial_t2_b")
     n_bootstrap = int(params.get("n_bootstrap", 1000))
     error_method = params.get("error_method", "analytical")
 
@@ -540,6 +564,7 @@ def run_methyl_t2_analysis_with_params(params, progress_callback=None):
                 initial_A=initial_A,
                 initial_t2_a=initial_t2_a, initial_t2_b=initial_t2_b,
                 n_bootstrap=n_bootstrap, error_method=error_method,
+                time_units=time_units,
             )
             res["success"] = True
         except Exception as e:

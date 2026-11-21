@@ -15,6 +15,10 @@ except ImportError:
 # the fitters themselves default to ms.
 TIME_UNITS_DEFAULT = 'ms'
 
+# One millisecond in each delay unit: what a millisecond value is multiplied by to be
+# stated in that unit.
+MS_TO_UNITS = {'ms': 1.0, 's': 1e-3, 'us': 1e3}
+
 SIDECAR_NAME = 'series_metadata.json'
 
 

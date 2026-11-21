@@ -7,8 +7,12 @@ from typing import Iterable
 
 import numpy as np
 
-from fit_Tx_NMRRE import fit_data_entry, fit_single_residue, results_row
-from fit_methyl_T2 import fit_single_residue_methyl
+try:
+    from fit_Tx_NMRRE import fit_data_entry, fit_single_residue, results_row
+    from fit_methyl_T2 import fit_single_residue_methyl
+except ImportError:  # imported as dynamiXs_T1_T2.refit (parent dir on path)
+    from dynamiXs_T1_T2.fit_Tx_NMRRE import fit_data_entry, fit_single_residue, results_row
+    from dynamiXs_T1_T2.fit_methyl_T2 import fit_single_residue_methyl
 
 
 def sidecar_path_for(json_path) -> Path:
@@ -176,6 +180,7 @@ def refit_residue_methyl(fit_entry: dict, metadata: dict,
         x_fit, y_fit, fit_entry.get("residue", ""),
         n_bootstrap=n_bootstrap,
         error_method=error_method,
+        time_units=metadata.get("time_units", "ms"),
     )
 
     max_t = float(time_points.max()) if len(time_points) else 0.0
