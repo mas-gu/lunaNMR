@@ -16,12 +16,16 @@ from oned_plotter import OneDPlotter
 from oned_series import integrate_series, locate_peaks, peak_at_position
 from oned_series_table import SeriesTableDialog
 
-SPECTRUM_PATTERNS = ('*.ft1', '*.ft', '*.ft2', '*.ft3', '*.dat')
+# Bruker names every processed 1D spectrum 1r, under <experiment>/pdata/<processing>.
+BRUKER_SPECTRUM = '1r'
+
+SPECTRUM_PATTERNS = ('*.ft1', '*.ft', '*.ft2', '*.ft3', '*.dat',
+                     f'*/pdata/*/{BRUKER_SPECTRUM}')
 
 # NMRPipe writes 1D spectra as .ft1, so it leads the filter. .ft2/.ft3 are offered
 # because they are picked by habit; a 2D file is rejected on load with a message
 # rather than being hidden from the dialog.
-SPECTRUM_FILTER = ("1D spectra (*.ft1 *.ft *.ft2 *.ft3 *.dat);;"
+SPECTRUM_FILTER = (f"1D spectra (*.ft1 *.ft *.ft2 *.ft3 *.dat {BRUKER_SPECTRUM});;"
                    "NMRPipe 1D (*.ft1);;All files (*)")
 
 # Which series-row key each entry of the observable box opens the results table on.
@@ -33,11 +37,26 @@ OBSERVABLE_KEYS = ('height', 'area', 'fit_area')
 QUANTITATIVE_OBSERVABLE = 'area'
 
 
+def spectrum_name(path):
+    """The name a spectrum is listed under: its file name, or for a Bruker spectrum
+    its experiment and processing numbers, since the file name is the same for all."""
+    path = Path(path)
+    if path.name == BRUKER_SPECTRUM:
+        return f"{path.parent.parent.parent.name}_{path.parent.name}"
+    return path.name
+
+
+def series_point_name(path):
+    """The name a spectrum's rows carry in the series results."""
+    return spectrum_name(path) if path.name == BRUKER_SPECTRUM else path.stem
+
+
 def series_order(paths):
     """Spectra in series order, numbers in a name compared as numbers (pt_2 before
     pt_10): each point is tracked from the one before it."""
     def natural_key(path):
-        return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', path.name)]
+        return [int(t) if t.isdigit() else t.lower()
+                for t in re.split(r'(\d+)', spectrum_name(path))]
     return sorted(paths, key=natural_key)
 
 
@@ -203,13 +222,13 @@ class OneDIntegrationPage(QWidget):
                 load_spectrum(path)
                 readable.append(path)
             except Exception as exc:
-                rejected.append(f"{Path(path).name}: {exc}")
+                rejected.append(f"{spectrum_name(path)}: {exc}")
 
         self.paths = readable
         self.spectrum_list.blockSignals(True)
         self.spectrum_list.clear()
         for path in readable:
-            item = QListWidgetItem(path.name)
+            item = QListWidgetItem(spectrum_name(path))
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked)
             self.spectrum_list.addItem(item)
@@ -244,7 +263,7 @@ class OneDIntegrationPage(QWidget):
         try:
             self.spectrum = load_spectrum(self.paths[row])
         except Exception as exc:
-            self.status.setText(f"Could not read {self.paths[row].name}: {exc}")
+            self.status.setText(f"Could not read {spectrum_name(self.paths[row])}: {exc}")
             return
 
         self.plotter.set_spectrum(self.spectrum, keep_view=True)
@@ -432,7 +451,7 @@ class OneDIntegrationPage(QWidget):
                 spectra.append(load_spectrum(path))
                 usable.append(path)
             except Exception:
-                unreadable.append(path.name)
+                unreadable.append(spectrum_name(path))
 
         if not spectra:
             self.status.setText("None of the checked spectra could be read.")
@@ -455,11 +474,11 @@ class OneDIntegrationPage(QWidget):
         def on_point(point, rows):
             self._mark_measured(rows_by_path[point], rows)
             self.status.setText(f"Integrating… {point + 1}/{len(usable)} "
-                                f"({usable[point].name})")
+                                f"({spectrum_name(usable[point])})")
             QApplication.processEvents()      # let the list fill in as the run proceeds
 
         self.table_rows = integrate_series(spectra, [dict(p) for p in self.peaks],
-                                           names=[p.stem for p in usable],
+                                           names=[series_point_name(p) for p in usable],
                                            progress=on_point)
 
         missing = sum(1 for r in self.table_rows if not r['matched'])

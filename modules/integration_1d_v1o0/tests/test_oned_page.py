@@ -153,6 +153,53 @@ class TestSeriesOrder:
         assert [p.name for p in page.paths] == self.NAMES
 
 
+# Bruker 1D processed data lives outside the repository, so these skip when absent.
+BRUKER_DATASET = _MODULE_DIR.parent.parent.parent / "data_test" / "bruker" / "20171009_CH1_domain"
+needs_bruker = pytest.mark.skipif(not (BRUKER_DATASET / "1" / "pdata" / "999" / "1r").exists(),
+                                  reason="Bruker 1D sample not present")
+
+
+@needs_bruker
+class TestBrukerSeries:
+    """A Bruker series is one experiment folder per point, each spectrum a file named
+    1r under <experiment>/pdata/<processing>."""
+
+    EXPERIMENTS = ['1', '2', '10']
+
+    def _dataset(self, tmp_path):
+        for name in self.EXPERIMENTS:
+            (tmp_path / name).symlink_to(BRUKER_DATASET / "1")
+        return tmp_path
+
+    def _listed(self, page):
+        return [page.spectrum_list.item(i).text() for i in range(page.spectrum_list.count())]
+
+    def test_filter_offers_the_bruker_spectrum_file(self, page):
+        from oned_page import SPECTRUM_FILTER
+        assert ' 1r' in SPECTRUM_FILTER.split(';;')[0]
+
+    def test_a_dataset_folder_loads_its_1d_spectra_in_series_order(self, page, tmp_path):
+        page.load_folder(folder=str(self._dataset(tmp_path)))
+        assert [p.relative_to(tmp_path).parts[0] for p in page.paths] == self.EXPERIMENTS
+
+    def test_each_spectrum_is_listed_by_experiment_and_processing_number(self, page, tmp_path):
+        page.load_folder(folder=str(self._dataset(tmp_path)))
+        assert self._listed(page) == ['1_999', '2_999', '10_999']
+
+    def test_chosen_files_are_ordered_and_named_the_same_way(self, page, tmp_path):
+        folder = self._dataset(tmp_path)
+        page.load_spectra(paths=[str(folder / n / "pdata" / "999" / "1r")
+                                 for n in reversed(self.EXPERIMENTS)])
+        assert self._listed(page) == ['1_999', '2_999', '10_999']
+
+    def test_the_series_rows_name_each_spectrum(self, page, tmp_path):
+        import numpy as np
+        page.load_folder(folder=str(self._dataset(tmp_path)))
+        page.add_peak_at(float(page.spectrum.ppm_axis[int(np.argmax(page.spectrum.data))]))
+        rows = page.integrate(show_table=False)
+        assert [r['spectrum'] for r in rows] == ['1_999', '2_999', '10_999']
+
+
 @needs_series
 class TestPeaksOutsideASpectrum:
     """A picked position that a checked spectrum's sweep does not reach measures
