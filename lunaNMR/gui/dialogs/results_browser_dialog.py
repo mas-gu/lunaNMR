@@ -29,6 +29,12 @@ from lunaNMR.gui.styles.design_system import (
 logger = logging.getLogger(__name__)
 
 
+def _detected_count(peaks: List) -> int:
+    """How many of a spectrum's peaks the series marks detected in its tracking table."""
+    from lunaNMR.processors.multi_spectrum_processor import _stands_above_noise
+    return sum(1 for peak in peaks if isinstance(peak, dict) and _stands_above_noise(peak))
+
+
 class ResultsBrowserDialog(BaseDialog):
     """Dialog for browsing batch/series integration results.
 
@@ -400,13 +406,13 @@ class ResultsBrowserDialog(BaseDialog):
         total_peaks = 0
 
         for spectrum_name, data in results.items():
-            fitted = data.get('fitted_results', [])
+            fitted = data.get('integration_results', [])
             for peak in fitted:
                 if isinstance(peak, dict) and 'r_squared' in peak:
                     all_r_squared.append(peak['r_squared'])
             total_peaks += data.get('total_peaks', 0)
-            if 'detection_rate' in data:
-                all_detection_rates.append(data['detection_rate'])
+            if fitted:
+                all_detection_rates.append(_detected_count(fitted) / len(fitted))
 
         avg_r2 = sum(all_r_squared) / len(all_r_squared) if all_r_squared else 0
         avg_detection = sum(all_detection_rates) / len(all_detection_rates) if all_detection_rates else 0
@@ -450,7 +456,7 @@ class ResultsBrowserDialog(BaseDialog):
         assignments = set()
 
         for spectrum_name, data in results.items():
-            fitted = data.get('fitted_results', [])
+            fitted = data.get('integration_results', [])
             for peak in fitted:
                 if isinstance(peak, dict):
                     assignment = peak.get('assignment') or peak.get('Assignment', '')
@@ -485,7 +491,7 @@ class ResultsBrowserDialog(BaseDialog):
 
         for spectrum_name in sorted(results.keys()):
             data = results[spectrum_name]
-            fitted = data.get('fitted_results', [])
+            fitted = data.get('integration_results', [])
 
             for peak in fitted:
                 if isinstance(peak, dict):
@@ -497,14 +503,14 @@ class ResultsBrowserDialog(BaseDialog):
                         # Spectrum name
                         self.tracking_table.setItem(row, 0, QTableWidgetItem(spectrum_name))
 
-                        pos_f2 = peak.get('pos_f2') or peak.get('Position_X', 0)
+                        pos_f2 = peak.get('ppm_x', 0)
                         self.tracking_table.setItem(row, 1, QTableWidgetItem(f"{pos_f2:.4f}"))
 
-                        pos_f1 = peak.get('pos_f1') or peak.get('Position_Y', 0)
+                        pos_f1 = peak.get('ppm_y', 0)
                         self.tracking_table.setItem(row, 2, QTableWidgetItem(f"{pos_f1:.3f}"))
 
                         # Intensity
-                        intensity = peak.get('intensity', 0)
+                        intensity = peak.get('height', 0)
                         self.tracking_table.setItem(row, 3, QTableWidgetItem(f"{intensity:.2e}"))
 
                         # Volume
@@ -535,30 +541,24 @@ class ResultsBrowserDialog(BaseDialog):
         values = []
 
         property_map = {
-            "Intensity": "intensity",
+            "Intensity": "height",
             "Volume": "volume",
             "R²": "r_squared",
-            "Position F2": "pos_f2",
-            "Position F1": "pos_f1"
+            "Position F2": "ppm_x",
+            "Position F1": "ppm_y"
         }
-        key = property_map.get(property_name, "intensity")
+        key = property_map.get(property_name, "height")
 
         for spectrum_name in sorted(results.keys()):
             data = results[spectrum_name]
-            fitted = data.get('fitted_results', [])
+            fitted = data.get('integration_results', [])
 
             for peak in fitted:
                 if isinstance(peak, dict):
                     peak_assignment = peak.get('assignment') or peak.get('Assignment', '')
                     if peak_assignment == assignment:
                         spectra_names.append(spectrum_name)
-                        if key == 'pos_f2':
-                            val = peak.get('pos_f2') or peak.get('Position_X', 0)
-                        elif key == 'pos_f1':
-                            val = peak.get('pos_f1') or peak.get('Position_Y', 0)
-                        else:
-                            val = peak.get(key, 0)
-                        values.append(val)
+                        values.append(peak.get(key, 0))
                         break
 
         self.draw_evolution_plot(spectra_names, values, property_name, assignment)
@@ -602,15 +602,15 @@ class ResultsBrowserDialog(BaseDialog):
         self.spectrum_status_label.setStyleSheet(
             f"font-size: {FONT_SIZE_BODY}pt; color: {status_color}; padding: 2px;")
 
-        total_peaks = data.get('total_peaks', 0)
-        detected = data.get('detected_peaks', 0)
+        fitted = data.get('integration_results', [])
+        total_peaks = len(fitted)
+        detected = _detected_count(fitted)
         self.spectrum_peaks_label.setText(f"Peaks: {detected}/{total_peaks}")
 
-        detection_rate = data.get('detection_rate', 0)
+        detection_rate = detected / total_peaks if total_peaks else 0
         self.spectrum_detection_label.setText(f"Detection Rate: {detection_rate:.1%}")
 
         # Calculate avg R²
-        fitted = data.get('fitted_results', [])
         r2_values = [p.get('r_squared', 0) for p in fitted if isinstance(p, dict) and 'r_squared' in p]
         avg_r2 = sum(r2_values) / len(r2_values) if r2_values else 0
         self.spectrum_avg_r2_label.setText(f"Avg R²: {avg_r2:.4f}")
@@ -628,14 +628,14 @@ class ResultsBrowserDialog(BaseDialog):
             assignment = peak.get('assignment') or peak.get('Assignment', '-')
             self.details_table.setItem(row, 0, QTableWidgetItem(str(assignment)))
 
-            pos_f2 = peak.get('pos_f2') or peak.get('Position_X', 0)
+            pos_f2 = peak.get('ppm_x', 0)
             self.details_table.setItem(row, 1, QTableWidgetItem(f"{pos_f2:.4f}"))
 
-            pos_f1 = peak.get('pos_f1') or peak.get('Position_Y', 0)
+            pos_f1 = peak.get('ppm_y', 0)
             self.details_table.setItem(row, 2, QTableWidgetItem(f"{pos_f1:.3f}"))
 
             # Intensity
-            intensity = peak.get('intensity', 0)
+            intensity = peak.get('height', 0)
             self.details_table.setItem(row, 3, QTableWidgetItem(f"{intensity:.2e}"))
 
             # Volume
@@ -643,11 +643,11 @@ class ResultsBrowserDialog(BaseDialog):
             self.details_table.setItem(row, 4, QTableWidgetItem(f"{volume:.2e}"))
 
             # Linewidth F2
-            lw_f2 = peak.get('lw_f2') or peak.get('linewidth_x', 0)
+            lw_f2 = peak.get('lw_x', 0)
             self.details_table.setItem(row, 5, QTableWidgetItem(f"{lw_f2:.4f}"))
 
             # Linewidth F1
-            lw_f1 = peak.get('lw_f1') or peak.get('linewidth_y', 0)
+            lw_f1 = peak.get('lw_y', 0)
             self.details_table.setItem(row, 6, QTableWidgetItem(f"{lw_f1:.3f}"))
 
             # R², coloured by the label the fit carries
