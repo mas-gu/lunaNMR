@@ -40,7 +40,7 @@ PySide6/Qt6 suite for NMR peak detection, Voigt profile fitting, and integration
 
 ## Features
 
-- **Voigt fitting**: Gaussian + Lorentzian lineshapes, ArPLS baseline correction, multi-peak deconvolution with simultaneous fitting of overlapping peaks.
+- **Voigt fitting**: Gaussian + Lorentzian lineshapes, multi-peak deconvolution with simultaneous fitting of overlapping peaks.
 - **2D simultaneous multi-peak fitting (PS2D)**: closely-spaced peaks auto-routed to 2D Levenberg-Marquardt deconvolution.
 - **Peak detection**: prominence / S-N peak picking, per sign (negative peaks are kept), no manual seeding required.
 - **Quality assessment**: R², covariance-based uncertainties (bootstrap for Kd fits), color-coded markers — plus per-peak flags for what R² cannot see: a fit that stopped on a position or intensity bound, and a peak below the detection floor.
@@ -141,6 +141,7 @@ lunaNMR/
 ```bash
 python3 -m venv dev_env && source dev_env/bin/activate   # or dev_env\Scripts\activate on Windows
 pip install -r requirements.txt
+pip install pytest                                       # the test runner; requirements.txt does not install it
 QT_QPA_PLATFORM=offscreen python -m pytest \
     tests/ modules/dynamiXs_v2o0/tests/ modules/integration_1d_v1o0/tests/ -q   # all three test roots, headless
 ```

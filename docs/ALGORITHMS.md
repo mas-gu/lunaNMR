@@ -32,7 +32,7 @@ GUI defaults (`main_window`): `centroid_window_x_ppm=0.01` (1H), `centroid_windo
 
 ## 2. PS2D Simultaneous 2D Voigt Fitting
 
-`core/ps2d_2d_fitter.py` — `Ps2dMultiPeakFitter2D.fit_multi_peak_2d`. Optimizer `PS2DStyleFitter` in `ps2d_style_fitter.py`.
+`core/ps2d_2d_fitter.py` — `Ps2dMultiPeakFitter2D.fit_multi_peak_2d`. Optimizer `Ps2dStyleLevenbergMarquardt` in `ps2d_style_fitter.py`.
 
 ### 2.1 Data Selection
 Union of elliptical windows around each peak: `(ΔF1/radF1)² + (ΔF2/radF2)² ≤ 1`.
@@ -55,7 +55,7 @@ No stage fits the intensities alone: that collapses them.
 
 GUI **Fix Positions**→skip Stage 2 and hold positions in Stage 3; **Fix Linewidths**→hold linewidths in every stage (Stage 1 still fits the intensities). A near-noise peak (`weak_peak_indices`, §2.6) has its position and linewidths held in every stage. Stages 1/3 support optional L/G-ratio and intensity-ratio soft penalties (applied only for too-close clusters).
 
-**Optimizer** (`PS2DStyleFitter`): additive damping `α + λ·I`; λ init 1e-4, ×5 on rejection, ×0.2 on acceptance. Analytical Jacobian (`compute_multi_voigt_jacobian_2d`). Parameter normalization `self.scales = max(|params|, 1e-8)` (Hessian condition ~10¹⁰→10³–10⁴); Jacobian scaled by `scales`, covariance denormalized via `outer(scales, scales)`.
+**Optimizer** (`Ps2dStyleLevenbergMarquardt`): additive damping `α + λ·I`; λ init 1e-4, ×5 on rejection, ×0.2 on acceptance. Analytical Jacobian (`compute_multi_voigt_jacobian_2d`). Parameter normalization `self.scales = max(|params|, 1e-8)` (Hessian condition ~10¹⁰→10³–10⁴); Jacobian scaled by `scales`, covariance denormalized via `outer(scales, scales)`.
 
 ### 2.4 Bounds
 - **Positions**: `pos ± max(0.04·FWHM, pos_margin)`; `pos_margin` 15N F1=0.02, F2=0.01 (13C F1=0.01). Titration mode passes a per-step window of 4 × the reference spectrum's median linewidth (capped at 1.0 / 0.2 ppm; `titration_pos_margin` 0.3 / 0.05 before linewidths are learned), and each peak's own **territory** (`ps2d_territories.territory_margins`: 0.49 × the distance to its nearest neighbour, in units of that window) through `fit_multi_peak_2d(pos_margins=...)`, taken exactly with no floor — all-or-nothing per cluster. Cascade mode additionally clips to `±max_drift` of the reference position (15N F1=0.025, F2=0.005) when **Enforce max drift from reference** is on (default); titration mode turns that limit off.
