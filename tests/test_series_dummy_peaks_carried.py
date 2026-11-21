@@ -58,3 +58,27 @@ def test_a_titration_fits_the_dummy_at_every_point(dnaja1_titration_series):
     n_points, per_dummy = _dummy_points(dnaja1_titration_series / "series_analysis_tidy.csv")
     assert len(per_dummy) == 1
     assert (per_dummy == n_points).all()
+
+
+WIDE_OUTPUTS = ("comprehensive_peak_tracking.csv", "peak_intensity_matrix.csv",
+                "peak_volume_matrix.csv", "peak_detection_matrix.csv",
+                "peak_intensity_detected_matrix.csv")
+
+
+@pytest.mark.parametrize("output", WIDE_OUTPUTS)
+def test_the_dummy_has_a_row_in_every_wide_output(reference_series, output):
+    """The tidy CSV carried the dummy and the matrices and the tracking table did not:
+    they were built from the listed peaks alone."""
+    tidy = pd.read_csv(reference_series / "series_analysis_tidy.csv")
+    dummies = set(tidy["assignment"].astype(str)[tidy["assignment"].astype(str).str.startswith("dummy_")])
+    wide = pd.read_csv(reference_series / output, dtype={"Assignment": str})
+    assert dummies <= set(wide["Assignment"])
+
+
+def test_the_dummy_row_holds_the_heights_the_tidy_file_reports(reference_series):
+    tidy = pd.read_csv(reference_series / "series_analysis_tidy.csv", dtype={"spectrum_name": str})
+    dummy = tidy[tidy["assignment"].astype(str).str.startswith("dummy_")]
+    matrix = pd.read_csv(reference_series / "peak_intensity_matrix.csv",
+                         dtype={"Assignment": str}).set_index("Assignment")
+    for _, row in dummy.iterrows():
+        assert matrix.loc[row["assignment"], row["spectrum_name"]] == pytest.approx(row["height"], rel=1e-6)

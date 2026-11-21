@@ -237,6 +237,7 @@ class MultiSpectrumProcessor:
         self.file_manager = NMRFileManager()
         self.voigt_params = voigt_params
         self.reference_peaks = None
+        self.dummy_peaks = pd.DataFrame()
         self.processing_active = False
         self.progress_callback = None
 
@@ -1700,7 +1701,8 @@ class MultiSpectrumProcessor:
                         f"would need x{repeats['scale']:.4f} — reported, not applied")
 
     def _create_peak_tracking_table(self, batch_results: Dict[str, Any]) -> pd.DataFrame:
-        """Create comprehensive peak tracking table.
+        """Create comprehensive peak tracking table: one row per listed peak, then one per
+        dummy the first spectrum's detection added. Every matrix is cut from this table.
 
         When extract_delays is enabled, column names use delay values (e.g., "50_Height")
         instead of filenames (e.g., "T1_50ms_Height"). Duplicate delays get unique
@@ -1708,7 +1710,7 @@ class MultiSpectrumProcessor:
         """
         all_peaks_data = []
 
-        for peak_idx, ref_peak in self.reference_peaks.iterrows():
+        for peak_idx, ref_peak in self._listed_and_dummy_peaks().iterrows():
             peak_row = {
                 'Peak_Number': peak_idx + 1,
                 'Assignment': ref_peak.get('Assignment', f'Peak_{peak_idx + 1}'),
