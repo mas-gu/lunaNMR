@@ -36,6 +36,7 @@ from gui_components import (
     create_primary_button, create_secondary_button, create_label,
     get_font, show_info, show_error, show_warning
 )
+from dynamiXs_T1_T2.delay_units import TIME_UNITS_DEFAULT
 
 
 class T1T2ResultsViewer(QMainWindow):
@@ -70,6 +71,8 @@ class T1T2ResultsViewer(QMainWindow):
                 'field1_t2': {'results_file': '...', 'frequency_mhz': 600, 'experiment_type': 'T2'},
                 ...
             }
+            An entry's 'time_units' ('ms', 's' or 'us') are the units its times are
+            labelled in; ms where it gives none.
         """
         super().__init__(parent)
 
@@ -131,6 +134,7 @@ class T1T2ResultsViewer(QMainWindow):
                     'df': df,
                     'frequency_mhz': entry.get('frequency_mhz', 0),
                     'experiment_type': entry.get('experiment_type', 'T1'),
+                    'time_units': entry.get('time_units') or TIME_UNITS_DEFAULT,
                     'file_path': results_file
                 }
                 loaded_count += 1
@@ -139,6 +143,7 @@ class T1T2ResultsViewer(QMainWindow):
                 print(f"Warning: Could not load {results_file}: {e}")
 
         if loaded_count > 0:
+            self._label_limits_in_units()
             self._update_statistics()
             self._update_plot()
             self.file_label.setText(f"Loaded {loaded_count} experiment(s)")
@@ -405,8 +410,23 @@ class T1T2ResultsViewer(QMainWindow):
         if file_path:
             self._load_results_file(file_path)
 
+    def _time_units(self, exp_type):
+        """The units the loaded `exp_type` times are in: those its session entry gives,
+        ms for a results file loaded on its own, which states none."""
+        for data in self.experiment_data.values():
+            if data['experiment_type'] == exp_type:
+                return data['time_units']
+        return TIME_UNITS_DEFAULT
+
+    def _label_limits_in_units(self):
+        """Give the Y-axis limit fields the units of the times they bound."""
+        for exp_type, spins in (('T1', (self.t1_ymin_spin, self.t1_ymax_spin)),
+                                ('T2', (self.t2_ymin_spin, self.t2_ymax_spin))):
+            for spin in spins:
+                spin.setSuffix(f" {self._time_units(exp_type)}")
+
     def _load_results_file(self, file_path):
-        """Load results from a TSV/CSV file."""
+        """Load results from a TSV/CSV file; it replaces the session's experiments."""
         try:
             # Try tab-delimited first (standard output from fitting)
             try:
@@ -414,6 +434,8 @@ class T1T2ResultsViewer(QMainWindow):
             except:
                 self.df = pd.read_csv(file_path)
 
+            self.experiment_data.clear()
+            self._label_limits_in_units()
             self.results_file = file_path
             self.file_label.setText(os.path.basename(file_path))
 
@@ -510,15 +532,16 @@ class T1T2ResultsViewer(QMainWindow):
                 clean_values = values.values[~outlier_mask]
 
                 if len(clean_values) > 0:
+                    units = self._time_units(exp_type)
                     stats_text = (
                         f"Experiment: {exp_type}\n"
                         f"Total residues: {len(values)}\n"
                         f"Outliers: {n_outliers}\n"
                         f"─────────────\n"
-                        f"Mean: {np.mean(clean_values):.2f} ms\n"
-                        f"Std: {np.std(clean_values):.2f} ms\n"
-                        f"Min: {np.min(clean_values):.2f} ms\n"
-                        f"Max: {np.max(clean_values):.2f} ms\n"
+                        f"Mean: {np.mean(clean_values):.2f} {units}\n"
+                        f"Std: {np.std(clean_values):.2f} {units}\n"
+                        f"Min: {np.min(clean_values):.2f} {units}\n"
+                        f"Max: {np.max(clean_values):.2f} {units}\n"
                         f"─────────────\n"
                         f"IQR range: [{lower_bound:.1f}, {upper_bound:.1f}]"
                     )
@@ -555,7 +578,8 @@ class T1T2ResultsViewer(QMainWindow):
             if value_col and len(valid_df) > 0:
                 values = valid_df[value_col].dropna().values
                 if len(values) > 0:
-                    stats_lines.append(f"{key}: n={len(values)}, mean={np.mean(values):.1f} ms")
+                    stats_lines.append(f"{key}: n={len(values)}, mean={np.mean(values):.1f} "
+                                       f"{data['time_units']}")
                 else:
                     stats_lines.append(f"{key}: no valid values")
             else:
@@ -747,7 +771,7 @@ class T1T2ResultsViewer(QMainWindow):
 
         # Labels and title
         ax.set_xlabel('Residue Number', fontsize=12, fontweight='bold')
-        ax.set_ylabel(f"{exp_type} (ms)", fontsize=12, fontweight='bold')
+        ax.set_ylabel(f"{exp_type} ({self._time_units(exp_type)})", fontsize=12, fontweight='bold')
         ax.set_title(f"{exp_type} Relaxation Times vs Residue Sequence", fontsize=14, fontweight='bold', pad=20)
 
         self._format_xaxis(ax, residues)
@@ -892,7 +916,7 @@ class T1T2ResultsViewer(QMainWindow):
             # Labels
             field_label = field_name.replace('field', 'Field ')
             freq_label = f" ({freq_mhz} MHz)" if freq_mhz else ""
-            ax.set_ylabel(f"{exp_type} (ms)", fontsize=10, fontweight='bold')
+            ax.set_ylabel(f"{exp_type} ({data['time_units']})", fontsize=10, fontweight='bold')
             ax.set_title(f"{exp_type} - {field_label}{freq_label}", fontsize=11, fontweight='bold')
             ax.grid(True, alpha=0.3, linestyle='--', zorder=1)
 
@@ -957,7 +981,7 @@ class T1T2ResultsViewer(QMainWindow):
 
     def _export_plot(self):
         """Export the current plot to a file."""
-        if self.df is None:
+        if self.df is None and not self.experiment_data:
             show_warning(self, "No Data", "No data to export.")
             return
 

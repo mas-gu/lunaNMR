@@ -257,8 +257,8 @@ class ResultsViewer(QMainWindow):
         # Parameter groups
         self.param_groups = {
             "Relaxation": ["R1", "R2", "hetNOE"],
-            "Spectral Density": ["J(0)", "J(wN)", "J(0.87wH)"],
-            "Model-Free": ["S2", "te", "Rex"]
+            "Spectral Density": ["J(0)", "J(wN)", "J(wH)", "J(0.87wH)"],
+            "Model-Free": ["S2", "te", "Rex", "tc"]
         }
 
         for group_name, params in self.param_groups.items():
@@ -444,7 +444,9 @@ class ResultsViewer(QMainWindow):
 
     def _show_blank_state(self):
         """Show blank plot with instruction message"""
-        self.ax.clear()
+        # The stacked and Show All plots replace the figure's axes with their own
+        self.figure.clear()
+        self.ax = self.figure.add_subplot(111)
 
         if self.df is None:
             message = "No data loaded.\n\nClick 'Load CSV File' to load results."
@@ -804,7 +806,8 @@ class ResultsViewer(QMainWindow):
         """Display all parameters in a grid of subplots"""
         self.figure.clear()
 
-        available_params = list(self.parameter_buttons.keys())
+        available_params = [param for param, btn in self.parameter_buttons.items()
+                            if btn.isEnabled()]
         n_params = len(available_params)
 
         if n_params == 0:

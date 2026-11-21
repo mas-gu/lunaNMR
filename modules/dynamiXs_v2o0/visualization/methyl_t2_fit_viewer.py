@@ -693,16 +693,19 @@ class MethylT2FitViewer(QMainWindow):
         ax.bar(x, values, yerr=errors, color=colors, capsize=2)
         ax.set_xticks(x)
         ax.set_xticklabels(residues, rotation=70, fontsize=8)
+        # The units the loaded fits record; one run's fits share them.
+        units = next((payload.get("metadata", {}).get("time_units", "ms")
+                      for payload in self.data.values()), "ms")
         if value_key == "eta":
             ax.axhline(1.0, color="grey", linewidth=0.8, linestyle=":")
             ax.set_ylabel("η = T2a / T2b", fontsize=11, fontweight="bold")
         elif value_key == "dT2":
             ax.axhline(0.0, color="grey", linewidth=0.8, linestyle=":")
-            ax.set_ylabel("ΔT2 (ms)", fontsize=11, fontweight="bold")
+            ax.set_ylabel(f"ΔT2 ({units})", fontsize=11, fontweight="bold")
         elif value_key == "T2_avg":
-            ax.set_ylabel("T2_avg (ms)", fontsize=11, fontweight="bold")
+            ax.set_ylabel(f"T2_avg ({units})", fontsize=11, fontweight="bold")
         else:
-            ax.set_ylabel(f"{value_key} (ms)", fontsize=11, fontweight="bold")
+            ax.set_ylabel(f"{value_key} ({units})", fontsize=11, fontweight="bold")
         ax.set_title(title, fontsize=12, fontweight="bold")
         ax.grid(True, axis="y", alpha=0.3, linestyle="--")
 
