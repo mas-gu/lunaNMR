@@ -367,9 +367,9 @@ def test_a_malformed_record_is_an_error_not_a_traceback(default_prefix_run, tmp_
     assert not out.exists()
 
 
-def test_a_cli_modelfree_run_writes_its_fit_json(run_dir):
+def test_a_cli_modelfree_run_writes_its_fit_json(bundle):
     """The page's View Fits reads the T1/T2 fit JSONs a run writes, as a GUI run does."""
-    names = sorted(p.name for p in (run_dir.parent / "JA1.lunaNMR").rglob(
+    names = sorted(p.name for p in bundle.rglob(
         "dynamixs/analyses/dual_modelfree/**/*_fit_data.json"))
     assert names == ["dual_field1_T1_fit_data.json", "dual_field1_T2_fit_data.json",
                      "dual_field2_T1_fit_data.json", "dual_field2_T2_fit_data.json"]
