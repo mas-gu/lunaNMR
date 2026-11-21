@@ -6,8 +6,6 @@ GUI Components for LunaNMR v1.0 (Qt/PySide6)
 
 This module contains all graphical user interface components including
 the main window, dialogs, and visualization tools.
-
-Note: Legacy Tkinter files have been moved to gui/_deprecated/
 """
 
 # Main Qt window

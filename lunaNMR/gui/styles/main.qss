@@ -2,8 +2,8 @@
    LunaNMR Qt Stylesheet (main.qss)
    Apple-style design system for PySide6/Qt6 application
 
-   This stylesheet maps the CustomTkinter design system to Qt Style Sheets (QSS).
-   All colors, spacing, and styling match the LUNАНMR_UX_STYLE_GUIDE.md
+   The single global stylesheet, loaded by BaseWindow and BaseDialog.
+   Its colours, spacing and sizes are the tokens of design_system.py.
 
    Author: Guillaume Mas
    Date: 2025
