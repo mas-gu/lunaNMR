@@ -6186,7 +6186,8 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
 
             if 'quality_distribution' in summary:
                 quality_dist = summary['quality_distribution']
-                logger.info(f"   Quality distribution: {quality_dist['excellent']} excellent, {quality_dist['good']} good, {quality_dist['poor']} poor")
+                logger.info("   Quality distribution: "
+                            + ", ".join(f"{count} {label}" for label, count in quality_dist.items()))
 
             # Update main spectrum plot to show color-coded peaks (v0o9 line 4298)
             self.update_spectrum_plot()
