@@ -1119,6 +1119,28 @@ class MultiSpectrumProcessor:
         return sorted({result['fitting_fallback'] for result in fitted_results
                        if result and result.get('fitting_fallback')})
 
+    def _seed_position(self, result):
+        """Where a successful fit seeds the next spectrum, as (1H, indirect) ppm.
+
+        peak_x/peak_y is not the same thing for every peak: a peak fitted alone stores
+        its fitted position there, a cluster member the position it was seeded from.
+
+        A titration follows every peak, so its seed is the fitted position
+        (center_x/center_y). Seeded from peak_x, no clustered peak of the 7-point DNAJA1
+        titration ever left its free-state seed (0 of 20; 48 of 49 isolated ones did)
+        and 17 of its 140 clustered points ended on the position bound, against 9 here.
+
+        In a time series peaks do not move, and a cluster member keeps the position it
+        was seeded from. Following the fit there moved KRASB 600 T1 further from the
+        reference-mode values (median 0.95% to 1.95%, q90 5.1% to 8.9%) at unchanged
+        fit errors.
+        """
+        if getattr(self, 'titration_tracking', False):
+            return (result.get('center_x', result.get('peak_x', 0)),
+                    result.get('center_y', result.get('peak_y', 0)))
+        return (result.get('peak_x', result.get('center_x', 0)),
+                result.get('peak_y', result.get('center_y', 0)))
+
     def _convert_fitted_results_to_reference_df(self, fitted_results):
         """
         Convert fitted results to reference peak DataFrame format.
@@ -1126,10 +1148,7 @@ class MultiSpectrumProcessor:
         This creates a reference peak list from fitted results that can be used
         as input for peak detection in the next spectrum.
 
-        IMPORTANT: Uses DETECTED positions (peak_x/peak_y) instead of FITTED positions
-        (center_x/center_y) to prevent position drift accumulation in cascade mode.
-        Fitted positions can drift during 2D optimization, especially for overlapping
-        clusters, causing errors to compound across spectra.
+        Where each successful fit seeds the next spectrum is `_seed_position`.
 
         Args:
             fitted_results: List of fitting result dictionaries
@@ -1143,13 +1162,7 @@ class MultiSpectrumProcessor:
         peak_data = []
         for result in fitted_results:
             if result and result.get('success', False):
-                # Use DETECTED position (peak_x, peak_y) NOT fitted position
-                # (center_x, center_y). Fitted positions can drift during 2D multi-peak
-                # optimization, causing cascade errors to compound.
-                # peak_x/peak_y = where detection found the peak in the current spectrum
-                # center_x/center_y = where 2D fitter placed the peak (can be wrong)
-                pos_x = result.get('peak_x', result.get('center_x', 0))
-                pos_y = result.get('peak_y', result.get('center_y', 0))
+                pos_x, pos_y = self._seed_position(result)
 
                 peak_data.append({
                     'Assignment': result.get('assignment', 'Unknown'),
