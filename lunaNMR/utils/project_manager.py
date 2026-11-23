@@ -361,7 +361,6 @@ class ProjectManager:
 
         # Peak detection parameters
         'search_window_x', 'search_window_y',
-        'detection_square_size', 'detection_rectangle_y',
         'centroid_window_x_ppm', 'centroid_window_y_ppm',
         'use_centroid_refinement', 'centroid_noise_multiplier',
         'auto_add_dummy_peaks',
@@ -376,10 +375,6 @@ class ProjectManager:
         # PS2D algorithm configuration
         'nucleus_type', 'ps2d_radF1', 'ps2d_radF2', 'ps2d_max_iterations',
         'ps2d_max_cluster_size', 'ps2d_overlap_x', 'ps2d_overlap_y',
-
-        # Custom linewidth parameters
-        'use_custom_linewidths', 'lw_lorentz_1h', 'lw_gauss_1h',
-        'lw_lorentz_15n', 'lw_gauss_15n',
 
         # Series integration parameters
         'use_ps2d_linewidth_reuse', 'enable_cascade_drift_limit',

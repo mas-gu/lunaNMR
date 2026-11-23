@@ -1379,17 +1379,11 @@ class SeriesIntegrationDialog(BaseDialog):
                 'centroid_window_x_ppm': getattr(self.main_window, 'centroid_window_x_ppm', 0.02),
                 'centroid_window_y_ppm': getattr(self.main_window, 'centroid_window_y_ppm', 1.0),
                 'centroid_noise_multiplier': getattr(self.main_window, 'centroid_noise_multiplier', 2.0),
-                'use_ps2d_multi_peak': getattr(self.main_window, 'use_ps2d_multi_peak', True),
                 'use_ps2d_linewidth_reuse': getattr(self.main_window, 'use_ps2d_linewidth_reuse', False),
                 # The fitting-window grid search is never run on a series: on real
                 # titrations it chose a window that cuts the peak at half height
                 'use_adaptive_optimization': False,
                 'auto_add_dummy_peaks': getattr(self.main_window, 'auto_add_dummy_peaks', True),
-                # Custom linewidth parameters (only if enabled)
-                'lw_lorentz_1h': getattr(self.main_window, 'lw_lorentz_1h', None) if getattr(self.main_window, 'use_custom_linewidths', False) else None,
-                'lw_gauss_1h': getattr(self.main_window, 'lw_gauss_1h', None) if getattr(self.main_window, 'use_custom_linewidths', False) else None,
-                'lw_lorentz_15n': getattr(self.main_window, 'lw_lorentz_15n', None) if getattr(self.main_window, 'use_custom_linewidths', False) else None,
-                'lw_gauss_15n': getattr(self.main_window, 'lw_gauss_15n', None) if getattr(self.main_window, 'use_custom_linewidths', False) else None,
                 # Peak detection parameters
                 'height_threshold': getattr(self.main_window, 'height_threshold', 0.1),
                 'distance_factor': getattr(self.main_window, 'distance_factor', 2.0),
