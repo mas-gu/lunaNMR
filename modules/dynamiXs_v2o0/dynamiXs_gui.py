@@ -5,8 +5,6 @@ DynamiXs v2.0 GUI - A comprehensive interface for NMR relaxation data analysis
 This GUI provides access to:
 - T1/T2 fitting analysis
 - Spectral density function analysis
-- Data plotting and comparison tools
-- Data formatting utilities
 
 Built with PySide6 (Qt) following LunaNMR v1.0 Style Guide
 for cross-platform compatibility (macOS, Windows, Linux)
