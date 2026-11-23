@@ -4410,6 +4410,7 @@ class LunaNMRMainWindow(BaseWindow):
         import os
         from PySide6.QtWidgets import QMessageBox, QInputDialog
         from lunaNMR.gui.dialogs import MultiSpectrumViewerDialog
+        from lunaNMR.gui.dialogs.spectrum_files import series_data_folder, series_spectrum_file
 
         saved_series = getattr(self, 'saved_series', {}) or {}
 
@@ -4451,15 +4452,7 @@ class LunaNMRMainWindow(BaseWindow):
             return
 
         # Get data folder from batch_results metadata (preferred) or fallback to current_nmr_folder
-        data_folder = None
-        if hasattr(batch_results, 'metadata'):
-            data_folder = batch_results.metadata.get('data_folder')
-        elif isinstance(batch_results, dict):
-            metadata = batch_results.get('metadata', {})
-            data_folder = metadata.get('data_folder')
-
-        if not data_folder:
-            data_folder = getattr(self, 'current_nmr_folder', None)
+        data_folder = series_data_folder(batch_results, getattr(self, 'current_nmr_folder', None))
 
         logger.debug(f"Data folder for spectrum paths: {data_folder}")
 
@@ -4471,9 +4464,9 @@ class LunaNMRMainWindow(BaseWindow):
 
                 # CRITICAL: Construct full path for spectrum_file (v0.9 main_gui.py:7547-7553)
                 # result may contain 'spectrum_file' but it's just a filename, not full path
-                if 'spectrum_file' not in result_copy or not os.path.isabs(result_copy.get('spectrum_file', '')):
+                result_copy['spectrum_file'] = series_spectrum_file(data_folder, name, result)
+                if not os.path.isabs(result.get('spectrum_file', '')):
                     if data_folder:
-                        result_copy['spectrum_file'] = os.path.join(data_folder, name)
                         logger.debug(f"Constructed full path for {name}: {result_copy['spectrum_file']}")
                     else:
                         logger.warning(f"No data folder - cannot construct path for {name}")
@@ -4507,12 +4500,6 @@ class LunaNMRMainWindow(BaseWindow):
     def _exported_peak_rows(spectrum_data):
         """The per-peak rows of one spectrum of a series that the exports write."""
         return spectrum_data.get('integration_results') or spectrum_data.get('fitted_results', [])
-
-    @staticmethod
-    def _mean_over_peaks(peak_rows, key):
-        """The mean of `key` over the peak rows that carry it, 0 when none does."""
-        values = [row[key] for row in peak_rows if isinstance(row, dict) and key in row]
-        return sum(values) / len(values) if values else 0
 
     def export_data_matrix(self):
         """Export comprehensive data matrix (v0o9 lines 7100-7230).
@@ -4598,6 +4585,7 @@ class LunaNMRMainWindow(BaseWindow):
         import json
         from datetime import datetime
         from PySide6.QtWidgets import QFileDialog, QMessageBox
+        from lunaNMR.processors.multi_spectrum_processor import mean_over_peak_rows
 
         if not hasattr(self, 'batch_results') or not self.batch_results:
             QMessageBox.warning(self, "No Data",
@@ -4645,7 +4633,7 @@ class LunaNMRMainWindow(BaseWindow):
                 success_rates = []
 
                 for name, data in self.batch_results.results.items():
-                    avg_r_squared = self._mean_over_peaks(self._exported_peak_rows(data), 'r_squared')
+                    avg_r_squared = mean_over_peak_rows(self._exported_peak_rows(data), 'r_squared')
                     if avg_r_squared:
                         r_squared_values.append(avg_r_squared)
                     success_rates.append(data.get('success_rate', 0))
@@ -4699,6 +4687,7 @@ class LunaNMRMainWindow(BaseWindow):
         import json
         import pandas as pd
         from datetime import datetime
+        from lunaNMR.processors.multi_spectrum_processor import mean_over_peak_rows
         from PySide6.QtWidgets import (QMessageBox, QFileDialog, QDialog,
                                        QVBoxLayout, QHBoxLayout, QCheckBox,
                                        QPushButton, QGroupBox)
@@ -4775,8 +4764,8 @@ class LunaNMRMainWindow(BaseWindow):
                         'total_peaks': spectrum_data.get('total_peaks', 0),
                         'successful_fits': spectrum_data.get('successful_fits', 0),
                         'success_rate': spectrum_data.get('success_rate', 0),
-                        'avg_r_squared': self._mean_over_peaks(results_to_export, 'r_squared'),
-                        'avg_snr': self._mean_over_peaks(results_to_export, 'snr')
+                        'avg_r_squared': mean_over_peak_rows(results_to_export, 'r_squared'),
+                        'avg_snr': mean_over_peak_rows(results_to_export, 'snr')
                     }
 
                     for peak_result in results_to_export:

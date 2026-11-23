@@ -2,7 +2,6 @@
 # ABOUTME: Port of Tkinter spectrum_browser.py to PySide6 for v1.0 Qt interface
 
 import logging
-import os
 from typing import Dict
 
 from PySide6.QtWidgets import (
@@ -14,7 +13,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
-from lunaNMR.gui.dialogs.spectrum_viewer_dialog import SpectrumViewerDialog, spectrum_summary
+from lunaNMR.gui.dialogs.spectrum_files import series_data_folder, series_spectrum_file
+from lunaNMR.gui.dialogs.spectrum_viewer_dialog import SpectrumViewerDialog
+from lunaNMR.processors.multi_spectrum_processor import spectrum_summary
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, PRIMARY_TEXT, PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
@@ -131,14 +132,13 @@ class SpectrumBrowserDialog(BaseDialog):
         title_layout.addStretch()
 
         # Summary info
-        if self.batch_results and hasattr(self.batch_results, 'results'):
-            results = self.batch_results.results
-            successful = sum(1 for result in results.values() if result.get('status') == 'success')
+        if self.batch_results and hasattr(self.batch_results, 'get_summary'):
+            summary = self.batch_results.get_summary()
             series_name = (getattr(self.batch_results, 'metadata', None) or {}).get('series_name')
             info_text = f"Series '{series_name}': " if series_name else "Series: "
-            info_text += f"{len(results)} spectra, {successful} successful"
-            if results:
-                info_text += f" ({successful / len(results):.1%})"
+            info_text += f"{summary.get('total_spectra', 0)} spectra, "
+            info_text += f"{summary.get('successful', 0)} successful "
+            info_text += f"({summary.get('success_rate', 0):.1f}%)"
             info_label = QLabel(info_text)
             info_label.setStyleSheet(f"""
                 QLabel {{
@@ -515,16 +515,6 @@ class SpectrumBrowserDialog(BaseDialog):
         self.selected_spectrum = item.data(NAME, Qt.UserRole)
         self.open_spectrum_viewer()
 
-    def _spectrum_file(self, spectrum_name: str, result: Dict) -> str:
-        """Where a spectrum of the series is on disk: the path its result records when
-        that is absolute, else its name in the series' data folder."""
-        spectrum_file = result.get('spectrum_file', '')
-        if os.path.isabs(spectrum_file):
-            return spectrum_file
-        metadata = getattr(self.batch_results, 'metadata', None) or {}
-        data_folder = metadata.get('data_folder') or self.original_data_folder
-        return os.path.join(data_folder, spectrum_name) if data_folder else ''
-
     def open_spectrum_viewer(self):
         """Open detailed spectrum viewer for selected spectrum."""
         if not self.selected_spectrum:
@@ -544,10 +534,11 @@ class SpectrumBrowserDialog(BaseDialog):
             )
             return
 
+        data_folder = series_data_folder(self.batch_results, self.original_data_folder)
         viewer = SpectrumViewerDialog(
             parent=self,
             spectrum_name=self.selected_spectrum,
-            spectrum_file_path=self._spectrum_file(self.selected_spectrum, result_data),
+            spectrum_file_path=series_spectrum_file(data_folder, self.selected_spectrum, result_data),
             result_data=result_data
         )
         viewer.show()

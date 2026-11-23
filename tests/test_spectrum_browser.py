@@ -13,7 +13,6 @@ import copy
 import json
 import math
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -25,7 +24,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 DNAJA1 = Path(__file__).resolve().parents[2] / "data_test" / "data_binding" / "DNAJA1_HSPA8"
 SPECTRA = ("2D_DNAJA1_0o0.ft", "2D_DNAJA1_HSPA8_0o5.ft", "2D_DNAJA1_HSPA8_3o0.ft")
 NOT_A_SPECTRUM = "unreadable.ft"
-SERIES = "DNAJA1"
 MENU_ACTION = "Browse Individual Spectra..."
 
 pytestmark = pytest.mark.skipif(not DNAJA1.exists(), reason="data_test not present")
@@ -76,16 +74,6 @@ def session_run(app, tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def bundle(dnaja1_titration_series, tmp_path_factory):
-    """A project bundle holding the three-point titration series."""
-    from lunaNMR.cli import main
-    run = tmp_path_factory.mktemp("bundled_series")
-    shutil.copytree(dnaja1_titration_series, run / "run" / SERIES)
-    assert main(["project", "build", str(run / "run"), "--out", str(run / "P.lunaNMR")]) == 0
-    return run / "P.lunaNMR"
-
-
-@pytest.fixture(scope="module")
 def session_window(app, session_run):
     """A main window after the series dialog finished the run."""
     from lunaNMR.gui.dialogs.series_integration_dialog import SeriesIntegrationDialog
@@ -100,10 +88,10 @@ def session_window(app, session_run):
 
 
 @pytest.fixture(scope="module")
-def bundle_window(app, bundle):
+def bundle_window(app, dnaja1_series_bundle):
     """A main window that opened the project bundle."""
     window = _new_window()
-    assert window._get_project_manager().load_project(bundle)[0]
+    assert window._get_project_manager().load_project(dnaja1_series_bundle)[0]
     yield window
     _close(window)
 
@@ -529,6 +517,15 @@ class TestTheViewersFitDetail:
         assert drawn['fitted_2d_surface'].shape == drawn['region_2d']['intensity'].shape
         titles = [ax.get_title() for ax in viewer.voigt_2d_plotter.figure.axes]
         assert f"Experimental - {assignment}" in titles
+
+    def test_the_2d_view_states_the_r_squared_and_label_the_fit_carries(self, app, viewer, window):
+        index, rows = _index_of(window, '42GlyH')
+        _click_peak(app, viewer, index)
+        fit = viewer.fitted_peaks[index]
+        figure = viewer.voigt_2d_plotter.figure
+        shown = "\n".join(text.get_text() for ax in figure.axes for text in ax.texts)
+        assert f"Quality: {rows.loc[index, 'quality']}" in shown
+        assert f"R² = {fit['r_squared']:.4f}" in shown
 
     def test_a_colour_scheme_redraws_the_3d_view_in_its_colours(self, app, viewer, window):
         from matplotlib.colors import to_rgb

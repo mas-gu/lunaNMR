@@ -1049,20 +1049,14 @@ class DynamiXsDialog(BaseDialog):
         Returns:
             List of result dicts with spectrum_name, spectrum_file, fitted_peaks
         """
-        import os
+        from lunaNMR.gui.dialogs.spectrum_files import series_data_folder, series_spectrum_file
 
         all_results = []
 
         # Get data_folder for constructing full paths (same as main_window.open_multi_spectrum_viewer)
-        data_folder = None
-        if hasattr(batch_results, 'metadata'):
-            data_folder = batch_results.metadata.get('data_folder')
-        elif isinstance(batch_results, dict):
-            metadata = batch_results.get('metadata', {})
-            data_folder = metadata.get('data_folder')
-
-        if not data_folder and self.main_window:
-            data_folder = getattr(self.main_window, 'current_nmr_folder', None)
+        data_folder = series_data_folder(
+            batch_results,
+            getattr(self.main_window, 'current_nmr_folder', None) if self.main_window else None)
 
         # BatchResults has .results attribute which is a dict keyed by spectrum_name
         if hasattr(batch_results, 'results') and batch_results.results:
@@ -1079,10 +1073,7 @@ class DynamiXsDialog(BaseDialog):
                     fitted_peaks = result_data.get('integration_results', [])
 
                 # Construct full path for spectrum_file (same logic as main_window)
-                spectrum_file = result_data.get('spectrum_file', '')
-                if not spectrum_file or not os.path.isabs(spectrum_file):
-                    if data_folder:
-                        spectrum_file = os.path.join(data_folder, spectrum_name)
+                spectrum_file = series_spectrum_file(data_folder, spectrum_name, result_data)
 
                 result_entry = {
                     'spectrum_name': spectrum_name,

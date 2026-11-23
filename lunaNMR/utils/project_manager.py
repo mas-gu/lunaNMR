@@ -51,6 +51,18 @@ def _serialize_metadata(metadata: dict) -> dict:
     return serialized
 
 
+# The metadata a series holds as datetime objects, which _serialize_metadata stores as text.
+SERIES_TIMES = ('start_time', 'end_time')
+
+
+def _deserialize_metadata(metadata: dict) -> dict:
+    """Stored series metadata as a series run in the session holds it: its times as
+    datetime objects."""
+    return {key: (datetime.fromisoformat(value)
+                  if key in SERIES_TIMES and isinstance(value, str) else value)
+            for key, value in metadata.items()}
+
+
 def _serialize_spectrum_result(result: dict) -> dict:
     """Serialize a single spectrum result.
 
@@ -125,7 +137,7 @@ def batch_results_from_dict(data: dict, deserialize_result=None):
     """
     from lunaNMR.processors.multi_spectrum_processor import BatchResults
     batch_results = BatchResults()
-    batch_results.metadata = data.get('metadata', {})
+    batch_results.metadata = _deserialize_metadata(data.get('metadata', {}))
     batch_results.statistics = data.get('statistics', {})
     batch_results.errors = data.get('errors', [])
     batch_results.series_mode = data.get('series_mode', 'time')

@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
 from lunaNMR.gui.styles.quality_colors import peak_quality_label, quality_color
+from lunaNMR.processors.multi_spectrum_processor import mean_over_peak_rows, spectrum_summary
 from lunaNMR.utils.residue_order import residue_sort_key
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
@@ -28,12 +29,6 @@ from lunaNMR.gui.styles.design_system import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _detected_count(peaks: List) -> int:
-    """How many of a spectrum's peaks the series marks detected in its tracking table."""
-    from lunaNMR.processors.multi_spectrum_processor import _stands_above_noise
-    return sum(1 for peak in peaks if isinstance(peak, dict) and _stands_above_noise(peak))
 
 
 class ResultsBrowserDialog(BaseDialog):
@@ -402,7 +397,7 @@ class ResultsBrowserDialog(BaseDialog):
         successful = sum(1 for d in results.values() if d.get('status') == 'success')
         failed = total_spectra - successful
 
-        all_r_squared = []
+        all_fits = []
         all_detection_rates = []
         total_peaks = 0
 
@@ -410,18 +405,18 @@ class ResultsBrowserDialog(BaseDialog):
             fitted = data.get('integration_results', [])
             for peak in fitted:
                 if isinstance(peak, dict) and 'r_squared' in peak:
-                    all_r_squared.append(peak['r_squared'])
+                    all_fits.append(peak)
             total_peaks += data.get('total_peaks', 0)
             if fitted:
-                all_detection_rates.append(_detected_count(fitted) / len(fitted))
+                all_detection_rates.append(spectrum_summary(data)['detection_rate'])
 
-        avg_r2 = sum(all_r_squared) / len(all_r_squared) if all_r_squared else 0
+        avg_r2 = mean_over_peak_rows(all_fits, 'r_squared')
         avg_detection = sum(all_detection_rates) / len(all_detection_rates) if all_detection_rates else 0
 
         self.total_spectra_label.setText(f"Total Spectra: {total_spectra}")
         self.successful_spectra_label.setText(f"Successful: {successful}")
         self.failed_spectra_label.setText(f"Failed: {failed}")
-        self.total_peaks_label.setText(f"Total Peak Fits: {len(all_r_squared)}")
+        self.total_peaks_label.setText(f"Total Peak Fits: {len(all_fits)}")
         self.avg_detection_label.setText(f"Avg Detection Rate: {avg_detection:.1%}")
         self.avg_r_squared_label.setText(f"Avg R²: {avg_r2:.4f}")
 
@@ -432,7 +427,7 @@ class ResultsBrowserDialog(BaseDialog):
             self.failed_spectra_label.setStyleSheet(
                 f"font-size: {FONT_SIZE_BODY}pt; color: {ERROR_RED}; padding: 2px;")
 
-        self.draw_quality_chart(all_r_squared)
+        self.draw_quality_chart([fit['r_squared'] for fit in all_fits])
 
     def draw_quality_chart(self, r_squared_values: List[float]):
         """Draw R² distribution histogram."""
@@ -604,17 +599,12 @@ class ResultsBrowserDialog(BaseDialog):
             f"font-size: {FONT_SIZE_BODY}pt; color: {status_color}; padding: 2px;")
 
         fitted = data.get('integration_results', [])
-        total_peaks = len(fitted)
-        detected = _detected_count(fitted)
-        self.spectrum_peaks_label.setText(f"Peaks: {detected}/{total_peaks}")
+        measured = spectrum_summary(data)
+        self.spectrum_peaks_label.setText(f"Peaks: {measured['detected']}/{measured['total']}")
 
-        detection_rate = detected / total_peaks if total_peaks else 0
-        self.spectrum_detection_label.setText(f"Detection Rate: {detection_rate:.1%}")
+        self.spectrum_detection_label.setText(f"Detection Rate: {measured['detection_rate']:.1%}")
 
-        # Calculate avg R²
-        r2_values = [p.get('r_squared', 0) for p in fitted if isinstance(p, dict) and 'r_squared' in p]
-        avg_r2 = sum(r2_values) / len(r2_values) if r2_values else 0
-        self.spectrum_avg_r2_label.setText(f"Avg R²: {avg_r2:.4f}")
+        self.spectrum_avg_r2_label.setText(f"Avg R²: {measured['mean_r_squared']:.4f}")
 
         self.details_table.setRowCount(0)
 

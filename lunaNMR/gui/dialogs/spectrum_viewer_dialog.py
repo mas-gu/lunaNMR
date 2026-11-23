@@ -19,7 +19,7 @@ from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
 from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
 from lunaNMR.gui.components.signed_contours import draw_signed_contours
-from lunaNMR.gui.dialogs.results_browser_dialog import _detected_count
+from lunaNMR.processors.multi_spectrum_processor import spectrum_summary
 from lunaNMR.utils.project_manager import lacks_fit_arrays, rebuild_fit_arrays, unrebuilt_fit
 from lunaNMR.gui.styles.quality_colors import peak_quality_label
 from lunaNMR.gui.styles.design_system import (
@@ -33,27 +33,6 @@ from lunaNMR.gui.styles.design_system import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _mean_over_rows(rows, key: str) -> float:
-    """The mean of `key` over the per-peak rows that carry a finite value, 0 when none does."""
-    values = [row[key] for row in rows if row.get(key) is not None and np.isfinite(row[key])]
-    return float(np.mean(values)) if values else 0.0
-
-
-def spectrum_summary(result: Dict) -> Dict:
-    """What a series measured on one spectrum, from the per-peak rows of its result:
-    how many peaks it fitted, how many of them stand above the noise (and that share),
-    and the mean R² and S/N of the fits."""
-    rows = [row for row in result.get('integration_results') or [] if isinstance(row, dict)]
-    detected = _detected_count(rows)
-    return {
-        'total': len(rows),
-        'detected': detected,
-        'detection_rate': detected / len(rows) if rows else 0.0,
-        'mean_r_squared': _mean_over_rows(rows, 'r_squared'),
-        'mean_snr': _mean_over_rows(rows, 'snr'),
-    }
 
 
 class SpectrumViewerDialog(BaseDialog):
@@ -917,9 +896,7 @@ class SpectrumViewerDialog(BaseDialog):
             for result in integration_results:
                 result_assignment = result.get('assignment') or result.get('Assignment')
                 if result_assignment == assignment:
-                    r_squared = (result.get('r_squared') or
-                                result.get('R_Squared') or
-                                result.get('avg_r_squared') or 0)
+                    r_squared = result.get('r_squared') or 0
                     logger.debug(f"Found integration_results Voigt result for {assignment}: R²={r_squared:.3f}")
                     return result
 
@@ -927,9 +904,7 @@ class SpectrumViewerDialog(BaseDialog):
             for result in self.fitted_results:
                 result_assignment = result.get('assignment') or result.get('Assignment')
                 if result_assignment == assignment:
-                    r_squared = (result.get('r_squared') or
-                                result.get('R_Squared') or
-                                result.get('avg_r_squared') or 0)
+                    r_squared = result.get('r_squared') or 0
                     logger.debug(f"Found fitted_results Voigt result for {assignment}: R²={r_squared:.3f}")
                     return result
 
