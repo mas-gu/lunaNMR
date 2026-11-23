@@ -280,6 +280,10 @@ class LunaNMRMainWindow(BaseWindow):
             enable_status_bar=True
         )
 
+        # The Edit menu's Undo and Redo actions belong to this manager for the window's life
+        from lunaNMR.utils.undo_manager import PeakUndoManager
+        self.undo_manager = PeakUndoManager(self)
+
         # Initialize state variables first (before GUI setup)
         self.init_variables()
 
@@ -348,8 +352,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.selected_peaks_multi = []  # List of peak_info dicts for multi-selection
 
         # ===== Undo/Redo Manager =====
-        from lunaNMR.utils.undo_manager import PeakUndoManager
-        self.undo_manager = PeakUndoManager(self)
+        self.undo_manager.clear()
 
         # ===== Workflow Configuration =====
         # Workflow mode: "peak_list" (default) or "sn_threshold"
@@ -3619,7 +3622,8 @@ class LunaNMRMainWindow(BaseWindow):
             'Assignment': assignment,
             'Position_X': x_coord,
             'Position_Y': y_coord,
-            'Height': intensity
+            'Height': intensity,
+            'peak_id': self.integrator.get_next_peak_id()
         }])
 
         if hasattr(self.integrator, 'peak_list') and self.integrator.peak_list is not None:
