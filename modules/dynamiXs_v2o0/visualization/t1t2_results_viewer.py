@@ -999,25 +999,3 @@ class T1T2ResultsViewer(QMainWindow):
                 show_info(self, "Export Complete", f"Plot exported to:\n{file_path}")
             except Exception as e:
                 show_error(self, "Export Error", f"Error exporting plot:\n{str(e)}")
-
-
-def open_t1t2_results_viewer(parent=None, results_file=None, experiment_type="T1"):
-    """
-    Convenience function to open the T1/T2 results viewer.
-
-    Parameters:
-    -----------
-    parent : QWidget, optional
-        Parent widget
-    results_file : str, optional
-        Path to results file
-    experiment_type : str
-        "T1" or "T2"
-
-    Returns:
-    --------
-    T1T2ResultsViewer : The viewer window instance
-    """
-    viewer = T1T2ResultsViewer(parent, results_file, experiment_type)
-    viewer.show()
-    return viewer

@@ -26,7 +26,7 @@ from constants import (
     BG_COLOR, PANEL_BG_COLOR, FRAME_BG_COLOR,
     PRIMARY_TEXT, SECONDARY_TEXT,
     PRIMARY_BUTTON_BG,
-    SUCCESS_GREEN, ERROR_RED,
+    SUCCESS_GREEN,
     SPACING_XS, SPACING_SM, SPACING_MD,
     FONT_SIZE_SECTION_LABEL, FONT_SIZE_BODY, FONT_SIZE_SMALL
 )
@@ -428,20 +428,6 @@ class ResultsViewer(QMainWindow):
 
         return None
 
-    def _find_column(self, param_name):
-        """Find column name based on current field selection"""
-        global_params = ["S2", "tc", "te"]
-
-        if param_name in global_params:
-            return self._find_column_with_field(param_name, None)
-
-        if self.current_field == "field1":
-            return self._find_column_with_field(param_name, "field1")
-        elif self.current_field == "field2":
-            return self._find_column_with_field(param_name, "field2")
-        else:
-            return self._find_column_with_field(param_name, "field1")
-
     def _show_blank_state(self):
         """Show blank plot with instruction message"""
         # The stacked and Show All plots replace the figure's axes with their own
@@ -482,6 +468,7 @@ class ResultsViewer(QMainWindow):
             self.current_parameter = self.selected_params[0]
             self._update_plot_stacked()
         else:
+            self.current_parameter = None
             self._show_blank_state()
 
     def _get_param_group(self, param):
@@ -519,7 +506,7 @@ class ResultsViewer(QMainWindow):
         elif self.current_parameter == "ALL":
             self._update_plot_all()
         else:
-            self._update_plot()
+            self._show_blank_state()
 
     def _on_error_checkbox_change(self, state):
         """Handle error checkbox state change"""
@@ -528,35 +515,6 @@ class ResultsViewer(QMainWindow):
             self._update_plot_stacked()
         elif self.current_parameter == "ALL":
             self._update_plot_all()
-        elif self.current_parameter:
-            self._update_plot()
-
-    def _update_plot(self):
-        """Update the plot with current selection"""
-        if self.current_parameter is None or self.current_parameter == "ALL":
-            self._show_blank_state()
-            return
-
-        self.ax.clear()
-
-        residue_col = None
-        for col in ['Residue', 'residue', 'Res', 'res', 'ResidueNum']:
-            if col in self.df.columns:
-                residue_col = col
-                break
-
-        if residue_col is None:
-            residues = self.df.index.values
-        else:
-            residues = self._extract_residue_numbers(self.df[residue_col].values)
-
-        if self.is_dual_field and self.current_field == "overlay":
-            self._plot_overlay(residues)
-        else:
-            self._plot_single_field(residues)
-
-        self.figure.tight_layout()
-        self.canvas.draw()
 
     def _update_plot_stacked(self):
         """Display multiple selected parameters in stacked vertical plots"""
@@ -690,117 +648,6 @@ class ResultsViewer(QMainWindow):
                        label=field_label, zorder=3)
 
         ax.legend(loc='best', fontsize=8)
-
-    def _plot_single_field(self, residues):
-        """Plot data for a single field"""
-        col_name = self._find_column(self.current_parameter)
-        if col_name is None:
-            self.ax.text(0.5, 0.5,
-                        f"Parameter '{self.current_parameter}' not found in results",
-                        ha='center', va='center',
-                        fontsize=14, color=ERROR_RED,
-                        transform=self.ax.transAxes)
-            self.ax.axis('off')
-            return
-
-        error_col = None
-        for suffix in ['err', '_err', '_error', 'Error']:
-            potential_err = f"{col_name}{suffix}"
-            if potential_err in self.df.columns:
-                error_col = potential_err
-                break
-
-        values = self.df[col_name].values
-        errors = self.df[error_col].values if error_col and self.show_errors else None
-
-        self._add_missing_residue_bars(residues, values)
-
-        field_label = f"{self.current_parameter}"
-        if self.is_dual_field:
-            field_name = f"Field {self.current_field[-1]}" if "field" in self.current_field else self.current_field
-            field_label = f"{self.current_parameter} ({field_name})"
-
-        if errors is not None and self.show_errors:
-            self.ax.errorbar(residues, values, yerr=errors,
-                           fmt='o', markersize=6, capsize=3,
-                           color=PRIMARY_BUTTON_BG, ecolor=SECONDARY_TEXT,
-                           label=field_label, zorder=3)
-        else:
-            self.ax.plot(residues, values, 'o', markersize=6,
-                       color=PRIMARY_BUTTON_BG,
-                       label=field_label, zorder=3)
-
-        self.ax.set_xlabel('Residue Number', fontsize=12, fontweight='bold')
-        self.ax.set_ylabel(self._get_ylabel(self.current_parameter),
-                          fontsize=12, fontweight='bold')
-        self.ax.set_title(f"{self.current_parameter} vs Residue Sequence",
-                         fontsize=14, fontweight='bold', pad=20)
-        self.ax.grid(True, alpha=0.3, linestyle='--', zorder=1)
-        self.ax.spines['top'].set_visible(False)
-        self.ax.spines['right'].set_visible(False)
-
-        self._format_xaxis(residues)
-
-        ylim = self.ax.get_ylim()
-        self.ax.set_ylim(0, ylim[1] * 1.1)
-
-    def _plot_overlay(self, residues):
-        """Plot overlay of both fields"""
-        col_field1 = self._find_column_with_field(self.current_parameter, "field1")
-        col_field2 = self._find_column_with_field(self.current_parameter, "field2")
-
-        all_values = []
-        if col_field1:
-            all_values.extend(self.df[col_field1].dropna().values)
-        if col_field2:
-            all_values.extend(self.df[col_field2].dropna().values)
-
-        if all_values:
-            self._add_missing_residue_bars(residues, np.array(all_values))
-
-        colors = ['#5B9EE5', '#E8554E']
-
-        for col_name, field_label, color in [
-            (col_field1, f"Field 1 ({self.field1_freq} MHz)", colors[0]),
-            (col_field2, f"Field 2 ({self.field2_freq} MHz)", colors[1])
-        ]:
-            if col_name is None:
-                continue
-
-            error_col = None
-            for suffix in ['err', '_err', '_error', 'Error']:
-                potential_err = f"{col_name}{suffix}"
-                if potential_err in self.df.columns:
-                    error_col = potential_err
-                    break
-
-            values = self.df[col_name].values
-            errors = self.df[error_col].values if error_col and self.show_errors else None
-
-            if errors is not None and self.show_errors:
-                self.ax.errorbar(residues, values, yerr=errors,
-                               fmt='o', markersize=6, capsize=3,
-                               color=color, ecolor=color, alpha=0.7,
-                               label=field_label, zorder=3)
-            else:
-                self.ax.plot(residues, values, 'o', markersize=6,
-                           color=color, alpha=0.7,
-                           label=field_label, zorder=3)
-
-        self.ax.set_xlabel('Residue Number', fontsize=12, fontweight='bold')
-        self.ax.set_ylabel(self._get_ylabel(self.current_parameter),
-                          fontsize=12, fontweight='bold')
-        self.ax.set_title(f"{self.current_parameter} vs Residue Sequence (Overlay)",
-                         fontsize=14, fontweight='bold', pad=20)
-        self.ax.grid(True, alpha=0.3, linestyle='--', zorder=1)
-        self.ax.legend(loc='best')
-        self.ax.spines['top'].set_visible(False)
-        self.ax.spines['right'].set_visible(False)
-
-        self._format_xaxis(residues)
-
-        ylim = self.ax.get_ylim()
-        self.ax.set_ylim(0, ylim[1] * 1.1)
 
     def _update_plot_all(self):
         """Display all parameters in a grid of subplots"""
@@ -998,46 +845,6 @@ class ResultsViewer(QMainWindow):
         ax.set_xticks(ticks)
         ax.set_xticklabels([str(t) for t in ticks])
 
-    def _add_missing_residue_bars(self, residues, values):
-        """Add grey bars for missing residues"""
-        min_residue = 1
-        max_residue = int(np.max(residues))
-
-        present_residues = set(residues)
-        all_residues = set(range(min_residue, max_residue + 1))
-        missing_residues = sorted(all_residues - present_residues)
-
-        if not missing_residues:
-            return
-
-        valid_values = values[~np.isnan(values)]
-        if len(valid_values) == 0:
-            return
-
-        for res in missing_residues:
-            self.ax.axvspan(res - 0.5, res + 0.5,
-                          facecolor='lightgrey', alpha=0.3, zorder=0)
-
-    def _format_xaxis(self, residues):
-        """Format x-axis with ticks every 10 residues"""
-        min_residue = 1
-        max_residue = int(np.max(residues))
-
-        self.ax.set_xlim(min_residue - 0.5, max_residue + 0.5)
-
-        if max_residue >= 10:
-            first_tick = 10
-            ticks = list(range(first_tick, max_residue + 1, 10))
-            if 1 not in ticks:
-                ticks = [1] + ticks
-            if max_residue not in ticks and max_residue - ticks[-1] > 2:
-                ticks.append(max_residue)
-        else:
-            ticks = list(range(1, max_residue + 1))
-
-        self.ax.set_xticks(ticks)
-        self.ax.set_xticklabels([str(t) for t in ticks])
-
     def _get_ylabel(self, param):
         """Get appropriate y-axis label for parameter"""
         labels = {
@@ -1054,29 +861,3 @@ class ResultsViewer(QMainWindow):
             "Rex": "Rₑₓ (s⁻¹)"
         }
         return labels.get(param, param)
-
-
-def open_results_viewer(parent=None, results_file=None, field1_freq=600.0, field2_freq=None, is_dual_field=False):
-    """
-    Convenience function to open the results viewer
-
-    Parameters:
-    -----------
-    parent : QWidget, optional
-        Parent widget
-    results_file : str
-        Path to results CSV file
-    field1_freq : float
-        Field 1 frequency in MHz
-    field2_freq : float, optional
-        Field 2 frequency in MHz
-    is_dual_field : bool
-        Whether dual-field analysis was performed
-
-    Returns:
-    --------
-    ResultsViewer : The viewer window instance
-    """
-    viewer = ResultsViewer(parent, results_file, field1_freq, field2_freq, is_dual_field)
-    viewer.show()
-    return viewer

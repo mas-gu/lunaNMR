@@ -623,53 +623,6 @@ class FitViewer(QMainWindow):
 
         self.inspect_peak_requested.emit(str(residue), series_name, all_fit_data)
 
-    def _get_fit_data_for_residue(self, residue: str, data_key: str) -> dict:
-        """Extract fit data for a specific residue.
-
-        Args:
-            residue: Residue ID (e.g., "142")
-            data_key: Data key for lookup (e.g., "field1_T1")
-
-        Returns:
-            Dict with fit data including:
-                - time_points: delay times for raw data
-                - intensities: raw intensity values
-                - fit_curve: {'time': [...], 'intensity': [...]} for smooth curve
-                - t_value: T1 or T2 value
-                - t_error: uncertainty
-                - time_units: time units string
-                - experiment_type: 'T1' or 'T2'
-            Returns None if fit data not available.
-        """
-        if data_key is None or data_key not in self.data:
-            return None
-
-        data_entry = self.data[data_key]
-        fits = data_entry.get('fits', [])
-        metadata = data_entry.get('metadata', {})
-
-        fit_entry = None
-        for fit in fits:
-            if fit.get('residue') == residue:
-                fit_entry = fit
-                break
-
-        if fit_entry is None:
-            return None
-
-        # Extract experiment type from data_key (e.g., 'field1_T1' -> 'T1')
-        experiment_type = data_key.split('_')[-1] if '_' in data_key else ''
-
-        return {
-            'time_points': metadata.get('time_points', []),
-            'intensities': fit_entry.get('intensities', []),
-            'fit_curve': fit_entry.get('fit_curve', {}),
-            't_value': fit_entry.get('t2', 0),  # Named 't2' even for T1 in JSON
-            't_error': fit_entry.get('t2_err', 0),
-            'time_units': metadata.get('time_units', 'ms'),
-            'experiment_type': experiment_type
-        }
-
     def _get_all_fit_data(self, data_key: str) -> dict:
         """Extract fit data for ALL residues.
 
@@ -1137,25 +1090,3 @@ class FitViewer(QMainWindow):
                transform=ax.transAxes)
         ax.axis('off')
         self.canvas.draw()
-
-
-def open_fit_viewer(parent=None, json_folder=None, json_folders=None):
-    """
-    Convenience function to open the fit viewer
-
-    Parameters:
-    -----------
-    parent : QWidget, optional
-        Parent widget
-    json_folder : str, optional
-        Path to JSON data folder (single folder)
-    json_folders : list, optional
-        List of JSON data folder paths (for multi-experiment support)
-
-    Returns:
-    --------
-    FitViewer : The viewer window instance
-    """
-    viewer = FitViewer(parent, json_folder=json_folder, json_folders=json_folders)
-    viewer.show()
-    return viewer

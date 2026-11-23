@@ -33,7 +33,7 @@ from dynamiXs_density_functions.model_free_search import (
     DUAL_FIELD_STARTS, S2_BOUNDS, TE_BOUNDS, REX_BOUNDS, TE_SCALE, best_least_squares)
 
 from dynamiXs_density_functions.spectral_density_physics import (
-    spectral_density, omega_h, omega_n, dipolar_constant, csa_constant, sigma_noe,
+    spectral_density, omega_h, omega_n, dipolar_constant, csa_constant,
     reduced_spectral_densities, reduced_spectral_density_errors, relaxation_deviations,
     overall_correlation_time, monte_carlo_rng)
 
@@ -104,10 +104,6 @@ class DualFieldSpectralDensityAnalysis:
     def _calculate_c_factor(self, omegaN):
         """Calculate CSA constant (field-dependent)"""
         return csa_constant(omegaN, self.csaN)
-    
-    def calculate_sigma_NOE(self, noe, r1):
-        """Calculate sigma NOE value"""
-        return sigma_noe(noe, r1)
     
     def calculate_spectral_densities(self, r1, r2, noe, field='field1'):
         """
@@ -282,7 +278,7 @@ class DualFieldSpectralDensityAnalysis:
         n_successful = len(mc_results['S2'])
         if n_successful < 10:
             print(f"    Warning: Only {n_successful}/{n_monte_carlo} dual-field MC fits succeeded")
-            print("    Returning ensemble-based errors instead of Monte Carlo errors")
+            print("    At least 10 are needed: the model-free errors are not estimated (NaN)")
             return best_fit
         
         best_fit['S2_err'] = np.std(mc_results['S2'])
@@ -965,167 +961,3 @@ def _worker_process_residue(args):
             'result': None,
             'error': str(e)
         }
-
-
-def main():
-    """
-    Example usage of the DualFieldSpectralDensityAnalysis class with multiprocessing
-    """
-    analyzer = DualFieldSpectralDensityAnalysis(
-        field1_freq=700.0,    # First field in MHz
-        field2_freq=600.0,    # Second field in MHz  
-        rNH=1.023e-10,        # N-H bond length in meters 1.023
-        csaN=-160.0e-6        # 15N CSA in ppm
-    )
-    
-    # Analyze dual-field CSV files
-    try:
-        print("Running dual-field analysis with Monte Carlo error propagation and multiprocessing...")
-        print(f"Available CPU cores: {cpu_count()}, Using: {int(cpu_count() * 0.8)} cores")
-        
-        csv_file1 = 'data_in_700.csv'  # Field 1 data file
-        csv_file2 = 'data_in_600.csv'  # Field 2 data file
-        
-        # Output filenames
-        basic_results_csv = 'density_basic.csv'
-        detailed_results_csv = 'density_detailled.csv'
-        plots_pdf = 'density_.pdf'
-        
-        results = analyzer.analyze_dual_field_csv(
-            csv_file1, csv_file2,
-            use_monte_carlo_errors=True,
-            n_monte_carlo=100,
-            use_multiprocessing=True,  # Enable multiprocessing
-            n_processes=None  # Use default (80% of cores)
-        )
-        
-        
-        print("\nDual-Field Reduced Spectral Density A^nalysis Results:")
-        print("=" * 80)
-        
-        if len(results) > 0:
-            if 'Residue' in results.columns:
-                display_cols = ['Residue', 'S2', 'tc', 'te', 'Rex_f1', 'Rex_f2', 'chi2']
-            else:
-                display_cols = ['Index', 'S2', 'tc', 'te', 'Rex_f1', 'Rex_f2', 'chi2']
-        else:
-            print("No results to display - analysis failed or no valid data found!")
-            return
-        
-        print(results[display_cols].round(4))
-        
-        results.to_csv(basic_results_csv, index=False)
-        print(f"Basic results saved to '{basic_results_csv}'")
-        
-        analyzer.save_dual_field_results(results, detailed_results_csv)
-        
-        analyzer.plot_dual_field_results(results, save_plots=True, plot_filename=plots_pdf)
-        
-        success_rate = results['fit_success'].mean() * 100
-        print("\nDual-Field Model-Free Fitting Results (Multicore):")
-        print(f"  Fit success rate: {success_rate:.1f}%")
-        print(f"  Fields analyzed: {analyzer.field1_freq} MHz and {analyzer.field2_freq} MHz")
-        print(f"  Cores utilized: {int(cpu_count() * 0.8)} out of {cpu_count()} available")
-        
-        if success_rate > 0:
-            successful = results[results['fit_success']]
-            print(f"  Successfully fitted residues: {len(successful)}")
-            print(f"  Average S²: {successful['S2'].mean():.3f} ± {successful['S2'].std():.3f}")
-            print(f"  Average τc: {successful['tc'].mean():.1f} ± {successful['tc'].std():.1f} ns")
-            print(f"  Average τe: {successful['te'].mean():.1f} ± {successful['te'].std():.1f} ps")
-            print(f"  Average Rex (field 1): {successful['Rex_f1'].mean():.1f} ± {successful['Rex_f1'].std():.1f} s⁻¹")
-            print(f"  Average Rex (field 2): {successful['Rex_f2'].mean():.1f} ± {successful['Rex_f2'].std():.1f} s⁻¹")
-            
-            # Analyze Rex field dependence
-            rex_f1_mean = successful['Rex_f1'].mean()
-            rex_f2_mean = successful['Rex_f2'].mean()
-            expected_ratio = (analyzer.field2_freq / analyzer.field1_freq)**2
-            observed_ratio = rex_f2_mean / rex_f1_mean if rex_f1_mean > 0 else np.nan
-            
-            print("\nRex Field Dependence Analysis:")
-            print(f"  Expected Rex ratio (B₂²/B₁²): {expected_ratio:.2f}")
-            print(f"  Observed Rex ratio: {observed_ratio:.2f}")
-            print(f"  Correlation between fields: {successful['Rex_f1'].corr(successful['Rex_f2']):.3f}")
-            
-            # Report Monte Carlo success if used
-            if 'mc_success_rate' in successful.columns:
-                avg_mc_success = successful['mc_success_rate'].mean()
-                print(f"  Average Monte Carlo success rate: {avg_mc_success*100:.1f}%")
-                
-            # Identify residues with significant exchange
-            high_rex_threshold = 2.0  # s⁻¹
-            high_rex_residues = successful[
-                (successful['Rex_f1'] > high_rex_threshold) | 
-                (successful['Rex_f2'] > high_rex_threshold)
-            ]
-            
-            if len(high_rex_residues) > 0:
-                print(f"\nResidues with significant chemical exchange (Rex > {high_rex_threshold} s⁻¹):")
-                if 'Residue' in high_rex_residues.columns:
-                    exchange_list = high_rex_residues['Residue'].tolist()
-                else:
-                    exchange_list = high_rex_residues.index.tolist()
-                print(f"  {len(exchange_list)} residues: {exchange_list}")
-                
-        else:
-            print("  No successful dual-field model-free fits obtained!")
-            
-    except FileNotFoundError:
-        print("Please provide two CSV files with dual-field relaxation data:")
-        print("File 1 (e.g., 'data_600MHz.csv') with columns: R1, R1err, R2, R2err, hetNOE, hetNOEerr")
-        print("File 2 (e.g., 'data_800MHz.csv') with columns: R1, R1err, R2, R2err, hetNOE, hetNOEerr")
-        print("Both files should also include a 'Residue' column for matching")
-        
-        np.random.seed(42)  # For reproducible example
-        n_residues = 15
-        
-        # Field 1 (600 MHz) - typically lower Rex values
-        example_data1 = pd.DataFrame({
-            'Residue': [f'A{i}' for i in range(1, n_residues + 1)],
-            'R1': np.random.normal(1.3, 0.3, n_residues),
-            'R1err': np.random.normal(0.05, 0.01, n_residues),
-            'R2': np.random.normal(12.0, 3.0, n_residues), 
-            'R2err': np.random.normal(0.4, 0.1, n_residues),
-            'hetNOE': np.random.normal(0.75, 0.15, n_residues),
-            'hetNOEerr': np.random.normal(0.03, 0.005, n_residues)
-        })
-        
-        # Field 2 (800 MHz) - typically higher Rex values due to field dependence
-        example_data2 = pd.DataFrame({
-            'Residue': [f'A{i}' for i in range(1, n_residues + 1)],
-            'R1': np.random.normal(1.1, 0.25, n_residues),  # Slightly different R1
-            'R1err': np.random.normal(0.04, 0.008, n_residues),
-            'R2': np.random.normal(14.0, 4.0, n_residues),  # Higher R2 at higher field
-            'R2err': np.random.normal(0.5, 0.12, n_residues),
-            'hetNOE': np.random.normal(0.78, 0.12, n_residues),  # Slightly different NOE
-            'hetNOEerr': np.random.normal(0.025, 0.004, n_residues)
-        })
-        
-        # Ensure all values are positive and physically reasonable
-        for df in [example_data1, example_data2]:
-            df['R1'] = np.clip(df['R1'], 0.5, 3.0)
-            df['R1err'] = np.clip(df['R1err'], 0.01, 0.1)
-            df['R2'] = np.clip(df['R2'], df['R1'] * 1.5, 50.0)  # R2 > R1
-            df['R2err'] = np.clip(df['R2err'], 0.1, 1.0)
-            df['hetNOE'] = np.clip(df['hetNOE'], 0.3, 1.0)
-            df['hetNOEerr'] = np.clip(df['hetNOEerr'], 0.01, 0.05)
-        
-        example_data1.to_csv('example_600MHz_data.csv', index=False)
-        example_data2.to_csv('example_800MHz_data.csv', index=False)
-        
-        print("\nExample dual-field data files created:")
-        print("  'example_600MHz_data.csv' - Field 1 data")
-        print("  'example_800MHz_data.csv' - Field 2 data")
-        print("You can test the script with these example files.")
-        print("\nTo use your own data, ensure both CSV files have the same residue identifiers")
-        print("and modify the field frequencies in the main() function as needed.")
-        
-        print("\nMultiprocessing Performance Info:")
-        print(f"  Total CPU cores available: {cpu_count()}")
-        print(f"  Cores that will be used: {int(cpu_count() * 0.8)} (80%)")
-        print("  To disable multiprocessing, set use_multiprocessing=False in analyze_dual_field_csv()")
-        print("  To use all cores, set n_processes=cpu_count() in analyze_dual_field_csv()")
-
-
-if __name__ == "__main__":
-    main()#!/usr/bin/env python3
