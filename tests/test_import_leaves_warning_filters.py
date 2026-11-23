@@ -12,7 +12,6 @@ DENSITY_DIR = REPO_ROOT / "modules" / "dynamiXs_v2o0" / "dynamiXs_density_functi
 
 _MODULES = [
     "lunaNMR.core.core_integrator",
-    "lunaNMR.core.enhanced_peak_picker",
     "lunaNMR.core.enhanced_voigt_fitter",
     "lunaNMR.utils.file_manager",
     "lunaNMR.integrators.inplace_advanced_nmr_integrator",

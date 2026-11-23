@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import pandas as pd
 
 from lunaNMR.core.ps2d_config import restore_base_ps2d_config
-from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
+from lunaNMR.utils.output_manager import log_progress, log_info, log_error
 from lunaNMR.utils.cancellation import Cancelled
 
 # Below this many peaks, distributing the work costs more than it saves.
@@ -147,14 +147,6 @@ class SingleSpectrumProcessor:
         self.processing_active = False
         self.progress_callback = None
 
-        # Processing statistics
-        self.stats = {
-            'total_processed': 0,
-            'successful_fits': 0,
-            'failed_fits': 0,
-            'average_quality': 0.0
-        }
-
     def process_peak_list(self, peak_list: pd.DataFrame,
                          processing_options: Optional[Dict] = None,
                          progress_callback: Optional[callable] = None,
@@ -186,7 +178,6 @@ class SingleSpectrumProcessor:
         """
         if processing_options is None:
             processing_options = {
-                'mode': 'sequential',  # 'sequential', 'parallel'
                 'use_parallel': self.parameter_manager.current_params.get('use_parallel_processing', False)
             }
 
@@ -209,10 +200,6 @@ class SingleSpectrumProcessor:
                 restore_base_ps2d_config()
 
             self.sync_parameters_to_integrator()
-
-            if processing_options and processing_options.get('skip_adaptive', False):
-                if hasattr(self.integrator, 'gui_params') and self.integrator.gui_params:
-                    self.integrator.gui_params['use_adaptive_optimization'] = False
 
             # Choose processing strategy
             # Returns tuple: (fitted_results, learned_statistics)
@@ -242,8 +229,6 @@ class SingleSpectrumProcessor:
             detection_params['search_window_x'],
             detection_params['search_window_y']
         )
-
-        self.integrator.fitting_parameters.update(params['fitting_params'])
 
         self.integrator.gui_params = params['gui_params']
 
@@ -371,13 +356,7 @@ class SingleSpectrumProcessor:
             'quality_distribution': {label: labels.count(label)
                                      for label in ('Excellent', 'Good', 'Fair', 'Poor', 'Failed')},
             'results': fitted_results,
-            'processing_stats': self.stats.copy()
         }
-
-    def cancel_processing(self):
-        """Cancel current processing operation"""
-        self.processing_active = False
-        log_warning("Single spectrum processing cancelled")
 
     def extract_clusters_by_assignment(
         self,

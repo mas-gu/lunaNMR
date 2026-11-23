@@ -11,11 +11,6 @@ attributes.
 
 # DEFAULTS OF THE INTEGRATOR'S ATTRIBUTES
 
-# Reference-based detection parameters
-USE_REFERENCE_DETECTION = True                      # Enable reference-based peak detection
-SEARCH_WINDOW_X_PPM = 0.2                         # ±X ppm search window (1H dimension)
-SEARCH_WINDOW_Y_PPM = 3.0                         # ±Y ppm search window (15N/13C dimension)
-
 # Noise region configuration
 USE_CUSTOM_NOISE_REGIONS = False                   # Use user-defined noise regions
 NOISE_REGIONS_PPM = [                             # Noise regions in ppm [x_min, x_max, y_min, y_max]
@@ -54,19 +49,12 @@ class InPlaceAdvancedNMRIntegrator:
         self.ppm_y_axis = None
 
         # Results storage
-        self.detected_peaks = []
         self.fitted_peaks = []
-        self.integration_results = []
 
         # Enhanced parameters
-        self.search_window_x_ppm = SEARCH_WINDOW_X_PPM
-        self.search_window_y_ppm = SEARCH_WINDOW_Y_PPM
         self.threshold_multiplier = DEFAULT_THRESHOLD_MULTIPLIER
         self.noise_regions_ppm = NOISE_REGIONS_PPM
         self.use_custom_noise_regions = USE_CUSTOM_NOISE_REGIONS
-        self.use_reference_detection = USE_REFERENCE_DETECTION
-        self.consolidation_x_tolerance = 0.05
-        self.consolidation_y_tolerance = 2.0
 
         # Quality tracking
         self.detection_statistics = {

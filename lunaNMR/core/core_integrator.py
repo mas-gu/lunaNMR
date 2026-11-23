@@ -151,7 +151,6 @@ class VoigtIntegrator(BaseIntegrator):
         self.fitting_parameters = {
             'max_iterations': 1000,
             'tolerance': 1e-6,
-            'min_r_squared': 0.1,  # Lowered to 0.1 for debugging/QC
             'fitting_window_x': 0.2,  # ppm @GM was 0.4 was 0.4 was 0.15
             'fitting_window_y': 2,   # ppm  @GM was 7 was 5 was 3 was 1.5
             'max_expansion_attempts': 3,  # Maximum attempts to expand window on failure
@@ -164,7 +163,6 @@ class VoigtIntegrator(BaseIntegrator):
         self.expected_peak_count = 50
         self.sn_detection_params = {
             'min_snr': 2.0,          # Minimum signal-to-noise ratio
-            'max_peaks': 500,        # Maximum peaks to detect
             'noise_estimation': 'corners',  # 'corners' or 'median'
             'peak_separation': 0.01  # Minimum peak separation in ppm
         }
@@ -205,11 +203,6 @@ class VoigtIntegrator(BaseIntegrator):
         # analytic volume of the broadened Voigt reads almost unchanged - measured on
         # DNAJA1/HSPA8 73LysH, height 27% of the reference and volume 94% of it.
         self.titration_lw_margins = None
-
-        # Integration parameters (for integrated detection-fitting mode)
-        self.integration_parameters = {
-            'enable_integrated_mode': False  # Disabled by default
-        }
 
         # Auto-add dummy peaks (for peak_list mode)
         self.auto_add_dummy_peaks = True  # Default ON, controlled by GUI
@@ -257,29 +250,6 @@ class VoigtIntegrator(BaseIntegrator):
         peak_id = self._next_peak_id
         self._next_peak_id += 1
         return peak_id
-
-    def load_nmr_data(self, data_2d, ppm_x_axis, ppm_y_axis):
-        """
-        TESTING SUPPORT: Load NMR data directly from arrays
-
-        This method is specifically for testing and direct data input.
-        For file-based loading, use load_data() or load_nmr_file().
-
-        Parameters:
-        - data_2d: 2D numpy array with NMR data
-        - ppm_x_axis: 1D array with X-axis ppm values
-        - ppm_y_axis: 1D array with Y-axis ppm values
-        """
-        self.nmr_data = data_2d
-        self.ppm_x_axis = ppm_x_axis
-        self.ppm_y_axis = ppm_y_axis
-
-        log_info(f"Loaded NMR data directly: {data_2d.shape}")
-
-        # Set dummy nmr_dict for compatibility
-        self.nmr_dict = {'dummy': 'for_testing'}
-
-        return True
 
     def set_processing_mode(self, mode):
         """Set processing mode: 'full_detection', 'in_place', or 'sn_native'"""
@@ -1791,8 +1761,6 @@ class VoigtIntegrator(BaseIntegrator):
             # Ensure all peaks have stable IDs for undo/redo
             self.ensure_peak_ids()
 
-            self.peak_list_path = peak_list_file
-
             # If NMR data was already loaded, we're ready to go
             if hasattr(self, 'nmr_data') and self.nmr_data is not None:
                 return True
@@ -2216,15 +2184,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
 
     def __init__(self):
         super().__init__()
-        self.advanced_parameters = {
-            'noise_regions': [],
-            'baseline_correction': True,
-            'phase_correction': True,
-            'apodization': 'exponential',
-            'zero_filling': 2,
-            'peak_shape_analysis': True
-        }
-
         # Detection statistics for GUI status display
         self.detection_statistics = {
             'total_peaks': 0,
@@ -2232,15 +2191,6 @@ class EnhancedVoigtIntegrator(VoigtIntegrator):
             'detection_rate': 0.0,
             'reference_retained': 0,
             'method': 'unknown'
-        }
-
-        # Integration parameters
-        self.integration_mode = 'standard'  # 'standard', 'integrated', 'adaptive'
-        self.integration_parameters = {
-            'enable_integrated_mode': False,  # Default off for backward compatibility
-            'adaptive_thresholds': True,
-            'multi_resolution_detection': True,
-            'quality_filtering': True,
         }
 
         # S/N from-GUI mode parameters

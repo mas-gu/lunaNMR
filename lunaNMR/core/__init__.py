@@ -1,11 +1,11 @@
-# ABOUTME: Core processing engines for LunaNMR: integrator, Voigt fitter, peak picker.
+# ABOUTME: Core processing engines for LunaNMR: integrator and Voigt fitter.
 # ABOUTME: Exported lazily (PEP 562) so importing a light submodule never loads the integrator.
 
 """
 Core Processing Engines for LunaNMR
 
 This module contains the core processing engines including
-integrators, fitters, and peak pickers.
+integrators and fitters.
 
 The engines are imported on first access. ``lunaNMR.utils.parameter_manager`` imports
 ``lunaNMR.core.ps2d_config`` while ``lunaNMR.utils`` is still initialising; an eager
@@ -18,7 +18,6 @@ import importlib
 _LAZY_EXPORTS = {
     'EnhancedVoigtIntegrator': '.core_integrator',
     'EnhancedVoigtFitter': '.enhanced_voigt_fitter',
-    'EnhancedPeakPicker': '.enhanced_peak_picker',
 }
 
 
@@ -38,5 +37,4 @@ def __dir__():
 __all__ = [
     'EnhancedVoigtIntegrator',
     'EnhancedVoigtFitter',
-    'EnhancedPeakPicker'
 ]

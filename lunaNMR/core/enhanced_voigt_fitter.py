@@ -12,7 +12,6 @@ class EnhancedVoigtFitter:
         self.fitting_parameters = {
             'max_iterations': 1000,
             'tolerance': 1e-8,
-            'min_r_squared': 0.3,  # Lowered for realistic data
             'baseline_polynomial_degree': 1,
             'smoothing_window': 5,
             'peak_detection_prominence': 0.1,

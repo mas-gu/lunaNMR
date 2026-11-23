@@ -34,7 +34,6 @@ _LAZY_EXPORTS = {
     'main': '.gui.main_window',
     'EnhancedVoigtIntegrator': '.core.core_integrator',
     'EnhancedVoigtFitter': '.core.enhanced_voigt_fitter',
-    'EnhancedPeakPicker': '.core.enhanced_peak_picker',
     'MultiSpectrumProcessor': '.processors.multi_spectrum_processor',
     'SingleSpectrumProcessor': '.processors.single_spectrum_processor',
     'ConfigurationManager': '.utils.config_manager',
@@ -74,7 +73,6 @@ __all__ = [
     # Core
     'EnhancedVoigtIntegrator',
     'EnhancedVoigtFitter',
-    'EnhancedPeakPicker',
     # Processors
     'MultiSpectrumProcessor',
     'SingleSpectrumProcessor',
