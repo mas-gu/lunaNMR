@@ -1,10 +1,10 @@
 # ABOUTME: A project whose gui_state.json names parameters the window has no control for opens, and takes none of them.
 # ABOUTME: Real LunaNMRMainWindow offscreen, saved and opened through the real ProjectManager.
 
-"""The window holds no custom initial linewidths and no detection rectangle in pixels: no
-engine code reads either. A bundle can still name them in its gui_state.json. Opening it
-restores the parameters the window has, and neither the window nor a series started from
-it carries the others."""
+"""The window holds no custom initial linewidths, no detection rectangle in pixels and none
+of the 1D peak-picking and fit-quality settings: no engine code reads any of them. A
+bundle can still name them in its gui_state.json. Opening it restores the parameters the
+window has, and neither the window nor a series started from it carries the others."""
 
 import json
 import os
@@ -18,6 +18,10 @@ WITHOUT_A_CONTROL = {
     'use_custom_linewidths': True, 'lw_lorentz_1h': 0.002, 'lw_gauss_1h': 0.04,
     'lw_lorentz_15n': 0.0002, 'lw_gauss_15n': 0.4,
     'detection_square_size': 5, 'detection_rectangle_y': 2,
+    'use_voigt_fitting': False, 'use_ps2d_multi_peak': False,
+    'use_centroid_refinement': False, 'centroid_noise_multiplier': 4.5,
+    'height_threshold': 0.5, 'distance_factor': 50.0, 'prominence_threshold': 0.3,
+    'smoothing_sigma': 3.0, 'max_peaks_fit': 2, 'max_optimization_iterations': 2,
 }
 
 
@@ -79,13 +83,20 @@ def test_the_window_takes_no_parameter_it_has_no_control_for(opened):
         assert not hasattr(opened, name), name
 
 
-def test_a_series_started_from_it_is_given_no_initial_linewidths(opened):
+def test_a_series_started_from_it_is_given_none_of_them(opened):
     from lunaNMR.gui.dialogs.series_integration_dialog import SeriesIntegrationDialog
     dialog = SeriesIntegrationDialog(main_window=opened)
     try:
-        assert not set(WITHOUT_A_CONTROL) & set(dialog._get_voigt_params()['gui_params'])
+        params = dialog._get_voigt_params()
+        assert not set(WITHOUT_A_CONTROL) & set(params['gui_params'])
+        assert 'fitting_params' not in params
     finally:
         dialog.deleteLater()
+
+
+def test_a_fit_started_from_it_is_given_none_of_them(opened):
+    opened.sync_parameters_to_integrator()
+    assert not set(WITHOUT_A_CONTROL) & set(opened.integrator.gui_params)
 
 
 def test_saving_it_again_writes_none_of_them(opened, tmp_path):

@@ -356,18 +356,13 @@ class ProjectManager:
         # Note: saved_xlim, saved_ylim are tuples - handle separately
 
         # Processing parameters
-        'use_voigt_fitting', 'use_parallel_processing', 'use_adaptive_optimization',
-        'use_ps2d_multi_peak', 'fix_linewidths', 'fix_positions',
+        'use_parallel_processing', 'use_adaptive_optimization',
+        'fix_linewidths', 'fix_positions',
 
         # Peak detection parameters
         'search_window_x', 'search_window_y',
         'centroid_window_x_ppm', 'centroid_window_y_ppm',
-        'use_centroid_refinement', 'centroid_noise_multiplier',
         'auto_add_dummy_peaks',
-
-        # Peak detection for series
-        'height_threshold', 'distance_factor', 'prominence_threshold',
-        'smoothing_sigma', 'max_peaks_fit', 'max_optimization_iterations',
 
         # Fitting quality parameters
         'min_r_squared', 'max_iterations', 'fitting_window_x', 'fitting_window_y',

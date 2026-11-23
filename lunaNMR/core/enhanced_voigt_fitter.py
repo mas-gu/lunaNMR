@@ -1,21 +1,12 @@
 #!/usr/bin/env python3
-# ABOUTME: Voigt fitter held by the integrator: its fitting parameters and enhanced_peak_fitting_parallel,
-# ABOUTME: the entry point that fits a peak list cluster by cluster in 2D through the parallel processor.
+# ABOUTME: Voigt fitter held by the integrator: enhanced_peak_fitting_parallel, the entry point
+# ABOUTME: that fits a peak list cluster by cluster in 2D through the parallel processor.
 
 from lunaNMR.utils.output_manager import log_progress
 
 
 class EnhancedVoigtFitter:
-    """Fitting parameters and the cluster-by-cluster 2D fit of a peak list"""
-
-    def __init__(self):
-        self.fitting_parameters = {
-            'max_iterations': 1000,
-            'tolerance': 1e-8,
-            'baseline_polynomial_degree': 1,
-            'smoothing_window': 5,
-            'peak_detection_prominence': 0.1,
-        }
+    """The cluster-by-cluster 2D fit of a peak list"""
 
     def enhanced_peak_fitting_parallel(self, peak_list, progress_callback=None,
                                         parent_integrator=None, locked_clusters_by_assignment=None,

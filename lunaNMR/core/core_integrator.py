@@ -148,14 +148,6 @@ class VoigtIntegrator(BaseIntegrator):
         super().__init__()
         self.voigt_fits = []  # Store detailed Voigt fitting results
         self._next_peak_id = 0  # Counter for stable peak IDs (undo/redo)
-        self.fitting_parameters = {
-            'max_iterations': 1000,
-            'tolerance': 1e-6,
-            'fitting_window_x': 0.2,  # ppm @GM was 0.4 was 0.4 was 0.15
-            'fitting_window_y': 2,   # ppm  @GM was 7 was 5 was 3 was 1.5
-            'max_expansion_attempts': 3,  # Maximum attempts to expand window on failure
-            'failure_expansion_factor': 1.5  # Window expansion factor on fitting failure
-        }
         self.processing_mode = 'full_detection'  # 'full_detection' or 'in_place' or 'sn_native'
 
         # S/N threshold parameters

@@ -177,7 +177,6 @@ class VoigtFittingWorker(QThread):
             param_manager: Parameter manager for configuration
             processing_options: Dict with keys:
                 - use_parallel: bool
-                - use_voigt_fitting: bool
             peaks_to_fit: DataFrame of peaks to fit. If None, uses integrator.peak_list
             stop: Optional threading.Event; setting it ends the fit before its next cluster
         """
@@ -380,10 +379,8 @@ class LunaNMRMainWindow(BaseWindow):
         # ===== Processing Parameters =====
         # These will be populated from config_manager by load_parameters_from_config()
         # For now, just initialize placeholders
-        self.use_voigt_fitting = True
         self.use_parallel_processing = True
         self.use_adaptive_optimization = False  # Grid search for optimal radF1/radF2
-        self.use_ps2d_multi_peak = True
         self.fix_linewidths = False
         self.fix_positions = False
 
@@ -395,8 +392,6 @@ class LunaNMRMainWindow(BaseWindow):
         # Peak Centroid Detection parameters
         self.centroid_window_x_ppm = 0.01  # X-window size in ppm (1H dimension)
         self.centroid_window_y_ppm = 0.1   # Y-window size in ppm (15N dimension)
-        self.use_centroid_refinement = True  # Enable centroid refinement
-        self.centroid_noise_multiplier = 2.0  # Noise threshold for centroid
 
         # Auto-add dummy peaks (for peak_list mode only)
         self.auto_add_dummy_peaks = True  # Auto-add nearby unmatched peaks
@@ -408,14 +403,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.manual_detection_x_max = 10.0  # ppm (1H)
         self.manual_detection_y_min = 105.0 # ppm (15N)
         self.manual_detection_y_max = 135.0 # ppm (15N)
-
-        # ===== Peak Detection Parameters (for series integration) =====
-        self.height_threshold = 0.1  # Peak height threshold
-        self.distance_factor = 2.0  # Peak distance factor
-        self.prominence_threshold = 0.05  # Peak prominence threshold
-        self.smoothing_sigma = 1.0  # Smoothing sigma
-        self.max_peaks_fit = 50  # Maximum peaks to fit
-        self.max_optimization_iterations = 50  # Optimization iterations
 
         # ===== Fitting Quality Parameters =====
         self.min_r_squared = 0.5  # Minimum R² quality threshold
@@ -5072,8 +5059,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     self.param_manager.current_params['centroid_window_x_ppm'] = self.centroid_window_x_ppm
                 if hasattr(self, 'centroid_window_y_ppm'):
                     self.param_manager.current_params['centroid_window_y_ppm'] = self.centroid_window_y_ppm
-                if hasattr(self, 'centroid_noise_multiplier'):
-                    self.param_manager.current_params['centroid_noise_multiplier'] = self.centroid_noise_multiplier
 
                 if hasattr(self, 'fix_linewidths'):
                     self.param_manager.current_params['fix_linewidths'] = self.fix_linewidths
@@ -5095,9 +5080,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                     detection_params['search_window_x'],
                     detection_params['search_window_y']
                 )
-
-                if hasattr(self.integrator, 'fitting_parameters'):
-                    self.integrator.fitting_parameters.update(integrator_params['fitting_params'])
 
                 self.integrator.gui_params = integrator_params['gui_params']
 
@@ -5469,7 +5451,6 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         # Build processing options from GUI parameters (v0o9 pattern)
         processing_options = {
             'use_parallel': self.use_parallel_processing,
-            'use_voigt_fitting': self.use_voigt_fitting,
             # For single spectrum fitting, always recompute clusters fresh.
             # This ensures changes to max_cluster_size and other Expert Mode
             # settings take effect immediately (don't reuse cached series_params).

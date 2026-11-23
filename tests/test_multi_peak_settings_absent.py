@@ -18,7 +18,9 @@ def test_the_parameter_manager_does_not_define(key):
 @pytest.mark.parametrize('key', KEYS)
 def test_the_fitter_does_not_carry(key):
     from lunaNMR.core.enhanced_voigt_fitter import EnhancedVoigtFitter
-    assert key not in EnhancedVoigtFitter().fitting_parameters
+    fitter = EnhancedVoigtFitter()
+    assert not hasattr(fitter, key)
+    assert not any(key in value for value in vars(fitter).values() if isinstance(value, dict))
 
 
 @pytest.mark.parametrize('key', KEYS)

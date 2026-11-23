@@ -753,9 +753,10 @@ def _discover_spectra(spectra, extensions=None):
 def _default_series_params(parallel=False):
     """Default series/voigt parameters, mirroring the GUI's getattr fallbacks.
 
-    The GUI assembles this nested dict from the main window with these same defaults
-    (gui/dialogs/series_integration_dialog.py::_get_voigt_parameters); a headless run
-    just uses the defaults directly. `parallel` enables the two-pass parallel processor.
+    The GUI assembles the detection, gui and processing groups from the main window with
+    these same defaults (gui/dialogs/series_integration_dialog.py::_get_voigt_params); a
+    headless run just uses the defaults directly. `parallel` enables the two-pass
+    parallel processor.
     """
     from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM
     return {
@@ -768,10 +769,8 @@ def _default_series_params(parallel=False):
             'fix_positions': False,
             'fix_linewidths': False,
             'use_parallel_processing': parallel,
-            'use_centroid_refinement': True,
             'centroid_window_x_ppm': 0.02,
             'centroid_window_y_ppm': 1.0,
-            'centroid_noise_multiplier': 2.0,
             'use_ps2d_linewidth_reuse': False,
             # The fitting-window grid search; off unless asked for (it chose the
             # smallest window on every real titration and broke CSP positions)
@@ -779,15 +778,9 @@ def _default_series_params(parallel=False):
             # Unmatched peaks near listed ones, added as dummy_ peaks on the first
             # spectrum and fitted at every point
             'auto_add_dummy_peaks': True,
-            'height_threshold': 0.1,
-            'distance_factor': 2.0,
-            'prominence_threshold': 0.05,
-            'smoothing_sigma': 1.0,
-            'max_peaks_fit': 50,
-            'max_optimization_iterations': 50,
         },
+        # Accepted from --params; nothing on the series path reads them
         'fitting_params': {
-            'min_r_squared': 0.5,
             'max_iterations': 1000,
             'fitting_window_x': 0.2,
             'fitting_window_y': 2.0,
@@ -933,9 +926,8 @@ def _validate_series(parser, args):
                      "one before); --peak-source independent cannot be combined with it")
 
 
-# Keys the defaults carry for the parameter manager, which indexes them, but which
-# nothing on the series path reads - or whose value a flag always replaces. A key the
-# defaults do not carry (noise_threshold) is refused here too, so the reason is stated.
+# Keys nothing on the series path reads, or whose value a flag always replaces. They
+# are refused here, rather than as unknown keys, so the reason is stated.
 _SERIES_PARAMS_WITHOUT_EFFECT = {
     ('gui_params', 'use_centroid_refinement'): 'nothing reads it',
     ('gui_params', 'centroid_noise_multiplier'): 'only a detection the series never runs reads it',

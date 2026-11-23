@@ -46,7 +46,7 @@ class TestTuningKnobsAreReachable:
         cfg.write_text(json.dumps({"detection_params": {"search_window_x": 0.05}}))
         params = _effective_params(tmp_path, ["--params", str(cfg)], capsys)
         assert params["detection_params"]["search_window_y"] is None  # the nucleus decides
-        assert params["fitting_params"]["min_r_squared"] == 0.5
+        assert params["fitting_params"]["max_iterations"] == 1000
 
     def test_several_sections_at_once(self, tmp_path, capsys):
         cfg = tmp_path / "tune.json"
@@ -172,6 +172,15 @@ class TestAKnobWithNoEffectIsRefused:
         assert TestAnUnknownKeyIsRefused()._err(tmp_path, {section: {key: value}}) == 1
         err = capsys.readouterr().err
         assert key in err and "no effect" in err
+
+    def test_the_summary_reports_none_of_them_as_a_parameter_of_the_run(self, tmp_path, capsys):
+        """--parallel sets use_parallel_processing, so the run does use that one."""
+        from lunaNMR.cli import _SERIES_PARAMS_WITHOUT_EFFECT
+        params = _effective_params(tmp_path, [], capsys)
+        reported = {(section, key) for section, values in params.items() for key in values}
+        assert reported & set(_SERIES_PARAMS_WITHOUT_EFFECT) == {
+            ("gui_params", "use_parallel_processing"),
+            ("processing_options", "use_parallel_processing")}
 
     @pytest.mark.parametrize("section", ["gui_params", "processing_options"])
     def test_parallel_processing_is_refused_in_favour_of_the_flag(self, tmp_path, capsys,

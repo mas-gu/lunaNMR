@@ -154,7 +154,7 @@ Dropping a decayed residue from an intensity series fabricates a plateau that is
 
 `utils/parameter_manager.py`: one parameter set, with a default, range and type per parameter.
 
-GUI spinbox values (search and centroid windows, fixed positions/linewidths, custom linewidths) **override** the defaults: `main_window.sync_parameters_to_integrator` writes them into `current_params`, and `get_integrator_parameters` groups them into the detection, fitting and `integrator.gui_params` sets.
+GUI spinbox values (search and centroid windows, fixed positions/linewidths) **override** the defaults: `main_window.sync_parameters_to_integrator` writes them into `current_params`, and `get_integrator_parameters` groups them into the detection and `integrator.gui_params` sets.
 
 ---
 

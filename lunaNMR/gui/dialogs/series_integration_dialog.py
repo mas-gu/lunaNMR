@@ -1375,29 +1375,13 @@ class SeriesIntegrationDialog(BaseDialog):
                 'fix_positions': getattr(self.main_window, 'fix_positions', False),
                 'fix_linewidths': getattr(self.main_window, 'fix_linewidths', False),
                 'use_parallel_processing': getattr(self.main_window, 'use_parallel_processing', False),
-                'use_centroid_refinement': getattr(self.main_window, 'use_centroid_refinement', True),
                 'centroid_window_x_ppm': getattr(self.main_window, 'centroid_window_x_ppm', 0.02),
                 'centroid_window_y_ppm': getattr(self.main_window, 'centroid_window_y_ppm', 1.0),
-                'centroid_noise_multiplier': getattr(self.main_window, 'centroid_noise_multiplier', 2.0),
                 'use_ps2d_linewidth_reuse': getattr(self.main_window, 'use_ps2d_linewidth_reuse', False),
                 # The fitting-window grid search is never run on a series: on real
                 # titrations it chose a window that cuts the peak at half height
                 'use_adaptive_optimization': False,
                 'auto_add_dummy_peaks': getattr(self.main_window, 'auto_add_dummy_peaks', True),
-                # Peak detection parameters
-                'height_threshold': getattr(self.main_window, 'height_threshold', 0.1),
-                'distance_factor': getattr(self.main_window, 'distance_factor', 2.0),
-                'prominence_threshold': getattr(self.main_window, 'prominence_threshold', 0.05),
-                'smoothing_sigma': getattr(self.main_window, 'smoothing_sigma', 1.0),
-                'max_peaks_fit': getattr(self.main_window, 'max_peaks_fit', 50),
-                'max_optimization_iterations': getattr(self.main_window, 'max_optimization_iterations', 50),
-            },
-            # Fitting parameters
-            'fitting_params': {
-                'min_r_squared': getattr(self.main_window, 'min_r_squared', 0.5),
-                'max_iterations': getattr(self.main_window, 'max_iterations', 1000),
-                'fitting_window_x': getattr(self.main_window, 'fitting_window_x', 0.2),
-                'fitting_window_y': getattr(self.main_window, 'fitting_window_y', 2.0),
             },
             # Processing options
             'processing_options': {

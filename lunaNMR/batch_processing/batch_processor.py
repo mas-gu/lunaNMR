@@ -332,8 +332,8 @@ class BatchProcessor:
 
         These are the main window's defaults as its sync_parameters_to_integrator writes
         them into its parameter manager, and the PS2D configuration of the nucleus it
-        auto-detects on load. A config's `processing_parameters` replace the search and
-        fitting windows, and its `max_iterations` the fit's iteration limit.
+        auto-detects on load. A config's `processing_parameters` replace the search
+        windows.
         """
         from lunaNMR.core.ps2d_config import set_ps2d_config
         from lunaNMR.utils.parameter_manager import NMRParameterManager
@@ -345,20 +345,14 @@ class BatchProcessor:
             'search_window_y': ps2d_config.search_window_f1,
             'centroid_window_x_ppm': 0.01,
             'centroid_window_y_ppm': 0.1,
-            'centroid_noise_multiplier': 2.0,
             'fix_linewidths': False,
             'fix_positions': False,
             'use_parallel_processing': True,
             'use_adaptive_optimization': False,
-            'lw_lorentz_1h': None,
-            'lw_gauss_1h': None,
-            'lw_lorentz_15n': None,
-            'lw_gauss_15n': None,
-            'max_iterations': int(self.config.get('max_iterations', 1000)),
         })
 
         processing_overrides = self.config.get('processing_parameters', {})
-        for key in ['search_window_x', 'search_window_y', 'fitting_window_x', 'fitting_window_y']:
+        for key in ['search_window_x', 'search_window_y']:
             if key in processing_overrides:
                 try:
                     param_manager.current_params[key] = float(processing_overrides[key])
@@ -399,7 +393,6 @@ class BatchProcessor:
 
         processing_options = {
             'use_parallel': self.fit_processor.parameter_manager.current_params['use_parallel_processing'],
-            'use_voigt_fitting': True,
             'skip_series_params': True
         }
         fitted_results, _ = self.fit_processor.process_peak_list(peak_list, processing_options)

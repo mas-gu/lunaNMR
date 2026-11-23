@@ -291,7 +291,8 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   `prominence_threshold`, `smoothing_sigma`, `max_peaks_fit`, `max_optimization_iterations`,
   `fitting_params.min_r_squared`, `processing_options.use_global_optimization`,
   `detection_params.noise_threshold` (series detection runs at its own S/N threshold), and
-  `use_parallel_processing` in either section (`--parallel` sets it). With `--mode titration`,
+  `use_parallel_processing` in either section (`--parallel` sets it). Apart from
+  `use_parallel_processing`, none of them appears in `params`. With `--mode titration`,
   `processing_options.use_original_reference_for_detection: true` is refused too.
 - `"gui_params": {"use_adaptive_optimization": true}` turns on the fitting-window grid
   search (1.0 / 1.5 / 2.0 x the median linewidth). It is **off by default**: on the DNAJA1

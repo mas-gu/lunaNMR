@@ -601,7 +601,7 @@ class MultiSpectrumProcessor:
         # REFINED STATE MANAGEMENT: Preserve essential integrator functionality
         # Save critical components before clearing
         essential_components = {}
-        preserve_attrs = ['enhanced_fitter', 'fitting_parameters', 'gui_params', 'processing_mode']
+        preserve_attrs = ['enhanced_fitter', 'gui_params', 'processing_mode']
 
         for attr in preserve_attrs:
             if hasattr(self.integrator, attr):
@@ -863,7 +863,6 @@ class MultiSpectrumProcessor:
             # Nested structure - flatten for parameter manager
             param_manager.current_params = {}
             param_manager.current_params.update(self.voigt_params.get('detection_params', {}))
-            param_manager.current_params.update(self.voigt_params.get('fitting_params', {}))
             param_manager.current_params.update(self.voigt_params.get('gui_params', {}))
             param_manager.current_params.update(self.voigt_params.get('processing_options', {}))
         else:
