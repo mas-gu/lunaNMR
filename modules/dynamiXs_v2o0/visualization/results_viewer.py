@@ -8,7 +8,6 @@ Displays fitted parameters (R1, R2, hetNOE, J values, S², τe, Rex) vs residue 
 import pandas as pd
 import numpy as np
 import os
-import re
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -34,6 +33,7 @@ from gui_components import (
     create_primary_button, create_secondary_button, create_label,
     get_font, show_info, show_error, show_warning
 )
+from residue_order import residue_axis_positions
 
 
 class ResultsViewer(QMainWindow):
@@ -791,23 +791,9 @@ class ResultsViewer(QMainWindow):
         Extract numeric residue numbers from residue labels
 
         Handles formats like: "75.GLY" -> 75, "GLY75" -> 75, "75" -> 75
+        A label without a number is placed after the highest residue number.
         """
-        numeric_residues = []
-
-        for label in residue_labels:
-            if isinstance(label, (int, float, np.integer, np.floating)):
-                numeric_residues.append(int(label))
-                continue
-
-            label_str = str(label)
-            numbers = re.findall(r'\d+', label_str)
-
-            if numbers:
-                numeric_residues.append(int(numbers[0]))
-            else:
-                numeric_residues.append(len(numeric_residues) + 1)
-
-        return np.array(numeric_residues)
+        return np.array(residue_axis_positions(residue_labels))
 
     def _add_missing_residue_bars_for_ax(self, ax, residues, values):
         """Add grey bars for missing residues to a specific axis"""

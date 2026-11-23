@@ -6,7 +6,16 @@ This module provides functions to validate NMR relaxation data and perform
 quality control checks before spectral density analysis.
 """
 
+import sys
+from pathlib import Path
 from typing import Dict, List, Tuple, Set
+
+# The residue order is shared by the DynamiXs and Kd modules and lives one folder up;
+# this module is also imported by bare name, with only its own folder on sys.path.
+_MODULE_ROOT = str(Path(__file__).resolve().parent.parent)
+if _MODULE_ROOT not in sys.path:
+    sys.path.append(_MODULE_ROOT)
+from residue_order import residue_sort_key  # noqa: E402
 
 
 class DataValidationWarning(UserWarning):
@@ -90,13 +99,7 @@ def merge_datasets_by_residue(r1_data: Dict[str, Dict[str, float]],
         raise ValueError(f"Unknown merging strategy: {strategy}. Use 'intersection' or 'union'")
 
     # Sort excluded residues numerically (extract numeric part for sorting)
-    def extract_numeric(res_id):
-        """Extract numeric part from residue ID for sorting (e.g., '3.LYS' -> 3, '10' -> 10)"""
-        import re
-        match = re.search(r'\d+', str(res_id))
-        return int(match.group()) if match else 0
-
-    return merged_data, sorted(excluded_residues, key=extract_numeric)
+    return merged_data, sorted(excluded_residues, key=residue_sort_key)
 
 
 def validate_relaxation_rates(merged_data: Dict[str, Dict],

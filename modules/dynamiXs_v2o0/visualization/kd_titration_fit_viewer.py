@@ -542,7 +542,7 @@ class KdTitrationFitViewer(QMainWindow):
             s = self.excluded_residues[cur]
             s.discard(residue) if residue in s else s.add(residue)
             self.data["excluded_residues"] = {
-                k: sorted(v) for k, v in self.excluded_residues.items()}
+                k: sorted(v, key=_residue_sort_key) for k, v in self.excluded_residues.items()}
             self._save_json()
             self._refresh()
             return

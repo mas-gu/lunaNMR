@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
 from lunaNMR.gui.styles.quality_colors import peak_quality_label, quality_color
+from lunaNMR.utils.residue_order import residue_sort_key
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
@@ -463,7 +464,7 @@ class ResultsBrowserDialog(BaseDialog):
                     if assignment:
                         assignments.add(assignment)
 
-        sorted_assignments = sorted(assignments)
+        sorted_assignments = sorted(assignments, key=residue_sort_key)
 
         self.peak_combo.clear()
         self.peak_combo.addItems(sorted_assignments)

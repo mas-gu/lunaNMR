@@ -254,7 +254,7 @@ class IntegratedAnalysisPipeline:
         # Who the merge dropped, not only how many: the residue lists otherwise reach
         # the progress log alone.
         results['excluded_residues'] = {
-            label: sorted(field['excluded_residues'])
+            label: list(field['excluded_residues'])
             for label, field in (('field1', self.field1_results),
                                  ('field2', getattr(self, 'field2_results', None)))
             if field}
