@@ -101,8 +101,8 @@ def test_a_config_key_batch_does_not_read_is_refused(folder, tmp_path, content, 
 
 def test_a_config_of_read_keys_is_accepted(folder, tmp_path):
     content = {"processing": {"sn_thresholds": {"15N1H": 3.0, "default": 2.5},
-                              "expected_peaks": {"15N1H": 40}, "max_iterations": 500},
-               "processing_parameters": {"fitting_window_x": 0.05},
+                              "expected_peaks": {"15N1H": 40}},
+               "processing_parameters": {"search_window_x": 0.05, "search_window_y": 0.2},
                "file_handling": {"recursive_search": True}}
     code, out = _batch(str(folder), "--dry-run", "--format", "json", "--output",
                        str(tmp_path / "out"), "--config", str(_config(tmp_path, content)))

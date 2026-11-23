@@ -67,6 +67,11 @@ def test_extensions_on_the_command_line_replace_the_config_files(folder, tmp_pat
     ({"processing": {"max_optimization_iterations": 10}}, "processing.max_optimization_iterations"),
     ({"processing": {"baseline_max_iter": 10}}, "processing.baseline_max_iter"),
     ({"processing": {"convergence_tolerance": 1e-6}}, "processing.convergence_tolerance"),
+    ({"processing": {"max_iterations": 500}}, "processing.max_iterations"),
+    ({"processing": {"max_iter": 500}}, "processing.max_iter"),
+    ({"processing_parameters": {"fitting_window_x": 0.05}}, "processing_parameters.fitting_window_x"),
+    ({"processing_parameters": {"fitting_window_y": 1.0}}, "processing_parameters.fitting_window_y"),
+    ({"processing_parameters": {"serch_window_x": 0.05}}, "processing_parameters.serch_window_x"),
     ({"logging": {"detailed_logging": False}}, "logging.detailed_logging"),
     ({"logging": {"log_file": "run.log"}}, "logging.log_file"),
     ({"output": {"generate_summary": False}}, "output"),
@@ -79,6 +84,30 @@ def test_a_setting_nothing_reads_is_refused(tmp_path, content, named):
     assert code == 2
     assert envelope["error"]["type"] == "UsageError"
     assert named in envelope["error"]["message"]
+
+
+def test_the_search_windows_of_a_config_are_read(tmp_path):
+    from lunaNMR.batch_processing.batch_processor import BatchProcessor
+    from lunaNMR.batch_processing.config_manager import ConfigManager
+    config = ConfigManager().load_config(_config(tmp_path, {
+        "processing_parameters": {"search_window_x": 0.05, "search_window_y": 0.2}}))
+    with contextlib.redirect_stdout(io.StringIO()):
+        processor = BatchProcessor(config, output_dir=tmp_path / "out")
+    assert (processor.integrator.search_window_x, processor.integrator.search_window_y) == (0.05, 0.2)
+    manager = processor._fit_all_parameter_manager('15N')
+    assert (manager.current_params['search_window_x'],
+            manager.current_params['search_window_y']) == (0.05, 0.2)
+
+
+def test_a_processor_holds_no_iteration_limit_or_fitting_window(tmp_path):
+    """The fit's iteration limit and its region are the PS2D configuration's."""
+    from lunaNMR.batch_processing.batch_processor import BatchProcessor
+    out = tmp_path / "out"
+    with contextlib.redirect_stdout(io.StringIO()):
+        processor = BatchProcessor(output_dir=out)
+    assert 'max_iterations' not in processor.config
+    log = next(out.glob("batch_processing_*.log")).read_text()
+    assert "max_iterations" not in log and "fitting window" not in log
 
 
 def test_no_configuration_batch_builds_carries_a_setting_nothing_reads():

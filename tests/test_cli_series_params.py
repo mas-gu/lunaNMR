@@ -46,17 +46,17 @@ class TestTuningKnobsAreReachable:
         cfg.write_text(json.dumps({"detection_params": {"search_window_x": 0.05}}))
         params = _effective_params(tmp_path, ["--params", str(cfg)], capsys)
         assert params["detection_params"]["search_window_y"] is None  # the nucleus decides
-        assert params["fitting_params"]["max_iterations"] == 1000
+        assert params["gui_params"]["centroid_window_x_ppm"] == 0.02
 
     def test_several_sections_at_once(self, tmp_path, capsys):
         cfg = tmp_path / "tune.json"
         cfg.write_text(json.dumps({
             "detection_params": {"search_window_x": 0.04, "search_window_y": 0.04},
-            "fitting_params": {"fitting_window_x": 0.3},
+            "processing_options": {"enable_cascade_drift_limit": False},
             "gui_params": {"fix_linewidths": True}}))
         params = _effective_params(tmp_path, ["--params", str(cfg)], capsys)
         assert params["detection_params"]["search_window_y"] == 0.04
-        assert params["fitting_params"]["fitting_window_x"] == 0.3
+        assert params["processing_options"]["enable_cascade_drift_limit"] is False
         assert params["gui_params"]["fix_linewidths"] is True
 
 
@@ -106,8 +106,8 @@ class TestAWrongTypeIsRefused:
         {"gui_params": {"fix_positions": "false"}},
         {"gui_params": {"use_ps2d_linewidth_reuse": 0}},
         {"detection_params": {"search_window_x": "0.05"}},
-        {"fitting_params": {"max_iterations": None}},
-        {"fitting_params": {"max_iterations": True}},
+        {"gui_params": {"centroid_window_x_ppm": None}},
+        {"gui_params": {"centroid_window_x_ppm": True}},
     ])
     def test_a_value_of_the_wrong_type_is_an_error(self, tmp_path, capsys, payload):
         assert TestAnUnknownKeyIsRefused()._err(tmp_path, payload) == 1
@@ -126,8 +126,8 @@ class TestAWrongTypeIsRefused:
     def test_an_integer_is_accepted_for_a_real_valued_knob(self):
         from lunaNMR.cli import _default_series_params, _merge_series_params
         merged = _merge_series_params(_default_series_params(),
-                                      {"fitting_params": {"fitting_window_y": 2}}, "tune.json")
-        assert merged["fitting_params"]["fitting_window_y"] == 2
+                                      {"gui_params": {"centroid_window_y_ppm": 2}}, "tune.json")
+        assert merged["gui_params"]["centroid_window_y_ppm"] == 2
 
 
 class TestCommandLineFlagsWin:
@@ -166,12 +166,23 @@ class TestAKnobWithNoEffectIsRefused:
         ("gui_params", "max_peaks_fit", 2),
         ("gui_params", "max_optimization_iterations", 2),
         ("fitting_params", "min_r_squared", 0.95),
+        ("fitting_params", "fitting_window_x", 0.3),
+        ("fitting_params", "fitting_window_y", 3.0),
+        ("fitting_params", "max_iterations", 500),
         ("processing_options", "use_global_optimization", True),
     ])
     def test_it_is_refused_as_having_no_effect(self, tmp_path, capsys, section, key, value):
         assert TestAnUnknownKeyIsRefused()._err(tmp_path, {section: {key: value}}) == 1
         err = capsys.readouterr().err
         assert key in err and "no effect" in err
+
+    def test_the_run_has_no_fitting_parameter_section(self, tmp_path, capsys):
+        """The fit region is the PS2D radii and the iteration limit the PS2D
+        configuration's: a series takes no fitting window and no iteration count."""
+        assert "fitting_params" not in _effective_params(tmp_path, [], capsys)
+        assert TestAnUnknownKeyIsRefused()._err(tmp_path, {"fitting_params": {"tolerance": 1e-6}}) == 1
+        err = capsys.readouterr().err
+        assert "unknown parameter section 'fitting_params'" in err
 
     def test_the_summary_reports_none_of_them_as_a_parameter_of_the_run(self, tmp_path, capsys):
         """--parallel sets use_parallel_processing, so the run does use that one."""

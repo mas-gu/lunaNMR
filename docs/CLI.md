@@ -289,7 +289,9 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   path reads is refused as having no effect: `gui_params.use_centroid_refinement`,
   `centroid_noise_multiplier`, `use_ps2d_multi_peak`, `height_threshold`, `distance_factor`,
   `prominence_threshold`, `smoothing_sigma`, `max_peaks_fit`, `max_optimization_iterations`,
-  `fitting_params.min_r_squared`, `processing_options.use_global_optimization`,
+  the whole `fitting_params` section (`min_r_squared`, `fitting_window_x`,
+  `fitting_window_y`, `max_iterations`: the fit region is the PS2D radii and the iteration
+  limit the PS2D configuration's), `processing_options.use_global_optimization`,
   `detection_params.noise_threshold` (series detection runs at its own S/N threshold), and
   `use_parallel_processing` in either section (`--parallel` sets it). Apart from
   `use_parallel_processing`, none of them appears in `params`. With `--mode titration`,
@@ -508,8 +510,8 @@ bound Kd ≥ 0. `kd` writes `<prefix>_kd_results.txt` in `--out` and the fit JSO
 `<prefix>_kd_params.json` under `<out>/data/`. `--survey` fits nothing global: it writes the
 vs-sequence figures, `<out>/data/<prefix>_survey.csv`, and an editable
 `<prefix>_residues.txt` beside the input for `--residues`. It judges every residue on both
-observables and estimates no fit errors, so `--observable` or `--bootstrap` with `--survey`
-is a usage error (exit 2), as is `--selection` (the path of the file a survey writes)
+observables and estimates no fit errors, so `--observable`, `--bootstrap` or `--residues`
+with `--survey` is a usage error (exit 2), as is `--selection` (the path of the file a survey writes)
 without `--survey`. The thresholds, the survey →
 fit workflow and the pool gates are in [CLI_AGENT.md](CLI_AGENT.md#kd-workflow-survey--choose--fit).
 
@@ -576,7 +578,8 @@ read (a removed setting such as `optimization`, or a typo), named in the message
 file that does not exist exits `1`, named in the message.
 
 A config file sets `processing.sn_thresholds`, `processing.expected_peaks`,
-`processing.quality_threshold`, `processing.skip_on_error`, `processing_parameters`,
+`processing.quality_threshold`, `processing.skip_on_error`,
+`processing_parameters.search_window_x` / `search_window_y`,
 `file_handling.extensions` / `recursive_search` / `pattern_filters` / `exclude_patterns` and
 `logging.level` / `progress_interval` (a progress line every N spectra). `--extensions`,
 `--recursive`, `--skip-errors` / `--strict` and `--log-level` replace the file's value only
@@ -589,7 +592,10 @@ entry of its nucleus type), and its detected peaks
 are fitted as the GUI's **Fit Spectrum** fits them after a Detect: the same processor
 (`SingleSpectrumProcessor.process_peak_list`), the main window's default parameters, the
 PS2D configuration of the nucleus detected on load, parallel, clusters computed afresh. A
-config's `processing_parameters` replace the search and fitting windows.
+config's `processing_parameters` replace the search windows. The fit region and the
+iteration limit are the PS2D configuration's: `processing.max_iterations` (or `max_iter`)
+and `processing_parameters.fitting_window_x` / `fitting_window_y` are refused as keys batch
+does not read.
 
 The nucleus type is the one the integrator detects on load from the spectral ranges (the
 same detection the PS2D configuration follows): `15N1H` for a 15N-HSQC, `13C1H` for a 13C

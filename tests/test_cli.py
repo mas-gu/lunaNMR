@@ -251,8 +251,7 @@ class TestSeriesHelpers:
     def test_default_series_params_has_nested_structure(self):
         from lunaNMR.cli import _default_series_params
         p = _default_series_params()
-        assert set(p) >= {'detection_params', 'gui_params', 'fitting_params', 'processing_options'}
-        assert p['fitting_params']['max_iterations'] == 1000
+        assert set(p) == {'detection_params', 'gui_params', 'processing_options'}
         # 1H search window starts at 0.070 ppm; the indirect one is left to the nucleus
         # of spectrum 1 (None until the integrator resolves it).
         assert p['detection_params']['search_window_x'] == 0.070

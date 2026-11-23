@@ -110,3 +110,15 @@ def test_a_survey_writes_its_selection_where_it_is_told(tidy, tmp_path):
     assert code == 0
     assert summary["residues_file"] == str(chosen)
     assert chosen.exists()
+
+
+def test_a_survey_refuses_a_residue_selection(tidy, tmp_path):
+    # A survey judges every residue; the selection it writes is what a fit then reads.
+    code, summary = _run("kd", "--survey", "--input", str(tidy), "--out", str(tmp_path / "out"),
+                         "--p0", "50", "--conc", ABSOLUTE, "--residues", "A17,K3")
+    assert code == 2
+    assert summary["ok"] is False
+    assert "--residues" in summary["error"]["message"]
+    assert "--survey" in summary["error"]["message"]
+    assert not (tmp_path / "out").exists()
+    assert sorted(p.name for p in tidy.parent.iterdir()) == [tidy.name]
