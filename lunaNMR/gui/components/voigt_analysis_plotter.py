@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ABOUTME: Qt VoigtAnalysisPlotter for 2D/3D Voigt fitting visualization in LunaNMR Qt interface
-# ABOUTME: Supports layer toggling, color presets, 3D surface plots, cross-sections, and residual analysis
+# ABOUTME: Supports layer toggling, color presets, 3D surface plots and residual analysis
 
 """
 VoigtAnalysisPlotter - Advanced Voigt Analysis Visualization for Qt
@@ -12,9 +12,6 @@ Key Features:
 - Layer toggling (experimental, fitted, residuals, individual peaks)
 - Color scheme presets (Classic, Clean, Dark, Warm)
 - 3D surface plots with peak labels
-- Cross-section views (F1/F2)
-- Interactive click events
-- Residual overlay vs separate panel modes
 - Intensity scaling
 - Peak clipping to fit region
 
@@ -25,7 +22,6 @@ Port Details:
 - All features from original implementation preserved
 """
 
-from PySide6.QtCore import Signal
 import numpy as np
 
 from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, ListedColormap, Normalize
@@ -142,18 +138,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
     Features:
         - Layer toggling (experimental/fitted/residuals/individual peaks)
         - Color presets for 3D plots
-        - Cross-sections (F1/F2)
-        - Residual modes (overlay/separate)
         - Intensity scaling
         - Peak clipping control
-        - Interactive click events (via Qt signal)
-
-    Signals:
-        plot_clicked(float, float): Emitted when user clicks on plot with (x, y) coordinates
     """
-
-    # Qt signal for click events
-    plot_clicked = Signal(float, float)
 
     def __init__(self, parent=None, toolbar=True):
         """
@@ -185,15 +172,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.show_individual_peaks = False  # Hidden by default
         self.show_peak_labels = True  # Toggle 3D peak assignment labels
 
-        # Feature 2: Cross-sections (disabled by default, code kept for future use)
-        self.show_cross_sections = False
-        self.ax_f1_cross = None
-        self.ax_f2_cross = None
-        self.click_position = None
-
-        # Feature 3: Residual mode (separate panel vs overlay)
-        self.residual_mode = 'overlay'  # Default to overlay mode
-
         # Feature 4: Intensity scaling
         self.intensity_scale_factor = 1.0  # 100% by default
         self.auto_z_min = None
@@ -201,10 +179,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
         self.current_result = None
         self.ax_data = None
-        self.ax_resid = None
-
-        # Store event connection ID to prevent accumulation
-        self.click_event_cid = None
 
         # Peak color mapping - ensures same peak gets same color across spectra
         self._peak_color_map = {}  # assignment -> color_index
@@ -318,17 +292,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         color_idx = self._peak_color_map[assignment] % len(colors)
         return colors[color_idx]
 
-    def set_residual_mode(self, mode):
-        """Set residual visualization mode
-
-        Args:
-            mode: 'separate' or 'overlay'
-        """
-        if mode not in ['separate', 'overlay']:
-            raise ValueError(f"Invalid residual mode: {mode}. Must be 'separate' or 'overlay'")
-        self.residual_mode = mode
-        self.refresh_plot()
-
     def set_intensity_scale(self, scale_percent):
         """Set intensity scale factor from percentage (50-200%)
 
@@ -364,9 +327,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         new_z_max = z_center + scaled_half_range
 
         self.ax_data.set_zlim(new_z_min, new_z_max)
-
-        if self.residual_mode == 'separate' and self.ax_resid is not None:
-            self.ax_resid.set_zlim(new_z_min, new_z_max)
 
         self.canvas.draw_idle()
 
@@ -445,101 +405,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.current_result = None
         self.canvas.draw_idle()
 
-    def update_cross_sections(self, x_ppm, y_ppm, result):
-        """Update F1 and F2 cross-section plots
-
-        Args:
-            x_ppm: F2 (1H) position in ppm
-            y_ppm: F1 (15N/13C) position in ppm
-            result: Voigt analysis result dictionary
-        """
-        if not self.show_cross_sections:
-            return
-
-        if self.ax_f1_cross is None or self.ax_f2_cross is None:
-            return  # Cross-section axes not created yet
-
-        region_2d = result.get('region_2d')
-        if region_2d is None:
-            return
-
-        # Convert arrays from lists to numpy arrays (may be lists from JSON serialization)
-        for key in ['f1_ppm', 'f2_ppm', 'f1_grid', 'f2_grid', 'intensity']:
-            if key in region_2d and isinstance(region_2d[key], list):
-                region_2d[key] = np.array(region_2d[key])
-
-        f1_ppm = region_2d['f1_ppm']  # (M,)
-        f2_ppm = region_2d['f2_ppm']  # (N,)
-        experimental = region_2d['intensity']  # (M, N)
-        fitted = result.get('fitted_2d_surface')  # (M, N)
-
-        if fitted is not None and isinstance(fitted, list):
-            fitted = np.array(fitted)
-
-        if fitted is None:
-            return
-
-        f2_idx = np.argmin(np.abs(f2_ppm - x_ppm))
-        f1_idx = np.argmin(np.abs(f1_ppm - y_ppm))
-
-        f1_exp_slice = experimental[:, f2_idx]  # Vertical slice at x_ppm
-        f1_fit_slice = fitted[:, f2_idx]
-
-        f2_exp_slice = experimental[f1_idx, :]  # Horizontal slice at y_ppm
-        f2_fit_slice = fitted[f1_idx, :]
-
-        # --- Plot F1 cross-section ---
-        self.ax_f1_cross.clear()
-        self.ax_f1_cross.plot(f1_ppm, f1_exp_slice, 'o',
-                              color='gray', markersize=3, label='Exp')
-        self.ax_f1_cross.plot(f1_ppm, f1_fit_slice, '-',
-                              color='red', linewidth=2, label='Fit')
-
-        individual_surfaces = result.get('individual_surfaces', [])
-        all_peaks = result.get('all_peaks', [])
-        if individual_surfaces:
-            colors = COMPONENT_COLOURS
-            for i, surf in enumerate(individual_surfaces):
-                component_slice = surf[:, f2_idx]
-                peak_assignment = all_peaks[i].get('assignment', f'Peak {i+1}') if i < len(all_peaks) else f'Peak {i+1}'
-                color = self._get_peak_color(peak_assignment, colors)
-                self.ax_f1_cross.plot(f1_ppm, component_slice, '--',
-                                      color=color, linewidth=1, alpha=0.7,
-                                      label=peak_assignment)
-
-        self.ax_f1_cross.set_xlabel('F1 (ppm)', fontsize=8)
-        self.ax_f1_cross.set_ylabel('Intensity', fontsize=8)
-        self.ax_f1_cross.set_title(f'F1 Cross-Section at F2={x_ppm:.3f} ppm', fontsize=9)
-        self.ax_f1_cross.invert_xaxis()  # NMR convention
-        self.ax_f1_cross.legend(fontsize=6, loc='best')
-        self.ax_f1_cross.grid(True, alpha=0.3)
-
-        # --- Plot F2 cross-section ---
-        self.ax_f2_cross.clear()
-        self.ax_f2_cross.plot(f2_ppm, f2_exp_slice, 'o',
-                              color='gray', markersize=3, label='Exp')
-        self.ax_f2_cross.plot(f2_ppm, f2_fit_slice, '-',
-                              color='blue', linewidth=2, label='Fit')
-
-        if individual_surfaces:
-            colors = COMPONENT_COLOURS
-            for i, surf in enumerate(individual_surfaces):
-                component_slice = surf[f1_idx, :]
-                peak_assignment = all_peaks[i].get('assignment', f'Peak {i+1}') if i < len(all_peaks) else f'Peak {i+1}'
-                color = self._get_peak_color(peak_assignment, colors)
-                self.ax_f2_cross.plot(f2_ppm, component_slice, '--',
-                                      color=color, linewidth=1, alpha=0.7,
-                                      label=peak_assignment)
-
-        self.ax_f2_cross.set_xlabel('F2 (ppm)', fontsize=8)
-        self.ax_f2_cross.set_ylabel('Intensity', fontsize=8)
-        self.ax_f2_cross.set_title(f'F2 Cross-Section at F1={y_ppm:.2f} ppm', fontsize=9)
-        self.ax_f2_cross.invert_xaxis()
-        self.ax_f2_cross.legend(fontsize=6, loc='best')
-        self.ax_f2_cross.grid(True, alpha=0.3)
-
-        self.canvas.draw_idle()
-
     def plot_voigt_analysis(self, voigt_result):
         """Plot comprehensive Voigt analysis results (delegates to specialized methods)"""
         if not voigt_result:
@@ -572,71 +437,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             self._plot_2d_surface_3d(voigt_result)
         else:
             self._plot_unfitted(voigt_result)
-
-    def _plot_1d_fits(self, voigt_result):
-        """Plot 1D cross-section fitting results"""
-        # Clear and recreate 2×1 layout for 1D fits
-        self.figure.clear()
-
-        ax_x = self.figure.add_subplot(2, 1, 1)
-        ax_y = self.figure.add_subplot(2, 1, 2)
-
-        x_fit = voigt_result.get('x_fit', {})
-        y_fit = voigt_result.get('y_fit', {})
-        assignment = voigt_result.get('assignment', 'Unknown')
-        quality = voigt_result.get('fitting_quality', 'Unknown')
-
-        self._plot_1d_fit(ax_x, x_fit, '¹H Chemical Shift (ppm)',
-                         f'X-Dimension Fit - {assignment}')
-
-        self._plot_1d_fit(ax_y, y_fit, indirect_axis_label(),
-                         f'Y-Dimension Fit - {assignment}')
-
-        self.figure.suptitle(f'Voigt Profile Analysis: {assignment} (Quality: {quality})',
-                            fontsize=10, fontweight='bold')
-
-        self.figure.tight_layout(rect=[0, 0, 1, 0.96])
-        self.canvas.draw()
-
-    def _plot_1d_fit(self, ax, fit_data, xlabel, title):
-        """Plot 1D fitting results"""
-        if not fit_data or 'ppm_scale' not in fit_data:
-            ax.text(0.5, 0.5, 'No fitting data available',
-                   transform=ax.transAxes, ha='center', va='center')
-            ax.set_title(title)
-            return
-
-        ppm_scale = fit_data['ppm_scale']
-        cross_section = fit_data['cross_section']
-        fitted_curve = fit_data.get('fitted_curve', None)
-        r_squared = fit_data.get('r_squared_local', fit_data.get('r_squared', 0))
-
-        ax.plot(ppm_scale, cross_section, 'b-', linewidth=2, alpha=0.7, label='Experimental')
-
-        if fitted_curve is not None:
-            ax.plot(ppm_scale, fitted_curve, 'r-', linewidth=2, label='Voigt Fit')
-
-            residuals = cross_section - fitted_curve
-            ax.plot(ppm_scale, residuals + np.min(cross_section)*0.9, 'g--',
-                   alpha=0.6, label='Residuals')
-
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel('Intensity')
-
-        # Show window size information in title if available
-        window_info = ""
-        if 'window_size' in fit_data:
-            window_size = fit_data['window_size']
-            gui_based = fit_data.get('gui_based', False)
-            window_source = "GUI" if gui_based else "Auto"
-            window_info = f", Window: ±{window_size/2:.3f} ppm ({window_source})"
-
-        ax.set_title(f'{title} (R² = {r_squared:.3f}{window_info})')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-
-        if '¹H' in xlabel:
-            ax.invert_xaxis()
 
     def _plot_2d_contour(self, voigt_result):
         """
@@ -829,8 +629,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
         Features:
         - Layer toggling (experimental/fitted/residuals)
-        - Cross-sections (F1 and F2 slices)
-        - Residual mode (separate panel or overlay)
         - Intensity scaling
         """
         self.current_result = voigt_result
@@ -839,7 +637,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         fitted_surface_original = voigt_result.get('fitted_2d_surface')
         individual_surfaces_original = voigt_result.get('individual_surfaces', None)
         all_peaks = voigt_result.get('all_peaks', [])
-        r_squared = voigt_result.get('avg_r_squared', 0)
         baseline = voigt_result.get('baseline', 0.0)
         assignment = voigt_result.get('assignment', 'Unknown')
 
@@ -925,21 +722,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         self.figure.clear()
         self.canvas.draw_idle()
 
-        if self.show_cross_sections:
-            if self.residual_mode == 'separate':
-                gs = self.figure.add_gridspec(3, 2, height_ratios=[2, 2, 1.5], hspace=0.3, wspace=0.2)
-            else:
-                gs = self.figure.add_gridspec(2, 2, height_ratios=[2, 1.5], hspace=0.3, wspace=0.2)
-        else:
-            if self.residual_mode == 'separate':
-                gs = self.figure.add_gridspec(2, 1, height_ratios=[1, 1], hspace=0.3)
-            else:
-                gs = self.figure.add_gridspec(1, 1)
+        gs = self.figure.add_gridspec(1, 1)
 
-        ax_data = self.figure.add_subplot(
-            gs[0, 0] if self.show_cross_sections or self.residual_mode == 'separate' else gs[0],
-            projection='3d'
-        )
+        ax_data = self.figure.add_subplot(gs[0], projection='3d')
         self.ax_data = ax_data
 
         scheme = self.color_presets[self.current_color_scheme]
@@ -947,22 +732,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         # The cage, stripped back to what carries depth - unfilled panes, no grid,
         # quiet axis lines. See style_3d_furniture for why the grid goes entirely.
         style_3d_furniture(ax_data, scheme)
-
-        self.ax_resid = None
-
-        if self.residual_mode == 'separate' and self.show_residuals:
-            ax_resid = self.figure.add_subplot(gs[1, 0], projection='3d')
-            self.ax_resid = ax_resid
-
-            style_3d_furniture(ax_resid, scheme)
-
-        if self.show_cross_sections:
-            if self.residual_mode == 'separate':
-                self.ax_f1_cross = self.figure.add_subplot(gs[2, 0])
-                self.ax_f2_cross = self.figure.add_subplot(gs[2, 1])
-            else:
-                self.ax_f1_cross = self.figure.add_subplot(gs[1, 0])
-                self.ax_f2_cross = self.figure.add_subplot(gs[1, 1])
 
         # Panel 1: Experimental data + Individual fitted peaks
         colors = COMPONENT_COLOURS
@@ -1078,8 +847,8 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
                                      edgecolor=color,
                                      alpha=0.85))
 
-        # Overlay residuals if in overlay mode
-        if self.residual_mode == 'overlay' and self.show_residuals:
+        # Overlay residuals if enabled
+        if self.show_residuals:
             max_intensity = np.max(experimental)
             residual_baseline = 0 - (0.2 * max_intensity)
 
@@ -1145,69 +914,6 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         if self.use_fixed_xy_limits and self.fixed_x_min is not None:
             ax_data.set_xlim(self.fixed_x_min, self.fixed_x_max)
             ax_data.set_ylim(self.fixed_y_min, self.fixed_y_max)
-
-        # Panel 2: Residuals in separate panel (if enabled)
-        if self.residual_mode == 'separate' and self.show_residuals and self.ax_resid is not None:
-            z_max_resid = np.max(np.abs(residuals))
-
-            colors_custom = [
-                (0.357, 0.620, 0.898),  # Bright blue
-                (1.0, 1.0, 1.0),        # White
-                (0.910, 0.333, 0.306)   # Bright red
-            ]
-            cmap_lunaNMR = LinearSegmentedColormap.from_list('lunaNMR_residuals', colors_custom)
-
-            surf_resid = self.ax_resid.plot_surface(F2_ppm, F1_ppm, residuals,
-                                                    cmap=cmap_lunaNMR, alpha=0.8,
-                                                    vmin=-z_max_resid, vmax=z_max_resid,
-                                                    antialiased=True)
-
-            cbar = self.figure.colorbar(surf_resid, ax=self.ax_resid, shrink=0.6, aspect=10)
-            cbar.set_label('Residuals', fontsize=8)
-
-            self.ax_resid.set_xlabel('¹H Chemical Shift (ppm)', fontsize=9)
-            self.ax_resid.set_ylabel(indirect_axis_label(), fontsize=9)
-            self.ax_resid.set_zlabel('Residuals', fontsize=9)
-            self.ax_resid.invert_xaxis()
-            self.ax_resid.invert_yaxis()
-            self.ax_resid.view_init(elev=self.preserved_elev, azim=self.preserved_azim, roll=self.preserved_roll)
-
-            self.ax_resid.xaxis.set_major_locator(MaxNLocator(nbins=2))
-            self.ax_resid.yaxis.set_major_locator(MaxNLocator(nbins=2))
-
-            # Match z-limits to data panel (fixed or auto)
-            if self.use_fixed_z_limits and self.fixed_z_min is not None:
-                self.ax_resid.set_zlim(self.fixed_z_min, self.fixed_z_max)
-            else:
-                self.ax_resid.set_zlim(z_min_data, z_max_data)
-
-            # Match x/y limits to data panel if fixed
-            if self.use_fixed_xy_limits and self.fixed_x_min is not None:
-                self.ax_resid.set_xlim(self.fixed_x_min, self.fixed_x_max)
-                self.ax_resid.set_ylim(self.fixed_y_min, self.fixed_y_max)
-
-            self.ax_resid.set_title(f'Residuals (R²={r_squared:.3f})', fontsize=10, fontweight='bold')
-
-        # Panel 3: Cross-sections (if enabled)
-        if self.show_cross_sections and self.ax_f1_cross is not None:
-            peak_x = voigt_result.get('peak_x', f2_ppm[len(f2_ppm)//2])
-            peak_y = voigt_result.get('peak_y', f1_ppm[len(f1_ppm)//2])
-            self.update_cross_sections(peak_x, peak_y, voigt_result)
-
-            if self.click_event_cid is not None:
-                self.canvas.mpl_disconnect(self.click_event_cid)
-
-            def on_click(event):
-                if event.inaxes == ax_data or (self.ax_resid and event.inaxes == self.ax_resid):
-                    if event.xdata and event.ydata:
-                        self.update_cross_sections(event.xdata, event.ydata, voigt_result)
-                        self.plot_clicked.emit(event.xdata, event.ydata)
-
-            self.click_event_cid = self.canvas.mpl_connect('button_press_event', on_click)
-        else:
-            if self.click_event_cid is not None:
-                self.canvas.mpl_disconnect(self.click_event_cid)
-                self.click_event_cid = None
 
         self.figure.suptitle(f'3D Voigt Analysis: {assignment}',
                             fontsize=12, fontweight='bold')

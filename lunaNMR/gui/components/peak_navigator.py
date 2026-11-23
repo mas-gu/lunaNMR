@@ -65,7 +65,6 @@ class PeakNavigator(QWidget):
         peak_edited(int, dict): Emitted when a peak is edited (peak_id, new_values)
         peak_added(dict): Emitted when a new peak is added (peak_data)
         peak_deleted(int): Emitted when a peak is deleted (peak_id)
-        navigation_requested(str): Emitted for prev/next navigation ('prev' or 'next')
         peak_analysis_requested(str, int): Emitted when analysis button clicked (peak_type, peak_id)
     """
 
@@ -74,7 +73,6 @@ class PeakNavigator(QWidget):
     peak_edited = Signal(int, dict)  # peak_id, new_values
     peak_added = Signal(dict)  # peak_data dict with assignment, x, y
     peak_deleted = Signal(int)  # peak_id
-    navigation_requested = Signal(str)  # 'prev' or 'next'
     peak_analysis_requested = Signal(str, int)  # peak_type, peak_id
 
     def __init__(self, parent: Optional[QWidget] = None):

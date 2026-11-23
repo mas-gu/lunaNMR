@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QStackedWidget, QWidget, QFrame, QInputDialog, QListWidget, QListWidgetItem,
     QMessageBox
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Qt
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
 
@@ -51,8 +51,6 @@ class DynamiXsDialog(BaseDialog):
         methods for project save/load functionality. State is automatically saved
         to main_window when the dialog closes.
     """
-
-    analysis_complete = Signal(dict)
 
     def __init__(self, parent=None, main_window=None):
         """Initialize the DynamiXs dialog.
@@ -356,11 +354,6 @@ class DynamiXsDialog(BaseDialog):
         """Show integrated analysis page."""
         self.stack.setCurrentWidget(self.integrated_page)
 
-    def clear_analysis_name(self):
-        """Clear current analysis name (e.g., when starting fresh)."""
-        self.current_analysis_name = None
-        self._analysis_metadata = {}
-
     def get_analysis_metadata(self) -> Dict[str, Any]:
         """Get metadata for current analysis.
 
@@ -447,27 +440,6 @@ class DynamiXsDialog(BaseDialog):
             for series_name in self.main_window.saved_series.keys():
                 if series_name in file_path:
                     return series_name
-
-        return None
-
-    def try_auto_detect_source_series(self):
-        """Try to auto-detect source series from loaded file paths.
-
-        Checks file references in the current state for series patterns.
-        Sets source_series in metadata if detected.
-        """
-        file_refs = self.get_file_refs()
-
-        for page_name, refs in file_refs.items():
-            if not refs:
-                continue
-
-            for field_name, file_path in refs.items():
-                if file_path:
-                    series_name = self.detect_source_series_from_path(file_path)
-                    if series_name:
-                        self.set_source_series(series_name)
-                        return series_name
 
         return None
 
@@ -952,76 +924,6 @@ class DynamiXsDialog(BaseDialog):
             if hasattr(page, 'field2_noe_unsat_display'):
                 page.field2_noe_unsat_display.setText(os.path.basename(refs['field2_noe_unsat']))
 
-    # Result Files Management
-
-    def get_output_directories(self) -> Dict[str, str]:
-        """Get output directories that may contain result files.
-
-        Returns:
-            Dict mapping page name to output directory path
-        """
-        dirs = {}
-
-        # T1T2 page - output_dir attribute or input file directory
-        if hasattr(self.t1t2_page, 'output_dir') and self.t1t2_page.output_dir:
-            dirs['t1t2'] = self.t1t2_page.output_dir
-        elif hasattr(self.t1t2_page, 'input_file') and self.t1t2_page.input_file:
-            import os
-            dirs['t1t2'] = os.path.dirname(self.t1t2_page.input_file)
-
-        # Integrated page - output_dir attribute
-        if hasattr(self.integrated_page, 'output_dir') and self.integrated_page.output_dir:
-            dirs['integrated'] = self.integrated_page.output_dir
-
-        return dirs
-
-    def get_result_files(self) -> Dict[str, List[str]]:
-        """Get list of result files from output directories.
-
-        Returns:
-            Dict mapping page name to list of result file paths (*.csv, *.txt)
-        """
-        import os
-        import glob
-
-        result_files = {}
-        output_dirs = self.get_output_directories()
-
-        for page_name, output_dir in output_dirs.items():
-            if output_dir and os.path.isdir(output_dir):
-                files = []
-                files.extend(glob.glob(os.path.join(output_dir, "*.csv")))
-                files.extend(glob.glob(os.path.join(output_dir, "*.txt")))
-                # Filter to only include actual result files (not input files)
-                result_patterns = [
-                    '_fit_results', '_basic', '_detailed', '_results',
-                    '_T2_from_T1rho', '_spectral_density', '_series_tidy',
-                    '_data', '_intensities', 'hetNOE_ratios'
-                ]
-                filtered = [f for f in files
-                           if any(p in os.path.basename(f) for p in result_patterns)]
-                if filtered:
-                    result_files[page_name] = filtered
-
-        return result_files
-
-    def set_output_directory(self, page_name: str, output_dir: str):
-        """Set output directory for a page after project load.
-
-        Args:
-            page_name: 't1t2', 'spectral', or 'integrated'
-            output_dir: New output directory path
-        """
-        import os
-
-        if page_name == 't1t2' and hasattr(self.t1t2_page, 'output_dir'):
-            self.t1t2_page.output_dir = output_dir
-        elif page_name == 'integrated':
-            if hasattr(self.integrated_page, 'output_dir'):
-                self.integrated_page.output_dir = output_dir
-            if hasattr(self.integrated_page, 'outdir_display'):
-                self.integrated_page.outdir_display.setText(os.path.basename(output_dir))
-
     # Dialog Event Handlers
 
     def closeEvent(self, event):
@@ -1088,54 +990,6 @@ class DynamiXsDialog(BaseDialog):
 
         # Open MultiSpectrumViewerDialog with the series data and all fit data
         self._open_multi_spectrum_viewer(series_data, residue_id, all_fit_data)
-
-    def _get_source_series_for_experiment(self, experiment_type: str) -> Optional[str]:
-        """Get source series name for a specific experiment type.
-
-        Looks up the series from:
-        1. T1T2FittingPage's source_series_map (from drag-and-drop)
-        2. File paths used for the fit (detects series from path)
-
-        Args:
-            experiment_type: "t1", "t2", or "t1rho"
-
-        Returns:
-            Series name or None if not found
-        """
-        if hasattr(self, 't1t2_page') and hasattr(self.t1t2_page, 'source_series_map'):
-            source_map = self.t1t2_page.source_series_map
-            for field in ['field1', 'field2']:
-                key = f"{field}_{experiment_type}"
-                if key in source_map:
-                    return source_map[key]
-
-        # Try detecting from file paths used in T1T2FittingPage
-        if hasattr(self, 't1t2_page'):
-            for field in ['field1', 'field2']:
-                file_attr = f"{field}_{experiment_type}_file"
-                file_path = getattr(self.t1t2_page, file_attr, None)
-                if file_path:
-                    series_name = self.detect_source_series_from_path(file_path)
-                    if series_name:
-                        return series_name
-
-        if hasattr(self, 'integrated_page'):
-            if hasattr(self.integrated_page, 'source_series_map'):
-                source_map = self.integrated_page.source_series_map
-                for field in ['field1', 'field2']:
-                    key = f"{field}_{experiment_type}"
-                    if key in source_map:
-                        return source_map[key]
-
-            for field in ['field1', 'field2']:
-                file_attr = f"{field}_{experiment_type}_file"
-                file_path = getattr(self.integrated_page, file_attr, None)
-                if file_path:
-                    series_name = self.detect_source_series_from_path(file_path)
-                    if series_name:
-                        return series_name
-
-        return None
 
     def _open_multi_spectrum_viewer(self, series_data, initial_assignment: str = None,
                                       exponential_fit_data: dict = None):

@@ -66,15 +66,15 @@ def test_the_neutrals_follow_the_scheme_they_sit_on(axes3d):
 
 def test_one_palette_so_a_residue_keeps_its_colour():
     """`_get_peak_color` indexes with `idx % len(colors)`, so palettes of different
-    lengths gave the same residue a different colour in the cross-sections from the
-    one it had in the 3D view - four palettes of lengths 5, 5, 8 and 8."""
+    lengths give the same residue a different colour from one view to the next: every
+    view draws from the one palette."""
     import inspect
     from lunaNMR.gui.components import voigt_analysis_plotter as module
 
     source = inspect.getsource(module)
     assert "colors = ['red', 'orange'" not in source
     assert "colors = ['orange', 'purple'" not in source
-    assert source.count('colors = COMPONENT_COLOURS') == 4
+    assert source.count('colors = COMPONENT_COLOURS') == 2
     assert len(COMPONENT_COLOURS) == len(set(COMPONENT_COLOURS))
 
 
