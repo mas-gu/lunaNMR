@@ -102,8 +102,6 @@ class BatchProcessor:
         self.integrator = EnhancedVoigtIntegrator()
 
         max_iter = self.config.get('max_iterations', 1000)
-        self.integrator.fitting_parameters['max_iterations'] = max_iter
-        self.integrator.enhanced_fitter.fitting_parameters['max_iterations'] = max_iter
         self.logger.info(f"Configured max_iterations: {max_iter}")
 
         proc_param_config = self.config.get('processing_parameters', {})
@@ -123,8 +121,6 @@ class BatchProcessor:
         if fitting_window_x is not None:
             try:
                 window_x_value = float(fitting_window_x)
-                self.integrator.fitting_parameters['fitting_window_x'] = window_x_value
-                self.integrator.enhanced_fitter.fitting_parameters['fitting_window_x'] = window_x_value
                 self.logger.info(f"Configured fitting window X: ±{window_x_value} ppm")
             except (TypeError, ValueError) as exc:
                 self.logger.warning(f"Invalid fitting_window_x override ({fitting_window_x}): {exc}")
@@ -133,8 +129,6 @@ class BatchProcessor:
         if fitting_window_y is not None:
             try:
                 window_y_value = float(fitting_window_y)
-                self.integrator.fitting_parameters['fitting_window_y'] = window_y_value
-                self.integrator.enhanced_fitter.fitting_parameters['fitting_window_y'] = window_y_value
                 self.logger.info(f"Configured fitting window Y: ±{window_y_value} ppm")
             except (TypeError, ValueError) as exc:
                 self.logger.warning(f"Invalid fitting_window_y override ({fitting_window_y}): {exc}")

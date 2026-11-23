@@ -16,7 +16,6 @@ import importlib
 
 _LAZY_EXPORTS = {
     'DelayExtractor': '.delay_extractor',
-    'RelaxationDataBridge': '.relaxation_data_bridge',
     'OutputManager': '.output_manager',
     'OutputLevel': '.output_manager',
     'log_progress': '.output_manager',

@@ -1,6 +1,6 @@
 # Algorithm Reference
 
-Prominence-based peak detection with top-contour centroid refinement, PS2D simultaneous 2D Voigt fitting (3-stage Levenberg-Marquardt), and hierarchical overlap clustering.
+Threshold peak detection (local extrema, per sign) with three-point parabolic position refinement, PS2D simultaneous 2D Voigt fitting (3-stage Levenberg-Marquardt), and hierarchical overlap clustering.
 
 Quality (R²): Excellent >0.9, Good >0.8, Fair >0.6; below that Poor above S/N 5, else Poor ≥0.2, Failed <0.2 (a near-noise peak Poor). See §4.
 
@@ -8,23 +8,25 @@ Quality (R²): Excellent >0.9, Good >0.8, Fair >0.6; below that Poor above S/N 5
 
 ## 1. Peak Detection
 
-`core/enhanced_peak_picker.py`
+`core/core_integrator.py`: `_detect_peaks_by_threshold` finds the candidates of every detection; `detect_peaks_sn_native` (no peak list) and `_detect_peaks_reference_based` (peak list) set its threshold and use what it finds.
 
-**Pipeline**: noise estimation → candidate detection → overlap clustering → centroid refinement.
+**Pipeline**: noise estimation → candidate detection → sub-point position refinement → with a peak list, reference matching.
 
-- **Noise**: corner sampling / MAD.
-- **Candidates**: local extrema via `scipy.ndimage.maximum_filter` + prominence/S-N thresholding, **per sign** (`_detect_peaks_by_threshold`): maxima above +threshold and minima below −threshold, so a negative peak beside a positive lobe is kept.
+- **Noise** (`_estimate_noise_level_advanced`): inside the detection region, the standard deviation of four corner blocks; MAD × 1.4826 when a corner block is under 5 points. It gives each candidate's S/N and the threshold of a detection without a peak list.
+- **Threshold**: without a peak list, that noise × the S/N threshold, the strongest `expected_peak_count` candidates kept, or the contour level as an absolute threshold; with a peak list, the contour threshold when one is set, else `peak_list_sn_threshold` (10) × the noise level estimated when the spectrum was loaded (`_estimate_noise_level`).
+- **Detection region**: the manual region when one is set; otherwise 1H ≥ 5.8 ppm on a 15N spectrum, 1H ≤ 2.75 ppm on a 13C spectrum, and 0.5 ppm in from each edge of the indirect dimension.
+- **Candidates**: local extrema in a 3 × 3 neighbourhood (`scipy.ndimage.maximum_filter` / `minimum_filter`) beyond the threshold, **per sign** (`_detect_peaks_by_threshold`): maxima above +threshold and minima below −threshold, so a negative peak beside a positive lobe is kept. A candidate is kept at S/N ≥ 2 (`sn_detection_params`), unless one already kept lies within 0.01 ppm in 1H and 0.1 ppm in the indirect dimension.
 - **Search window** default **0.070 ppm in 1H; the indirect window is the nucleus's: 0.3 ppm for 15N, 0.11 for 13C** (`ps2d_config` `search_window_f1`; startup, Reset, a nucleus switch and the CLI series, whose indirect default is resolved once spectrum 1 sets the nucleus). A 15N point can be 0.074 ppm (600 MHz hetNOE planes), so 0.070 could not reach a peak one point off its reference. **On every later spectrum of a series** a reference only searches the 0.070 × 0.070 box around its LISTED position, so a peak that has decayed below threshold cannot take a stronger unlisted neighbour (the wide box gave JA1 T2 44LysH a neighbour's peak and a T2 8× its own). Measured on the saturated/unsaturated hetNOE pair at the GUI threshold: 47 residues kept against 41, three lost (a wider box reaches a different maximum).
 - **Reference matching** (`core_integrator._detect_peaks_reference_based`): **competitive**. Every (listed peak, candidate) pair inside the search box is ranked by its distance **in linewidths**, `√((Δ1H/radF2)² + (ΔX/radF1)²)` with the PS2D radii of the spectrum's nucleus (15N 0.04/0.4, 13C 0.04/0.15) — not raw ppm, which counts an indirect ppm as a 1H ppm — and the nearest pairs are settled first across all listed peaks, one maximum per peak. A contested maximum goes to the peak nearest it, not to whichever comes first in the list: in list order, a peak with no maximum of its own would take the one its neighbour sits on. A listed peak left without a candidate is read at its listed position; dummies come from the maxima no listed peak took.
 
-### 1.1 Top-Contour Centroid
+### 1.1 Sub-Point Peak Position
 
-`calculate_top_contour_center` (picker) / `_calculate_top_contour_center` (`core_integrator.py`). Sub-pixel positioning for flat-top peaks.
+`_calculate_top_contour_center` (`core_integrator.py`). Three-point parabolic interpolation around the extremum, in each dimension.
 
-1. Find max intensity I_max.
-2. Select pixels within ±5% band `[0.95·I_max, 1.05·I_max]` (`intensity_band=0.05`).
-3. Intensity-weighted center `x_c = Σ(x_i·I_i)/Σ I_i` (same for y).
-4. Clip shift to GUI `max_shift_x/y`; fall back to pixel max if band empty.
+1. Take the extremum point I₀ and its two neighbours I₋, I₊ along the dimension.
+2. The vertex of the parabola through them lies `(I₋ − I₊) / (2·(I₋ − 2·I₀ + I₊))` points from the extremum, clipped to ±1 point; a zero denominator keeps the extremum point.
+3. Clip the shift to the GUI `max_shift_x/y`.
+4. An extremum on the edge of the spectrum keeps its point.
 
 GUI defaults (`main_window`): `centroid_window_x_ppm=0.01` (1H), `centroid_window_y_ppm=0.1` (15N).
 
@@ -112,7 +114,7 @@ One rule labels every fit: `fit_quality_label(r_squared, success, near_noise, sn
 
 The Kd loaders and the intensity matrices drop a Failed point, so the last two rows decide what is measured. A near-noise peak's R² is ~0 by construction (a held shape against noise) and its near-zero intensity is the measurement, so it is Poor, never Failed. Marker colors: lime (Excellent), green (Good), orange (Fair), red (Poor/Failed/unfitted).
 
-**Acceptance**: PS2D pragmatic `r_squared > 0.2` (or formal convergence / chi² reduction / a near-noise-only cluster); 1D `min_r_squared` default 0.3.
+**Acceptance**: PS2D pragmatic `r_squared > 0.2` (or formal convergence / chi² reduction / a near-noise-only cluster).
 
 **Failed peaks** stored with placeholders (`fitted=False, r_squared=0, intensity=0, quality='Failed'`) to keep 1:1 peak_list↔results index mapping for the Navigator.
 

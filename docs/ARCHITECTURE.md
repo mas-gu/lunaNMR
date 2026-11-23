@@ -42,9 +42,10 @@ tkinter is used **only** for the launcher's startup error dialogs; the app is en
 
 ## 3. Core Engines
 
-### 3.1 Peak Detection (`core/enhanced_peak_picker.py`, `core_integrator.py`)
-- Prominence/S-N detection via `scipy.ndimage.maximum_filter`, per sign: maxima above +threshold and minima below −threshold (negative peaks are kept)
-- Top-contour centroid refinement: `core_integrator._calculate_top_contour_center()`
+### 3.1 Peak Detection (`core_integrator.py`)
+- Threshold detection of local extrema via `scipy.ndimage.maximum_filter` / `minimum_filter` (`_detect_peaks_by_threshold`), per sign: maxima above +threshold and minima below −threshold (negative peaks are kept)
+- Sub-point position by three-point parabolic interpolation: `core_integrator._calculate_top_contour_center()`
+- With a peak list, competitive matching of the listed peaks to the detected extrema: `_detect_peaks_reference_based()`
 
 ### 3.2 PS2D Stack
 - **Data selector** (`ps2d_data_selector.py`): union of elliptical masks around a cluster
@@ -76,7 +77,7 @@ GUI → processors.SingleSpectrumProcessor.process_peak_list(stop=)
       → PASS 2: multi-peak clusters with the learned statistics
       each pass: _create_cluster_tasks() → _execute_parallel_cluster_fitting()
                  → _parallel_cluster_worker(task) per cluster:
-                     single peak → enhanced_peak_fitting() (1D)
+                     single peak → enhanced_peak_fitting() (2D)
                      multi-peak  → fit_overlap_group_2d() → ps2d_2d_fitter.fit_multi_peak_2d() (2D)
       → _consolidate_cluster_results()  (integer peak_number matching)
   → GUI tables/plots

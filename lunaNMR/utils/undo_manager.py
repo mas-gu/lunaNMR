@@ -315,7 +315,6 @@ class PeakUndoManager(QObject):
 
     # Stack limits
     MAX_UNDO_DEPTH = 30
-    POST_SAVE_KEEP = 20
 
     def __init__(self, main_window, parent=None):
         """
@@ -337,28 +336,6 @@ class PeakUndoManager(QObject):
         The command's redo() method is called automatically.
         """
         self.undo_stack.push(command)
-
-    def undo(self):
-        """Undo the last command."""
-        if self.undo_stack.canUndo():
-            self.undo_stack.undo()
-            return True
-        return False
-
-    def redo(self):
-        """Redo the last undone command."""
-        if self.undo_stack.canRedo():
-            self.undo_stack.redo()
-            return True
-        return False
-
-    def can_undo(self) -> bool:
-        """Check if undo is available."""
-        return self.undo_stack.canUndo()
-
-    def can_redo(self) -> bool:
-        """Check if redo is available."""
-        return self.undo_stack.canRedo()
 
     def clear(self):
         """Clear all undo/redo history."""
@@ -383,10 +360,6 @@ class PeakUndoManager(QObject):
         """
         self.undo_stack.setClean()
         logger.info("Undo stack marked as clean (saved)")
-
-    def is_clean(self) -> bool:
-        """Check if current state matches last saved state."""
-        return self.undo_stack.isClean()
 
     def create_undo_action(self, parent):
         """Create a QAction for Undo menu item.

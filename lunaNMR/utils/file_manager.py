@@ -14,15 +14,6 @@ Classes:
 import os
 import pandas as pd
 
-try:
-    import nmrglue as ng
-except ImportError:
-    # stderr: this import happens outside the CLI's stdout guard, so on stdout it would
-    # prepend prose to the JSON summary and break `json.loads(proc.stdout)`.
-    import sys as _sys
-    print("Warning: nmrglue not available - some features may be limited", file=_sys.stderr)
-    ng = None
-
 class NMRFileManager:
     """Core file operations for NMR data and peak lists"""
 
@@ -33,8 +24,6 @@ class NMRFileManager:
     def __init__(self):
         self.supported_nmr_formats = ['ft', 'ft1', 'ser', 'ft2', 'ft3', 'pipe', 'ucsf']
         self.supported_peak_formats = ['txt', 'csv', 'peaks']
-        self.recent_files = []
-        self.max_recent = 10
 
     def _is_bruker_pdata(self, file_path):
         """Check if file is Bruker processed data based on filename."""
@@ -163,34 +152,6 @@ class NMRFileManager:
         except Exception as e:
             return False, f"Validation error: {str(e)}"
 
-    def load_nmr_data(self, file_path):
-        """Load NMR data using nmrglue"""
-        if not ng:
-            raise ImportError("nmrglue is required for NMR data loading")
-
-        try:
-            valid, message = self.validate_nmr_file(file_path)
-            if not valid:
-                raise ValueError(message)
-
-            # Check for Varian/Agilent FID (file named 'fid' in *.fid/ directory)
-            if self._is_varian_fid(file_path):
-                dic, data = ng.varian.read(os.path.dirname(file_path))
-            else:
-                ext = os.path.splitext(file_path)[1].lower().lstrip('.')
-
-                if ext == 'ft':
-                    dic, data = ng.varian.read(os.path.dirname(file_path))
-                else:
-                    raise ValueError(f"Unsupported format for loading: {ext}")
-
-            self.add_recent_file(file_path)
-
-            return dic, data
-
-        except Exception as e:
-            raise RuntimeError(f"Failed to load NMR data: {str(e)}")
-
     def load_peak_list(self, file_path):
         """Load peak list file"""
         try:
@@ -205,8 +166,6 @@ class NMRFileManager:
             # matching across datasets is by exact string.
             if 'Assignment' in df.columns:
                 df['Assignment'] = df['Assignment'].astype(str).str.strip()
-
-            self.add_recent_file(file_path)
 
             return df
 
@@ -255,16 +214,3 @@ class NMRFileManager:
             df['Assignment'] = [f'Peak_{i+1}' for i in range(len(df))]
 
         return df
-
-    def add_recent_file(self, file_path):
-        """Add file to recent files list"""
-        abs_path = os.path.abspath(file_path)
-
-        if abs_path in self.recent_files:
-            self.recent_files.remove(abs_path)
-
-        self.recent_files.insert(0, abs_path)
-
-        # Limit size
-        if len(self.recent_files) > self.max_recent:
-            self.recent_files = self.recent_files[:self.max_recent]

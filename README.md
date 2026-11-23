@@ -42,7 +42,7 @@ PySide6/Qt6 suite for NMR peak detection, Voigt profile fitting, and integration
 
 - **Voigt fitting**: Gaussian + Lorentzian lineshapes, multi-peak deconvolution with simultaneous fitting of overlapping peaks.
 - **2D simultaneous multi-peak fitting (PS2D)**: closely-spaced peaks auto-routed to 2D Levenberg-Marquardt deconvolution.
-- **Peak detection**: prominence / S-N peak picking, per sign (negative peaks are kept), no manual seeding required.
+- **Peak detection**: S/N or contour threshold peak picking, per sign (negative peaks are kept), no manual seeding required.
 - **Quality assessment**: R², covariance-based uncertainties (bootstrap for Kd fits), color-coded markers — plus per-peak flags for what R² cannot see: a fit that stopped on a position or intensity bound, and a peak below the detection floor.
 - **Series workflows**: relaxation (T₁, T₂, hetNOE), titration, and multi-spectrum (temperature/pH) processing with automated peak tracking.
 - **Kd / titration**: CSP (quadratic 1:1 isotherm) and intensity-decay binding fits.
@@ -111,7 +111,7 @@ lunaNMR/
 ├── launch_lunaNMR.py          # GUI launcher (starts the Qt app)
 ├── lunaNMR/
 │   ├── cli.py / __main__.py   # headless CLI (python -m lunaNMR)
-│   ├── core/                  # peak picker, Voigt fitter, integrator, PS2D, parallel processor
+│   ├── core/                  # integrator (peak detection), Voigt fitter, PS2D, parallel processor
 │   ├── gui/                   # PySide6/Qt6 interface
 │   ├── processors/            # single/multi-spectrum workflows
 │   ├── batch_processing/      # CLI batch automation
@@ -130,7 +130,7 @@ lunaNMR/
 ## Scientific Background
 
 - **Voigt function**: convolution of Gaussian (instrumental) and Lorentzian (natural linewidth) components; multi-peak deconvolution with constraints.
-- **Peak detection**: local extrema with prominence / S-N analysis and top-contour centroid refinement; overlapping peaks grouped by agglomerative clustering.
+- **Peak detection**: local extrema beyond an S/N or contour threshold, with sub-point position refinement; overlapping peaks grouped by agglomerative clustering.
 - **Optimization**: Levenberg-Marquardt with parameter normalization.
 - **Uncertainty**: bootstrap and covariance-based error estimation.
 

@@ -107,7 +107,7 @@
 then tracks them across a <em>series</em> of spectra to extract quantitative observables —
 relaxation rates, binding affinities (K<sub>d</sub>), chemical-shift perturbations (CSP), and intensities.</p>
 <div class="grid">
-  <div class="card"><h4>Detect</h4><p class="muted">Prominence / S-N peak picking, per sign (negative peaks are kept), with top-contour centroid refinement.</p></div>
+  <div class="card"><h4>Detect</h4><p class="muted">S/N or contour threshold peak picking, per sign (negative peaks are kept), with sub-point position refinement.</p></div>
   <div class="card"><h4>Fit</h4><p class="muted">Professional Voigt profiles (Gaussian + Lorentzian); 2D simultaneous deconvolution of overlapping clusters (PS2D).</p></div>
   <div class="card"><h4>Track</h4><p class="muted">Cascade propagation across a series so moving peaks (titration) stay locked to the right signal.</p></div>
   <div class="card"><h4>Analyze</h4><p class="muted">DynamiXs (T1/T2, T1ρ, methyl T2, hetNOE, spectral density, model-free), a Kd/titration module (CSP + intensity binding fits) and 1D integration across a series.</p></div>
@@ -152,9 +152,8 @@ analysis modules (DynamiXs, Kd) consume.</p>
 ├── launch_lunaNMR.py            # launcher: opens the Qt main window
 ├── lunaNMR/
 │   ├── core/                    # processing engines
-│   │   ├── enhanced_peak_picker.py        # prominence / S-N peak detection
 │   │   ├── enhanced_voigt_fitter.py       # peak-list fit entry (enhanced_peak_fitting_parallel)
-│   │   ├── core_integrator.py             # master orchestrator (EnhancedVoigtIntegrator)
+│   │   ├── core_integrator.py             # master orchestrator (EnhancedVoigtIntegrator), peak detection
 │   │   ├── parallel_voigt_processor.py    # two-pass cluster pipeline, sequential or parallel
 │   │   ├── ps2d_*.py                       # 2D simultaneous multi-peak fitting
 │   │   └── adaptive_optimizer.py          # grid search for PS2D radii
@@ -190,10 +189,10 @@ log area; in CLI mode they fall back to <code>print()</code>. Thread-local callb
 
 <section id="detect">
 <h2>Peak detection</h2>
-<p>Local extrema (<code>scipy.ndimage.maximum_filter</code>) with <strong>prominence / S-N analysis</strong>
-(<code>core/enhanced_peak_picker.py</code>, <code>core_integrator._detect_peaks_by_threshold</code>), kept
+<p>Local extrema (<code>scipy.ndimage.maximum_filter</code> / <code>minimum_filter</code>) beyond an
+<strong>S/N or contour threshold</strong> (<code>core_integrator._detect_peaks_by_threshold</code>), kept
 <strong>per sign</strong>: maxima above +threshold and minima below −threshold, so a negative peak beside a
-positive lobe survives. Positions are refined to the top-contour centroid. Detection supports manual region
+positive lobe survives. Positions are refined by three-point parabolic interpolation. Detection supports manual region
 restriction. The search window is 0.070 ppm in ¹H and the nucleus's own in the indirect dimension
 (0.3 ppm ¹⁵N, 0.11 ppm ¹³C); on later spectra of a series a peak searches only ±0.070 ppm around its
 listed position, so a decayed peak cannot take a neighbour. Cancel stops a detection before its next peak.</p>

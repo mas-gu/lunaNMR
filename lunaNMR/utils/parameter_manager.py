@@ -7,7 +7,6 @@ Handles all parameter validation, conversion, and synchronization
 
 from typing import Dict, Any, List
 from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM, get_ps2d_config
-from lunaNMR.utils.output_manager import log_info, log_warning
 
 class NMRParameterManager:
     """
@@ -65,40 +64,6 @@ class NMRParameterManager:
         self.current_params = {}
         for param_name, definition in self.parameter_definitions.items():
             self.current_params[param_name] = definition['default']
-
-    def _validate_parameter(self, param_name: str, value: Any) -> Any:
-        """Validate a parameter value against its definition"""
-
-        if param_name not in self.parameter_definitions:
-            log_warning(f"Unknown parameter: {param_name}")
-            return value
-
-        definition = self.parameter_definitions[param_name]
-
-        # Type conversion
-        try:
-            if definition['type'] == bool:
-                validated_value = bool(value)
-            elif definition['type'] == int:
-                validated_value = int(value)
-            elif definition['type'] == float:
-                validated_value = float(value)
-            else:
-                validated_value = value
-        except (ValueError, TypeError):
-            log_warning(f"Type conversion failed for {param_name}: {value}")
-            return definition['default']
-
-        # Range validation (for numeric types)
-        if definition['type'] in [int, float]:
-            if 'min' in definition and validated_value < definition['min']:
-                log_warning(f"{param_name} value {validated_value} below minimum {definition['min']}")
-                validated_value = definition['min']
-            elif 'max' in definition and validated_value > definition['max']:
-                log_warning(f"{param_name} value {validated_value} above maximum {definition['max']}")
-                validated_value = definition['max']
-
-        return validated_value
 
     def get_integrator_parameters(self) -> Dict[str, Dict[str, Any]]:
         """Get parameters formatted for core integrator"""
@@ -195,9 +160,3 @@ class NMRParameterManager:
                     lines.append(f"  {param_name}: {value}")
 
         return "\n".join(lines)
-
-    def reset_to_defaults(self):
-        """Reset all parameters to default values"""
-        for param_name, definition in self.parameter_definitions.items():
-            self.current_params[param_name] = definition['default']
-        log_info("All parameters reset to defaults")
