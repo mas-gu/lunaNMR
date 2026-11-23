@@ -67,3 +67,46 @@ def test_an_unknown_export_kind_is_reported_on_stdout_under_json(tidy, tmp_path)
     assert code == 1
     assert summary["ok"] is False
     assert "curvs" in summary["error"]["message"]
+
+
+@pytest.mark.parametrize("flag, value", [("--observable", "intensity"), ("--bootstrap", "50")])
+def test_a_survey_refuses_an_option_only_a_fit_reads(tidy, tmp_path, flag, value):
+    # A survey judges every residue on both observables and estimates no fit errors.
+    code, summary = _run("kd", "--survey", "--input", str(tidy), "--out", str(tmp_path / "out"),
+                         "--p0", "50", "--conc", ABSOLUTE, flag, value)
+    assert code == 2
+    assert summary["ok"] is False
+    assert flag in summary["error"]["message"]
+    assert "--survey" in summary["error"]["message"]
+    assert not (tmp_path / "out").exists()
+    assert sorted(p.name for p in tidy.parent.iterdir()) == [tidy.name]
+
+
+def test_a_fit_without_those_options_fits_both_observables_without_bootstrap(tidy, tmp_path):
+    code, fit = _run("kd", "--input", str(tidy), "--out", str(tmp_path / "fit"), "--p0", "50",
+                     "--conc", ABSOLUTE, "--residues", "A17,K3")
+    assert code == 0
+    metadata = json.loads(Path(fit["json_file"]).read_text())["metadata"]
+    assert metadata["observables"] == ["csp", "intensity"]
+    assert metadata["n_bootstrap"] == 0
+
+
+def test_a_fit_refuses_a_path_for_the_selection_file_only_a_survey_writes(tidy, tmp_path):
+    code, summary = _run("kd", "--input", str(tidy), "--out", str(tmp_path / "out"),
+                         "--p0", "50", "--conc", ABSOLUTE, "--observable", "intensity",
+                         "--selection", str(tmp_path / "chosen.txt"))
+    assert code == 2
+    assert summary["ok"] is False
+    assert "--selection" in summary["error"]["message"]
+    assert "--survey" in summary["error"]["message"]
+    assert not (tmp_path / "out").exists()
+    assert not (tmp_path / "chosen.txt").exists()
+
+
+def test_a_survey_writes_its_selection_where_it_is_told(tidy, tmp_path):
+    chosen = tmp_path / "chosen.txt"
+    code, summary = _run("kd", "--survey", "--input", str(tidy), "--out", str(tmp_path / "out"),
+                         "--p0", "50", "--conc", ABSOLUTE, "--selection", str(chosen))
+    assert code == 0
+    assert summary["residues_file"] == str(chosen)
+    assert chosen.exists()

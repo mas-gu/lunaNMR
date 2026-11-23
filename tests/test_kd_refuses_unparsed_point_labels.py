@@ -50,8 +50,9 @@ def index_named_series(tmp_path_factory):
 
 
 def _kd(csv, out, *extra):
+    fit_only = () if "--survey" in extra else ("--observable", "intensity")
     return _main("kd", "--input", str(csv), "--out", str(out), "--p0", "50",
-                 "--observable", "intensity", *extra)
+                 *fit_only, *extra)
 
 
 @pytest.mark.parametrize("csv", ["series_analysis_tidy.csv",

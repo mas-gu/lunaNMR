@@ -201,6 +201,14 @@ within a drift window bounded by the peak's own linewidth, and matching is compe
 two peaks can never collapse onto one maximum, the failure that silently turns an
 intensity ratio into 1.0.
 
+`--spectra` is a folder or a glob. A folder is searched as the 1D page searches it: NMRPipe
+files (`.ft1`, `.ft`, `.ft2`, `.ft3`, `.dat`, `.pipe`) and, in a Bruker dataset folder, every
+`<experiment>/pdata/<processing>/1r`, which the output names `<experiment>_<processing>`.
+Spectra are measured in name order, numbers compared as numbers. A file of a scanned
+folder that does not read as a 1D spectrum (a 2D plane beside the series) is left out and
+named, with the reason, in the summary's `skipped_spectra` and in the text output; a file
+named by the glob itself must be a 1D spectrum, or the run fails naming it.
+
 Writes a wide `<prefix>_series.csv` (one row per spectrum, one column per peak) and a long
 `<prefix>_table.csv` carrying every observable per measurement.
 
@@ -277,7 +285,7 @@ python -m lunaNMR series --spectra <folder> --peaks <list.txt> --out <dir> \
   still reports success is the failure mode this whole surface exists to prevent, and it is
   checked during `--dry-run` too. Command-line flags (`--parallel`, `--peak-source`) win over
   the file, so a stale tuning file cannot silently override what you just typed. The run
-  summary - and the `--dry-run` summary - records the effective `params`. A key the defaults carry but nothing on the series
+  summary - and the `--dry-run` summary - records the effective `params`. A key nothing on the series
   path reads is refused as having no effect: `gui_params.use_centroid_refinement`,
   `centroid_noise_multiplier`, `use_ps2d_multi_peak`, `height_threshold`, `distance_factor`,
   `prominence_threshold`, `smoothing_sigma`, `max_peaks_fit`, `max_optimization_iterations`,
@@ -498,7 +506,10 @@ CSP uses the full 1:1 quadratic isotherm; intensity uses exponential decay + pla
 bound Kd ≥ 0. `kd` writes `<prefix>_kd_results.txt` in `--out` and the fit JSON and
 `<prefix>_kd_params.json` under `<out>/data/`. `--survey` fits nothing global: it writes the
 vs-sequence figures, `<out>/data/<prefix>_survey.csv`, and an editable
-`<prefix>_residues.txt` beside the input for `--residues`. The thresholds, the survey →
+`<prefix>_residues.txt` beside the input for `--residues`. It judges every residue on both
+observables and estimates no fit errors, so `--observable` or `--bootstrap` with `--survey`
+is a usage error (exit 2), as is `--selection` (the path of the file a survey writes)
+without `--survey`. The thresholds, the survey →
 fit workflow and the pool gates are in [CLI_AGENT.md](CLI_AGENT.md#kd-workflow-survey--choose--fit).
 
 **Concentrations are required, with their units.** `--conc` is read in `--conc-units`

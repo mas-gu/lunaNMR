@@ -1,7 +1,6 @@
 # ABOUTME: 1D integration page - load a series, pick peaks interactively, integrate all points.
 # ABOUTME: Wires the plotter's selections to the series extraction and writes the results CSV.
 
-import re
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -13,14 +12,10 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFile
 
 from oned_loader import load_spectrum
 from oned_plotter import OneDPlotter
-from oned_series import integrate_series, locate_peaks, peak_at_position
+from oned_series import (BRUKER_SPECTRUM, integrate_series, load_readable,
+                         locate_peaks, peak_at_position, series_order,
+                         spectra_in_folder, spectrum_name)
 from oned_series_table import SeriesTableDialog
-
-# Bruker names every processed 1D spectrum 1r, under <experiment>/pdata/<processing>.
-BRUKER_SPECTRUM = '1r'
-
-SPECTRUM_PATTERNS = ('*.ft1', '*.ft', '*.ft2', '*.ft3', '*.dat',
-                     f'*/pdata/*/{BRUKER_SPECTRUM}')
 
 # NMRPipe writes 1D spectra as .ft1, so it leads the filter. .ft2/.ft3 are offered
 # because they are picked by habit; a 2D file is rejected on load with a message
@@ -37,27 +32,9 @@ OBSERVABLE_KEYS = ('height', 'area', 'fit_area')
 QUANTITATIVE_OBSERVABLE = 'area'
 
 
-def spectrum_name(path):
-    """The name a spectrum is listed under: its file name, or for a Bruker spectrum
-    its experiment and processing numbers, since the file name is the same for all."""
-    path = Path(path)
-    if path.name == BRUKER_SPECTRUM:
-        return f"{path.parent.parent.parent.name}_{path.parent.name}"
-    return path.name
-
-
 def series_point_name(path):
     """The name a spectrum's rows carry in the series results."""
     return spectrum_name(path) if path.name == BRUKER_SPECTRUM else path.stem
-
-
-def series_order(paths):
-    """Spectra in series order, numbers in a name compared as numbers (pt_2 before
-    pt_10): each point is tracked from the one before it."""
-    def natural_key(path):
-        return [int(t) if t.isdigit() else t.lower()
-                for t in re.split(r'(\d+)', spectrum_name(path))]
-    return sorted(paths, key=natural_key)
 
 
 class OneDIntegrationPage(QWidget):
@@ -200,15 +177,13 @@ class OneDIntegrationPage(QWidget):
         if not folder:
             return
 
-        paths = []
-        for pattern in SPECTRUM_PATTERNS:
-            paths.extend(Path(folder).glob(pattern))
+        paths = spectra_in_folder(folder)
 
         if not paths:
             self.status.setText(f"No 1D spectra found in {folder}")
             return
 
-        self._set_paths(series_order(paths))
+        self._set_paths(paths)
 
     def _set_paths(self, paths):
         """Keep the files that load as 1D, reporting the ones that do not.
@@ -216,13 +191,8 @@ class OneDIntegrationPage(QWidget):
         A folder often holds 2D spectra beside the 1D ones, and picking one should
         say so rather than aborting the whole selection.
         """
-        readable, rejected = [], []
-        for path in paths:
-            try:
-                load_spectrum(path)
-                readable.append(path)
-            except Exception as exc:
-                rejected.append(f"{spectrum_name(path)}: {exc}")
+        _spectra, readable, left_out = load_readable(paths)
+        rejected = [f"{spectrum_name(path)}: {reason}" for path, reason in left_out]
 
         self.paths = readable
         self.spectrum_list.blockSignals(True)
@@ -445,13 +415,7 @@ class OneDIntegrationPage(QWidget):
         # A file that has gone missing since the set was opened is dropped from the
         # run rather than aborting it - losing one point of a series should not cost
         # the other fifty-two.
-        spectra, usable, unreadable = [], [], []
-        for path in selected:
-            try:
-                spectra.append(load_spectrum(path))
-                usable.append(path)
-            except Exception:
-                unreadable.append(spectrum_name(path))
+        spectra, usable, unreadable = load_readable(selected)
 
         if not spectra:
             self.status.setText("None of the checked spectra could be read.")

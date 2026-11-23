@@ -158,3 +158,125 @@ class TestAPeakOutsideTheSpectrum:
     def test_a_position_inside_still_runs(self, spectra, tmp_path):
         assert _run(["integrate-1d", "--spectra", str(spectra), "--out", str(tmp_path / "o"),
                      "--peaks", "8.6796"]) == 0
+
+
+# Bruker 1D processed data lives outside the repository, so these skip when absent.
+BRUKER_DATASET = REPO_ROOT.parent / "data_test" / "bruker" / "20171009_CH1_domain"
+needs_bruker = pytest.mark.skipif(not (BRUKER_DATASET / "1" / "pdata" / "999" / "1r").exists(),
+                                  reason="Bruker 1D sample not present")
+
+
+@needs_bruker
+class TestBrukerSeries:
+    """A Bruker series is one experiment folder per point, each spectrum a file named
+    1r under <experiment>/pdata/<processing>."""
+
+    EXPERIMENTS = ['1', '2', '10']
+
+    def _dataset(self, tmp_path):
+        folder = tmp_path / "dataset"
+        folder.mkdir()
+        for name in self.EXPERIMENTS:
+            (folder / name).symlink_to(BRUKER_DATASET / "1")
+        return folder
+
+    def _measured_spectra(self, spectra, tmp_path, capsys):
+        import csv
+        assert _run(["integrate-1d", "--spectra", str(spectra), "--out", str(tmp_path / "o"),
+                     "--detect", "--format", "json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        rows = list(csv.DictReader(Path(payload["outputs"]["table"]).open()))
+        return list(dict.fromkeys(r["spectrum"] for r in rows))
+
+    def test_a_dataset_folder_is_measured_in_series_order(self, tmp_path, capsys):
+        assert self._measured_spectra(self._dataset(tmp_path), tmp_path, capsys) == [
+            '1_999', '2_999', '10_999']
+
+    def test_a_glob_of_spectrum_files_is_measured_in_series_order(self, tmp_path, capsys):
+        pattern = self._dataset(tmp_path) / "*" / "pdata" / "999" / "1r"
+        assert self._measured_spectra(pattern, tmp_path, capsys) == [
+            '1_999', '2_999', '10_999']
+
+    def test_the_wide_table_has_a_row_per_spectrum(self, tmp_path, capsys):
+        import csv
+        assert _run(["integrate-1d", "--spectra", str(self._dataset(tmp_path)),
+                     "--out", str(tmp_path / "o"), "--detect", "--format", "json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["n_spectra"] == len(self.EXPERIMENTS)
+        rows = list(csv.reader(Path(payload["outputs"]["series"]).open()))
+        assert len(rows) == 1 + len(self.EXPERIMENTS)
+
+    def test_the_page_loads_the_same_spectra(self, tmp_path, capsys):
+        pytest.importorskip('PySide6')
+        from PySide6.QtWidgets import QApplication
+        from oned_page import OneDIntegrationPage
+        app = QApplication.instance() or QApplication([])
+        page = OneDIntegrationPage()
+        page.load_folder(folder=str(BRUKER_DATASET))
+        listed = [page.spectrum_list.item(i).text()
+                  for i in range(page.spectrum_list.count())]
+        assert len(listed) > 1
+        assert self._measured_spectra(BRUKER_DATASET, tmp_path, capsys) == listed
+
+
+PLANE_2D = REPO_ROOT / "data_example" / "2DHSQC" / "600_T1_0o0.ft"
+
+
+@pytest.mark.skipif(not (ONED.exists() and PLANE_2D.exists()), reason="data_example not present")
+class TestA2DSpectrumAmongTheSeries:
+    """A folder of 1D spectra often holds a 2D spectrum too. Scanning the folder measures
+    the 1D spectra and names the file left out; naming the 2D file itself is an error."""
+
+    @pytest.fixture
+    def spectra(self, tmp_path):
+        folder = tmp_path / "spectra"
+        folder.mkdir()
+        for path in sorted(ONED.glob("*.ft1"))[:3]:
+            (folder / path.name).symlink_to(path)
+        (folder / "plane.ft2").symlink_to(PLANE_2D)
+        return folder
+
+    def test_the_folder_is_measured_without_it(self, spectra, tmp_path, capsys):
+        import csv
+        assert _run(["integrate-1d", "--spectra", str(spectra), "--out", str(tmp_path / "o"),
+                     "--peaks", "8.6796", "--format", "json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["n_spectra"] == 3
+        rows = list(csv.DictReader(Path(payload["outputs"]["table"]).open()))
+        assert [r["spectrum"] for r in rows] == sorted(p.name for p in ONED.glob("*.ft1"))[:3]
+
+    def test_the_summary_names_the_file_left_out(self, spectra, tmp_path, capsys):
+        _run(["integrate-1d", "--spectra", str(spectra), "--out", str(tmp_path / "o"),
+              "--peaks", "8.6796", "--format", "json"])
+        (skipped,) = json.loads(capsys.readouterr().out)["skipped_spectra"]
+        assert skipped["spectrum"] == "plane.ft2"
+        assert "2D" in skipped["reason"]
+
+    def test_the_human_output_names_it_too(self, spectra, tmp_path, capsys):
+        _run(["integrate-1d", "--spectra", str(spectra), "--out", str(tmp_path / "o"),
+              "--peaks", "8.6796"])
+        out = capsys.readouterr().out
+        assert "plane.ft2" in out and "2D" in out
+
+    def test_a_folder_of_1d_spectra_reports_none_left_out(self, spectra, tmp_path, capsys):
+        (spectra / "plane.ft2").unlink()
+        assert _run(["integrate-1d", "--spectra", str(spectra), "--out", str(tmp_path / "o"),
+                     "--peaks", "8.6796", "--format", "json"]) == 0
+        assert json.loads(capsys.readouterr().out)["skipped_spectra"] == []
+
+    @pytest.mark.parametrize("named", ["*", "plane.ft2"])
+    def test_naming_it_is_an_error(self, spectra, tmp_path, capsys, named):
+        out = tmp_path / "o"
+        assert _run(["integrate-1d", "--spectra", str(spectra / named), "--out", str(out),
+                     "--peaks", "8.6796", "--format", "json"]) == 1
+        message = json.loads(capsys.readouterr().out)["error"]["message"]
+        assert "plane.ft2" in message and "2D" in message
+        assert not out.exists()
+
+    def test_a_folder_with_no_1d_spectrum_is_an_error_naming_what_it_held(self, spectra,
+                                                                         tmp_path, capsys):
+        for path in spectra.glob("*.ft1"):
+            path.unlink()
+        assert _run(["integrate-1d", "--spectra", str(spectra), "--out", str(tmp_path / "o"),
+                     "--peaks", "8.6796", "--format", "json"]) == 1
+        assert "plane.ft2" in json.loads(capsys.readouterr().out)["error"]["message"]
