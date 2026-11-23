@@ -5,7 +5,9 @@ import numpy as np
 import pandas as pd
 
 
-# 15N/1H gyromagnetic ratio factor (15N frequency = 1H frequency / this factor)
+# 1H/15N reference-frequency ratio, 1 / Xi(15N) with Xi = 0.101329118 (liquid NH3 scale):
+# the 15N frequency a ppm offset is converted with = 1H frequency / this factor.
+# Not gamma_H / gamma_N of the bare nuclei (9.862), which the spectral-density physics uses.
 N15_GAMMA_RATIO = 9.869
 
 
