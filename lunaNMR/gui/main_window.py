@@ -4214,10 +4214,8 @@ class LunaNMRMainWindow(BaseWindow):
         browse_series_action.triggered.connect(self.open_results_browser)
         results_menu.addAction(browse_series_action)
 
-        # Browse Individual Spectra hidden but code kept for future use
         browse_spectra_action = QAction("Browse Individual Spectra...", self)
         browse_spectra_action.triggered.connect(self.open_spectrum_browser)
-        browse_spectra_action.setVisible(False)  # Hidden but functional
         results_menu.addAction(browse_spectra_action)
 
         multi_viewer_action = QAction("Multi-Spectrum Overlay Viewer...", self)
@@ -4392,13 +4390,11 @@ class LunaNMRMainWindow(BaseWindow):
                 "No series results available. Run series integration first.")
             return
 
-        series_processor = getattr(self, 'series_processor', None)
         original_data_folder = getattr(self, 'current_nmr_folder', None)
 
         dialog = SpectrumBrowserDialog(
             parent=self,
             batch_results=self.batch_results,
-            series_processor=series_processor,
             original_data_folder=original_data_folder
         )
         dialog.show()  # Non-modal

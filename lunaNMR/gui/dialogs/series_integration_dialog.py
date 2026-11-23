@@ -491,14 +491,13 @@ class SeriesIntegrationDialog(BaseDialog):
         layout.addStretch()
 
         # Results viewer buttons (enabled after processing completes)
-        # Browse Results button hidden but code kept for future use
-        self.browse_results_btn = QPushButton("📋 Browse Results")
+        self.browse_results_btn = QPushButton("📋 Browse Spectra")
         self.browse_results_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         self.browse_results_btn.setStyleSheet(self._get_secondary_button_style())
         self.browse_results_btn.setToolTip("Browse individual spectrum results")
         self.browse_results_btn.clicked.connect(self._open_spectrum_browser)
         self.browse_results_btn.setEnabled(False)
-        self.browse_results_btn.setVisible(False)  # Hidden but functional
+        layout.addWidget(self.browse_results_btn)
 
         # Overlay Viewer button - Blue with icon
         self.overlay_viewer_btn = QPushButton("📊 Overlay Viewer")
@@ -1185,13 +1184,11 @@ class SeriesIntegrationDialog(BaseDialog):
                 "No series results available.")
             return
 
-        series_processor = getattr(self.main_window, 'series_processor', None) if self.main_window else None
         original_data_folder = getattr(self.main_window, 'current_nmr_folder', None) if self.main_window else None
 
         dialog = SpectrumBrowserDialog(
             parent=self,
             batch_results=self.batch_results,
-            series_processor=series_processor,
             original_data_folder=original_data_folder
         )
         dialog.show()
