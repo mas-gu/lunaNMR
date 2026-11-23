@@ -35,6 +35,7 @@ from gui_components import (
     create_primary_button, create_secondary_button, create_label,
     get_font, show_info, show_error, show_warning
 )
+from residue_order import residue_sort_key
 
 # Refit helpers (sidecar IO + surgical JSON/TSV updates)
 sys.path.insert(0, str(Path(__file__).parent.parent / "dynamiXs_T1_T2"))
@@ -475,7 +476,7 @@ class FitViewer(QMainWindow):
                 self._populate_residue_list()
                 return
 
-            self.available_residues = sorted(list(residues_set), key=self._residue_sort_key)
+            self.available_residues = sorted(list(residues_set), key=residue_sort_key)
 
             self._update_field_controls()
             self._populate_residue_list()
@@ -492,11 +493,6 @@ class FitViewer(QMainWindow):
         """Load JSON files from a single folder."""
         # Use the multi-folder method with a single folder
         self._load_json_folders([folder_path])
-
-    def _residue_sort_key(self, residue_str):
-        """Extract numeric part of residue for sorting"""
-        numbers = re.findall(r'\d+', residue_str)
-        return int(numbers[0]) if numbers else 0
 
     def _update_field_controls(self):
         """Enable/disable field controls based on available data"""
@@ -749,7 +745,7 @@ class FitViewer(QMainWindow):
         self._pick_registry = {}  # rebuilt on every redraw
 
         plots = []
-        for residue in sorted(residues, key=self._residue_sort_key):
+        for residue in sorted(residues, key=residue_sort_key):
             plots.extend((residue, exp) for exp in self._shown_experiments())
 
         n_plots = len(plots)

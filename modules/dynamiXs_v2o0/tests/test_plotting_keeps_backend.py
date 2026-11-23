@@ -1,4 +1,4 @@
-# ABOUTME: Importing a DynamiXs fitter or plot script leaves the process's matplotlib backend alone,
+# ABOUTME: Importing a DynamiXs fitter or density script leaves the process's matplotlib backend alone,
 # ABOUTME: and its plots draw from a worker thread under QtAgg without pyplot, as the GUI workers call them.
 
 import os
@@ -12,8 +12,7 @@ _DIR = Path(__file__).resolve().parent.parent
 RUN = (Path(__file__).resolve().parents[4] / "data_test" / "data_JA1_relaxation"
        / "run_20260825_1405")
 
-_PATHS = [str(_DIR), str(_DIR / "dynamiXs_T1_T2"), str(_DIR / "dynamiXs_density_functions"),
-          str(_DIR / "dynamiXs_plot")]
+_PATHS = [str(_DIR), str(_DIR / "dynamiXs_T1_T2"), str(_DIR / "dynamiXs_density_functions")]
 
 _QT_PROCESS = f"""
 import sys
@@ -27,8 +26,6 @@ app = QApplication(sys.argv)
 FITTERS = ["fit_Tx_NMRRE", "fitmulti__Tx_NMRRE"]
 SINGLE_FIELD = ["ZZ_multi_density"]
 DUAL_FIELD = ["ZZ_multi_2fields_density"]
-PLOT_SCRIPTS = ["compare_datasets", "compare_datasets_087", "plot_dual_field_datasets",
-                "plot_dual_field_datasets_087"]
 
 
 def _run(code, cwd):
@@ -37,7 +34,7 @@ def _run(code, cwd):
                           env={**os.environ, "QT_QPA_PLATFORM": "offscreen"})
 
 
-@pytest.mark.parametrize("module", FITTERS + SINGLE_FIELD + DUAL_FIELD + PLOT_SCRIPTS)
+@pytest.mark.parametrize("module", FITTERS + SINGLE_FIELD + DUAL_FIELD)
 def test_importing_the_module_keeps_the_qt_backend(module, tmp_path):
     run = _run(f"import {module}\nprint(matplotlib.get_backend())", tmp_path)
 

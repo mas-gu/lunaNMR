@@ -36,6 +36,7 @@ from dynamiXs_density_functions.spectral_density_physics import (
     spectral_density, omega_h, omega_n, dipolar_constant, csa_constant,
     reduced_spectral_densities, reduced_spectral_density_errors, relaxation_deviations,
     overall_correlation_time, monte_carlo_rng)
+from residue_order import residue_axis_positions, residue_sort_key
 
 # The J(wH) column for each proton-frequency factor J(wH) can be evaluated at
 JWH_COLUMN = {1.0: 'JwH', 0.87: 'JwH_087'}
@@ -371,13 +372,7 @@ class DualFieldSpectralDensityAnalysis:
             merged_data = pd.merge(data1, data2, on=residue_col, suffixes=('_f1', '_f2'))
 
             # Sort numerically by residue ID (extract numeric part for proper ordering)
-            import re
-            def extract_numeric(res_id):
-                """Extract numeric part from residue ID for sorting (e.g., '3.LYS' -> 3, '10' -> 10)"""
-                match = re.search(r'\d+', str(res_id))
-                return int(match.group()) if match else 0
-
-            merged_data['_sort_key'] = merged_data[residue_col].apply(extract_numeric)
+            merged_data['_sort_key'] = merged_data[residue_col].apply(residue_sort_key)
             merged_data = merged_data.sort_values('_sort_key').drop('_sort_key', axis=1).reset_index(drop=True)
             print(f"Matched {len(merged_data)} residues between the two datasets")
         else:
@@ -608,12 +603,7 @@ class DualFieldSpectralDensityAnalysis:
 
         residues = good_data.index if 'Residue' not in good_data.columns else good_data['Residue']
 
-        import re
-        def extract_numeric(res_id):
-                match = re.search(r'\d+', str(res_id))
-                return int(match.group()) if match else 0
-
-        residue_numbers = [extract_numeric(r) for r in residues]
+        residue_numbers = residue_axis_positions(residues)
         if len(residue_numbers) > 0:
                 max_res = max(residue_numbers)
                 all_residues_range = set(range(1, max_res + 1))  # Always start from residue 1

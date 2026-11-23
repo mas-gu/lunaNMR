@@ -449,9 +449,9 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
         region_2d = voigt_result.get('region_2d')
         fitted_surface = voigt_result.get('fitted_2d_surface')
         all_peaks = voigt_result.get('all_peaks', [])
-        r_squared = voigt_result.get('avg_r_squared', 0)
+        r_squared = voigt_result.get('r_squared', 0)
         assignment = voigt_result.get('assignment', 'Unknown')
-        quality = voigt_result.get('fitting_quality', 'Unknown')
+        quality = peak_quality_label(voigt_result) or 'Unknown'
 
         # Convert arrays from lists to numpy arrays (may be lists from JSON serialization)
         if region_2d is not None:

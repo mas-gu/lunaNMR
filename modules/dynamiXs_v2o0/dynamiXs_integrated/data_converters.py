@@ -9,10 +9,19 @@ the NMR relaxation analysis pipeline:
 - Data format transformations for spectral density analysis
 """
 
+import sys
+
 import numpy as np
 import pandas as pd
 from typing import Dict, Tuple, Optional
 from pathlib import Path
+
+# The residue order is shared by the DynamiXs and Kd modules and lives one folder up;
+# this module is also imported by bare name, with only its own folder on sys.path.
+_MODULE_ROOT = str(Path(__file__).resolve().parent.parent)
+if _MODULE_ROOT not in sys.path:
+    sys.path.append(_MODULE_ROOT)
+from residue_order import residue_axis_positions, residue_sort_key  # noqa: E402
 
 
 def convert_relaxation_times_to_rates(t_values: Dict[str, Dict[str, float]],
@@ -160,20 +169,10 @@ def calculate_hetnoe_from_intensities(saturated_data: Dict[str, float],
     return noe_values
 
 
-def _residue_number(assignment):
-    """First integer in an assignment label ('K3'->3, 'V10'->10). None if absent."""
-    import re
-    m = re.search(r'\d+', str(assignment))
-    return int(m.group()) if m else None
-
-
 def in_sequence_order(noe_values):
     """(residue, record) pairs ordered by sequence number; residues without a parseable
     number follow, alphabetically."""
-    return sorted(noe_values.items(),
-                  key=lambda kv: (_residue_number(kv[0]) is None,
-                                  _residue_number(kv[0]) if _residue_number(kv[0]) is not None else 0,
-                                  str(kv[0])))
+    return sorted(noe_values.items(), key=lambda kv: residue_sort_key(kv[0]))
 
 
 def draw_hetnoe_vs_residue(ax, noe_values, title=None):
@@ -186,8 +185,7 @@ def draw_hetnoe_vs_residue(ax, noe_values, title=None):
     """
     items = in_sequence_order(noe_values)
     labels = [k for k, _ in items]
-    x = [_residue_number(k) if _residue_number(k) is not None else i
-         for i, k in enumerate(labels)]
+    x = residue_axis_positions(labels)
     y = [v['value'] for _, v in items]
     yerr = [v.get('error', 0.0) for _, v in items]
 
@@ -351,13 +349,7 @@ def create_spectral_density_input_csv(r1_data: Dict[str, Dict[str, float]],
     """
     common_residues = set(r1_data.keys()) & set(r2_data.keys()) & set(noe_data.keys())
 
-    import re
-    def extract_numeric(res_id):
-        """Extract numeric part from residue ID for sorting (e.g., '3.LYS' -> 3, '10' -> 10)"""
-        match = re.search(r'\d+', str(res_id))
-        return int(match.group()) if match else 0
-
-    common_residues = sorted(common_residues, key=extract_numeric)
+    common_residues = sorted(common_residues, key=residue_sort_key)
 
     if len(common_residues) == 0:
         raise ValueError("No common residues found across R1, R2, and hetNOE datasets")

@@ -17,6 +17,7 @@ from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.utils.project_manager import lacks_fit_arrays, rebuild_fit_arrays, unrebuilt_fit
 from lunaNMR.gui.components.peak_navigator_table import PeakNavigatorTable
 from lunaNMR.gui.components.signed_contours import draw_signed_contours
+from lunaNMR.gui.styles.quality_colors import peak_quality_label
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, FONT_SIZE_MEDIUM_HEADER, FONT_SIZE_BODY, FONT_SIZE_SMALL,
     PRIMARY_TEXT, SECONDARY_TEXT,
@@ -1276,10 +1277,10 @@ class MultiSpectrumViewerDialog(BaseDialog):
             return
 
         assignment = voigt_result.get('assignment', 'Unknown')
-        quality = voigt_result.get('fitting_quality', 'Unknown')
+        quality = peak_quality_label(voigt_result) or 'Unknown'
         method = voigt_result.get('method', '')
         all_peaks = voigt_result.get('all_peaks', [])
-        r_squared = voigt_result.get('avg_r_squared', voigt_result.get('r_squared', 0.0))
+        r_squared = voigt_result.get('r_squared', 0.0)
 
         lines = []
 
@@ -1791,9 +1792,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
             for result in integration_results:
                 result_assignment = result.get('assignment') or result.get('Assignment')
                 if result_assignment == assignment:
-                    r_squared = (result.get('r_squared') or
-                                result.get('R_Squared') or
-                                result.get('avg_r_squared') or 0)
+                    r_squared = result.get('r_squared') or 0
                     logger.debug(f"Found integration_results Voigt result for {assignment}: R²={r_squared:.3f}")
                     return result
 
@@ -1802,9 +1801,7 @@ class MultiSpectrumViewerDialog(BaseDialog):
             for result in fitted_results:
                 result_assignment = result.get('assignment') or result.get('Assignment')
                 if result_assignment == assignment:
-                    r_squared = (result.get('r_squared') or
-                                result.get('R_Squared') or
-                                result.get('avg_r_squared') or 0)
+                    r_squared = result.get('r_squared') or 0
                     logger.debug(f"Found fitted_results Voigt result for {assignment}: R²={r_squared:.3f}")
                     return result
 

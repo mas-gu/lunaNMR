@@ -150,6 +150,7 @@ def _capture(path, peaks) -> Dict:
 def load_peak_list(path) -> Dict:
     """Load with the pipeline's own reader, then judge hygiene on what it returns."""
     from lunaNMR.utils.file_manager import NMRFileManager
+    from lunaNMR.utils.residue_order import residue_sort_key
     df = NMRFileManager().load_peak_list(str(path))
     if df is None or df.empty:
         return dict(path=str(path), assignments=[], peaks=[], findings=[
@@ -159,7 +160,7 @@ def load_peak_list(path) -> Dict:
     peaks = list(zip(names, df['Position_X'].astype(float), df['Position_Y'].astype(float)))
 
     findings = []
-    duplicates = sorted({n for n in names if names.count(n) > 1})
+    duplicates = sorted({n for n in names if names.count(n) > 1}, key=residue_sort_key)
     if duplicates:
         findings.append(Finding('FAIL', 'peak_list',
                                 f'{os.path.basename(path)}: duplicate assignments {duplicates}'))

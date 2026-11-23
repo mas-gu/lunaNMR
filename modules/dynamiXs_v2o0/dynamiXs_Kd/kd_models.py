@@ -1,9 +1,17 @@
 # ABOUTME: 1:1 binding isotherm models for Kd titration fitting (CSP and intensity).
 # ABOUTME: Full quadratic fraction-bound (accounts for protein concentration P0).
 
-import re
+import os
+import sys
 
 import numpy as np
+
+# The residue order is shared with the relaxation modules and lives one folder up;
+# a Kd caller puts only this folder on sys.path.
+_MODULE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _MODULE_ROOT not in sys.path:
+    sys.path.append(_MODULE_ROOT)
+from residue_order import residue_sort_key  # noqa: E402
 
 
 # A reference intensity this many times below the residue's own series maximum is a
@@ -139,13 +147,6 @@ def ref_point_values(fits, i, j, obs, alpha=0.14, value='height', ref_max_ratio=
         names.append(f.get('residue'))
         vals.append(v)
     return names, vals
-
-
-def residue_sort_key(name):
-    """Order residues by sequence number, not amino-acid letter: 'K14' before
-    'A17'. Names without a number sort last, alphabetically among themselves."""
-    m = re.search(r'\d+', str(name))
-    return (int(m.group()) if m else float('inf'), str(name))
 
 
 def global_fit_table(fits, global_fit, obs, P0):

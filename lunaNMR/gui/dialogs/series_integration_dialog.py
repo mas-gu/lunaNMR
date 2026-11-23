@@ -491,14 +491,13 @@ class SeriesIntegrationDialog(BaseDialog):
         layout.addStretch()
 
         # Results viewer buttons (enabled after processing completes)
-        # Browse Results button hidden but code kept for future use
-        self.browse_results_btn = QPushButton("📋 Browse Results")
+        self.browse_results_btn = QPushButton("📋 Browse Spectra")
         self.browse_results_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
         self.browse_results_btn.setStyleSheet(self._get_secondary_button_style())
         self.browse_results_btn.setToolTip("Browse individual spectrum results")
         self.browse_results_btn.clicked.connect(self._open_spectrum_browser)
         self.browse_results_btn.setEnabled(False)
-        self.browse_results_btn.setVisible(False)  # Hidden but functional
+        layout.addWidget(self.browse_results_btn)
 
         # Overlay Viewer button - Blue with icon
         self.overlay_viewer_btn = QPushButton("📊 Overlay Viewer")
@@ -1185,13 +1184,11 @@ class SeriesIntegrationDialog(BaseDialog):
                 "No series results available.")
             return
 
-        series_processor = getattr(self.main_window, 'series_processor', None) if self.main_window else None
         original_data_folder = getattr(self.main_window, 'current_nmr_folder', None) if self.main_window else None
 
         dialog = SpectrumBrowserDialog(
             parent=self,
             batch_results=self.batch_results,
-            series_processor=series_processor,
             original_data_folder=original_data_folder
         )
         dialog.show()
@@ -1202,6 +1199,7 @@ class SeriesIntegrationDialog(BaseDialog):
         """Open multi-spectrum overlay viewer."""
         import os
         from lunaNMR.gui.dialogs import MultiSpectrumViewerDialog
+        from lunaNMR.gui.dialogs.spectrum_files import series_data_folder, series_spectrum_file
 
         if not self.batch_results:
             QMessageBox.warning(self, "No Data",
@@ -1210,15 +1208,9 @@ class SeriesIntegrationDialog(BaseDialog):
 
         # Get data folder from batch_results metadata (v0.9 main_gui.py:7551 pattern)
         # This is the folder containing the NMR files
-        data_folder = None
-        if hasattr(self.batch_results, 'metadata'):
-            data_folder = self.batch_results.metadata.get('data_folder')
-        elif isinstance(self.batch_results, dict):
-            metadata = self.batch_results.get('metadata', {})
-            data_folder = metadata.get('data_folder')
-
-        if not data_folder:
-            data_folder = getattr(self.main_window, 'current_nmr_folder', None) if self.main_window else None
+        data_folder = series_data_folder(
+            self.batch_results,
+            getattr(self.main_window, 'current_nmr_folder', None) if self.main_window else None)
 
         self._log(f"Data folder for spectrum paths: {data_folder}")
 
@@ -1230,9 +1222,9 @@ class SeriesIntegrationDialog(BaseDialog):
 
                 # CRITICAL: Construct full path for spectrum_file (v0.9 main_gui.py:7547-7553)
                 # result may contain 'spectrum_file' but it's just a filename, not full path
-                if 'spectrum_file' not in result_copy or not os.path.isabs(result_copy.get('spectrum_file', '')):
+                result_copy['spectrum_file'] = series_spectrum_file(data_folder, name, result)
+                if not os.path.isabs(result.get('spectrum_file', '')):
                     if data_folder:
-                        result_copy['spectrum_file'] = os.path.join(data_folder, name)
                         self._log(f"Constructed full path for {name}: {result_copy['spectrum_file']}")
                     else:
                         self._log(f"⚠️ WARNING: No data folder - cannot construct path for {name}")

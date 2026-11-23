@@ -22,11 +22,11 @@ class UnreadConfigKeys(ValueError):
     """A configuration file names settings batch does not read."""
 
 
-# Keys BatchProcessor reads beside the default configuration's own
-_READ_PROCESSING_KEYS = {'max_iterations', 'max_iter'}
-# Sections whose keys are names (nuclei, fit parameters) rather than settings
-_FREE_FORM_SECTIONS = {('processing', 'sn_thresholds'), ('processing', 'expected_peaks'),
-                       ('processing_parameters',)}
+# Settings BatchProcessor reads beside the default configuration's own
+_READ_BESIDE_DEFAULTS = {'processing_parameters': {'search_window_x': None,
+                                                   'search_window_y': None}}
+# Sections whose keys are names (nuclei) rather than settings
+_FREE_FORM_SECTIONS = {('processing', 'sn_thresholds'), ('processing', 'expected_peaks')}
 
 
 def unread_config_keys(user_config: Dict[str, Any], schema: Dict[str, Any],
@@ -39,9 +39,7 @@ def unread_config_keys(user_config: Dict[str, Any], schema: Dict[str, Any],
         # Notes, not settings: the files --create-examples writes carry them
         if here in _FREE_FORM_SECTIONS or key == 'description' or key.startswith('_'):
             continue
-        known = (key in schema or (path == ('processing',) and key in _READ_PROCESSING_KEYS)
-                 or here in _FREE_FORM_SECTIONS)
-        if not known:
+        if key not in schema:
             unread.append('.'.join(here))
         elif isinstance(value, dict) and isinstance(schema.get(key), dict):
             unread.extend(unread_config_keys(value, schema[key], here))
@@ -175,7 +173,8 @@ class ConfigManager:
 
             self.logger.info(f"Loaded configuration from: {config_path}")
 
-            unread = unread_config_keys(user_config, self.default_config)
+            unread = unread_config_keys(
+                user_config, {**self.default_config, **_READ_BESIDE_DEFAULTS})
             if unread:
                 raise UnreadConfigKeys(
                     f"{config_path} sets {', '.join(unread)}, which batch does not read")

@@ -27,14 +27,7 @@ A comprehensive graphical user interface for NMR relaxation data analysis built 
 - **Spectral density page**: single- or dual-field reduced spectral density mapping and model-free fit from data files, J(ωH) or J(0.87ωH)
 - **Model Free Analysis page**: the same analysis run from relaxation series (T1/T2 fitted first), single- or dual-field, J(ωH) or J(0.87ωH) (default: dual-field J(0.87ωH))
 
-### 4. Data Plotting Tools
-The GUI has no plotting page. The tools run as standalone scripts in `dynamiXs_plot/`:
-- **Dataset comparison** (`compare_datasets.py`) with difference plots and mean/std of the difference
-- **Dual field plotting** (`plot_dual_field_datasets.py`) for multi-field NMR experiments
-- **Rex field analysis** (`plot_rex_field_analysis.py`, see [README_rex_field_analysis.md](dynamiXs_plot/README_rex_field_analysis.md))
-- **PDF output** with publication-ready formatting
-
-### 5. Cross-Platform Compatibility
+### 4. Cross-Platform Compatibility
 - **macOS, Windows, and Linux** support through PySide6 (Qt)
 - **Modern Qt-based interface** with LunaNMR styling
 - **User-friendly interface** requiring no scripting knowledge
@@ -79,13 +72,6 @@ L6,156.7,123.4,89.2,61.5,42.3,28.9,17.1,10.2
   - Results text file with fitted parameters and errors
   - Multi-page PDF plots showing data and fits
   - `<prefix>_<field>_<exp>_fit_data.json` for the Fit Viewer
-
-### Dataset Comparison (`dynamiXs_plot/compare_datasets.py`, command line)
-- **Input:** Two CSV files with analysis results
-- **Processing:** Difference calculation with error propagation
-- **Output:**
-  - Comparison plots (original data + differences)
-  - Mean and std of the difference, on the plot and in the terminal
 
 ## Mathematical Framework
 
@@ -229,10 +215,7 @@ dynamiXs_v2o0/
 │   └── refit.py              # Headless refit helpers (sidecar IO,
 │                              #   single-residue refit, TSV/JSON in-place update)
 ├── dynamiXs_integrated/      # Integrated analysis pipeline
-├── dynamiXs_density_functions/ # Spectral density analysis
-├── dynamiXs_cpmg/            # CPMG scripts (standalone; no page or subcommand)
-├── dynamiXs_plot/            # Plotting utilities
-└── dynamiXs_format/          # Data formatting scripts (standalone)
+└── dynamiXs_density_functions/ # Spectral density analysis
 ```
 
 ## Current Implementation Status
@@ -244,10 +227,6 @@ dynamiXs_v2o0/
 - "Save run to project" on each page (inside LunaNMR)
 - File handling and parameter configuration
 - Real-time progress monitoring
-
-🚧 **In Development:**
-- CPMG analysis integration
-- Data formatting utilities
 
 ## Usage Notes
 
@@ -273,7 +252,7 @@ dynamiXs_v2o0/
 - Use the analytical error method, or fewer bootstrap iterations, for faster results
 
 ### Threading Warnings
-- The T1/T2 fitters and the spectral density / model-free scripts select no matplotlib backend: they draw on a bare `Figure`, so they plot from a worker thread and leave the application's backend as it is. `compare_datasets.py` and `plot_dual_field_datasets.py` select none either and draw through pyplot, on the backend in use
+- The T1/T2 fitters and the spectral density / model-free scripts select no matplotlib backend: they draw on a bare `Figure`, so they plot from a worker thread and leave the application's backend as it is
 - Generated plots are saved as PDF files without requiring GUI interaction
 
 ## Future Enhancements

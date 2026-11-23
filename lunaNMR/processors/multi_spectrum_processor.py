@@ -2051,6 +2051,33 @@ class MultiSpectrumProcessor:
 
 ## GM added
 
+def detected_peak_count(peak_rows) -> int:
+    """How many of a spectrum's per-peak rows the series marks detected in its tracking table."""
+    return sum(1 for row in peak_rows if isinstance(row, dict) and _stands_above_noise(row))
+
+
+def mean_over_peak_rows(peak_rows, key: str):
+    """The mean of `key` over the per-peak rows that carry a finite value, 0 when none does."""
+    values = [row[key] for row in peak_rows
+              if isinstance(row, dict) and row.get(key) is not None and np.isfinite(row[key])]
+    return sum(values) / len(values) if values else 0
+
+
+def spectrum_summary(result: Dict[str, Any]) -> Dict[str, Any]:
+    """What a series measured on one spectrum, from the per-peak rows of its result:
+    how many peaks it fitted, how many of them stand above the noise (and that share),
+    and the mean R² and S/N of the fits."""
+    rows = [row for row in result.get('integration_results') or [] if isinstance(row, dict)]
+    detected = detected_peak_count(rows)
+    return {
+        'total': len(rows),
+        'detected': detected,
+        'detection_rate': detected / len(rows) if rows else 0.0,
+        'mean_r_squared': mean_over_peak_rows(rows, 'r_squared'),
+        'mean_snr': mean_over_peak_rows(rows, 'snr'),
+    }
+
+
 class BatchResults:
     """Container for batch processing results with analysis capabilities"""
 

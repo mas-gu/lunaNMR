@@ -47,6 +47,13 @@ def save_outliers(json_path, exclusions: dict) -> None:
     sc.write_text(json.dumps(payload, indent=2))
 
 
+def _fitted_value(fit_entry: dict, key: str):
+    """The value a previous fit left under `key`, or None where it left none (a failed
+    fit stores NaN): the refit then starts from the data."""
+    value = fit_entry.get(key)
+    return float(value) if value is not None and np.isfinite(value) else None
+
+
 def refit_residue(fit_entry: dict, metadata: dict,
                   excluded_indices: Iterable[int],
                   error_method: str = "analytical") -> dict:
@@ -56,7 +63,7 @@ def refit_residue(fit_entry: dict, metadata: dict,
     exclusions live in the sidecar, never in the data record. Every other field is the
     refit's own, `success` and the window ones included, over the points it kept.
 
-    Initial guesses are warm-started from the prior fit's A/t2/C.
+    Initial guesses are warm-started from the prior fit's A/t2, where it has them.
     The dense `fit_curve` is regenerated over the original full time range so plots
     remain visually consistent after points are dropped.
     """
@@ -76,8 +83,8 @@ def refit_residue(fit_entry: dict, metadata: dict,
     n_bootstrap = int(metadata.get("n_bootstrap", 1000))
     result = fit_single_residue(
         x_fit, y_fit, fit_entry.get("residue", ""),
-        initial_A=float(fit_entry.get("A", 1.0)),
-        initial_t2=float(fit_entry.get("t2", 100.0)),
+        initial_A=_fitted_value(fit_entry, "A"),
+        initial_t2=_fitted_value(fit_entry, "t2"),
         # Not warm-started from the stored C: the baseline is fixed at zero, and
         # feeding a previous non-zero value back would pin the refit at that offset.
         initial_C=0.0,
@@ -111,9 +118,9 @@ def update_json_fit_entry(json_path, residue: str, new_fit_entry: dict) -> None:
 def update_tsv_row(tsv_path, residue: str, new_fit: dict, experiment_type: str) -> None:
     """Replace one Residue row in a fit_results.txt TSV.
 
-    The TSV is written by `fit_Tx_NMRRE.save_results` (or its multicore twin), with
-    the header `fit_Tx_NMRRE.results_columns`. The row is written under the file's own
-    header, one cell per column, from `fit_Tx_NMRRE.results_row`.
+    The TSV is written by `fit_Tx_NMRRE.save_results`, with the header
+    `fit_Tx_NMRRE.results_columns`. The row is written under the file's own header, one
+    cell per column, from `fit_Tx_NMRRE.results_row`: NaN cells for a refit that failed.
 
     Raises KeyError if the residue is absent, or if the header names a column the
     results row does not have.

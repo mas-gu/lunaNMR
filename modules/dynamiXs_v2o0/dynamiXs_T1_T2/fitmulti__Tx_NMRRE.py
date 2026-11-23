@@ -17,126 +17,28 @@ Features:
 import os
 
 import numpy as np
-from lmfit import Model
-# One definition of the fit conventions, shared with the single-core fitter.
+# One definition of the fit and its conventions, shared with the single-core fitter.
 try:
     from fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
-                              _is_reliable_t2, delay_window,
-                              fit_data_entry, measured_points, results_columns,
-                              results_file_from_json, results_row)
+                              fit_single_residue, read_relaxation_matrix, save_results,
+                              unfitted_residue)
     from fit_Tx_NMRRE import create_plots as plot_fit_results
+    from fit_Tx_NMRRE import save_fit_data_json as save_fits_as_json
 except ImportError:  # imported as dynamiXs_T1_T2.fitmulti__Tx_NMRRE (parent dir on path)
     from dynamiXs_T1_T2.fit_Tx_NMRRE import (DEGENERATE_T2_OVER_TMAX, FIT_BASELINE_BY_DEFAULT,
-                                             _is_reliable_t2,
-                                             delay_window, fit_data_entry,
-                                             measured_points, results_columns,
-                                             results_file_from_json, results_row)
+                                             fit_single_residue, read_relaxation_matrix,
+                                             save_results, unfitted_residue)
     from dynamiXs_T1_T2.fit_Tx_NMRRE import create_plots as plot_fit_results
-import pandas as pd
+    from dynamiXs_T1_T2.fit_Tx_NMRRE import save_fit_data_json as save_fits_as_json
 import multiprocessing
 from multiprocessing import cpu_count
-import json
 import time
-
-
-try:
-    from delay_parser import parse_delay_columns, require_delay_start
-except ImportError:  # imported as dynamiXs_T1_T2.fitmulti__Tx_NMRRE (parent dir on path)
-    from dynamiXs_T1_T2.delay_parser import parse_delay_columns, require_delay_start
-
-
-def exp_decay(x, A, t2, C=0.0):
-    """Mono-exponential decay with baseline offset: I(t) = A * exp(-t/t2) + C."""
-    return A * np.exp(-x / t2) + C
-
-
-def bootstrap_errors(x, y, model, params, n_bootstrap=1000, fit_baseline=None):
-    """
-    Classic residual bootstrap error estimation.
-
-    Uses simple residual resampling with replacement - the standard,
-    well-understood bootstrap approach for regression. Assumes homoscedastic
-    noise (constant variance), which is appropriate for NMR thermal noise.
-
-    Parameters
-    ----------
-    x : array
-        Time points
-    y : array
-        Signal intensities
-    model : lmfit.Model
-        Fitting model
-    params : lmfit.Parameters
-        Initial parameters
-    n_bootstrap : int
-        Number of bootstrap iterations (default: 1000)
-
-    Returns
-    -------
-    tuple : (A_error, t2_error)
-
-    Notes
-    -----
-    Algorithm:
-    1. Fit data to get y_fit and residuals
-    2. For each bootstrap iteration:
-       - Resample residuals WITH REPLACEMENT
-       - Create synthetic data: y_synthetic = y_fit + resampled_residuals
-       - Refit to get parameter estimates
-    3. Return std of bootstrap parameter distributions
-    """
-    # Initial fit (unweighted)
-    result = model.fit(y, params, x=x)
-    y_fit = result.best_fit
-    residuals = y - y_fit
-    n = len(residuals)
-
-    a_values = []
-    t2_values = []
-    c_values = []
-
-    for _ in range(n_bootstrap):
-        # Resample residuals WITH REPLACEMENT
-        resampled_indices = np.random.randint(0, n, size=n)
-        resampled_residuals = residuals[resampled_indices]
-
-        y_synthetic = y_fit + resampled_residuals
-
-        y_synthetic = np.maximum(y_synthetic, 1e-10)
-
-        # Refit (unweighted)
-        params_boot = model.make_params(
-            A=params['A'].value, t2=params['t2'].value, C=params['C'].value
-        )
-        params_boot['A'].min = 0
-        params_boot['t2'].min = 0
-        vary_c = params['C'].vary if fit_baseline is None else bool(fit_baseline)
-        params_boot['C'].set(vary=vary_c)
-
-        try:
-            res = model.fit(y_synthetic, params_boot, x=x)
-            if res.success:
-                a_values.append(res.params['A'].value)
-                t2_values.append(res.params['t2'].value)
-                c_values.append(res.params['C'].value)
-        except Exception:
-            continue
-
-    if len(a_values) < 10:
-        # Not enough successful fits, fall back to covariance estimate
-        a_err = result.params['A'].stderr if result.params['A'].stderr else np.nan
-        t2_err = result.params['t2'].stderr if result.params['t2'].stderr else np.nan
-        c_err = result.params['C'].stderr if result.params['C'].stderr else np.nan
-        return a_err, t2_err, c_err
-
-    return np.std(a_values), np.std(t2_values), np.std(c_values)
 
 
 def fit_single_residue_parallel(args):
     """
-    Wrapper function for parallel processing of single residue fitting.
-
-    Model: I(t) = A * exp(-t/t2) + C
+    fit_single_residue for the worker pool: its arguments in one tuple, the residue's
+    position added to its result, and an exception returned as a failed fit.
 
     The baseline convention travels IN `args`. A module-level global cannot work here:
     macOS spawns fresh workers that re-import this module, so each would read the value
@@ -161,114 +63,15 @@ def fit_single_residue_parallel(args):
         if idx % 10 == 0:
             print(f"Processing residue {idx+1}/{total}: {residue_name}")
 
-        x_all = np.asarray(x, dtype=float)
-        y_all = np.asarray(y, dtype=float)
-        x, y = measured_points(x_all, y_all)
-        n_free = 3 if fit_baseline else 2
-        # One point beyond the parameters: with none spare the fit is exact by
-        # construction and would report an error of zero, not an unknown one.
-        if len(y) <= n_free:
-            raise ValueError(f"{len(y)} measured points, need {n_free + 1}")
-
-        # Data-driven initial guesses (fixed A=5/t2=100 fail to converge when the
-        # amplitude or time-scale differ by orders of magnitude).
-        if initial_C is None:
-            initial_C = float(np.min(y))
-        if initial_A is None:
-            initial_A = float(np.max(y) - np.min(y)) or 1.0
-        if initial_t2 is None:
-            x_max = float(np.max(x))
-            initial_t2 = x_max / 2.0 if x_max > 0 else 1.0
-
-        model = Model(exp_decay)
-        if not fit_baseline:
-            initial_C = 0.0
-        params = model.make_params(A=initial_A, t2=initial_t2, C=initial_C)
-        params['A'].min = 0
-        params['t2'].min = 0
-        params['C'].set(vary=fit_baseline)
-
-        # Unweighted least squares fit
-        result = model.fit(y, params, x=x)
-
-        if not result.success:
-            print(f"Warning: Fit failed for residue {residue_name}")
-            return {
-                'residue': residue_name,
-                'A': np.nan,
-                't2': np.nan,
-                'C': np.nan,
-                'A_err': np.nan,
-                't2_err': np.nan,
-                'C_err': np.nan,
-                'success': False,
-                'idx': idx
-            }
-
-        a = result.params['A'].value
-        t2 = result.params['t2'].value
-        c = result.params['C'].value
-
-        # Error estimation based on selected method
-        if error_method == 'bootstrap':
-            a_err, t2_err, c_err = bootstrap_errors(x, y, model, params, n_bootstrap,
-                                                   fit_baseline=fit_baseline)
-        else:
-            # Analytical: use covariance matrix from lmfit
-            a_err = result.params['A'].stderr if result.params['A'].stderr else np.nan
-            t2_err = result.params['t2'].stderr if result.params['t2'].stderr else np.nan
-            c_err = result.params['C'].stderr if result.params['C'].stderr else np.nan
-        # lmfit reports no stderr both when the covariance is singular and when the residuals
-        # vanish, but those mean opposite things: an exact fit has ~zero uncertainty, a
-        # singular one has unknown uncertainty. Only the first is safe to call zero, and
-        # leaving it NaN drops the residue from every downstream table.
-        _resid = np.asarray(getattr(result, 'residual', []), float).ravel()
-        _scale = float(np.max(np.abs(np.asarray(y, float)))) if np.size(y) else 0.0
-        if _resid.size and _scale > 0 and float(np.sqrt(np.mean(_resid ** 2))) < 1e-9 * _scale:
-            a_err = 0.0 if not np.isfinite(a_err) else a_err
-            t2_err = 0.0 if not np.isfinite(t2_err) else t2_err
-        if not fit_baseline:
-            # Fixed, not unmeasured. NaN here propagates into the density input table and
-            # every residue is then dropped as "contains NaN".
-            c_err = 0.0
-
-        # A fit whose t2 exceeds 100x the longest delay has no measurable decay
-        # in the window (flat / no-signal / bad peak) -> unreliable, excluded.
-        reliable = _is_reliable_t2(t2, t2_err, x, amplitude=a, y=y)
-        window_ratio, window_marginal = delay_window(x, t2)
-
-        return {
-            'residue': residue_name,
-            'A': a,
-            't2': t2,
-            'C': c,
-            'A_err': a_err,
-            't2_err': t2_err,
-            'C_err': c_err,
-            'baseline_fixed': not fit_baseline,
-            'window_ratio': window_ratio,
-            'window_marginal': window_marginal,
-            'x': x_all,
-            'y': y_all,
-            'result': result,
-            'success': reliable,
-            'idx': idx
-        }
+        result = fit_single_residue(x, y, residue_name, initial_A, initial_t2, initial_C,
+                                    n_bootstrap, error_method, fit_baseline)
 
     except Exception as e:
         print(f"Error processing residue {residue_name}: {str(e)}")
-        return {
-            'residue': residue_name,
-            'A': np.nan,
-            't2': np.nan,
-            'C': np.nan,
-            'A_err': np.nan,
-            't2_err': np.nan,
-            'C_err': np.nan,
-            'success': False,
-            'error': str(e),
-            'idx': idx
-        }
+        result = {**unfitted_residue(residue_name, x, y, fit_baseline), 'error': str(e)}
+
+    result['idx'] = idx
+    return result
 
 
 def create_plots(results_list, output_prefix, n_plots_per_figure=20,
@@ -305,34 +108,10 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
                      experiment_type, time_units, signal_units)
 
 
-def save_results(results_list, output_file, experiment_type="T1"):
-    """
-    Save fitting results to text file
-
-    Parameters:
-    -----------
-    results_list : list
-        List of fitting results dictionaries
-    output_file : str
-        Output filename
-    experiment_type : str
-        Type of experiment for headers
-    """
-    with open(output_file, "w") as f:
-        f.write("\t".join(results_columns(experiment_type)) + "\n")
-        for result in results_list:
-            if result.get('success', False):
-                f.write("\t".join(results_row(result, experiment_type).values()) + "\n")
-            else:
-                f.write(
-                    f"{result['residue']}\tNaN\tNaN\tNaN\tNaN\tNaN\tNaN\tNo\tNaN\n"
-                )
-
-
 def save_fit_data_json(results_list, output_file, experiment_type, time_units,
                        signal_units, n_bootstrap, field_freq, results_file=None):
     """
-    Save complete fitting data as JSON for interactive visualization
+    Save the successful fits as JSON for interactive visualization
 
     Parameters:
     -----------
@@ -353,41 +132,13 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
     results_file : str, optional
         The run's results file, recorded relative to the JSON for a refit to update
     """
-    # Get time points from first successful result (same for all residues)
     successful_results = [r for r in results_list if r.get('success', False)]
     if not successful_results:
         print("Warning: No successful fits to save to JSON")
         return
 
-    time_points = successful_results[0]['x'].tolist()
-
-    # Build fit curve points (dense sampling for smooth plotting)
-    max_time = max(time_points)
-    fit_time_dense = np.linspace(0, max_time * 1.2, 100)
-
-    fits_data = [fit_data_entry(result, fit_time_dense) for result in successful_results]
-
-    output_data = {
-        'metadata': {
-            'experiment_type': experiment_type,
-            'field_freq': float(field_freq),
-            'time_units': time_units,
-            'signal_units': signal_units,
-            'n_bootstrap': n_bootstrap,
-            'n_residues': len(fits_data),
-            'time_points': [float(t) for t in time_points],
-            'results_file': (results_file_from_json(output_file, results_file)
-                             if results_file else None)
-        },
-        'fits': fits_data
-    }
-
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-
-    with open(output_file, 'w') as f:
-        json.dump(output_data, f, indent=2)
-
-    print(f"Saved JSON fit data to: {output_file}")
+    save_fits_as_json(successful_results, output_file, experiment_type, time_units,
+                      signal_units, n_bootstrap, field_freq, results_file=results_file)
 
 
 def run_analysis_with_params(params, progress_callback=None):
@@ -445,54 +196,7 @@ def run_analysis_with_params(params, progress_callback=None):
         print(f"Bootstrap iterations: {n_bootstrap}")
     print(f"Number of processes: {n_processes}")
 
-    # Load CSV using pandas to handle mixed data types
-    print("Loading data...")
-    raw_df = pd.read_csv(input_csv_file, header=None)
-
-    # Detect format: LunaNMR Fit Series vs simple DynamiXs format
-    # LunaNMR format has columns: Peak_Number, Assignment, Reference_X, Reference_Y, delay1, delay2, ...
-    # Simple format has columns: Residue, delay1, delay2, ...
-    header_row = raw_df.iloc[0].astype(str).tolist()
-
-    lunaNMR_columns = {'Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y'}
-    # Columns whose header carries no delay: reported so a spectrum cannot go
-    # missing from a series without anyone noticing.
-    dropped_columns = []
-    detected_lunaNMR_cols = [col for col in header_row if col in lunaNMR_columns]
-
-    if detected_lunaNMR_cols:
-        print(f"Detected LunaNMR Fit Series format (columns: {detected_lunaNMR_cols})")
-
-        delay_start_idx = require_delay_start(header_row, lunaNMR_columns, input_csv_file)
-
-        # Find the Assignment column index for residue names
-        assignment_idx = header_row.index('Assignment') if 'Assignment' in header_row else 1
-
-        print(f"  Using 'Assignment' column (index {assignment_idx}) for residue names")
-        print(f"  Delay columns start at index {delay_start_idx}")
-
-        residue_names = raw_df.iloc[1:, assignment_idx].to_numpy()  # Assignment column, skip header
-        # Parse delay columns - handles duplicates like "300_2" -> 300.0
-        delay_headers = raw_df.iloc[0, delay_start_idx:].tolist()
-        x, _keep, _dropped = parse_delay_columns(delay_headers)
-        dropped_columns.extend(_dropped)
-        y_data = raw_df.iloc[1:, delay_start_idx:].astype(float).to_numpy()[:, _keep]  # Intensity data
-    else:
-        # Simple DynamiXs format: first column is residue, rest are delays
-        print("Detected simple DynamiXs format")
-        residue_names = raw_df.iloc[1:, 0].to_numpy()  # Column 1 (residue names), skip header
-        # Parse delay columns - handles duplicates like "300_2" -> 300.0
-        delay_headers = raw_df.iloc[0, 1:].tolist()
-        x, _keep, _dropped = parse_delay_columns(delay_headers)
-        dropped_columns.extend(_dropped)
-        y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()[:, _keep]  # Values to fit (rows 2+, columns 2+)
-
-    valid_mask = np.array([not str(name).lower().startswith('dummy') for name in residue_names])
-    n_dummies = np.sum(~valid_mask)
-    if n_dummies > 0:
-        print(f"Excluding {n_dummies} dummy residue(s) from fitting")
-        residue_names = residue_names[valid_mask]
-        y_data = y_data[valid_mask]
+    residue_names, x, y_data, dropped_columns = read_relaxation_matrix(input_csv_file)
 
     total_residues = len(residue_names)
     print(f"Loaded {total_residues} residues with {len(x)} time points")
@@ -614,6 +318,7 @@ def run_analysis_with_params(params, progress_callback=None):
     return {
         'n_fitted': len(successful_fits),
         'dropped_columns': dropped_columns,
+        'n_excluded': len(failed_fits),
         'n_total': len(results_list),
         'results_file': results_txt_file,
         'json_file': json_file,

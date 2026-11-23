@@ -414,15 +414,17 @@ class TestSurvey:
         assert dummy.iloc[0]["verdict"] == "unusable"
         assert str(dummy.iloc[0]["reasons"]).strip()
 
-    def test_a_selection_does_not_restrict_the_survey(self, own_tidy, tmp_path):
-        """--survey is what produces a selection, so it cannot honour one."""
+    def test_a_survey_refuses_a_selection(self, own_tidy, tmp_path, capsys):
+        """--survey is what produces a selection, so it cannot honour one: --residues
+        with it is a usage error naming the flag, and nothing is surveyed."""
         from lunaNMR.cli import main
         sel = _selection_file(tmp_path, ["3LysH"])
         out = tmp_path / "survey"
         assert main(["kd", "--survey", "--input", str(own_tidy), "--out", str(out),
                      "--prefix", "P", "--p0", P0, "--conc", CONC,
-                     "--residues", str(sel)]) == 0
-        assert len(pd.read_csv(out / "data" / "P_survey.csv")) == DNAJA1_ROWS
+                     "--residues", str(sel)]) == 2
+        assert "--residues" in capsys.readouterr().err
+        assert not out.exists()
 
     def test_the_suggestion_file_round_trips_into_a_fit(self, own_tidy, tmp_path):
         """The suggested selection must be directly usable as --residues input."""

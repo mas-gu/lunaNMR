@@ -13,13 +13,15 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QComboBox, QMessageBox, QListWidget, QListWidgetItem,
     QTabWidget
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.components.matplotlib_widget import MatplotlibWidget
 from lunaNMR.gui.components.nmr_navigation_handler import NMRNavigationHandler
 from lunaNMR.gui.components.signed_contours import draw_signed_contours
+from lunaNMR.processors.multi_spectrum_processor import spectrum_summary
 from lunaNMR.utils.project_manager import lacks_fit_arrays, rebuild_fit_arrays, unrebuilt_fit
+from lunaNMR.gui.styles.quality_colors import peak_quality_label
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, FONT_SIZE_LARGE_HEADER, FONT_SIZE_MEDIUM_HEADER,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, FONT_SIZE_SMALL,
@@ -54,25 +56,21 @@ class SpectrumViewerDialog(BaseDialog):
             parent,
             spectrum_name="spectrum_001",
             spectrum_file_path="/path/to/spectrum.ft2",
-            result_data={'peaks': [...], 'avg_r_squared': 0.95}
+            result_data={'status': 'success', 'integration_results': [...]}
         )
         dialog.show()
         ```
     """
 
-    peak_selected = Signal(int)  # Emits peak index when selected
-
     def __init__(self, parent=None, spectrum_name: str = "",
-                 spectrum_file_path: str = "", result_data: Dict = None,
-                 series_processor=None):
+                 spectrum_file_path: str = "", result_data: Dict = None):
         """Initialize the spectrum viewer dialog.
 
         Args:
             parent: Parent widget
             spectrum_name: Name of spectrum being viewed
             spectrum_file_path: Path to NMR spectrum file
-            result_data: Result dictionary containing peaks, metrics, etc.
-            series_processor: Optional series processor for additional context
+            result_data: The spectrum's result in a series, with its per-peak rows
         """
         super().__init__(
             parent=parent,
@@ -84,18 +82,16 @@ class SpectrumViewerDialog(BaseDialog):
         self.spectrum_name = spectrum_name
         self.spectrum_file_path = spectrum_file_path
         self.result_data = result_data or {}
-        self.series_processor = series_processor
 
         # State variables
         self.integrator = None
         self.selected_peak_idx = None
-        self.fitted_peaks = []
+        self.fitted_peaks = self.result_data.get('integration_results') or []
         self.fitted_results = self.result_data.get('fitted_results', [])
 
         # Contour control values
         self.contour_levels = 20
         self.contour_min = 0.15
-        self.contour_increment = 1.2
 
         # Voigt analysis plotters (initialized in setup_ui)
         self.voigt_2d_plotter = None
@@ -171,10 +167,10 @@ class SpectrumViewerDialog(BaseDialog):
         # Quality info
         if self.result_data:
             status = self.result_data.get('status', 'Unknown')
-            detection_rate = self.result_data.get('detection_rate', 0)
-            avg_r2 = self.result_data.get('avg_r_squared', 0)
+            measured = spectrum_summary(self.result_data)
 
-            info_text = f"Status: {status} | Detection: {detection_rate:.1f}% | Avg R²: {avg_r2:.4f}"
+            info_text = (f"Status: {status} | Detection: {measured['detection_rate']:.1%} | "
+                         f"Mean R²: {measured['mean_r_squared']:.4f}")
             info_label = QLabel(info_text)
             info_label.setStyleSheet(f"""
                 QLabel {{
@@ -329,13 +325,6 @@ class SpectrumViewerDialog(BaseDialog):
         layer_layout.setContentsMargins(8, 3, 8, 3)
         layer_layout.setSpacing(15)
 
-        self.show_exp_3d = True
-        self.show_fit_3d = True
-        self.show_individual_3d = False
-        self.show_peak_labels_3d = False
-        self.show_resid_3d = False
-        self.limit_peak_display_3d = True
-
         self.exp_3d_checkbox = QCheckBox("Exp")
         self.exp_3d_checkbox.setChecked(True)
         self.exp_3d_checkbox.toggled.connect(self._on_toggle_exp_3d)
@@ -369,7 +358,6 @@ class SpectrumViewerDialog(BaseDialog):
         color_group.setStyleSheet(self._get_group_style())
         color_layout = QHBoxLayout()
 
-        self.color_scheme_3d = 'Clean'
         self.colormap_3d_combo = QComboBox()
         self.colormap_3d_combo.addItems(['Classic', 'Clean', 'Dark', 'Warm'])
         self.colormap_3d_combo.setCurrentText('Clean')
@@ -382,10 +370,6 @@ class SpectrumViewerDialog(BaseDialog):
         row1_layout.addWidget(color_group)
         row1_layout.addStretch()
         layout.addLayout(row1_layout)
-
-        # Keep residual mode and intensity scale state variables functional (hidden controls)
-        self.residual_mode_3d = 'separate'
-        self.intensity_scale_3d = 100
 
         # === Plot area ===
         plot_group = QGroupBox("3D Voigt Surface Analysis")
@@ -406,31 +390,26 @@ class SpectrumViewerDialog(BaseDialog):
     # === 3D Voigt Control Handlers (v0.9 main_gui.py:816-829) ===
     def _on_toggle_exp_3d(self, checked):
         """Toggle experimental layer visibility."""
-        self.show_exp_3d = checked
         if self.voigt_3d_plotter:
             self.voigt_3d_plotter.toggle_experimental(checked)
 
     def _on_toggle_fit_3d(self, checked):
         """Toggle fitted layer visibility."""
-        self.show_fit_3d = checked
         if self.voigt_3d_plotter:
             self.voigt_3d_plotter.toggle_fitted(checked)
 
     def _on_toggle_individual_3d(self, checked):
         """Toggle individual peaks visibility."""
-        self.show_individual_3d = checked
         if self.voigt_3d_plotter:
             self.voigt_3d_plotter.toggle_individual_peaks(checked)
 
     def _on_toggle_resid_3d(self, checked):
         """Toggle residuals visibility."""
-        self.show_resid_3d = checked
         if self.voigt_3d_plotter:
             self.voigt_3d_plotter.toggle_residuals(checked)
 
     def _on_toggle_limit_3d(self, checked):
         """Toggle peak extent limiting."""
-        self.limit_peak_display_3d = checked
         if self.voigt_3d_plotter:
             self.voigt_3d_plotter.toggle_peak_clipping(checked)
 
@@ -519,7 +498,6 @@ class SpectrumViewerDialog(BaseDialog):
         self.levels_spin.setRange(5, 100)
         self.levels_spin.setValue(self.contour_levels)
         self.levels_spin.setMaximumWidth(80)
-        self.levels_spin.valueChanged.connect(self._on_contour_changed)
         layout.addWidget(self.levels_spin)
 
         # Min level
@@ -530,18 +508,7 @@ class SpectrumViewerDialog(BaseDialog):
         self.min_spin.setSingleStep(0.002)
         self.min_spin.setDecimals(5)
         self.min_spin.setMaximumWidth(80)
-        self.min_spin.valueChanged.connect(self._on_contour_changed)
         layout.addWidget(self.min_spin)
-
-        # Increment
-        layout.addWidget(QLabel("Increment:"))
-        self.increment_spin = QDoubleSpinBox()
-        self.increment_spin.setRange(1.01, 2.0)
-        self.increment_spin.setValue(self.contour_increment)
-        self.increment_spin.setSingleStep(0.01)
-        self.increment_spin.setMaximumWidth(80)
-        self.increment_spin.valueChanged.connect(self._on_contour_changed)
-        layout.addWidget(self.increment_spin)
 
         layout.addStretch()
 
@@ -550,7 +517,6 @@ class SpectrumViewerDialog(BaseDialog):
         self.colormap_combo = QComboBox()
         self.colormap_combo.addItems(['viridis', 'plasma', 'inferno', 'magma', 'coolwarm', 'Blues', 'Reds'])
         self.colormap_combo.setMaximumWidth(100)
-        self.colormap_combo.currentTextChanged.connect(self._on_contour_changed)
         layout.addWidget(self.colormap_combo)
 
         refresh_btn = QPushButton("Refresh Plot")
@@ -632,12 +598,6 @@ class SpectrumViewerDialog(BaseDialog):
                 logger.error(f"Failed to load spectrum: {self.spectrum_file_path}")
                 return
 
-            self.fitted_peaks = self.result_data.get('integration_results', [])
-            if not self.fitted_peaks:
-                self.fitted_peaks = self.result_data.get('fitted_peaks', [])
-            if self.fitted_peaks is None:
-                self.fitted_peaks = []
-
             logger.info(f"Loaded spectrum with {len(self.fitted_peaks)} peaks")
 
         except Exception as e:
@@ -683,8 +643,7 @@ class SpectrumViewerDialog(BaseDialog):
 
             if self.fitted_peaks:
                 for i, peak in enumerate(self.fitted_peaks):
-                    pos_x = peak.get('pos_f2', peak.get('position_x', 0))
-                    pos_y = peak.get('pos_f1', peak.get('position_y', 0))
+                    pos_x, pos_y = self._fitted_position(peak)
 
                     color = 'red' if i == self.selected_peak_idx else 'blue'
                     size = 50 if i == self.selected_peak_idx else 30
@@ -705,16 +664,25 @@ class SpectrumViewerDialog(BaseDialog):
         except Exception as e:
             logger.error(f"Error updating contour plot: {e}")
 
+    @staticmethod
+    def _fitted_position(peak: Dict) -> tuple:
+        """(¹H, indirect) position in ppm a series' per-peak row was fitted at."""
+        return peak.get('ppm_x', 0), peak.get('ppm_y', 0)
+
+    @staticmethod
+    def _assignment(peak: Dict, peak_idx: int):
+        """The assignment a per-peak row carries, or a name from its place in the list."""
+        return peak.get('assignment', peak.get('Assignment', f'Peak_{peak_idx+1}'))
+
     def _populate_peak_list(self):
         """Populate the peak navigator list."""
         self.peak_list.clear()
 
         for i, peak in enumerate(self.fitted_peaks):
-            pos_x = peak.get('pos_f2', peak.get('position_x', 0))
-            pos_y = peak.get('pos_f1', peak.get('position_y', 0))
-            r2 = peak.get('r_squared', peak.get('fit_quality', 0))
+            pos_x, pos_y = self._fitted_position(peak)
+            r2 = peak.get('r_squared', 0)
 
-            label = f"Peak {i+1}: ({pos_x:.3f}, {pos_y:.2f}) R²={r2:.3f}"
+            label = f"{self._assignment(peak, i)}: ({pos_x:.3f}, {pos_y:.2f}) R²={r2:.3f}"
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, i)
             self.peak_list.addItem(item)
@@ -727,7 +695,6 @@ class SpectrumViewerDialog(BaseDialog):
         self._update_cross_sections(peak_idx)
         self._update_contour_plot()  # Refresh to highlight selected peak
         self._update_voigt_analysis(peak_idx)  # Update Voigt analysis plots
-        self.peak_selected.emit(peak_idx)
 
     def _show_peak_info(self, peak_idx: int):
         """Display info for selected peak."""
@@ -736,20 +703,22 @@ class SpectrumViewerDialog(BaseDialog):
             return
 
         peak = self.fitted_peaks[peak_idx]
+        pos_x, pos_y = self._fitted_position(peak)
 
-        info = f"Peak {peak_idx + 1}\n"
+        info = f"{self._assignment(peak, peak_idx)}\n"
         info += "-" * 20 + "\n"
-        info += f"Position F2 (¹H): {peak.get('pos_f2', 'N/A'):.4f} ppm\n"
-        info += f"Position F1: {peak.get('pos_f1', 'N/A'):.2f} ppm\n"
-        info += f"Intensity: {peak.get('intensity', 'N/A'):.2e}\n"
-        info += f"Volume: {peak.get('volume', 'N/A'):.2e}\n"
-        info += f"R²: {peak.get('r_squared', 'N/A'):.4f}\n"
-        info += f"SNR: {peak.get('snr', 'N/A'):.2f}\n"
+        info += f"Position F2 (¹H): {pos_x:.4f} ppm\n"
+        info += f"Position F1: {pos_y:.2f} ppm\n"
+        info += f"Height: {peak.get('height', 0):.2e}\n"
+        info += f"Volume: {peak.get('volume', 0):.2e}\n"
+        info += f"R²: {peak.get('r_squared', 0):.4f}\n"
+        info += f"S/N: {peak.get('snr', 0):.2f}\n"
+        info += f"Quality: {peak_quality_label(peak) or 'Unknown'}\n"
 
-        if 'sigma_x' in peak:
-            info += f"σx: {peak['sigma_x']:.4f}\n"
-        if 'sigma_y' in peak:
-            info += f"σy: {peak['sigma_y']:.4f}\n"
+        if 'lw_x' in peak:
+            info += f"Linewidth F2: {peak['lw_x']:.4f} ppm\n"
+        if 'lw_y' in peak:
+            info += f"Linewidth F1: {peak['lw_y']:.3f} ppm\n"
 
         self.peak_info_label.setText(info)
 
@@ -759,8 +728,7 @@ class SpectrumViewerDialog(BaseDialog):
             return
 
         peak = self.fitted_peaks[peak_idx]
-        pos_x = peak.get('pos_f2', peak.get('position_x', 0))
-        pos_y = peak.get('pos_f1', peak.get('position_y', 0))
+        pos_x, pos_y = self._fitted_position(peak)
 
         try:
             data = self.integrator.nmr_data
@@ -823,14 +791,6 @@ class SpectrumViewerDialog(BaseDialog):
         self._update_contour_plot()
         self._update_voigt_analysis(self.selected_peak_idx)
 
-    def _on_contour_changed(self):
-        """Handle contour parameter changes."""
-        self.contour_levels = self.levels_spin.value()
-        self.contour_min = self.min_spin.value()
-        self.contour_increment = self.increment_spin.value()
-        # Don't auto-update to avoid performance issues during dragging
-        # User can click Refresh Plot
-
     def _export_plot(self):
         """Export the contour plot."""
         from PySide6.QtWidgets import QFileDialog
@@ -868,7 +828,7 @@ class SpectrumViewerDialog(BaseDialog):
             return
 
         peak = self.fitted_peaks[peak_idx]
-        assignment = peak.get('assignment', peak.get('Assignment', f'Peak_{peak_idx+1}'))
+        assignment = self._assignment(peak, peak_idx)
 
         # Find stored Voigt result with full analysis data
         stored_result = self._find_stored_voigt_result(assignment)
@@ -936,9 +896,7 @@ class SpectrumViewerDialog(BaseDialog):
             for result in integration_results:
                 result_assignment = result.get('assignment') or result.get('Assignment')
                 if result_assignment == assignment:
-                    r_squared = (result.get('r_squared') or
-                                result.get('R_Squared') or
-                                result.get('avg_r_squared') or 0)
+                    r_squared = result.get('r_squared') or 0
                     logger.debug(f"Found integration_results Voigt result for {assignment}: R²={r_squared:.3f}")
                     return result
 
@@ -946,9 +904,7 @@ class SpectrumViewerDialog(BaseDialog):
             for result in self.fitted_results:
                 result_assignment = result.get('assignment') or result.get('Assignment')
                 if result_assignment == assignment:
-                    r_squared = (result.get('r_squared') or
-                                result.get('R_Squared') or
-                                result.get('avg_r_squared') or 0)
+                    r_squared = result.get('r_squared') or 0
                     logger.debug(f"Found fitted_results Voigt result for {assignment}: R²={r_squared:.3f}")
                     return result
 
@@ -973,21 +929,6 @@ class SpectrumViewerDialog(BaseDialog):
         """Handle color scheme change for 3D Voigt plot.
 
         Based on v0.9 _on_color_scheme_change_3d() (main_gui.py:829-837).
-        Maps scheme names (Classic, Clean, Dark, Warm) to matplotlib colormaps.
         """
-        # Map v0.9 color scheme names to matplotlib colormaps
-        scheme_map = {
-            'Classic': 'viridis',
-            'Clean': 'RdBu_r',
-            'Dark': 'inferno',
-            'Warm': 'plasma'
-        }
-        colormap = scheme_map.get(scheme, 'viridis')
-
-        self.color_scheme_3d = scheme
-        if self.voigt_3d_plotter and hasattr(self.voigt_3d_plotter, 'current_result'):
-            if self.voigt_3d_plotter.current_result:
-                self.voigt_3d_plotter.plot_voigt_analysis_3d(
-                    self.voigt_3d_plotter.current_result,
-                    colormap=colormap
-                )
+        if self.voigt_3d_plotter:
+            self.voigt_3d_plotter.set_color_scheme(scheme)

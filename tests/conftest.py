@@ -1,4 +1,4 @@
-# ABOUTME: Shared pytest fixtures for the lunaNMR test suite: a short real DNAJA1 titration
+# ABOUTME: Shared pytest fixtures for the lunaNMR test suite: a short real DNAJA1 titration (and a bundle of it)
 # ABOUTME: and a two-point 13C methyl T2 series, each once per session through `lunaNMR series`; a series rebuilt from a tidy CSV.
 
 import json
@@ -33,6 +33,17 @@ def dnaja1_titration_series(tmp_path_factory):
     assert code == 0
     (root / "summary.json").write_text(summary.getvalue())
     return root / "out"
+
+
+@pytest.fixture(scope="session")
+def dnaja1_series_bundle(dnaja1_titration_series, tmp_path_factory):
+    """A project bundle holding the 3-point DNAJA1 titration as its series 'DNAJA1'."""
+    import shutil
+    from lunaNMR.cli import main
+    root = tmp_path_factory.mktemp("dnaja1_bundle")
+    shutil.copytree(dnaja1_titration_series, root / "run" / "DNAJA1")
+    assert main(["project", "build", str(root / "run"), "--out", str(root / "P.lunaNMR")]) == 0
+    return root / "P.lunaNMR"
 
 
 @pytest.fixture(scope="session")

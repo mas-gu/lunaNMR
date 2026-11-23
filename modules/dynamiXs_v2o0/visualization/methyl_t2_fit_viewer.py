@@ -3,7 +3,6 @@
 
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -31,6 +30,7 @@ from gui_components import (
     create_primary_button, create_secondary_button, create_label,
     get_font, show_info, show_error, show_warning,
 )
+from residue_order import residue_sort_key
 
 # Refit helpers shared with the mono-exp viewer (sidecar IO + JSON updater).
 sys.path.insert(0, str(Path(__file__).parent.parent / "dynamiXs_T1_T2"))
@@ -336,7 +336,7 @@ class MethylT2FitViewer(QMainWindow):
                 self._populate_residue_list([])
                 return
 
-            self.available_residues = sorted(residues_set, key=self._residue_sort_key)
+            self.available_residues = sorted(residues_set, key=residue_sort_key)
             self._populate_residue_list(self.available_residues)
             if not silent:
                 show_info(self, "Loaded", f"{len(self.data)} dataset(s), "
@@ -407,11 +407,6 @@ class MethylT2FitViewer(QMainWindow):
                     break
 
         self._update_plot()
-
-    def _residue_sort_key(self, name):
-        s = str(name)
-        m = re.match(r"^\D*(\d+)", s)
-        return (int(m.group(1)), s) if m else (10**9, s)
 
     def _populate_residue_list(self, residues):
         # Block itemChanged signals during repopulation to avoid spurious renders.

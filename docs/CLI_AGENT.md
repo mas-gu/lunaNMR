@@ -267,8 +267,8 @@ proposes, a human disposes, and only then is a Kd reported.
 back. Trailing comments are evidence, never exclusions. It lives **beside the input CSV**,
 not in `--out`, so a different `--out` cannot lose it; `--selection` overrides. Re-running
 `--survey` MERGES: human decisions survive, evidence refreshes, disagreements are marked
-`[kept]`/`[dropped]` and never re-suggested. `--observable` and `--bootstrap` belong to
-the fit (step 3): with `--survey` they are a usage error (exit 2). So is `--selection`
+`[kept]`/`[dropped]` and never re-suggested. `--observable`, `--bootstrap` and `--residues`
+belong to the fit (step 3): with `--survey` they are a usage error (exit 2). So is `--selection`
 without `--survey`: a fit reads its residues from `--residues`.
 
 **Output layout.** `--out` holds `*.pdf` and `*_kd_results.txt`; every CSV and JSON is in

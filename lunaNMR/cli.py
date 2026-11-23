@@ -554,7 +554,8 @@ def _validate_kd(parser, args):
     # A survey judges every residue on both observables and estimates no fit errors.
     if args.survey:
         fit_only = [flag for flag, value in (('--observable', args.observable),
-                                             ('--bootstrap', args.bootstrap))
+                                             ('--bootstrap', args.bootstrap),
+                                             ('--residues', args.residues))
                     if value is not None]
         if fit_only:
             parser.error(f"--survey does not read {' or '.join(fit_only)}: they set what "
@@ -753,10 +754,9 @@ def _discover_spectra(spectra, extensions=None):
 def _default_series_params(parallel=False):
     """Default series/voigt parameters, mirroring the GUI's getattr fallbacks.
 
-    The GUI assembles the detection, gui and processing groups from the main window with
-    these same defaults (gui/dialogs/series_integration_dialog.py::_get_voigt_params); a
-    headless run just uses the defaults directly. `parallel` enables the two-pass
-    parallel processor.
+    The GUI assembles this nested dict from the main window with these same defaults
+    (gui/dialogs/series_integration_dialog.py::_get_voigt_params); a headless run
+    just uses the defaults directly. `parallel` enables the two-pass parallel processor.
     """
     from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM
     return {
@@ -778,12 +778,6 @@ def _default_series_params(parallel=False):
             # Unmatched peaks near listed ones, added as dummy_ peaks on the first
             # spectrum and fitted at every point
             'auto_add_dummy_peaks': True,
-        },
-        # Accepted from --params; nothing on the series path reads them
-        'fitting_params': {
-            'max_iterations': 1000,
-            'fitting_window_x': 0.2,
-            'fitting_window_y': 2.0,
         },
         'processing_options': {
             'use_parallel_processing': parallel,
@@ -939,6 +933,10 @@ _SERIES_PARAMS_WITHOUT_EFFECT = {
     ('gui_params', 'max_peaks_fit'): 'only a 1D parameter search, which nothing calls, reads it',
     ('gui_params', 'max_optimization_iterations'): 'only a 1D parameter search, which nothing calls, reads it',
     ('fitting_params', 'min_r_squared'): 'it is stored and never read',
+    ('fitting_params', 'fitting_window_x'): 'the fit region is the PS2D radii; nothing reads it',
+    ('fitting_params', 'fitting_window_y'): 'the fit region is the PS2D radii; nothing reads it',
+    ('fitting_params', 'max_iterations'):
+        "the iteration limit is the PS2D configuration's; nothing reads it",
     ('processing_options', 'use_global_optimization'): 'the series always runs without it',
     ('gui_params', 'use_parallel_processing'): 'it is set by --parallel',
     ('processing_options', 'use_parallel_processing'): 'it is set by --parallel',
@@ -962,6 +960,11 @@ def _merge_series_params(defaults, overrides, path):
         raise ValueError(f"{path}: expected a JSON object of parameter sections, "
                          f"got {type(overrides).__name__}")
     for section, values in overrides.items():
+        for key in values if isinstance(values, dict) else ():
+            if (section, key) in _SERIES_PARAMS_WITHOUT_EFFECT:
+                raise ValueError(
+                    f"{path}: {section}.{key} has no effect on a series run "
+                    f"({_SERIES_PARAMS_WITHOUT_EFFECT[section, key]}); remove it")
         if section not in merged:
             close = difflib.get_close_matches(section, merged, n=1)
             raise ValueError(f"{path}: unknown parameter section {section!r}"
@@ -973,10 +976,6 @@ def _merge_series_params(defaults, overrides, path):
         accepted = [k for k in merged[section]
                     if (section, k) not in _SERIES_PARAMS_WITHOUT_EFFECT]
         for key, value in values.items():
-            if (section, key) in _SERIES_PARAMS_WITHOUT_EFFECT:
-                raise ValueError(
-                    f"{path}: {section}.{key} has no effect on a series run "
-                    f"({_SERIES_PARAMS_WITHOUT_EFFECT[section, key]}); remove it")
             if key not in merged[section]:
                 close = difflib.get_close_matches(key, accepted, n=1)
                 raise ValueError(

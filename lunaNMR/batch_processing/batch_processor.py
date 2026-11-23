@@ -52,8 +52,7 @@ class BatchProcessor:
         defaults = ConfigManager().default_config
         self.config = {
             **defaults['processing'],
-            'max_iterations': 1000,                    # Curve fitting max iterations
-            # Search/fitting window overrides; without them a spectrum is fitted with
+            # Search window overrides; without them a spectrum is fitted with
             # the windows the GUI's Fit Spectrum uses
             'processing_parameters': {},
             'file_handling': defaults['file_handling'],
@@ -71,10 +70,6 @@ class BatchProcessor:
                     self.config['quality_threshold'] = processing_config['quality_threshold']
                 if 'skip_on_error' in processing_config:
                     self.config['skip_on_error'] = processing_config['skip_on_error']
-                if 'max_iterations' in processing_config:
-                    self.config['max_iterations'] = processing_config['max_iterations']
-                if 'max_iter' in processing_config:
-                    self.config['max_iterations'] = processing_config['max_iter']
 
             if 'processing_parameters' in config:
                 self.config['processing_parameters'].update(config['processing_parameters'])
@@ -101,9 +96,6 @@ class BatchProcessor:
 
         self.integrator = EnhancedVoigtIntegrator()
 
-        max_iter = self.config.get('max_iterations', 1000)
-        self.logger.info(f"Configured max_iterations: {max_iter}")
-
         proc_param_config = self.config.get('processing_parameters', {})
 
         search_window_x = proc_param_config.get('search_window_x')
@@ -116,22 +108,6 @@ class BatchProcessor:
                 )
             except Exception as exc:
                 self.logger.warning(f"Unable to apply search window overrides: {exc}")
-
-        fitting_window_x = proc_param_config.get('fitting_window_x')
-        if fitting_window_x is not None:
-            try:
-                window_x_value = float(fitting_window_x)
-                self.logger.info(f"Configured fitting window X: ±{window_x_value} ppm")
-            except (TypeError, ValueError) as exc:
-                self.logger.warning(f"Invalid fitting_window_x override ({fitting_window_x}): {exc}")
-
-        fitting_window_y = proc_param_config.get('fitting_window_y')
-        if fitting_window_y is not None:
-            try:
-                window_y_value = float(fitting_window_y)
-                self.logger.info(f"Configured fitting window Y: ±{window_y_value} ppm")
-            except (TypeError, ValueError) as exc:
-                self.logger.warning(f"Invalid fitting_window_y override ({fitting_window_y}): {exc}")
 
         self.logger.info("Batch processor initialized")
 

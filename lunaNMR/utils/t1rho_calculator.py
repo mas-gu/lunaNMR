@@ -4,8 +4,12 @@
 import numpy as np
 import pandas as pd
 
+from lunaNMR.utils.residue_order import residue_sort_key
 
-# 15N/1H gyromagnetic ratio factor (15N frequency = 1H frequency / this factor)
+
+# 1H/15N reference-frequency ratio, 1 / Xi(15N) with Xi = 0.101329118 (liquid NH3 scale):
+# the 15N frequency a ppm offset is converted with = 1H frequency / this factor.
+# Not gamma_H / gamma_N of the bare nuclei (9.862), which the spectral-density physics uses.
 N15_GAMMA_RATIO = 9.869
 
 
@@ -130,7 +134,7 @@ def calculate_T2_from_T1rho(
     results = []
     unmatched = []
 
-    for residue in sorted(common_residues):
+    for residue in sorted(common_residues, key=residue_sort_key):
         r1_row = r1_data[r1_data['residue'] == residue].iloc[0]
         r1rho_row = r1rho_data[r1rho_data['residue'] == residue].iloc[0]
 

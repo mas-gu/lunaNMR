@@ -9,19 +9,49 @@ from PySide6.QtWidgets import (
     QGroupBox, QLineEdit, QComboBox, QTreeWidget, QTreeWidgetItem,
     QHeaderView, QMessageBox
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
+from lunaNMR.gui.dialogs.spectrum_files import series_data_folder, series_spectrum_file
+from lunaNMR.gui.dialogs.spectrum_viewer_dialog import SpectrumViewerDialog
+from lunaNMR.processors.multi_spectrum_processor import spectrum_summary
 from lunaNMR.gui.styles.design_system import (
     SPACING_SM, SPACING_MD, SPACING_LG,
     FONT_SIZE_BODY, FONT_SIZE_SECTION_LABEL, PRIMARY_TEXT, PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
-    INFO_BLUE,
+    INFO_BLUE, SUCCESS_GREEN, WARNING_ORANGE, ERROR_RED,
     FRAME_BG_COLOR
 )
 
 logger = logging.getLogger(__name__)
+
+COLUMNS = ["Status", "Spectrum", "Detected", "Total", "Detection Rate",
+           "Mean R²", "Mean S/N", "Spectrum score"]
+STATUS, NAME, DETECTED, TOTAL, DETECTION_RATE, MEAN_R_SQUARED, MEAN_SNR, SCORE = range(len(COLUMNS))
+
+# The row tint of each band of the per-spectrum score; a Poor spectrum's row is left plain.
+SCORE_BAND_COLORS = {
+    "Excellent": SUCCESS_GREEN,
+    "Good": INFO_BLUE,
+    "Fair": WARNING_ORANGE,
+    "Failed": ERROR_RED,
+}
+
+
+class SpectrumRow(QTreeWidgetItem):
+    """A row of the spectrum list. A column holding a number is sorted by that number,
+    kept in the cell's user data, and not by the text it is shown as."""
+
+    def __lt__(self, other):
+        column = self.treeWidget().sortColumn()
+        mine, theirs = self.data(column, Qt.UserRole), other.data(column, Qt.UserRole)
+        if isinstance(mine, (int, float)) and isinstance(theirs, (int, float)):
+            return mine < theirs
+        # The text is compared here: QTreeWidgetItem's own comparison, called from
+        # Python, dispatches back to this method and never returns.
+        return self.text(column) < other.text(column)
 
 
 class SpectrumBrowserDialog(BaseDialog):
@@ -30,33 +60,32 @@ class SpectrumBrowserDialog(BaseDialog):
     This is a Qt port of the Tkinter SpectrumBrowserDialog from spectrum_browser.py.
 
     Features:
-        - List of all spectra in series with status and quality info
-        - Search and filter by name, quality, status
+        - List of all spectra in series with status, detection, mean R², mean S/N
+          and the per-spectrum score computed from those three
+        - Search and filter by name, spectrum score, status
         - Sort by any column
         - Double-click to open detailed spectrum viewer
-        - Quality indicators with color coding
+        - Rows tinted by the band of their spectrum score
+
+    The spectrum score rates a spectrum of a series. It is not a fit's quality label,
+    which comes from fit_quality_label and is read from each fit.
 
     Based on v0.9 SpectrumBrowserDialog (spectrum_browser.py:116-478)
 
     Example:
         ```python
-        dialog = SpectrumBrowserDialog(parent, batch_results, series_processor)
-        if dialog.exec():
-            selected = dialog.selected_spectrum
+        dialog = SpectrumBrowserDialog(parent, batch_results)
+        dialog.show()
         ```
     """
 
-    spectrum_selected = Signal(str)  # Emits spectrum name when selected
-
-    def __init__(self, parent=None, batch_results=None, series_processor=None,
-                 original_data_folder=None):
+    def __init__(self, parent=None, batch_results=None, original_data_folder=None):
         """Initialize the spectrum browser dialog.
 
         Args:
             parent: Parent widget
             batch_results: BatchResults object containing series processing results
-            series_processor: MultiSpectrumProcessor instance
-            original_data_folder: Path to original data folder
+            original_data_folder: Folder of the spectra, for a series that records none
         """
         super().__init__(
             parent=parent,
@@ -66,12 +95,8 @@ class SpectrumBrowserDialog(BaseDialog):
         )
 
         self.batch_results = batch_results
-        self.series_processor = series_processor
         self.original_data_folder = original_data_folder
         self.selected_spectrum = None
-
-        self.sort_column = 1  # Default sort by spectrum name
-        self.sort_ascending = True
 
         self.setup_ui()
 
@@ -109,7 +134,9 @@ class SpectrumBrowserDialog(BaseDialog):
         # Summary info
         if self.batch_results and hasattr(self.batch_results, 'get_summary'):
             summary = self.batch_results.get_summary()
-            info_text = f"Series: {summary.get('total_spectra', 0)} spectra, "
+            series_name = (getattr(self.batch_results, 'metadata', None) or {}).get('series_name')
+            info_text = f"Series '{series_name}': " if series_name else "Series: "
+            info_text += f"{summary.get('total_spectra', 0)} spectra, "
             info_text += f"{summary.get('successful', 0)} successful "
             info_text += f"({summary.get('success_rate', 0):.1f}%)"
             info_label = QLabel(info_text)
@@ -142,7 +169,7 @@ class SpectrumBrowserDialog(BaseDialog):
         Returns:
             QGroupBox containing filter controls
         """
-        group = QGroupBox("Filter & Search")
+        group = QGroupBox("Filter && Search")
         group.setStyleSheet(f"""
             QGroupBox {{
                 font-size: {FONT_SIZE_BODY}pt;
@@ -174,13 +201,13 @@ class SpectrumBrowserDialog(BaseDialog):
 
         layout.addSpacing(SPACING_MD)
 
-        # Quality filter
-        layout.addWidget(QLabel("Quality:"))
-        self.quality_filter = QComboBox()
-        self.quality_filter.addItems(["All", "Excellent", "Good", "Fair", "Poor", "Failed"])
-        self.quality_filter.setMaximumWidth(120)
-        self.quality_filter.currentTextChanged.connect(self.filter_spectra)
-        layout.addWidget(self.quality_filter)
+        # Spectrum score filter
+        layout.addWidget(QLabel("Spectrum score:"))
+        self.score_filter = QComboBox()
+        self.score_filter.addItems(["All", "Excellent", "Good", "Fair", "Poor", "Failed"])
+        self.score_filter.setMaximumWidth(120)
+        self.score_filter.currentTextChanged.connect(self.filter_spectra)
+        layout.addWidget(self.score_filter)
 
         layout.addSpacing(SPACING_MD)
 
@@ -226,23 +253,14 @@ class SpectrumBrowserDialog(BaseDialog):
         layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels([
-            "Status", "Spectrum", "Type", "Detected", "Total",
-            "Detection Rate", "Quality", "Processing Time"
-        ])
+        self.tree.setHeaderLabels(COLUMNS)
 
-        header = self.tree.header()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Status
-        header.setSectionResizeMode(1, QHeaderView.Stretch)  # Spectrum name
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Type
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Detected
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Total
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Detection Rate
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Quality
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # Processing Time
+        # Every column as wide as its content, so that a spectrum's name is never cut
+        self.tree.header().setSectionResizeMode(QHeaderView.ResizeToContents)
 
+        self.tree.setRootIsDecorated(False)
         self.tree.setSortingEnabled(True)
-        self.tree.sortByColumn(1, Qt.AscendingOrder)
+        self.tree.sortByColumn(NAME, Qt.AscendingOrder)
 
         self.tree.itemDoubleClicked.connect(self.on_spectrum_double_click)
         self.tree.itemClicked.connect(self.on_spectrum_select)
@@ -366,94 +384,73 @@ class SpectrumBrowserDialog(BaseDialog):
             return
 
         for spectrum_name, result in self.batch_results.results.items():
-            quality_score = self.calculate_quality_score(result)
-            quality_text = self.get_quality_text(quality_score)
+            summary = spectrum_summary(result)
+            score = self.spectrum_score(summary)
+            band = self.score_band(score)
 
             # Status icon
             status_icon = "✓" if result.get('status') == 'success' else "✗"
 
-            # Spectrum type
-            spectrum_type = "REF" if result.get('is_reference', False) else "STD"
-
-            # Processing time
-            proc_time = result.get('processing_time', 0)
-            proc_time_str = f"{proc_time:.2f}s" if proc_time else "N/A"
-
-            # Detection rate
-            detection_rate = result.get('detection_rate', 0)
-
-            item = QTreeWidgetItem([
+            item = SpectrumRow([
                 status_icon,
                 spectrum_name,
-                spectrum_type,
-                str(result.get('detected_peaks', 0)),
-                str(result.get('total_peaks', 0)),
-                f"{detection_rate:.1f}%",
-                quality_text,
-                proc_time_str
+                str(summary['detected']),
+                str(summary['total']),
+                f"{summary['detection_rate']:.1%}",
+                f"{summary['mean_r_squared']:.4f}",
+                f"{summary['mean_snr']:.1f}",
+                f"{score:.0f} ({band})"
             ])
 
-            item.setData(0, Qt.UserRole, result)
-            item.setData(1, Qt.UserRole, spectrum_name)
+            item.setData(NAME, Qt.UserRole, spectrum_name)
+            item.setData(DETECTED, Qt.UserRole, summary['detected'])
+            item.setData(TOTAL, Qt.UserRole, summary['total'])
+            item.setData(DETECTION_RATE, Qt.UserRole, summary['detection_rate'])
+            item.setData(MEAN_R_SQUARED, Qt.UserRole, summary['mean_r_squared'])
+            item.setData(MEAN_SNR, Qt.UserRole, summary['mean_snr'])
+            item.setData(SCORE, Qt.UserRole, score)
 
-            # Color coding based on quality and status
-            if result.get('status') == 'failed':
-                item.setBackground(0, Qt.red)
+            # Row tint by the band of the spectrum score
+            if band in SCORE_BAND_COLORS:
+                tint = QColor(SCORE_BAND_COLORS[band]).lighter(170)
                 for col in range(self.tree.columnCount()):
-                    item.setBackground(col, Qt.lightGray)
-            elif quality_score >= 90:
-                for col in range(self.tree.columnCount()):
-                    item.setBackground(col, Qt.green)
-            elif quality_score >= 70:
-                for col in range(self.tree.columnCount()):
-                    item.setBackground(col, Qt.cyan)
-            elif quality_score >= 50:
-                for col in range(self.tree.columnCount()):
-                    item.setBackground(col, Qt.yellow)
+                    item.setBackground(col, tint)
 
             self.tree.addTopLevelItem(item)
 
         logger.debug(f"Populated spectrum list with {self.tree.topLevelItemCount()} items")
 
-    def calculate_quality_score(self, result: Dict) -> float:
-        """Calculate quality score for a spectrum result.
+    def spectrum_score(self, summary: Dict) -> float:
+        """The score of a spectrum of the series, from what the series measured on it.
 
         Based on v0.9 calculate_quality_score() (spectrum_browser.py:301-325)
 
         Args:
-            result: Result dictionary for a spectrum
+            summary: spectrum_summary of the spectrum's result
 
         Returns:
-            Quality score from 0-100
+            Spectrum score from 0-100
         """
-        if result.get('status') == 'failed':
-            return 0
-
-        # Weighted scoring based on different metrics
-        detection_rate = result.get('detection_rate', 0)
-        avg_r_squared = result.get('avg_r_squared', 0)
-        avg_snr = result.get('avg_snr', 0)
-
-        # Detection rate: 40% weight
-        detection_score = detection_rate * 0.4
+        # Detection rate: 40% weight (scale 0-1 to 0-100)
+        detection_score = summary['detection_rate'] * 100 * 0.4
 
         # R-squared: 40% weight (scale 0-1 to 0-100)
-        r_squared_score = avg_r_squared * 100 * 0.4
+        r_squared_score = summary['mean_r_squared'] * 100 * 0.4
 
         # SNR: 20% weight (cap at 10 for 100% score)
-        snr_score = min(avg_snr / 10, 1.0) * 100 * 0.2
+        snr_score = min(summary['mean_snr'] / 10, 1.0) * 100 * 0.2
 
         total_score = detection_score + r_squared_score + snr_score
         return min(total_score, 100)
 
-    def get_quality_text(self, score: float) -> str:
-        """Convert quality score to text label.
+    def score_band(self, score: float) -> str:
+        """The band a spectrum score falls in.
 
         Args:
-            score: Quality score (0-100)
+            score: Spectrum score (0-100)
 
         Returns:
-            Quality label string
+            Band name
         """
         if score >= 90:
             return "Excellent"
@@ -472,23 +469,23 @@ class SpectrumBrowserDialog(BaseDialog):
         Based on v0.9 filter_spectra() (spectrum_browser.py:327-380)
         """
         search_text = self.search_edit.text().lower()
-        quality_filter = self.quality_filter.currentText()
+        score_filter = self.score_filter.currentText()
         status_filter = self.status_filter.currentText()
 
         # Show/hide items based on filters
         for i in range(self.tree.topLevelItemCount()):
             item = self.tree.topLevelItem(i)
-            spectrum_name = item.text(1).lower()
-            quality = item.text(6)
-            status = "Success" if item.text(0) == "✓" else "Failed"
+            spectrum_name = item.text(NAME).lower()
+            band = self.score_band(item.data(SCORE, Qt.UserRole))
+            status = "Success" if item.text(STATUS) == "✓" else "Failed"
 
             show = True
 
             if search_text and search_text not in spectrum_name:
                 show = False
 
-            # Quality filter
-            if quality_filter != "All" and quality != quality_filter:
+            # Spectrum score filter
+            if score_filter != "All" and band != score_filter:
                 show = False
 
             # Status filter
@@ -504,7 +501,7 @@ class SpectrumBrowserDialog(BaseDialog):
             item: Selected tree item
             column: Column that was clicked
         """
-        spectrum_name = item.data(1, Qt.UserRole)
+        spectrum_name = item.data(NAME, Qt.UserRole)
         self.selected_spectrum = spectrum_name
         logger.debug(f"Selected spectrum: {spectrum_name}")
 
@@ -515,13 +512,11 @@ class SpectrumBrowserDialog(BaseDialog):
             item: Double-clicked tree item
             column: Column that was clicked
         """
-        self.selected_spectrum = item.data(1, Qt.UserRole)
+        self.selected_spectrum = item.data(NAME, Qt.UserRole)
         self.open_spectrum_viewer()
 
     def open_spectrum_viewer(self):
         """Open detailed spectrum viewer for selected spectrum."""
-        from .spectrum_viewer_dialog import SpectrumViewerDialog
-
         if not self.selected_spectrum:
             QMessageBox.warning(
                 self,
@@ -539,22 +534,14 @@ class SpectrumBrowserDialog(BaseDialog):
             )
             return
 
-        spectrum_file_path = result_data.get('spectrum_file', '')
-        if not spectrum_file_path and self.original_data_folder:
-            # Try to construct path from folder and name
-            import os
-            spectrum_file_path = os.path.join(self.original_data_folder, self.selected_spectrum)
-
+        data_folder = series_data_folder(self.batch_results, self.original_data_folder)
         viewer = SpectrumViewerDialog(
             parent=self,
             spectrum_name=self.selected_spectrum,
-            spectrum_file_path=spectrum_file_path,
-            result_data=result_data,
-            series_processor=self.series_processor
+            spectrum_file_path=series_spectrum_file(data_folder, self.selected_spectrum, result_data),
+            result_data=result_data
         )
         viewer.show()
-
-        self.spectrum_selected.emit(self.selected_spectrum)
 
     def show_quick_analysis(self):
         """Show quick analysis summary for selected spectrum.
@@ -573,23 +560,24 @@ class SpectrumBrowserDialog(BaseDialog):
         if not result_data:
             return
 
+        measured = spectrum_summary(result_data)
+
         summary = f"Quick Analysis: {self.selected_spectrum}\n"
         summary += "=" * 50 + "\n\n"
 
-        summary += f"Status: {result_data.get('status', 'Unknown')}\n"
-        summary += f"Processing Time: {result_data.get('processing_time', 0):.2f}s\n\n"
+        summary += f"Status: {result_data.get('status', 'Unknown')}\n\n"
 
         summary += "Detection Statistics:\n"
-        summary += f"  - Detected Peaks: {result_data.get('detected_peaks', 0)}\n"
-        summary += f"  - Total Peaks: {result_data.get('total_peaks', 0)}\n"
-        summary += f"  - Detection Rate: {result_data.get('detection_rate', 0):.1f}%\n\n"
+        summary += f"  - Detected Peaks: {measured['detected']}\n"
+        summary += f"  - Total Peaks: {measured['total']}\n"
+        summary += f"  - Detection Rate: {measured['detection_rate']:.1%}\n\n"
 
-        summary += "Quality Metrics:\n"
-        summary += f"  - Average R²: {result_data.get('avg_r_squared', 0):.4f}\n"
-        summary += f"  - Average SNR: {result_data.get('avg_snr', 0):.2f}\n"
+        summary += "Fit Statistics:\n"
+        summary += f"  - Mean R²: {measured['mean_r_squared']:.4f}\n"
+        summary += f"  - Mean S/N: {measured['mean_snr']:.1f}\n\n"
 
-        quality_score = self.calculate_quality_score(result_data)
-        summary += f"  - Quality Score: {quality_score:.1f}/100 ({self.get_quality_text(quality_score)})\n"
+        score = self.spectrum_score(measured)
+        summary += f"Spectrum score: {score:.0f} ({self.score_band(score)})\n"
 
         QMessageBox.information(self, "Quick Analysis", summary)
 
