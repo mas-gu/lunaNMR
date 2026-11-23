@@ -336,6 +336,22 @@ def shared_baseline_test(series, f_max=0.45, f_min=-0.15, n_grid=61):
                 profile_at_zero=float(np.nanmedian(at_zero[ok])) if n_ok else float('nan'))
 
 
+def unfitted_residue(residue_name, x, y, fit_baseline):
+    """The result of a residue no fit could be made of: its data, and no value."""
+    return {
+        'residue': residue_name,
+        'A': np.nan, 't2': np.nan, 'C': np.nan,
+        'A_err': np.nan, 't2_err': np.nan, 'C_err': np.nan,
+        'baseline_fixed': not bool(fit_baseline),
+        'window_ratio': np.nan,
+        'window_marginal': False,
+        'x': x,
+        'y': y,
+        'result': None,
+        'success': False
+    }
+
+
 def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
                        initial_C=None, n_bootstrap=1000, error_method='analytical',
                        fit_baseline=FIT_BASELINE_BY_DEFAULT):
@@ -343,6 +359,10 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
     Fit exponential decay with baseline offset to single residue data.
 
     Model: I(t) = A * exp(-t/t2) + C
+
+    The fit has failed (`success` False) when too few points are measured, when lmfit
+    reports no convergence - both return unfitted_residue - or when the fitted time
+    constant is not measurable in the delay window, which keeps the fitted values.
 
     Parameters
     ----------
@@ -379,18 +399,7 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
     if len(y) <= n_free:
         print(f"Fitting residue: {residue_name}  ->  {len(y)} measured points, "
               f"need {n_free + 1}, excluded")
-        return {
-            'residue': residue_name,
-            'A': np.nan, 't2': np.nan, 'C': np.nan,
-            'A_err': np.nan, 't2_err': np.nan, 'C_err': np.nan,
-            'baseline_fixed': not bool(fit_baseline),
-            'window_ratio': np.nan,
-            'window_marginal': False,
-            'x': x_all,
-            'y': y_all,
-            'result': None,
-            'success': False
-        }
+        return unfitted_residue(residue_name, x_all, y_all, fit_baseline)
 
     # Data-driven initial guesses (fixed defaults like A=5/t2=100 fail to converge
     # when the amplitude or time-scale differs by orders of magnitude, e.g. real
@@ -413,6 +422,10 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
 
     # Unweighted least squares fit
     result = model.fit(y, params, x=x)
+
+    if not result.success:
+        print(f"Fitting residue: {residue_name}  ->  the fit did not converge, excluded")
+        return unfitted_residue(residue_name, x_all, y_all, fit_baseline)
 
     a = result.params['A'].value
     t2 = result.params['t2'].value
@@ -438,7 +451,9 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
         t2_err = 0.0 if not np.isfinite(t2_err) else t2_err
     if not fit_baseline:
         # Fixed, not unmeasured: NaN here would be indistinguishable from a singular
-        # covariance, which downstream code treats as a failed error estimate.
+        # covariance, which downstream code treats as a failed error estimate. It also
+        # propagates into the density input table, where every residue is then dropped
+        # as "contains NaN".
         c_err = 0.0
 
     window_ratio, window_marginal = delay_window(x, t2)
@@ -565,13 +580,17 @@ def results_columns(experiment_type):
 
 
 def results_row(result, experiment_type):
-    """One residue's row of a results file, as {column: cell} in results_columns order."""
+    """One residue's row of a results file, as {column: cell} in results_columns order.
+    A failed fit reports no value: every cell is NaN and Success is No."""
     # fitting_wrapper.py and the results viewer read row['Success'].
-    ok = 'Yes' if result.get('reliable', result.get('success', True)) else 'No'
-    # WindowRatio is t_max/T: below ~2 the window is too short to pin the time constant down.
-    cells = [str(result['residue']), f"{result['A']:.6e}", f"{result['t2']:.6e}",
-             f"{result['C']:.6e}", f"{result['A_err']:.6e}", f"{result['t2_err']:.6e}",
-             f"{result['C_err']:.6e}", ok, f"{result.get('window_ratio', float('nan')):.3f}"]
+    if result.get('reliable', result.get('success', True)):
+        # WindowRatio is t_max/T: below ~2 the window is too short to pin the time constant down.
+        cells = [str(result['residue']), f"{result['A']:.6e}", f"{result['t2']:.6e}",
+                 f"{result['C']:.6e}", f"{result['A_err']:.6e}", f"{result['t2_err']:.6e}",
+                 f"{result['C_err']:.6e}", 'Yes',
+                 f"{result.get('window_ratio', float('nan')):.3f}"]
+    else:
+        cells = [str(result['residue'])] + ['NaN'] * 6 + ['No', 'NaN']
     return dict(zip(results_columns(experiment_type), cells))
 
 
@@ -680,6 +699,59 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
     print(f"Saved JSON fit data to: {output_file}")
 
 
+def read_relaxation_matrix(input_csv_file):
+    """Read a series matrix or a simple residue-by-delay table.
+
+    Returns (residue_names, x, y_data, dropped_columns): one row of y_data per residue,
+    dummy peaks left out, one column per delay in x; dropped_columns are the headers
+    that carry no delay.
+    """
+    # Load CSV using pandas to handle mixed data types
+    print("Loading data...")
+    raw_df = pd.read_csv(input_csv_file, header=None)
+
+    # Detect format: LunaNMR Fit Series vs simple DynamiXs format
+    # LunaNMR format has columns: Peak_Number, Assignment, Reference_X, Reference_Y, delay1, delay2, ...
+    # Simple format has columns: Residue, delay1, delay2, ...
+    header_row = raw_df.iloc[0].astype(str).tolist()
+    lunaNMR_columns = {'Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y'}
+    # Columns whose header carries no delay: reported so a spectrum cannot go
+    # missing from a series without anyone noticing.
+    dropped_columns = []
+    detected_lunaNMR_cols = [col for col in header_row if col in lunaNMR_columns]
+
+    if detected_lunaNMR_cols:
+        print(f"Detected LunaNMR Fit Series format (columns: {detected_lunaNMR_cols})")
+        delay_start_idx = require_delay_start(header_row, lunaNMR_columns, input_csv_file)
+        # Find the Assignment column index for residue names
+        assignment_idx = header_row.index('Assignment') if 'Assignment' in header_row else 1
+        print(f"  Using 'Assignment' column (index {assignment_idx}) for residue names")
+        print(f"  Delay columns start at index {delay_start_idx}")
+        residue_names = raw_df.iloc[1:, assignment_idx].to_numpy()  # Assignment column, skip header
+        # Parse delay columns - handles duplicates like "300_2" -> 300.0
+        delay_headers = raw_df.iloc[0, delay_start_idx:].tolist()
+        x, _keep, _dropped = parse_delay_columns(delay_headers)
+        dropped_columns.extend(_dropped)
+        y_data = raw_df.iloc[1:, delay_start_idx:].astype(float).to_numpy()[:, _keep]  # Intensity data
+    else:
+        # Simple DynamiXs format: first column is residue, rest are delays
+        print("Detected simple DynamiXs format")
+        residue_names = raw_df.iloc[1:, 0].to_numpy()  # Column 1 (residue names), skip header
+        # Parse delay columns - handles duplicates like "300_2" -> 300.0
+        delay_headers = raw_df.iloc[0, 1:].tolist()
+        x, _keep, _dropped = parse_delay_columns(delay_headers)
+        dropped_columns.extend(_dropped)
+        y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()[:, _keep]  # Values to fit (rows 2+, columns 2+)
+
+    valid_mask = np.array([not str(name).lower().startswith('dummy') for name in residue_names])
+    n_dummies = np.sum(~valid_mask)
+    if n_dummies > 0:
+        print(f"Excluding {n_dummies} dummy residue(s) from fitting")
+        residue_names = residue_names[valid_mask]
+        y_data = y_data[valid_mask]
+    return residue_names, x, y_data, dropped_columns
+
+
 def run_analysis_with_params(params, progress_callback=None):
     """
     Run analysis with parameters provided by GUI
@@ -729,45 +801,7 @@ def run_analysis_with_params(params, progress_callback=None):
     if error_method == 'bootstrap':
         print(f"Bootstrap iterations: {n_bootstrap}")
 
-    # Load CSV using pandas to handle mixed data types
-    print("Loading data...")
-    raw_df = pd.read_csv(input_csv_file, header=None)
-
-    # Detect format: LunaNMR Fit Series vs simple DynamiXs format
-    header_row = raw_df.iloc[0].astype(str).tolist()
-    lunaNMR_columns = {'Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y'}
-    # Columns whose header carries no delay: reported so a spectrum cannot go
-    # missing from a series without anyone noticing.
-    dropped_columns = []
-    detected_lunaNMR_cols = [col for col in header_row if col in lunaNMR_columns]
-
-    if detected_lunaNMR_cols:
-        print(f"Detected LunaNMR Fit Series format (columns: {detected_lunaNMR_cols})")
-        delay_start_idx = require_delay_start(header_row, lunaNMR_columns, input_csv_file)
-        assignment_idx = header_row.index('Assignment') if 'Assignment' in header_row else 1
-        print(f"  Using 'Assignment' column (index {assignment_idx}) for residue names")
-        print(f"  Delay columns start at index {delay_start_idx}")
-        residue_names = raw_df.iloc[1:, assignment_idx].to_numpy()
-        # Parse delay columns - handles duplicates like "300_2" -> 300.0
-        delay_headers = raw_df.iloc[0, delay_start_idx:].tolist()
-        x, _keep, _dropped = parse_delay_columns(delay_headers)
-        dropped_columns.extend(_dropped)
-        y_data = raw_df.iloc[1:, delay_start_idx:].astype(float).to_numpy()[:, _keep]
-    else:
-        print("Detected simple DynamiXs format")
-        residue_names = raw_df.iloc[1:, 0].to_numpy()  # Column 1 (residue names), skip header
-        # Parse delay columns - handles duplicates like "300_2" -> 300.0
-        delay_headers = raw_df.iloc[0, 1:].tolist()
-        x, _keep, _dropped = parse_delay_columns(delay_headers)
-        dropped_columns.extend(_dropped)
-        y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()[:, _keep]  # Values to fit (rows 2+, columns 2+)
-
-    valid_mask = np.array([not str(name).lower().startswith('dummy') for name in residue_names])
-    n_dummies = np.sum(~valid_mask)
-    if n_dummies > 0:
-        print(f"Excluding {n_dummies} dummy residue(s) from fitting")
-        residue_names = residue_names[valid_mask]
-        y_data = y_data[valid_mask]
+    residue_names, x, y_data, dropped_columns = read_relaxation_matrix(input_csv_file)
 
     print(f"Loaded {len(residue_names)} residues with {len(x)} time points")
     print(f"Time range: {x.min():.3f} to {x.max():.3f} {time_units}")
@@ -849,6 +883,8 @@ def run_analysis_with_params(params, progress_callback=None):
         'n_fitted': len(reliable),
         'dropped_columns': dropped_columns,
         'n_excluded': n_excluded,
+        'n_total': len(results_list),
+        'failed_residues': [r['residue'] for r in results_list if not r.get('success', True)],
         'results_file': results_txt_file,
         'plots_prefix': output_prefix,
         'json_file': json_file,
@@ -859,6 +895,5 @@ def run_analysis_with_params(params, progress_callback=None):
         # Fit provenance, so a caller sees the convention and the sampling quality
         # without opening the per-residue files.
         'baseline_fixed': not fit_baseline,
-        'n_window_marginal': sum(1 for r in results_list
-                                 if isinstance(r, dict) and r.get('window_marginal')),
+        'n_window_marginal': sum(1 for r in reliable if r.get('window_marginal')),
     }

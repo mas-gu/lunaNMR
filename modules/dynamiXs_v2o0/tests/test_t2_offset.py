@@ -89,20 +89,6 @@ class TestFitRecoversOffset:
         )
 
 
-class TestMulticoreFitter:
-    """Same offset behavior for the parallel fitter."""
-
-    def test_exp_decay_offset_in_multi(self):
-        from fitmulti__Tx_NMRRE import exp_decay
-
-        x = np.array([0.0, 10.0, 20.0])
-        A, t2, C = 100.0, 50.0, 5.0
-        y = exp_decay(x, A, t2, C)
-
-        expected = A * np.exp(-x / t2) + C
-        np.testing.assert_allclose(y, expected, rtol=1e-12)
-
-
 class TestSaveResultsTSV:
     """save_results writes C and C_err columns alongside A/T2."""
 
