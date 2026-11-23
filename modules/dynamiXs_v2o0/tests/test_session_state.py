@@ -1,5 +1,5 @@
-# ABOUTME: Tests that the real T1/T2 page and the standalone DynamiXs window save and restore
-# ABOUTME: the page's field assignments (T1 Data, T2 Data) and the series dropped on them.
+# ABOUTME: Tests that the real T1/T2 page saves and restores its field assignments
+# ABOUTME: (T1 Data, T2 Data) and the series dropped on them.
 
 import os
 import sys
@@ -74,26 +74,6 @@ class TestT1T2FittingPageSessionState:
         assert restored.field1_t1_file == original.field1_t1_file
         assert restored.field1_t2_file == original.field1_t2_file
         assert restored.field1_t1_display.text() == "📊 600_T1"
-
-
-class TestDynamiXsMainWindowState:
-
-    def test_get_state_carries_the_pages_series_and_files(self, windows):
-        window = windows()
-        _assigned(window)
-        assert window.get_state()['t1t2']['source_series_map'] == {
-            'field1_t1': '600_T1', 'field1_t2': '600_T2'}
-        assert window.get_file_refs()['t1t2']['field1_t1_file'] == str(T1_TIDY)
-
-    def test_restore_state_hands_them_back_to_the_page(self, windows):
-        saved = windows()
-        _assigned(saved)
-        window = windows()
-        window.restore_state(saved.get_state(), saved.get_file_refs())
-        page = window.t1t2_page
-        assert page.source_series_map == {'field1_t1': '600_T1', 'field1_t2': '600_T2'}
-        assert page.field1_t1_file == str(T1_TIDY)
-        assert page.field1_t1_display.text() == "📊 600_T1"
 
 
 if __name__ == '__main__':

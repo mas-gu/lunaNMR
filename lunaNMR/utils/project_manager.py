@@ -356,19 +356,13 @@ class ProjectManager:
         # Note: saved_xlim, saved_ylim are tuples - handle separately
 
         # Processing parameters
-        'use_voigt_fitting', 'use_parallel_processing', 'use_adaptive_optimization',
-        'use_ps2d_multi_peak', 'fix_linewidths', 'fix_positions',
+        'use_parallel_processing', 'use_adaptive_optimization',
+        'fix_linewidths', 'fix_positions',
 
         # Peak detection parameters
         'search_window_x', 'search_window_y',
-        'detection_square_size', 'detection_rectangle_y',
         'centroid_window_x_ppm', 'centroid_window_y_ppm',
-        'use_centroid_refinement', 'centroid_noise_multiplier',
         'auto_add_dummy_peaks',
-
-        # Peak detection for series
-        'height_threshold', 'distance_factor', 'prominence_threshold',
-        'smoothing_sigma', 'max_peaks_fit', 'max_optimization_iterations',
 
         # Fitting quality parameters
         'min_r_squared', 'max_iterations', 'fitting_window_x', 'fitting_window_y',
@@ -376,10 +370,6 @@ class ProjectManager:
         # PS2D algorithm configuration
         'nucleus_type', 'ps2d_radF1', 'ps2d_radF2', 'ps2d_max_iterations',
         'ps2d_max_cluster_size', 'ps2d_overlap_x', 'ps2d_overlap_y',
-
-        # Custom linewidth parameters
-        'use_custom_linewidths', 'lw_lorentz_1h', 'lw_gauss_1h',
-        'lw_lorentz_15n', 'lw_gauss_15n',
 
         # Series integration parameters
         'use_ps2d_linewidth_reuse', 'enable_cascade_drift_limit',

@@ -229,65 +229,6 @@ BUTTON_HEIGHT_DIALOG = 40  # Dialog button height
 """Dialog button height (40px). For modal dialog buttons."""
 
 
-# COLOR UTILITY FUNCTIONS
-# Helper functions for color manipulation
-
-def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
-    """
-    Convert hex color string to RGB tuple.
-
-    Args:
-        hex_color: Hex color string (e.g., "#5B9EE5")
-
-    Returns:
-        Tuple of (r, g, b) values (0-255)
-
-    Example:
-        >>> hex_to_rgb("#5B9EE5")
-        (91, 158, 229)
-    """
-    hex_color = hex_color.lstrip('#')
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-
-
-def rgb_to_hex(r: int, g: int, b: int) -> str:
-    """
-    Convert RGB values to hex color string.
-
-    Args:
-        r: Red value (0-255)
-        g: Green value (0-255)
-        b: Blue value (0-255)
-
-    Returns:
-        Hex color string (e.g., "#5B9EE5")
-
-    Example:
-        >>> rgb_to_hex(91, 158, 229)
-        "#5B9EE5"
-    """
-    return f"#{r:02x}{g:02x}{b:02x}".upper()
-
-
-def color_with_alpha(hex_color: str, alpha: float) -> str:
-    """
-    Create RGBA color string from hex color and alpha value.
-
-    Args:
-        hex_color: Hex color string (e.g., "#5B9EE5")
-        alpha: Alpha value (0.0 to 1.0)
-
-    Returns:
-        RGBA string for Qt (e.g., "rgba(91, 158, 229, 0.5)")
-
-    Example:
-        >>> color_with_alpha("#5B9EE5", 0.5)
-        "rgba(91, 158, 229, 0.5)"
-    """
-    r, g, b = hex_to_rgb(hex_color)
-    return f"rgba({r}, {g}, {b}, {alpha})"
-
-
 # DESIGN SYSTEM VALIDATION
 
 def validate_design_system():

@@ -53,7 +53,7 @@ The primary fitting engine for overlapping peaks — not optional.
 - Respects the Expert-Mode **Fix Positions** / **Fix Linewidths** flags.
 
 ### Two-Phase Fitting
-- **Phase 1 (detect + cluster):** prominence detection → top-contour centroid refinement → hierarchical graph-based clustering into disjoint clusters (each peak in exactly one).
+- **Phase 1 (detect + cluster):** threshold detection of local extrema → sub-point position refinement → hierarchical graph-based clustering into disjoint clusters (each peak in exactly one).
 - **Phase 2 (fit):** single-peak clusters → single-peak PS2D fitting; multi-peak clusters → PS2D. Parallel mode distributes whole clusters across cores; results are identical to sequential.
 
 See [ALGORITHMS.md](ALGORITHMS.md) for detection, clustering, and fitting details.

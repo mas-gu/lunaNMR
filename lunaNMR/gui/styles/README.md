@@ -10,20 +10,15 @@ This directory contains the complete design system for the Qt/PySide6 version of
 
 ## Quick Start
 
-### 1. Load Stylesheet in Application
+### 1. Stylesheet Loading
 
-```python
-from PySide6.QtWidgets import QApplication
-from lunaNMR.gui.styles import load_stylesheet
-
-app = QApplication(sys.argv)
-app.setStyleSheet(load_stylesheet())
-```
+`BaseWindow` and `BaseDialog` load `main.qss` themselves (`_load_stylesheet`): a window
+or dialog that inherits from one of them needs no call.
 
 ### 2. Use Design Constants
 
 ```python
-from lunaNMR.gui.styles import (
+from lunaNMR.gui.styles.design_system import (
     PRIMARY_BUTTON_BG,
     SPACING_MD,
     BUTTON_CORNER_RADIUS
@@ -229,7 +224,7 @@ All colors are centralized in `design_system.py`. When adding custom styling, al
 
 ```python
 # Good
-from lunaNMR.gui.styles import PRIMARY_BUTTON_BG
+from lunaNMR.gui.styles.design_system import PRIMARY_BUTTON_BG
 widget.setStyleSheet(f"background-color: {PRIMARY_BUTTON_BG};")
 
 # Bad

@@ -17,7 +17,7 @@ Usage:
 import os
 import tempfile
 import traceback
-from typing import Callable, Dict, Optional
+from typing import Dict, Optional
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -38,7 +38,6 @@ class AnalysisWorker(QThread):
         progress_value: Emits progress percentage (int, 0-100)
         finished: Emits results on successful completion (object)
         error: Emits error message on failure (str)
-        status: Emits status updates (str)
     """
 
     # Signals for communication with GUI
@@ -46,7 +45,6 @@ class AnalysisWorker(QThread):
     progress_value = Signal(int)     # Progress percentage (0-100)
     finished = Signal(object)        # Result object on completion
     error = Signal(str)              # Error message
-    status = Signal(str)             # Status update
 
     def __init__(self, parent: Optional[QObject] = None):
         """Initialize the worker thread."""
@@ -91,69 +89,6 @@ class AnalysisWorker(QThread):
         """
         error_msg = f"{str(error)}\n\n{traceback.format_exc()}"
         self.error.emit(error_msg)
-
-
-# GENERIC FUNCTION WORKER
-
-class FunctionWorker(AnalysisWorker):
-    """
-    Worker that executes an arbitrary function in a background thread.
-
-    This is useful for wrapping existing analysis functions without
-    creating custom worker classes.
-
-    Example:
-        def my_analysis(params, progress_callback):
-            progress_callback("Starting...")
-            result = do_analysis(params)
-            progress_callback("Complete!")
-            return result
-
-        worker = FunctionWorker(my_analysis, params)
-        worker.finished.connect(handle_result)
-        worker.start()
-    """
-
-    def __init__(
-        self,
-        func: Callable,
-        *args,
-        progress_callback: bool = True,
-        **kwargs
-    ):
-        """
-        Initialize the function worker.
-
-        Args:
-            func: The function to execute
-            *args: Positional arguments for the function
-            progress_callback: If True, pass progress callback as first arg
-            **kwargs: Keyword arguments for the function
-        """
-        super().__init__()
-        self._func = func
-        self._args = args
-        self._kwargs = kwargs
-        self._use_callback = progress_callback
-
-    def run(self):
-        """Execute the wrapped function."""
-        try:
-            if self._use_callback:
-                # Pass progress callback as first argument
-                result = self._func(
-                    self.emit_progress,
-                    *self._args,
-                    **self._kwargs
-                )
-            else:
-                result = self._func(*self._args, **self._kwargs)
-
-            if not self._cancelled:
-                self.finished.emit(result)
-
-        except Exception as e:
-            self.emit_error(e)
 
 
 # T1/T2 FITTING WORKER
@@ -214,7 +149,6 @@ class T1T2FittingWorker(AnalysisWorker):
         """Execute the T1/T2 fitting analysis."""
         temp_csv_path = None
         try:
-            self.status.emit("Initializing fitting...")
             self.emit_progress("Loading data...", 5)
 
             if self.params.multicore:
@@ -346,7 +280,6 @@ class KdTitrationFittingWorker(AnalysisWorker):
         import sys
         temp_csv_path = None
         try:
-            self.status.emit("Initializing Kd titration fit...")
             self.emit_progress("Loading data...", 5)
 
             kd_dir = os.path.join(os.path.dirname(__file__), "dynamiXs_Kd")
@@ -416,7 +349,6 @@ class MethylT2FittingWorker(AnalysisWorker):
     def run(self):
         temp_csv_path = None
         try:
-            self.status.emit("Initializing methyl T2 fit...")
             self.emit_progress("Loading data...", 5)
 
             from dynamiXs_T1_T2 import fit_methyl_T2 as fitting_module
@@ -522,7 +454,6 @@ class SpectralDensityWorker(AnalysisWorker):
         """Execute the spectral density analysis."""
         import os
         try:
-            self.status.emit("Initializing spectral density analysis...")
             self.emit_progress("Loading data...", 10)
 
             rNH_meters = self.params.r_nh * 1e-10  # Angstroms to meters
@@ -685,8 +616,6 @@ class IntegratedAnalysisWorker(AnalysisWorker):
     def run(self):
         """Execute the complete integrated analysis pipeline."""
         try:
-            self.status.emit("Starting integrated analysis...")
-
             from dynamiXs_integrated.integrated_analysis import (
                 IntegratedAnalysisPipeline,
                 IntegratedAnalysisParameters

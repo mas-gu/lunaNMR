@@ -44,7 +44,7 @@ def _kd(*args):
 
 
 def test_the_survey_records_only_what_is_restored(csv, tmp_path):
-    _kd("--survey", "--observable", "intensity", "--input", str(csv),
+    _kd("--survey", "--input", str(csv),
         "--out", str(tmp_path / "s"), "--prefix", "DNAJA1",
         "--conc", EQUIVALENTS, "--conc-units", "equivalents")
     written = json.loads((csv.parent / "DNAJA1_kd_params.json").read_text())

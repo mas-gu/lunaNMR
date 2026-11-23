@@ -852,14 +852,9 @@ class ParallelVoigtProcessor:
             'integrator_params': self._serialize_integrator_params(),
             
             # Preserve all current EnhancedVoigtFitter parameters
-            'baseline_params': self._serialize_baseline_params(),
-            'fitting_params': self._serialize_fitting_params(),
-            'quality_params': self._serialize_quality_params(),
             'gui_params': self._get_gui_params(),
             
             # Advanced parameters
-            'fitting_windows': self._get_fitting_windows(),
-            'optimization_settings': self._get_optimization_settings(),
             'validation_thresholds': self._get_validation_thresholds(),
 
             # CRITICAL: All peaks context for automatic 2D routing
@@ -903,64 +898,19 @@ class ParallelVoigtProcessor:
         log_warning("Parallel: No gui_params found, using empty dict (PS2D multi-peak will NOT activate)")
         return {}
 
-    def _serialize_baseline_params(self):
-        """Extract all baseline correction parameters"""
-        return {
-            'lam': getattr(self.original_fitter, 'baseline_lambda', 1e6),
-            'p': getattr(self.original_fitter, 'baseline_p', 0.001),
-            'max_iter': getattr(self.original_fitter, 'baseline_max_iter', 50),
-            'tolerance': getattr(self.original_fitter, 'baseline_tolerance', 1e-6),
-            'method': getattr(self.original_fitter, 'baseline_method', 'arpls')
-        }
-
-    def _serialize_fitting_params(self):
-        """Extract all Voigt fitting parameters"""
-        return {
-            'max_iter': getattr(self.original_fitter, 'max_iterations', 1000),
-            'tolerance': getattr(self.original_fitter, 'convergence_tolerance', 1e-8),
-            'method': getattr(self.original_fitter, 'optimization_method', 'leastsq'),
-            'bounds_method': getattr(self.original_fitter, 'bounds_method', 'soft'),
-            'initial_guess_method': getattr(self.original_fitter, 'initial_guess_method', 'moments')
-        }
-
-    def _serialize_quality_params(self):
-        """Extract all quality assessment parameters"""
-        return {
-            'min_r_squared': getattr(self.original_fitter, 'min_r_squared', 0.8),
-            'max_residual': getattr(self.original_fitter, 'max_residual', 0.1),
-            'snr_threshold': getattr(self.original_fitter, 'snr_threshold', 3.0),
-            'quality_checks': getattr(self.original_fitter, 'quality_checks', True)
-        }
-
-    def _get_fitting_windows(self):
-        """Extract fitting window parameters"""
-        return {
-            'window_x': getattr(self.original_fitter, 'fitting_window_x', 0.2),
-            'window_y': getattr(self.original_fitter, 'fitting_window_y', 2.0),
-            'auto_window': getattr(self.original_fitter, 'auto_window_sizing', True)
-        }
-
     def _serialize_integrator_params(self):
         """Extract integrator-specific parameters from parent"""
         params = {}
         
         parent = getattr(self.original_fitter, 'parent', None)
         if parent:
-            for param_name in ['fitting_parameters', 'gui_params', 'processing_mode',
+            for param_name in ['gui_params', 'processing_mode',
                                'titration_pos_margin_f1', 'titration_pos_margin_f2',
                                'titration_pos_margins', 'titration_lw_margins']:
                 if hasattr(parent, param_name):
                     params[param_name] = getattr(parent, param_name)
         
         return params
-
-    def _get_optimization_settings(self):
-        """Extract optimization algorithm settings"""
-        return {
-            'algorithm': getattr(self.original_fitter, 'optimization_algorithm', 'lm'),
-            'step_size': getattr(self.original_fitter, 'step_size', 1e-8),
-            'gradient_tolerance': getattr(self.original_fitter, 'gradient_tolerance', 1e-12)
-        }
 
     def _serialize_ps2d_config(self):
         """
@@ -978,8 +928,6 @@ class ParallelVoigtProcessor:
     def _get_validation_thresholds(self):
         """Extract validation threshold parameters"""
         return {
-            'peak_detection_threshold': getattr(self.original_fitter, 'peak_threshold', 0.1),
-            'multipeak_threshold': getattr(self.original_fitter, 'multipeak_threshold', 0.3),
             'noise_level': getattr(self.original_fitter, 'noise_level', None)
         }
         
@@ -1634,9 +1582,6 @@ def _initialize_worker_fitter(shared_context):
 
     # 6. Restore enhanced fitter parameters
     worker_fitter = worker_integrator.enhanced_fitter
-    _restore_baseline_params(worker_fitter, shared_context['baseline_params'])
-    _restore_fitting_params(worker_fitter, shared_context['fitting_params'])
-    _restore_quality_params(worker_fitter, shared_context['quality_params'])
     worker_fitter.gui_params = shared_context['gui_params']
 
     # CRITICAL: Update enhanced_fitter's parent reference to point to worker_integrator
@@ -1644,8 +1589,6 @@ def _initialize_worker_fitter(shared_context):
     worker_fitter.parent = worker_integrator
         
     # Advanced settings
-    _restore_fitting_windows(worker_fitter, shared_context['fitting_windows'])
-    _restore_optimization_settings(worker_fitter, shared_context['optimization_settings'])
     _restore_validation_thresholds(worker_fitter, shared_context['validation_thresholds'])
 
     # Set noise_level on worker_integrator for fit_overlap_group_2d() weak peak detection
@@ -1660,43 +1603,6 @@ def _initialize_worker_fitter(shared_context):
     return worker_integrator
 
 
-def _restore_baseline_params(worker_fitter, baseline_params):
-    """Restore baseline correction parameters"""
-    worker_fitter.baseline_lambda = baseline_params['lam']
-    worker_fitter.baseline_p = baseline_params['p']
-    worker_fitter.baseline_max_iter = baseline_params['max_iter']
-    worker_fitter.baseline_tolerance = baseline_params['tolerance']
-    worker_fitter.baseline_method = baseline_params['method']
-
-def _restore_fitting_params(worker_fitter, fitting_params):
-    """Restore Voigt fitting parameters"""
-    worker_fitter.max_iterations = fitting_params['max_iter']
-    worker_fitter.convergence_tolerance = fitting_params['tolerance']
-    worker_fitter.optimization_method = fitting_params['method']
-    worker_fitter.bounds_method = fitting_params['bounds_method']
-    worker_fitter.initial_guess_method = fitting_params['initial_guess_method']
-
-def _restore_quality_params(worker_fitter, quality_params):
-    """Restore quality assessment parameters"""
-    worker_fitter.min_r_squared = quality_params['min_r_squared']
-    worker_fitter.max_residual = quality_params['max_residual']
-    worker_fitter.snr_threshold = quality_params['snr_threshold']
-    worker_fitter.quality_checks = quality_params['quality_checks']
-
-def _restore_fitting_windows(worker_fitter, fitting_windows):
-    """Restore fitting window parameters"""
-    worker_fitter.fitting_window_x = fitting_windows['window_x']
-    worker_fitter.fitting_window_y = fitting_windows['window_y']
-    worker_fitter.auto_window_sizing = fitting_windows['auto_window']
-
-def _restore_optimization_settings(worker_fitter, optimization_settings):
-    """Restore optimization algorithm settings"""
-    worker_fitter.optimization_algorithm = optimization_settings['algorithm']
-    worker_fitter.step_size = optimization_settings['step_size']
-    worker_fitter.gradient_tolerance = optimization_settings['gradient_tolerance']
-
 def _restore_validation_thresholds(worker_fitter, validation_thresholds):
     """Restore validation threshold parameters"""
-    worker_fitter.peak_threshold = validation_thresholds['peak_detection_threshold']
-    worker_fitter.multipeak_threshold = validation_thresholds['multipeak_threshold']
     worker_fitter.noise_level = validation_thresholds['noise_level']

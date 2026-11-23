@@ -391,3 +391,44 @@ class TestRealSeries:
         for k in range(53):
             centres = [r['ppm'] for r in table if r['point'] == k and r['ppm'] is not None]
             assert len(set(centres)) == 2, f"peaks merged at point {k}"
+
+
+class TestSpectraInAFolder:
+    """Which files of a folder are its series, and in which order."""
+
+    def _names(self, folder):
+        from oned_series import spectra_in_folder, spectrum_name
+        return [spectrum_name(p) for p in spectra_in_folder(folder)]
+
+    def test_nmrpipe_spectra_come_in_series_order(self, tmp_path):
+        for name in ('pt_10.ft1', 'pt_2.ft1', 'pt_1.ft1', 'notes.txt'):
+            (tmp_path / name).touch()
+        assert self._names(tmp_path) == ['pt_1.ft1', 'pt_2.ft1', 'pt_10.ft1']
+
+    def test_a_bruker_dataset_gives_one_spectrum_per_processing(self, tmp_path):
+        for experiment, processing in (('10', '1'), ('2', '1'), ('2', '999')):
+            pdata = tmp_path / experiment / 'pdata' / processing
+            pdata.mkdir(parents=True)
+            (pdata / '1r').touch()
+        (tmp_path / '3' / 'pdata' / '1').mkdir(parents=True)
+        assert self._names(tmp_path) == ['2_1', '2_999', '10_1']
+
+    def test_a_folder_without_spectra_gives_none(self, tmp_path):
+        from oned_series import spectra_in_folder
+        assert spectra_in_folder(tmp_path) == []
+
+
+PLANE_2D = _MODULE_DIR.parent.parent / "data_example" / "2DHSQC" / "600_T1_0o0.ft"
+
+
+@needs_series
+@pytest.mark.skipif(not PLANE_2D.exists(), reason="real 2D spectrum not present")
+class TestLoadingWhatReadsAs1D:
+    def test_a_2d_spectrum_is_left_out_with_the_reason(self):
+        from oned_series import load_readable
+        first, second = sorted(REAL_DIR.glob("*.ft1"))[:2]
+        spectra, readable, rejected = load_readable([first, PLANE_2D, second])
+        assert readable == [first, second]
+        assert len(spectra) == 2
+        ((path, reason),) = rejected
+        assert path == PLANE_2D and "2D" in reason

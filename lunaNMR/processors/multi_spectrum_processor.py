@@ -14,7 +14,6 @@ from typing import List, Dict, Any, Optional
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
 from lunaNMR.core.parallel_voigt_processor import ParallelVoigtProcessor
 from lunaNMR.core.ps2d_config import get_ps2d_config, restore_base_ps2d_config, set_ps2d_config
-from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.processors.single_spectrum_processor import SingleSpectrumProcessor
 from lunaNMR.utils.parameter_manager import NMRParameterManager
 from lunaNMR.utils.quality_categories import DETECTION_SIGMA_FLOOR, fit_quality_label
@@ -234,7 +233,6 @@ class MultiSpectrumProcessor:
         """Initialize with independent integrator instance"""
         # Create OWN integrator instance - completely independent from GUI
         self.integrator = EnhancedVoigtIntegrator()
-        self.file_manager = NMRFileManager()
         self.voigt_params = voigt_params
         self.reference_peaks = None
         self.dummy_peaks = pd.DataFrame()
@@ -244,13 +242,9 @@ class MultiSpectrumProcessor:
         if isinstance(self.voigt_params, dict) and 'gui_params' in self.voigt_params:
             # Nested structure from get_integrator_parameters()
             self.integrator.gui_params = self.voigt_params['gui_params'].copy()
-            self.integrator.fitting_parameters.update(
-                self.voigt_params.get('fitting_params', {})
-            )
         else:
             # Flat structure
             self.integrator.gui_params = self.voigt_params.copy()
-            self.integrator.fitting_parameters.update(self.voigt_params)
 
         # Whether the first spectrum's detection adds the unmatched peaks near listed
         # ones as dummy_ peaks, which every later spectrum then fits too
@@ -607,14 +601,14 @@ class MultiSpectrumProcessor:
         # REFINED STATE MANAGEMENT: Preserve essential integrator functionality
         # Save critical components before clearing
         essential_components = {}
-        preserve_attrs = ['enhanced_fitter', 'fitting_parameters', 'gui_params', 'processing_mode']
+        preserve_attrs = ['enhanced_fitter', 'gui_params', 'processing_mode']
 
         for attr in preserve_attrs:
             if hasattr(self.integrator, attr):
                 essential_components[attr] = getattr(self.integrator, attr)
 
         # Clear only problematic state attributes
-        problematic_attrs = ['peak_list_path', 'nmr_file_path']
+        problematic_attrs = ['nmr_file_path']
         for attr in problematic_attrs:
             if hasattr(self.integrator, attr):
                 delattr(self.integrator, attr)
@@ -869,7 +863,6 @@ class MultiSpectrumProcessor:
             # Nested structure - flatten for parameter manager
             param_manager.current_params = {}
             param_manager.current_params.update(self.voigt_params.get('detection_params', {}))
-            param_manager.current_params.update(self.voigt_params.get('fitting_params', {}))
             param_manager.current_params.update(self.voigt_params.get('gui_params', {}))
             param_manager.current_params.update(self.voigt_params.get('processing_options', {}))
         else:
@@ -894,10 +887,8 @@ class MultiSpectrumProcessor:
 
         if 'gui_params' in self.voigt_params:
             use_parallel = self.voigt_params['gui_params'].get('use_parallel_processing', False)
-            use_voigt = self.voigt_params.get('use_voigt_fitting', True)
         else:
             use_parallel = self.voigt_params.get('use_parallel_processing', False)
-            use_voigt = self.voigt_params.get('use_voigt_fitting', True)
 
         if 'processing_options' in self.voigt_params:
             enable_cascade_drift_limit = self.voigt_params['processing_options'].get('enable_cascade_drift_limit', True)
@@ -914,10 +905,8 @@ class MultiSpectrumProcessor:
 
         processing_options = {
             'use_parallel': use_parallel,
-            'use_voigt_fitting': use_voigt,
             # Only if cascade/independent mode AND drift limit enabled
             'original_reference_positions': self.original_reference_positions if use_drift_limit else None,
-            'enable_cascade_drift_limit': enable_cascade_drift_limit,
             # Skip series_params to allow fresh adaptive optimization per spectrum
             # (used for Independent mode where each spectrum runs full pipeline)
             'skip_series_params': self.rerun_adaptive_per_spectrum
@@ -930,9 +919,6 @@ class MultiSpectrumProcessor:
             processing_options['reference_linewidths'] = self.reference_linewidths
             processing_options['force_reference_linewidths'] = True  # Use as initial guess
             log_info(f"Spectrum {spectrum_number}: Using {len(self.reference_linewidths)} reference linewidths as initial guess")
-
-        if self.peak_source_mode == 'cascade':
-            pass  # Cascade mode uses drift limiting
 
         # CLUSTER LOCKING: Use reference spectrum clusters for consistent grouping
         # Spectrum 1: compute clusters fresh, then store them
@@ -1969,11 +1955,6 @@ class MultiSpectrumProcessor:
         summary_file = os.path.join(self.output_folder, "processing_summary.csv")
         summary_df.to_csv(summary_file, index=False, float_format='%.2f')
 
-    def cancel_processing(self):
-        """Cancel current processing operation"""
-        self.processing_active = False
-        log_info("Multi-spectrum processing cancelled")
-
     def _extract_and_store_linewidth(self, result, assignment):
         """
         Extract linewidths from reference spectrum fit results.
@@ -2127,67 +2108,6 @@ class BatchResults:
         }
 
         return summary
-
-    def export_results(self, output_folder):
-        """Export all results to files"""
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
-
-        # Export summary
-        summary_file = os.path.join(output_folder, "batch_summary.json")
-        with open(summary_file, 'w') as f:
-            json.dump({
-                'metadata': self.metadata,
-                'summary': self.get_summary(),
-                'statistics': self.statistics,
-                'errors': self.errors
-            }, f, indent=2, default=str)
-
-        # Export individual results
-        if self.results:
-            all_integrations = []
-            detection_stats = []
-
-            for spectrum_name, result in self.results.items():
-                # Detection statistics
-                detection_stats.append({
-                    'spectrum': spectrum_name,
-                    'status': result.get('status', 'unknown'),
-                    'detected_peaks': result.get('detected_peaks', 0),
-                    'total_peaks': result.get('total_peaks', 0),
-                    'detection_rate': result.get('detection_rate', 0.0),
-                    'noise_level': result.get('noise_level', 0.0),
-                    'processing_time': result.get('processing_time', 0.0)
-                })
-
-                # Individual integrations
-                if result.get('integration_results'):
-                    for integration in result['integration_results']:
-                        integration_with_spectrum = integration.copy()
-                        integration_with_spectrum['spectrum'] = spectrum_name
-                        all_integrations.append(integration_with_spectrum)
-
-            if detection_stats:
-                stats_file = os.path.join(output_folder, "detection_statistics.csv")
-                pd.DataFrame(detection_stats).to_csv(stats_file, index=False)
-
-            if all_integrations:
-                integration_file = os.path.join(output_folder, "all_integrations.csv")
-                integration_df = pd.DataFrame(all_integrations)
-                # Format ppm_x and ppm_y with 3 decimals (position data), other numeric columns with 1 decimal
-                integration_df_formatted = integration_df.copy()
-                for col in integration_df_formatted.columns:
-                    if not pd.api.types.is_numeric_dtype(integration_df_formatted[col]):
-                        continue
-                    # Position and linewidth columns get 3 decimal places
-                    if col in ['ppm_x', 'ppm_y', 'lw_x', 'lw_y']:
-                        integration_df_formatted[col] = integration_df_formatted[col].apply(lambda x: f'{x:.3f}' if pd.notna(x) else '')
-                    # All other numeric columns get 1 decimal place
-                    else:
-                        integration_df_formatted[col] = integration_df_formatted[col].apply(lambda x: f'{x:.1f}' if pd.notna(x) else '')
-                integration_df_formatted.to_csv(integration_file, index=False)
-
-        return output_folder
 
     def to_tidy_dataframe(self) -> pd.DataFrame:
         """Generate tidy DataFrame from BatchResults for T1/T2 fitting.

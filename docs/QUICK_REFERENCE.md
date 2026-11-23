@@ -139,7 +139,7 @@ multiple named analyses; reopen from the Project Browser (File ▸ Project Conte
 
 | Component | File |
 |-----------|------|
-| Peak Detection | `core/enhanced_peak_picker.py` |
+| Peak Detection | `core/core_integrator.py` (`_detect_peaks_by_threshold`, `_detect_peaks_reference_based`) |
 | Clustering + Orchestrator | `core/core_integrator.py` (`identify_overlap_clusters`) |
 | PS2D 2D Fitting | `core/ps2d_2d_fitter.py` |
 | Peak-list fit entry (`enhanced_peak_fitting_parallel`) | `core/enhanced_voigt_fitter.py` |

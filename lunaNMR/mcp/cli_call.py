@@ -97,12 +97,12 @@ def _kd_args(input_file, p0, conc_units, out, conc, observables, intensity_scale
 
 
 def kd_survey_args(input_file, p0, conc_units, out, conc=None, intensity_scales=None,
-                   selection_file=None, observables=None, prefix=None, alpha=None,
-                   intensity_from=None, bootstrap=None, csp_sigma_multiple=None,
+                   selection_file=None, prefix=None, alpha=None,
+                   intensity_from=None, csp_sigma_multiple=None,
                    kd_outlier_z=None, noise_quantile=None, dd_runaway_ratio=None,
                    ref_max_ratio=None, dry_run=False):
-    args = _kd_args(input_file, p0, conc_units, out, conc, observables, intensity_scales, prefix,
-                    alpha, intensity_from, bootstrap, csp_sigma_multiple, kd_outlier_z,
+    args = _kd_args(input_file, p0, conc_units, out, conc, None, intensity_scales, prefix,
+                    alpha, intensity_from, None, csp_sigma_multiple, kd_outlier_z,
                     noise_quantile, dd_runaway_ratio, ref_max_ratio, dry_run)
     args.insert(1, '--survey')
     _value(args, '--selection', selection_file)

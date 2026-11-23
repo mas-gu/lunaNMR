@@ -14,7 +14,6 @@ Classes:
 import os
 import json
 from pathlib import Path
-from datetime import datetime
 from lunaNMR.utils.output_manager import log_warning, log_error
 
 class ConfigurationManager:
@@ -24,7 +23,6 @@ class ConfigurationManager:
         self.app_name = app_name
         self.config_folder = self._get_config_folder()
         self.config_file = os.path.join(self.config_folder, "config.json")
-        self.recent_files_file = os.path.join(self.config_folder, "recent_files.json")
 
         os.makedirs(self.config_folder, exist_ok=True)
 
@@ -45,7 +43,6 @@ class ConfigurationManager:
                 "search_window_y": 3.0,
                 "fitting_window_x": 0.3,
                 "fitting_window_y": 8.0,
-                "min_r_squared": 0.7,
                 "max_iterations": 1000,
                 "use_reference_detection": True,
                 "processing_mode": "full_detection"
@@ -107,20 +104,6 @@ class ConfigurationManager:
             log_warning(f"Failed to load config, using defaults: {e}")
             return self.default_config.copy()
 
-    def save_config(self):
-        """Save configuration to file"""
-        try:
-            self.config["last_updated"] = datetime.now().isoformat()
-
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, indent=2)
-
-            return True
-
-        except Exception as e:
-            log_warning(f"Failed to save config: {e}")
-            return False
-
     def _merge_configs(self, default, loaded):
         """Recursively merge configurations, keeping defaults for missing keys"""
         merged = default.copy()
@@ -144,19 +127,6 @@ class ConfigurationManager:
             return value
         except (KeyError, TypeError):
             return default
-
-    def set(self, key_path, value):
-        """Set configuration value using dot notation"""
-        keys = key_path.split('.')
-        config_section = self.config
-
-        # Navigate to the parent of the target key
-        for key in keys[:-1]:
-            if key not in config_section:
-                config_section[key] = {}
-            config_section = config_section[key]
-
-        config_section[keys[-1]] = value
 
     def reset_to_defaults(self, section=None):
         """Reset configuration to defaults"""
@@ -189,71 +159,11 @@ class ConfigurationManager:
             log_error(f"Failed to import config: {e}")
             return False
 
-    # Recent Files Management
-    def load_recent_files(self):
-        """Load recent files list"""
-        try:
-            if os.path.exists(self.recent_files_file):
-                with open(self.recent_files_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            else:
-                return {"nmr_files": [], "peak_files": []}
-        except Exception:
-            return {"nmr_files": [], "peak_files": []}
-
-    def save_recent_files(self, recent_files):
-        """Save recent files list"""
-        try:
-            with open(self.recent_files_file, 'w', encoding='utf-8') as f:
-                json.dump(recent_files, f, indent=2)
-            return True
-        except Exception:
-            return False
-
-    def add_recent_file(self, file_path, file_type):
-        """Add file to recent files list"""
-        recent = self.load_recent_files()
-
-        key = f"{file_type}_files"
-        if key not in recent:
-            recent[key] = []
-
-        file_path = os.path.abspath(file_path)
-
-        if file_path in recent[key]:
-            recent[key].remove(file_path)
-
-        recent[key].insert(0, file_path)
-
-        # Limit size
-        max_recent = 10
-        if len(recent[key]) > max_recent:
-            recent[key] = recent[key][:max_recent]
-
-        self.save_recent_files(recent)
-
 class UserPreferences:
     """User interface preferences manager"""
 
     def __init__(self, config_manager):
         self.config_manager = config_manager
-
-    def get_window_geometry(self):
-        """Get saved window geometry"""
-        return self.config_manager.get("user_preferences.window_geometry", "1400x900")
-
-    def set_window_geometry(self, geometry):
-        """Save window geometry"""
-        self.config_manager.set("user_preferences.window_geometry", geometry)
-
-    def get_window_state(self):
-        """Get saved window state"""
-        return self.config_manager.get("user_preferences.window_state", "normal")
-
-    def set_window_state(self, state):
-        """Save window state"""
-        self.config_manager.set("user_preferences.window_state", state)
-
 
 class ProcessingParameters:
     """NMR processing parameters manager"""
@@ -264,65 +174,15 @@ class ProcessingParameters:
     def get_detection_params(self):
         """Get peak detection parameters"""
         return {
-            'search_window_x': self.config_manager.get("processing_parameters.search_window_x", 0.2),
-            'search_window_y': self.config_manager.get("processing_parameters.search_window_y", 3.0),
+            'search_window_x': self.config_manager.get("processing_parameters.search_window_x"),
+            'search_window_y': self.config_manager.get("processing_parameters.search_window_y"),
             'use_reference_detection': self.config_manager.get("processing_parameters.use_reference_detection", True)
         }
-
-    def set_detection_params(self, **params):
-        """Set peak detection parameters"""
-        for key, value in params.items():
-            self.config_manager.set(f"processing_parameters.{key}", value)
 
     def get_fitting_params(self):
         """Get Voigt fitting parameters"""
         return {
             'fitting_window_x': self.config_manager.get("processing_parameters.fitting_window_x", 0.3),
             'fitting_window_y': self.config_manager.get("processing_parameters.fitting_window_y", 8.0),
-            'min_r_squared': self.config_manager.get("processing_parameters.min_r_squared", 0.7),
             'max_iterations': self.config_manager.get("processing_parameters.max_iterations", 1000)
         }
-
-    def set_fitting_params(self, **params):
-        """Set Voigt fitting parameters"""
-        for key, value in params.items():
-            self.config_manager.set(f"processing_parameters.{key}", value)
-
-    def get_processing_mode(self):
-        """Get processing mode"""
-        return self.config_manager.get("processing_parameters.processing_mode", "full_detection")
-
-    def set_processing_mode(self, mode):
-        """Set processing mode"""
-        self.config_manager.set("processing_parameters.processing_mode", mode)
-
-    def get_display_options(self):
-        """Get display options"""
-        return {
-            'show_detected': self.config_manager.get("display_options.show_detected", True),
-            'show_assigned': self.config_manager.get("display_options.show_assigned", True),
-            'show_fitted_curves': self.config_manager.get("display_options.show_fitted_curves", False),
-            'contour_levels': self.config_manager.get("display_options.contour_levels", 15),
-            'colormap': self.config_manager.get("display_options.colormap", "viridis"),
-            'plot_dpi': self.config_manager.get("display_options.plot_dpi", 100)
-        }
-
-    def set_display_options(self, **options):
-        """Set display options"""
-        for key, value in options.items():
-            self.config_manager.set(f"display_options.{key}", value)
-
-    def get_series_options(self):
-        """Get series processing options"""
-        return {
-            'auto_process_series': self.config_manager.get("series_options.auto_process_series", True),
-            'save_individual_results': self.config_manager.get("series_options.save_individual_results", True),
-            'create_summary_plots': self.config_manager.get("series_options.create_summary_plots", True),
-            'parallel_processing': self.config_manager.get("series_options.parallel_processing", False),
-            'max_workers': self.config_manager.get("series_options.max_workers", 4)
-        }
-
-    def set_series_options(self, **options):
-        """Set series processing options"""
-        for key, value in options.items():
-            self.config_manager.set(f"series_options.{key}", value)

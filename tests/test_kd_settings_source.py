@@ -35,9 +35,10 @@ def folder(tmp_path):
 
 def _kd(*args):
     from lunaNMR.cli import main
+    fit_only = () if "--survey" in args else ("--observable", "intensity")
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        code = main(["kd", "--format", "json", "--p0", "50", "--observable", "intensity", *args])
+        code = main(["kd", "--format", "json", "--p0", "50", *fit_only, *args])
     text = out.getvalue()
     return code, (json.loads(text) if text.strip() else {})
 

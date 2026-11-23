@@ -48,9 +48,6 @@ class DelayExtractor:
     # decimal point (separator required). An optional file extension may follow.
     TITRATION_PATTERN = re.compile(r'_(\d+[o.]\d+)(?:\.\w+)?$')
 
-    # NMR file extensions to look for when scanning folders
-    NMR_EXTENSIONS = {'.ft', '.ucsf', '.pipe', '.2rr', '.2ii'}
-
     def __init__(self, mode: str = "time"):
         if mode not in ("time", "titration"):
             raise ValueError(f"mode must be 'time' or 'titration', got {mode!r}")
@@ -125,76 +122,6 @@ class DelayExtractor:
         files_with_delays.sort(key=lambda x: x[1])
 
         return files_with_delays
-
-    def scan_folder(self, folder_path: str) -> List[Tuple[str, float]]:
-        """
-        Scan a folder for NMR files with delay values in their names.
-
-        Args:
-            folder_path: Path to the folder to scan
-
-        Returns:
-            List of (full_path, delay_ms) tuples, sorted by delay ascending.
-            Returns empty list if folder doesn't exist or has no matching files.
-        """
-        if not os.path.isdir(folder_path):
-            return []
-
-        files_with_delays = []
-
-        try:
-            for filename in os.listdir(folder_path):
-                _, ext = os.path.splitext(filename.lower())
-                if ext not in self.NMR_EXTENSIONS:
-                    continue
-
-                full_path = os.path.join(folder_path, filename)
-                if not os.path.isfile(full_path):
-                    continue
-
-                delay = self.extract_value(filename)
-                if delay is not None:
-                    files_with_delays.append((full_path, delay))
-
-        except PermissionError:
-            return []
-
-        files_with_delays.sort(key=lambda x: x[1])
-
-        return files_with_delays
-
-    def get_delay_summary(self, folder_path: str) -> dict:
-        """
-        Get a summary of delays found in a folder.
-
-        Args:
-            folder_path: Path to the folder to scan
-
-        Returns:
-            Dict with 'files': list of files, 'delays': list of delays,
-            'min': minimum delay, 'max': maximum delay, 'count': number of files
-        """
-        result = self.scan_folder(folder_path)
-
-        if not result:
-            return {
-                'files': [],
-                'delays': [],
-                'min': None,
-                'max': None,
-                'count': 0
-            }
-
-        files = [f for f, _ in result]
-        delays = [d for _, d in result]
-
-        return {
-            'files': files,
-            'delays': delays,
-            'min': min(delays),
-            'max': max(delays),
-            'count': len(delays)
-        }
 
     def sort_files_with_sequence(
         self, files: List[str]
@@ -287,54 +214,6 @@ class DelayExtractor:
             except ValueError:
                 return None
         return None
-
-    def scan_folder_with_sequence(
-        self, folder_path: str
-    ) -> List[Tuple[str, float, int]]:
-        """
-        Scan a folder for NMR files with delay values, including sequence numbers.
-
-        Args:
-            folder_path: Path to the folder to scan
-
-        Returns:
-            List of (full_path, delay_ms, sequence) tuples, sorted by delay
-            with sequence numbers for duplicates.
-        """
-        if not os.path.isdir(folder_path):
-            return []
-
-        files_with_delays_and_idx = []
-
-        try:
-            for idx, filename in enumerate(sorted(os.listdir(folder_path))):
-                _, ext = os.path.splitext(filename.lower())
-                if ext not in self.NMR_EXTENSIONS:
-                    continue
-
-                full_path = os.path.join(folder_path, filename)
-                if not os.path.isfile(full_path):
-                    continue
-
-                delay = self.extract_value(filename)
-                if delay is not None:
-                    files_with_delays_and_idx.append((full_path, delay, idx))
-
-        except PermissionError:
-            return []
-
-        files_with_delays_and_idx.sort(key=lambda x: (x[1], x[2]))
-
-        # Assign sequence numbers
-        result = []
-        delay_counts: Dict[float, int] = {}
-
-        for full_path, delay, _ in files_with_delays_and_idx:
-            delay_counts[delay] = delay_counts.get(delay, 0) + 1
-            sequence = delay_counts[delay]
-            result.append((full_path, delay, sequence))
-
-        return result
 
     def build_column_mapping(self, files: List[str]) -> Dict[str, str]:
         """

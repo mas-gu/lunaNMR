@@ -550,6 +550,21 @@ def _run_kd_survey(args):
     return 0
 
 
+def _validate_kd(parser, args):
+    # A survey judges every residue on both observables and estimates no fit errors.
+    if args.survey:
+        fit_only = [flag for flag, value in (('--observable', args.observable),
+                                             ('--bootstrap', args.bootstrap))
+                    if value is not None]
+        if fit_only:
+            parser.error(f"--survey does not read {' or '.join(fit_only)}: they set what "
+                         f"a fit does")
+    # Only a survey writes a selection file; a fit reads one through --residues.
+    elif args.selection is not None:
+        parser.error("--selection names the file --survey writes; a fit reads its "
+                     "residues from --residues")
+
+
 def _run_kd(args):
     """Wrap dynamiXs_Kd.kd_fit.run_kd_analysis_with_params for the CLI."""
     if args.dry_run:
@@ -574,9 +589,9 @@ def _run_kd(args):
         'output_prefix': args.prefix,
         'protein_conc': args.p0,
         'alpha': args.alpha,
-        'observables': args.observable,
+        'observables': args.observable or ['csp', 'intensity'],
         'intensity_value': args.intensity_from,
-        'n_bootstrap': args.bootstrap,
+        'n_bootstrap': args.bootstrap or 0,
     }
     if args.residues is not None:
         params['residues'] = _read_residue_selection(args.residues)
@@ -738,9 +753,10 @@ def _discover_spectra(spectra, extensions=None):
 def _default_series_params(parallel=False):
     """Default series/voigt parameters, mirroring the GUI's getattr fallbacks.
 
-    The GUI assembles this nested dict from the main window with these same defaults
-    (gui/dialogs/series_integration_dialog.py::_get_voigt_parameters); a headless run
-    just uses the defaults directly. `parallel` enables the two-pass parallel processor.
+    The GUI assembles the detection, gui and processing groups from the main window with
+    these same defaults (gui/dialogs/series_integration_dialog.py::_get_voigt_params); a
+    headless run just uses the defaults directly. `parallel` enables the two-pass
+    parallel processor.
     """
     from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM
     return {
@@ -753,11 +769,8 @@ def _default_series_params(parallel=False):
             'fix_positions': False,
             'fix_linewidths': False,
             'use_parallel_processing': parallel,
-            'use_centroid_refinement': True,
             'centroid_window_x_ppm': 0.02,
             'centroid_window_y_ppm': 1.0,
-            'centroid_noise_multiplier': 2.0,
-            'use_ps2d_multi_peak': True,
             'use_ps2d_linewidth_reuse': False,
             # The fitting-window grid search; off unless asked for (it chose the
             # smallest window on every real titration and broke CSP positions)
@@ -765,15 +778,9 @@ def _default_series_params(parallel=False):
             # Unmatched peaks near listed ones, added as dummy_ peaks on the first
             # spectrum and fitted at every point
             'auto_add_dummy_peaks': True,
-            'height_threshold': 0.1,
-            'distance_factor': 2.0,
-            'prominence_threshold': 0.05,
-            'smoothing_sigma': 1.0,
-            'max_peaks_fit': 50,
-            'max_optimization_iterations': 50,
         },
+        # Accepted from --params; nothing on the series path reads them
         'fitting_params': {
-            'min_r_squared': 0.5,
             'max_iterations': 1000,
             'fitting_window_x': 0.2,
             'fitting_window_y': 2.0,
@@ -919,9 +926,8 @@ def _validate_series(parser, args):
                      "one before); --peak-source independent cannot be combined with it")
 
 
-# Keys the defaults carry for the parameter manager, which indexes them, but which
-# nothing on the series path reads - or whose value a flag always replaces. A key the
-# defaults do not carry (noise_threshold) is refused here too, so the reason is stated.
+# Keys nothing on the series path reads, or whose value a flag always replaces. They
+# are refused here, rather than as unknown keys, so the reason is stated.
 _SERIES_PARAMS_WITHOUT_EFFECT = {
     ('gui_params', 'use_centroid_refinement'): 'nothing reads it',
     ('gui_params', 'centroid_noise_multiplier'): 'only a detection the series never runs reads it',
@@ -2208,18 +2214,35 @@ _ONED_DIAGNOSTIC = ('height', 'fit_area', 'r_squared', 'fwhm')
 def _run_integrate_1d(args):
     """Measure peaks across a 1D spectrum series (modules/integration_1d_v1o0)."""
     _add_modules_path('integration_1d_v1o0')
-    spectra_paths = _discover_spectra(args.spectra, ('ft1', 'ft', 'pipe'))
+    from oned_series import (load_series, load_readable, integrate_series,
+                             write_series_csv, series_order, spectra_in_folder,
+                             spectrum_name)
+    from oned_detector import detect_peaks
+
+    # A folder is searched as the 1D page searches it; a glob names the files itself.
+    scanned = os.path.isdir(args.spectra)
+    if scanned:
+        spectra_paths = spectra_in_folder(args.spectra)
+    else:
+        spectra_paths = series_order(glob.glob(args.spectra))
     if args.dry_run:
         return _dry_run(args, [('spectra', args.spectra if spectra_paths else '')],
                         {'output_dir': args.out})
     if not spectra_paths:
         raise FileNotFoundError(f"No 1D spectra found in {args.spectra}")
 
-    from oned_series import load_series, integrate_series, write_series_csv
-    from oned_detector import detect_peaks
-
     with _engine_stdout(args):
-        spectra = load_series(spectra_paths)
+        # A scanned folder may hold 2D spectra too, which are left out and reported; a
+        # file the caller named must be a 1D spectrum.
+        if scanned:
+            spectra, spectra_paths, left_out = load_readable(spectra_paths)
+        else:
+            spectra, left_out = load_series(spectra_paths), []
+        skipped = [{'spectrum': spectrum_name(path), 'reason': reason}
+                   for path, reason in left_out]
+        if not spectra:
+            raise ValueError(f"No 1D spectra found in {args.spectra}: "
+                             + '; '.join(s['reason'] for s in skipped))
         if args.detect:
             found = detect_peaks(spectra[0], min_snr=args.min_snr)
             peaks = [{'position': p['ppm'], 'assignment': f"peak_{i + 1}"}
@@ -2240,7 +2263,7 @@ def _run_integrate_1d(args):
             raise ValueError("No peaks to measure: --detect found none, and --peaks was "
                              "not given")
         table = integrate_series(spectra, peaks,
-                                 names=[os.path.basename(p) for p in spectra_paths])
+                                 names=[spectrum_name(p) for p in spectra_paths])
 
     os.makedirs(args.out, exist_ok=True)
     series_csv = os.path.join(args.out, f"{args.prefix}_series.csv")
@@ -2260,12 +2283,14 @@ def _run_integrate_1d(args):
           {'command': 'integrate-1d', 'n_spectra': len(spectra),
            'n_peaks': len(peaks), 'n_rows': len(table),
            'n_unmatched': n_unmatched,
+           'skipped_spectra': skipped,
            'quantitative_observable': _ONED_QUANTITATIVE,
            'diagnostic_observables': list(_ONED_DIAGNOSTIC),
            'outputs': {'series': series_csv, 'table': table_csv}},
           f"1D integration complete: {len(peaks)} peak(s) across {len(spectra)} spectra",
           f"  Series: {series_csv}",
           f"  Table:  {table_csv}",
+          *(f"  Skipped {s['spectrum']}: {s['reason']}" for s in skipped),
           *( [f"  NOTE: {n_unmatched} of {len(table)} measurements found no maximum and "
               f"were read at the expected position"] if n_unmatched else []),
           "  Quantify with `area` (the region sum). `height` moves with linewidth, and",
@@ -2375,12 +2400,11 @@ def build_parser():
                          'this input; with none of these the run is refused')
     kd.add_argument('--alpha', type=float, default=0.14,
                     help='CSP N/H scaling factor (default: 0.14)')
-    kd.add_argument('--observable', type=_choice_list('csp', 'intensity'),
-                    default=['csp', 'intensity'],
+    kd.add_argument('--observable', type=_choice_list('csp', 'intensity'), default=None,
                     help='Comma-separated observables to fit: csp,intensity (default: both)')
     kd.add_argument('--intensity-from', choices=['height', 'volume'], default='height',
                     dest='intensity_from', help='Intensity source for the ratio (default: height)')
-    kd.add_argument('--bootstrap', type=int, default=0,
+    kd.add_argument('--bootstrap', type=int, default=None,
                     help='Bootstrap iterations for error estimates (default: 0)')
     kd.add_argument('--intensity-scale', type=_float_list, default=None,
                     help='Comma-separated per-point height/volume scale factors')
@@ -2416,7 +2440,7 @@ def build_parser():
                     help='Restrict the fit to these residues: a selection file from '
                          '--survey (one name per line, # comments out) or a '
                          'comma-separated list')
-    kd.set_defaults(func=_run_kd)
+    kd.set_defaults(func=_run_kd, _validate=_validate_kd)
 
     series = sub.add_parser('series', parents=[common],
                             help='Process a multi-spectrum series/titration')

@@ -55,8 +55,3 @@ def test_a_utils_name_resolves_from_the_package():
 
 def test_an_unknown_utils_name_is_an_attribute_error():
     assert _run("import lunaNMR.utils as u; print(hasattr(u, 'ConfigManager'))") == "False"
-
-
-def test_the_peak_picker_holds_no_fitter():
-    from lunaNMR.core.enhanced_peak_picker import EnhancedPeakPicker
-    assert not hasattr(EnhancedPeakPicker(), 'fitter')

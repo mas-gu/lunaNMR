@@ -45,14 +45,14 @@ def _page():
 
 
 def _cli_survey(csv):
-    """`kd --survey` with non-default P0/alpha/observable; leaves its settings file beside
+    """`kd --survey` with non-default P0/alpha; leaves its settings file beside
     the input. Returns that file."""
     from lunaNMR.cli import main
     out = io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
         code = main(["kd", "--survey", "--format", "json", "--input", str(csv),
                      "--out", str(csv.parent / "survey"), "--prefix", "DNAJA1",
-                     "--p0", "30", "--alpha", "0.2", "--observable", "intensity",
+                     "--p0", "30", "--alpha", "0.2",
                      "--conc-units", "equivalents", "--kd-outlier-z", "2"])
     assert code == 0, out.getvalue()
     return csv.parent / "DNAJA1_kd_params.json"

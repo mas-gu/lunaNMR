@@ -6,7 +6,7 @@ from typing import Optional, Dict, List
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
-    QGroupBox, QWidget, QColorDialog, QMessageBox,
+    QGroupBox, QWidget, QColorDialog,
     QSpinBox, QDoubleSpinBox, QSplitter, QListWidget, QListWidgetItem,
     QTabWidget, QComboBox, QTextEdit, QStackedWidget
 )
@@ -22,7 +22,7 @@ from lunaNMR.gui.styles.design_system import (
     PRIMARY_TEXT, SECONDARY_TEXT,
     PRIMARY_BUTTON_BG, PRIMARY_BUTTON_HOVER, PRIMARY_BUTTON_TEXT,
     SECONDARY_BUTTON_BG, SECONDARY_BUTTON_HOVER, SECONDARY_BUTTON_TEXT,
-    SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS, BUTTON_HEIGHT_DIALOG,
+    SECONDARY_BUTTON_BORDER, BUTTON_CORNER_RADIUS,
     FRAME_BG_COLOR
 )
 
@@ -1410,131 +1410,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
             }}
         """
 
-    def create_contour_controls(self) -> QGroupBox:
-        """Create contour control settings.
-
-        Returns:
-            QGroupBox containing contour controls
-        """
-        group = QGroupBox("Contour Controls (Applied to All Spectra)")
-        group.setStyleSheet(f"""
-            QGroupBox {{
-                font-size: {FONT_SIZE_BODY}pt;
-                font-weight: bold;
-                color: {PRIMARY_TEXT};
-                border: 1px solid {SECONDARY_BUTTON_BORDER};
-                border-radius: {BUTTON_CORNER_RADIUS}px;
-                margin-top: {SPACING_SM}px;
-                padding-top: {SPACING_MD}px;
-                background-color: {FRAME_BG_COLOR};
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: {SPACING_SM}px;
-                padding: 0 {SPACING_SM}px;
-            }}
-        """)
-
-        layout = QHBoxLayout()
-        layout.setSpacing(SPACING_MD)
-        layout.setContentsMargins(SPACING_MD, SPACING_MD, SPACING_MD, SPACING_MD)
-
-        # Levels
-        layout.addWidget(QLabel("Levels:"))
-        self.levels_spin = QSpinBox()
-        self.levels_spin.setRange(5, 100)
-        self.levels_spin.setValue(10)
-        self.levels_spin.setMaximumWidth(80)
-        layout.addWidget(self.levels_spin)
-
-        # Min level
-        layout.addWidget(QLabel("Min Level:"))
-        self.min_spin = QDoubleSpinBox()
-        self.min_spin.setRange(0.0001, 10.0)
-        self.min_spin.setValue(0.2)
-        self.min_spin.setSingleStep(0.002)
-        self.min_spin.setDecimals(5)
-        self.min_spin.setMaximumWidth(80)
-        layout.addWidget(self.min_spin)
-
-        # Increment
-        layout.addWidget(QLabel("Increment:"))
-        self.increment_spin = QDoubleSpinBox()
-        self.increment_spin.setRange(1.01, 2.0)
-        self.increment_spin.setValue(2.0)
-        self.increment_spin.setSingleStep(0.01)
-        self.increment_spin.setMaximumWidth(80)
-        layout.addWidget(self.increment_spin)
-
-        layout.addStretch()
-
-        update_btn = QPushButton("Update Plot")
-        update_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {PRIMARY_BUTTON_BG};
-                color: {PRIMARY_BUTTON_TEXT};
-                border: none;
-                border-radius: {BUTTON_CORNER_RADIUS}px;
-                padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}pt;
-            }}
-            QPushButton:hover {{
-                background-color: {PRIMARY_BUTTON_HOVER};
-            }}
-        """)
-        update_btn.clicked.connect(self._update_plot)
-        layout.addWidget(update_btn)
-
-        # Export button
-        export_btn = QPushButton("Export PNG")
-        export_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {SECONDARY_BUTTON_BG};
-                color: {SECONDARY_BUTTON_TEXT};
-                border: 1px solid {SECONDARY_BUTTON_BORDER};
-                border-radius: {BUTTON_CORNER_RADIUS}px;
-                padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}pt;
-            }}
-            QPushButton:hover {{
-                background-color: {SECONDARY_BUTTON_HOVER};
-            }}
-        """)
-        export_btn.clicked.connect(self._export_plot)
-        layout.addWidget(export_btn)
-
-        group.setLayout(layout)
-        return group
-
-    def create_button_row(self) -> QHBoxLayout:
-        """Create the bottom button row.
-
-        Returns:
-            QHBoxLayout containing buttons
-        """
-        layout = QHBoxLayout()
-        layout.addStretch()
-
-        close_btn = QPushButton("Close")
-        close_btn.setMinimumHeight(BUTTON_HEIGHT_DIALOG)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {SECONDARY_BUTTON_BG};
-                color: {SECONDARY_BUTTON_TEXT};
-                border: 1px solid {SECONDARY_BUTTON_BORDER};
-                border-radius: {BUTTON_CORNER_RADIUS}px;
-                padding: {SPACING_SM}px {SPACING_MD}px;
-                font-size: {FONT_SIZE_BODY}pt;
-            }}
-            QPushButton:hover {{
-                background-color: {SECONDARY_BUTTON_HOVER};
-            }}
-        """)
-        close_btn.clicked.connect(self.close)
-        layout.addWidget(close_btn)
-
-        return layout
-
     def _on_visibility_changed(self, spectrum_name: str, visible: bool):
         """Handle spectrum visibility toggle."""
         if visible:
@@ -1753,33 +1628,6 @@ class MultiSpectrumViewerDialog(BaseDialog):
         except Exception as e:
             logger.error(f"Error loading {spec['name']}: {e}")
             return False
-
-    def _export_plot(self):
-        """Export the overlay plot as PNG."""
-        from PySide6.QtWidgets import QFileDialog
-
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Overlay Plot",
-            "",
-            "PNG files (*.png);;All files (*.*)"
-        )
-
-        if filename:
-            try:
-                self.plot_widget.save_figure(filename, dpi=300)
-                QMessageBox.information(
-                    self,
-                    "Export Successful",
-                    f"Plot exported to:\n{filename}"
-                )
-                logger.info(f"Exported plot to {filename}")
-            except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Export Error",
-                    f"Failed to export plot:\n{str(e)}"
-                )
 
     # ===== Voigt Analysis Methods (v0.9 multi_spectrum_viewer.py:1113-1305) =====
 

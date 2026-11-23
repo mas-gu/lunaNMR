@@ -38,8 +38,7 @@ OPTIONAL_DEPENDENCIES = {}
 
 INTERNAL_MODULES = [
     ('lunaNMR.core.core_integrator', 'Core integration engine'),
-    ('lunaNMR.core.enhanced_voigt_fitter', '1D Voigt profile fitting'),
-    ('lunaNMR.core.enhanced_peak_picker', 'Peak detection'),
+    ('lunaNMR.core.enhanced_voigt_fitter', 'Peak fitting entry point'),
     ('lunaNMR.core.ps2d_2d_fitter', '2D simultaneous multi-peak fitting'),
     ('lunaNMR.core.parallel_voigt_processor', 'Parallel processing'),
     ('lunaNMR.processors.multi_spectrum_processor', 'Series processing'),

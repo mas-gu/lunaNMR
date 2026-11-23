@@ -10,17 +10,11 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 GUI_PARAMS = {
-    'centroid_noise_multiplier': 2.0, 'centroid_window_x_ppm': 0.02, 'centroid_window_y_ppm': 1.0,
-    'distance_factor': 2.0, 'fix_linewidths': False, 'fix_positions': False,
-    'height_threshold': 0.1, 'lw_gauss_15n': None, 'lw_gauss_1h': None,
-    'lw_lorentz_15n': None, 'lw_lorentz_1h': None, 'max_optimization_iterations': 50,
-    'max_peaks_fit': 50, 'prominence_threshold': 0.05, 'smoothing_sigma': 1.0,
-    'use_adaptive_optimization': False, 'use_centroid_refinement': True,
+    'centroid_window_x_ppm': 0.02, 'centroid_window_y_ppm': 1.0,
+    'fix_linewidths': False, 'fix_positions': False,
+    'use_adaptive_optimization': False,
     'use_parallel_processing': False, 'use_ps2d_linewidth_reuse': False,
-    'use_ps2d_multi_peak': True,
 }
-FITTING_PARAMS = {'fitting_window_x': 0.15, 'fitting_window_y': 2.0,
-                  'max_iterations': 1000, 'min_r_squared': 0.1}
 
 
 @pytest.fixture
@@ -35,10 +29,25 @@ def test_the_manager_hands_the_integrator_its_default_parameter_set():
     search_window_y = get_ps2d_config().search_window_f1
     assert NMRParameterManager().get_integrator_parameters() == {
         'detection_params': {'search_window_x': SEARCH_WINDOW_PPM, 'search_window_y': search_window_y},
-        'fitting_params': FITTING_PARAMS,
         'gui_params': GUI_PARAMS,
         'processing_options': {'use_parallel_processing': False},
     }
+
+
+def test_the_manager_defines_only_the_parameters_it_hands_over():
+    from lunaNMR.utils.parameter_manager import NMRParameterManager
+    manager = NMRParameterManager()
+    handed = manager.get_integrator_parameters()
+    named = set(handed['detection_params']) | set(handed['gui_params'])
+    assert set(manager.parameter_definitions) | {'use_adaptive_optimization'} == named
+    assert set(manager.current_params) == set(manager.parameter_definitions)
+
+
+def test_neither_the_integrator_nor_its_fitter_holds_fitting_parameters():
+    from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
+    integrator = EnhancedVoigtIntegrator()
+    assert not hasattr(integrator, 'fitting_parameters')
+    assert not hasattr(integrator.enhanced_fitter, 'fitting_parameters')
 
 
 def test_the_main_window_sync_hands_the_integrator_that_set(app):
@@ -52,7 +61,7 @@ def test_the_main_window_sync_hands_the_integrator_that_set(app):
         assert window.integrator.gui_params == dict(
             GUI_PARAMS, centroid_window_x_ppm=0.01, centroid_window_y_ppm=0.1,
             use_parallel_processing=True)
-        assert {k: window.integrator.fitting_parameters[k] for k in FITTING_PARAMS} == FITTING_PARAMS
+        assert not hasattr(window.integrator, 'fitting_parameters')
         assert (window.integrator.search_window_x, window.integrator.search_window_y) == (0.07, 0.3)
     finally:
         window.close()

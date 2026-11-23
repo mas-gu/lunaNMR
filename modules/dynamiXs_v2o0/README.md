@@ -211,7 +211,6 @@ dynamiXs_v2o0/
 │   ├── results_viewer.py     # Model-free results viewer
 │   ├── fit_viewer.py         # T1/T2 fit viewer
 │   ├── t1t2_results_viewer.py # T1/T2 values vs residue
-│   ├── series_results_viewer.py # LunaNMR series results
 │   ├── kd_titration_fit_viewer.py # Kd fit viewer
 │   └── methyl_t2_fit_viewer.py # Methyl bi-exp viewer (per-residue editor and
 │                                #   summary-only mode for "Plot T2 vs Residue")

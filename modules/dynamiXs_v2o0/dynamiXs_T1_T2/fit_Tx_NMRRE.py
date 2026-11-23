@@ -3,12 +3,10 @@
 Enhanced T1/T2 NMR Relaxation Fitting Script with Configurable File Handling
 
 This script performs exponential decay fitting for T1/T2 relaxation data with bootstrap error estimation.
-RE VERSION: Enhanced with configurable input/output file management in main function.
 
 Features:
 - Exponential decay fitting using lmfit
 - Bootstrap error estimation
-- Configurable file paths in main function
 - Multi-figure PDF output with customizable plots per figure
 - Comprehensive results output
 """
@@ -682,123 +680,6 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
     print(f"Saved JSON fit data to: {output_file}")
 
 
-def main():
-    """
-    Main function with configurable file handling
-    """
-    
-    # CONFIGURATION SECTION
-    
-    # Input file configuration
-    input_csv_file = "T1_data_600.csv"  # Input CSV file path
-    
-    # Output file configuration
-    output_prefix = "600_T1"  # Prefix for output files
-    results_txt_file = "600_T1_fit_results.txt"  # Results text file
-    
-    # Experiment configuration
-    experiment_type = "T1"  # T1, T2, etc. (for labels and headers)
-    time_units = "ms"  # Time axis units
-    signal_units = "Intensity"  # Signal axis units
-    
-    # Fitting parameters
-    initial_A = None  # Data-driven (max-min) unless overridden
-    initial_t2 = None  # Data-driven (from delay range) unless overridden
-    n_bootstrap = 1000  # Number of bootstrap iterations for error estimation
-    error_method = 'analytical'  # 'analytical' (fast) or 'bootstrap' (robust)
-
-    n_plots_per_figure = 20  # Number of plots per PDF page
-
-    # END CONFIGURATION
-
-    if not os.path.exists(input_csv_file):
-        raise FileNotFoundError(f"Input file not found: {input_csv_file}")
-
-    print(f"Starting {experiment_type} relaxation fitting analysis...")
-    print(f"Input file: {input_csv_file}")
-    print(f"Output prefix: {output_prefix}")
-    print(f"Error method: {error_method}")
-    if error_method == 'bootstrap':
-        print(f"Bootstrap iterations: {n_bootstrap}")
-
-    # Load CSV using pandas to handle mixed data types
-    print("Loading data...")
-    raw_df = pd.read_csv(input_csv_file, header=None)
-
-    # Detect format: LunaNMR Fit Series vs simple DynamiXs format
-    header_row = raw_df.iloc[0].astype(str).tolist()
-    lunaNMR_columns = {'Peak_Number', 'Assignment', 'Reference_X', 'Reference_Y'}
-    # Columns whose header carries no delay: reported so a spectrum cannot go
-    # missing from a series without anyone noticing.
-    dropped_columns = []
-    detected_lunaNMR_cols = [col for col in header_row if col in lunaNMR_columns]
-
-    if detected_lunaNMR_cols:
-        print(f"Detected LunaNMR Fit Series format (columns: {detected_lunaNMR_cols})")
-        delay_start_idx = require_delay_start(header_row, lunaNMR_columns, input_csv_file)
-        assignment_idx = header_row.index('Assignment') if 'Assignment' in header_row else 1
-        print(f"  Using 'Assignment' column (index {assignment_idx}) for residue names")
-        print(f"  Delay columns start at index {delay_start_idx}")
-        residue_names = raw_df.iloc[1:, assignment_idx].to_numpy()
-        # Parse delay columns - handles duplicates like "300_2" -> 300.0
-        delay_headers = raw_df.iloc[0, delay_start_idx:].tolist()
-        x, _keep, _dropped = parse_delay_columns(delay_headers)
-        dropped_columns.extend(_dropped)
-        y_data = raw_df.iloc[1:, delay_start_idx:].astype(float).to_numpy()[:, _keep]
-    else:
-        print("Detected simple DynamiXs format")
-        residue_names = raw_df.iloc[1:, 0].to_numpy()  # Column 1 (residue names), skip header
-        # Parse delay columns - handles duplicates like "300_2" -> 300.0
-        delay_headers = raw_df.iloc[0, 1:].tolist()
-        x, _keep, _dropped = parse_delay_columns(delay_headers)
-        dropped_columns.extend(_dropped)
-        y_data = raw_df.iloc[1:, 1:].astype(float).to_numpy()[:, _keep]  # Values to fit (rows 2+, columns 2+)
-
-    valid_mask = np.array([not str(name).lower().startswith('dummy') for name in residue_names])
-    n_dummies = np.sum(~valid_mask)
-    if n_dummies > 0:
-        print(f"Excluding {n_dummies} dummy residue(s) from fitting")
-        residue_names = residue_names[valid_mask]
-        y_data = y_data[valid_mask]
-
-    print(f"Loaded {len(residue_names)} residues with {len(x)} time points")
-    print(f"Time range: {x.min():.3f} to {x.max():.3f} {time_units}")
-
-    print("Starting fitting process...")
-    results_list = []
-
-    for col_idx in range(len(residue_names)):
-        y = y_data[col_idx, :]
-        residue = residue_names[col_idx]
-
-        result = fit_single_residue(x, y, residue, initial_A, initial_t2,
-                                    n_bootstrap=n_bootstrap, error_method=error_method)
-        results_list.append(result)
-
-    print(f"Completed fitting for {len(results_list)} residues")
-    
-    print("Generating plots...")
-    create_plots(results_list, output_prefix, n_plots_per_figure, 
-                 experiment_type, time_units, signal_units)
-    
-    print(f"Saving results to {results_txt_file}...")
-    save_results(results_list, results_txt_file, experiment_type)
-    
-    # Summary statistics
-    t2_values = [r['t2'] for r in results_list]
-    t2_errors = [r['t2_err'] for r in results_list]
-    
-    print(f"\n{experiment_type} Analysis Summary:")
-    print(f"  Number of residues fitted: {len(results_list)}")
-    print(f"  {experiment_type} range: {min(t2_values):.2f} to {max(t2_values):.2f} {time_units}")
-    print(f"  Mean {experiment_type}: {np.mean(t2_values):.2f} ± {np.std(t2_values):.2f} {time_units}")
-    print(f"  Mean fitting error: {np.mean(t2_errors):.2f} {time_units}")
-    print(f"  Results saved to: {results_txt_file}")
-    print(f"  Plots saved with prefix: {output_prefix}")
-    
-    print("Analysis completed successfully!")
-
-
 def run_analysis_with_params(params, progress_callback=None):
     """
     Run analysis with parameters provided by GUI
@@ -981,7 +862,3 @@ def run_analysis_with_params(params, progress_callback=None):
         'n_window_marginal': sum(1 for r in results_list
                                  if isinstance(r, dict) and r.get('window_marginal')),
     }
-
-
-if __name__ == "__main__":
-    main()

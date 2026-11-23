@@ -22,6 +22,31 @@ def dataset(tmp_path_factory):
     return stage_binding_dataset(tmp_path_factory.mktemp("dataset"))
 
 
+KD_OPTIONS = dict(prefix="run1", alpha=0.2, intensity_from="volume",
+                  csp_sigma_multiple=2.0, kd_outlier_z=0.0, noise_quantile=0.3,
+                  dd_runaway_ratio=5.0, ref_max_ratio=8.0)
+
+
+def test_no_kd_vector_carries_an_option_its_mode_refuses():
+    """`kd --survey` refuses the options only a fit reads, and a fit the selection path only
+    a survey writes: the vectors must pass the validation that follows parsing too."""
+    import inspect
+    survey = set(inspect.signature(cli_call.kd_survey_args).parameters)
+    fit = set(inspect.signature(cli_call.kd_fit_args).parameters)
+    assert not {"observables", "bootstrap", "residues_file"} & survey
+    assert "selection_file" not in fit
+    parser = build_parser()
+    for argv in (
+            cli_call.kd_survey_args("t.csv", 50, "absolute", "o", conc=[0, 1],
+                                    intensity_scales=[1, 0.5], selection_file="sel.txt",
+                                    **KD_OPTIONS),
+            cli_call.kd_fit_args("t.csv", 50, "absolute", "o", conc=[0, 1],
+                                 intensity_scales=[1, 0.5], residues_file="residues.txt",
+                                 observables=["csp"], bootstrap=50, **KD_OPTIONS)):
+        args = parser.parse_args(argv)
+        args._validate(parser, args)
+
+
 def test_every_added_argument_vector_is_accepted_by_the_cli_parser():
     parser = build_parser()
     parser.parse_args(cli_call.diagnose_args("d", quick=True, mode="titration", sample=True,
@@ -29,14 +54,11 @@ def test_every_added_argument_vector_is_accepted_by_the_cli_parser():
     parser.parse_args(cli_call.plan_series_args("s", "p", "o", quick=True, sample=True,
                                                 params_file="params.json"))
     parser.parse_args(cli_call.start_series_args("s", "p", "o", params_file="params.json"))
-    kd_options = dict(prefix="run1", alpha=0.2, intensity_from="volume", bootstrap=50,
-                      csp_sigma_multiple=2.0, kd_outlier_z=0.0, noise_quantile=0.3,
-                      dd_runaway_ratio=5.0, ref_max_ratio=8.0)
     parser.parse_args(cli_call.kd_survey_args(
-        "t.csv", 50, "absolute", "o", conc=[0, 1], selection_file="sel.txt", observables=["csp"],
-        **kd_options))
+        "t.csv", 50, "absolute", "o", conc=[0, 1], selection_file="sel.txt", **KD_OPTIONS))
     parser.parse_args(cli_call.kd_fit_args(
-        "t.csv", 50, "absolute", "o", conc=[0, 1], observables=["csp", "intensity"], **kd_options))
+        "t.csv", 50, "absolute", "o", conc=[0, 1], observables=["csp", "intensity"],
+        bootstrap=50, **KD_OPTIONS))
     parser.parse_args(cli_call.export_kd_args(
         "f.json", "o", kinds=["curves"], observables=["csp"], fig_format=["pdf", "png"],
         per_page=10, prefix="p", summary_only=True))

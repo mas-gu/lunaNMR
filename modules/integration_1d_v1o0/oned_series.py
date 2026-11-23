@@ -1,6 +1,9 @@
 # ABOUTME: Extracts selected peaks across an ordered series of 1D spectra.
 # ABOUTME: Backs the interactive picker - box select, click select, and one-shot series integration.
 
+import re
+from pathlib import Path
+
 import numpy as np
 
 from oned_detector import (DEFAULT_MIN_SNR, detect_peaks, estimate_fwhm,
@@ -16,9 +19,59 @@ DEFAULT_TRACK_WINDOW_PPM = 0.01
 DRIFT_FWHM_MULTIPLE = 2.0
 
 
+# Bruker names every processed 1D spectrum 1r, under <experiment>/pdata/<processing>.
+BRUKER_SPECTRUM = '1r'
+
+SPECTRUM_PATTERNS = ('*.ft1', '*.ft', '*.ft2', '*.ft3', '*.dat', '*.pipe',
+                     f'*/pdata/*/{BRUKER_SPECTRUM}')
+
+
+def spectrum_name(path):
+    """The name a spectrum is listed under: its file name, or for a Bruker spectrum
+    its experiment and processing numbers, since the file name is the same for all."""
+    path = Path(path)
+    if path.name == BRUKER_SPECTRUM:
+        return f"{path.parent.parent.parent.name}_{path.parent.name}"
+    return path.name
+
+
+def series_order(paths):
+    """Spectra in series order, numbers in a name compared as numbers (pt_2 before
+    pt_10): each point is tracked from the one before it."""
+    def natural_key(path):
+        return [int(t) if t.isdigit() else t.lower()
+                for t in re.split(r'(\d+)', spectrum_name(path))]
+    return sorted(paths, key=natural_key)
+
+
+def spectra_in_folder(folder):
+    """Every spectrum file of a folder, in series order."""
+    paths = []
+    for pattern in SPECTRUM_PATTERNS:
+        paths.extend(Path(folder).glob(pattern))
+    return series_order(paths)
+
+
 def load_series(paths):
     """Load spectra in the given order."""
     return [load_spectrum(p) for p in paths]
+
+
+def load_readable(paths):
+    """Load the spectra that read as 1D, in the given order.
+
+    A folder often holds 2D spectra beside the 1D ones, and one of those is reported
+    rather than aborting the whole set. Returns the spectra, their paths, and a
+    (path, reason) pair for each file left out.
+    """
+    spectra, readable, rejected = [], [], []
+    for path in paths:
+        try:
+            spectra.append(load_spectrum(path))
+            readable.append(path)
+        except Exception as exc:
+            rejected.append((path, str(exc)))
+    return spectra, readable, rejected
 
 
 def peaks_in_range(spectrum, ppm_from, ppm_to, min_snr=DEFAULT_MIN_SNR):

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QMessageBox, QInputDialog
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.styles.design_system import (
@@ -25,8 +25,6 @@ logger = logging.getLogger(__name__)
 
 class SeriesManagerDialog(BaseDialog):
     """Dialog for managing saved series integrations."""
-
-    series_updated = Signal()  # Emitted when series are modified
 
     def __init__(self, parent=None, main_window=None):
         super().__init__(
@@ -216,7 +214,6 @@ class SeriesManagerDialog(BaseDialog):
         saved_series[new_name] = batch
 
         self._populate_list()
-        self.series_updated.emit()
         logger.info(f"Renamed series '{old_name}' to '{new_name}'")
 
     def _delete_series(self):
@@ -249,5 +246,4 @@ class SeriesManagerDialog(BaseDialog):
                         self.main_window.batch_results = None
 
             self._populate_list()
-            self.series_updated.emit()
             logger.info(f"Deleted series '{name}'")

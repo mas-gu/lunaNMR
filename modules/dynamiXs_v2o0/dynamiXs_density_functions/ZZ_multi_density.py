@@ -207,7 +207,7 @@ class ReducedSpectralDensityAnalysis:
         n_successful = len(mc_results['S2'])
         if n_successful < 10:  # Need minimum samples for reliable errors
             print(f"    Warning: Only {n_successful}/{n_monte_carlo} MC fits succeeded")
-            # Fall back to ensemble-based errors
+            # Too few refits for an error estimate: the errors stay NaN
             return best_fit
         
         best_fit['S2_err'] = np.std(mc_results['S2'])
@@ -675,86 +675,3 @@ def _worker_process_residue_single(args):
             'warnings': [],
             'error': str(e)
         }
-
-
-
-
-def main():
-    """
-    Example usage of the ReducedSpectralDensityAnalysis class with multiprocessing
-    """
-    analyzer = ReducedSpectralDensityAnalysis(
-        spectrometer_frequency=700.0,  # MHz
-        rNH=1.023e-10,                   # meters
-        csaN=-160.0e-6                   # ppm in frequency units
-    )
-    
-    # Analyze CSV file with multiprocessing support
-    try:
-        print("Running analysis with multiprocessing and Monte Carlo error propagation...")
-        results = analyzer.analyze_csv('data_in_700.csv',
-                                     use_monte_carlo_errors=True,
-                                     n_monte_carlo=100,
-                                     use_multiprocessing=True,
-                                     n_processes=None)  # Use 80% of available cores
-        
-        if len(results) == 0:
-            print("No data to analyze after filtering!")
-            return
-        
-        print("\nReduced Spectral Density Analysis Results (Multiprocessing):")
-        print("=" * 70)
-        
-        if 'Residue' in results.columns:
-            display_cols = ['Residue', 'J0', 'JwN', 'JwH', 'S2', 'tc', 'te', 'Rex']
-        else:
-            display_cols = ['Index', 'J0', 'JwN', 'JwH', 'S2', 'tc', 'te', 'Rex']
-        
-        print(results[display_cols].round(4))
-        
-        results.to_csv('ZZ_rsdm_multicore.csv', index=False)
-        
-        analyzer.save_detailed_results(results)
-        
-        analyzer.plot_results(results)
-        
-        success_rate = results['fit_success'].mean() * 100
-        print("\nModel-Free Fitting Results:")
-        print(f"  Fit success rate: {success_rate:.1f}%")
-        print(f"  Multiprocessing enabled: {success_rate > 0}")
-        
-        if success_rate > 0:
-            successful = results[results['fit_success']]
-            print(f"  Successfully fitted residues: {len(successful)}")
-            print(f"  Average S²: {successful['S2'].mean():.3f} ± {successful['S2'].std():.3f}")
-            print(f"  Average τc: {successful['tc'].mean():.1f} ± {successful['tc'].std():.1f} ns")
-            print(f"  Average τe: {successful['te'].mean():.1f} ± {successful['te'].std():.1f} ps")
-            print(f"  Average Rex: {successful['Rex'].mean():.1f} ± {successful['Rex'].std():.1f} s⁻¹")
-            
-            # Report Monte Carlo success if used
-            if 'mc_success_rate' in successful.columns:
-                avg_mc_success = successful['mc_success_rate'].mean()
-                print(f"  Average Monte Carlo success rate: {avg_mc_success*100:.1f}%")
-        else:
-            print("  No successful model-free fits obtained!")
-            
-    except FileNotFoundError:
-        print("Please provide a CSV file named 'data_in.csv' with columns:")
-        print("R1, R1err, R2, R2err, hetNOE, hetNOEerr, and optionally Residue")
-        
-        example_data = pd.DataFrame({
-            'Residue': [f'A{i}' for i in range(1, 11)],
-            'R1': np.random.normal(1.5, 0.2, 10),
-            'R1err': np.random.normal(0.05, 0.01, 10),
-            'R2': np.random.normal(15.0, 2.0, 10), 
-            'R2err': np.random.normal(0.5, 0.1, 10),
-            'hetNOE': np.random.normal(0.8, 0.1, 10),
-            'hetNOEerr': np.random.normal(0.03, 0.005, 10)
-        })
-        example_data.to_csv('example_relaxation_data.csv', index=False)
-        print("\nExample data file 'example_relaxation_data.csv' created.")
-        print("You can test the script with this example data.")
-
-
-if __name__ == "__main__":
-    main()

@@ -97,8 +97,6 @@ class DynamiXsMainWindow(QMainWindow):
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.resize(900, 700)
 
-        self.dynamixs_path = Path(__file__).parent
-
         # Current working directory for file operations
         self.current_dir = os.getcwd()
 
@@ -263,146 +261,6 @@ class DynamiXsMainWindow(QMainWindow):
             self.current_dir = new_dir
             os.chdir(new_dir)
             self.dir_label.setText(f"Working Directory: {self.current_dir}")
-
-    def get_state(self) -> dict:
-        """Get complete DynamiXs state for project saving.
-
-        Collects state from all pages including field data, session results,
-        and source_series_map for series-based data.
-        """
-        state = {
-            't1t2': {},
-            'spectral_density': {},
-            'model_free': {},
-        }
-
-        # T1/T2 Fitting page state
-        if hasattr(self, 't1t2_page'):
-            page = self.t1t2_page
-            state['t1t2'] = {
-                'session_results': getattr(page, 'session_results', {}),
-                'fitted_experiments': getattr(page, 'fitted_experiments', []),
-                'output_dir': getattr(page, 'output_dir', None),
-                'field2_enabled': getattr(page, 'field2_enabled', False),
-                'source_series_map': getattr(page, 'source_series_map', {}),
-                # Field frequencies
-                'field1_freq': page.field1_freq_spin.value() if hasattr(page, 'field1_freq_spin') else 600.0,
-                'field2_freq': page.field2_freq_spin.value() if hasattr(page, 'field2_freq_spin') else 700.0,
-            }
-
-        # Spectral Density page state
-        if hasattr(self, 'spectral_page'):
-            page = self.spectral_page
-            state['spectral_density'] = {
-                'session_results': getattr(page, 'session_results', {}),
-                'output_dir': getattr(page, 'output_dir', None),
-                'source_series_map': getattr(page, 'source_series_map', {}),
-            }
-
-        # Model Free / Integrated Analysis page state
-        if hasattr(self, 'integrated_page'):
-            page = self.integrated_page
-            state['model_free'] = {
-                'session_results': getattr(page, 'session_results', {}),
-                'output_dir': getattr(page, 'output_dir', None),
-                'source_series_map': getattr(page, 'source_series_map', {}),
-            }
-
-        return state
-
-    def get_file_refs(self) -> dict:
-        """Get file references from all pages for project saving.
-
-        Returns dict of all file paths used by DynamiXs pages.
-        """
-        file_refs = {
-            't1t2': {},
-            'spectral_density': {},
-            'model_free': {},
-        }
-
-        # T1/T2 Fitting page file refs
-        if hasattr(self, 't1t2_page'):
-            page = self.t1t2_page
-            file_refs['t1t2'] = {
-                'field1_t1_file': getattr(page, 'field1_t1_file', None),
-                'field1_t2_file': getattr(page, 'field1_t2_file', None),
-                'field1_t1rho_file': getattr(page, 'field1_t1rho_file', None),
-                'field2_t1_file': getattr(page, 'field2_t1_file', None),
-                'field2_t2_file': getattr(page, 'field2_t2_file', None),
-                'field2_t1rho_file': getattr(page, 'field2_t1rho_file', None),
-                'peak_list_file': getattr(page, 'peak_list_file', None),
-            }
-
-        # Spectral Density page file refs
-        if hasattr(self, 'spectral_page'):
-            page = self.spectral_page
-            file_refs['spectral_density'] = {
-                'field1_t1_file': getattr(page, 'field1_t1_file', None),
-                'field1_t2_file': getattr(page, 'field1_t2_file', None),
-                'field1_noe_sat_file': getattr(page, 'field1_noe_sat_file', None),
-                'field1_noe_unsat_file': getattr(page, 'field1_noe_unsat_file', None),
-                'field2_t1_file': getattr(page, 'field2_t1_file', None),
-                'field2_t2_file': getattr(page, 'field2_t2_file', None),
-                'field2_noe_sat_file': getattr(page, 'field2_noe_sat_file', None),
-                'field2_noe_unsat_file': getattr(page, 'field2_noe_unsat_file', None),
-            }
-
-        return file_refs
-
-    def restore_state(self, state: dict, file_refs: dict):
-        """Restore DynamiXs state from project load.
-
-        Args:
-            state: State dict from get_state()
-            file_refs: File refs dict from get_file_refs()
-        """
-        if hasattr(self, 't1t2_page') and 't1t2' in state:
-            page = self.t1t2_page
-            t1t2_state = state['t1t2']
-            t1t2_refs = file_refs.get('t1t2', {})
-
-            if 'session_results' in t1t2_state:
-                page.session_results = t1t2_state['session_results']
-            if 'fitted_experiments' in t1t2_state:
-                page.fitted_experiments = t1t2_state['fitted_experiments']
-            if 'output_dir' in t1t2_state:
-                page.output_dir = t1t2_state['output_dir']
-            if 'field2_enabled' in t1t2_state:
-                page.field2_enabled = t1t2_state['field2_enabled']
-            if 'source_series_map' in t1t2_state:
-                page.source_series_map = t1t2_state['source_series_map']
-
-            if hasattr(page, 'field1_freq_spin') and 'field1_freq' in t1t2_state:
-                page.field1_freq_spin.setValue(t1t2_state['field1_freq'])
-            if hasattr(page, 'field2_freq_spin') and 'field2_freq' in t1t2_state:
-                page.field2_freq_spin.setValue(t1t2_state['field2_freq'])
-
-            for attr in ['field1_t1_file', 'field1_t2_file', 'field1_t1rho_file',
-                        'field2_t1_file', 'field2_t2_file', 'field2_t1rho_file',
-                        'peak_list_file']:
-                if attr in t1t2_refs and t1t2_refs[attr]:
-                    setattr(page, attr, t1t2_refs[attr])
-
-            page._update_field_displays()
-
-        if hasattr(self, 'spectral_page') and 'spectral_density' in state:
-            page = self.spectral_page
-            sd_state = state['spectral_density']
-            sd_refs = file_refs.get('spectral_density', {})
-
-            if 'session_results' in sd_state:
-                page.session_results = sd_state['session_results']
-            if 'output_dir' in sd_state:
-                page.output_dir = sd_state['output_dir']
-            if 'source_series_map' in sd_state:
-                page.source_series_map = sd_state['source_series_map']
-
-            for attr in ['field1_t1_file', 'field1_t2_file', 'field1_noe_sat_file',
-                        'field1_noe_unsat_file', 'field2_t1_file', 'field2_t2_file',
-                        'field2_noe_sat_file', 'field2_noe_unsat_file']:
-                if attr in sd_refs and sd_refs[attr]:
-                    setattr(page, attr, sd_refs[attr])
 
 
 # BASE PAGE CLASS
@@ -820,9 +678,6 @@ class T1T2FittingPage(BasePage):
 
     def _init_file_vars(self):
         """Initialize file path variables for dual-field support."""
-        # Single-file input
-        self.input_file = None
-
         # Field 1 files
         self.field1_t1_file = None
         self.field1_t2_file = None
@@ -1501,18 +1356,6 @@ class T1T2FittingPage(BasePage):
         else:  # Analytical selected
             self.boot_row.hide()
 
-    def _browse_input_file(self):
-        """Browse for input CSV file."""
-        filename = open_file_dialog(
-            self,
-            title="Select Input CSV File",
-            directory=self.main_window.current_dir,
-            filter="CSV files (*.csv);;All files (*.*)"
-        )
-        if filename:
-            self.input_file = filename
-            self.file_display.setText(os.path.basename(filename))
-
     def _start_analysis(self):
         """Start the T1/T2 analysis based on selected analysis type."""
         if self._analysis_running(self.results_text.appendPlainText):
@@ -1735,12 +1578,16 @@ class T1T2FittingPage(BasePage):
             f"  θ = {theta}°, ω₁ = {omega1} Hz, carrier = {carrier:.3f} ppm, "
             f"{spec_freq_mhz} MHz")
 
-        time_units = self.units_combo.currentText() or TIME_UNITS_DEFAULT
-        self.results_text.appendPlainText(f"  fitted times read in {time_units}")
+        # Each fit's own units, not the selector's: it may have moved since the fits.
+        fits = self.session_results[field]
+        t1_units = self._fitted_time_units(fits['t1'])
+        t1rho_units = self._fitted_time_units(fits['t1rho'])
+        self.results_text.appendPlainText(
+            f"  fitted times read in {t1_units} (T1) and {t1rho_units} (T1ρ)")
         r1_data = self._normalize_relaxation_columns(
-            self._load_relaxation_results(t1_file), 'R1', time_units)
+            self._load_relaxation_results(t1_file), 'R1', t1_units)
         r1rho_data = self._normalize_relaxation_columns(
-            self._load_relaxation_results(t1rho_file), 'R1rho', time_units)
+            self._load_relaxation_results(t1rho_file), 'R1rho', t1rho_units)
         result = calculate_T2_from_T1rho(
             r1_data=r1_data,
             r1rho_data=r1rho_data,
@@ -2744,7 +2591,6 @@ class IntegratedAnalysisPage(BasePage):
 
         # Output settings - default to current working directory
         self.output_dir = self.main_window.current_dir
-        self.json_folder = None
 
         # Session state tracking
         self.session_results = {
@@ -3369,7 +3215,6 @@ class IntegratedAnalysisPage(BasePage):
         json_folder = os.path.join(self.output_dir, self.json_display.text())
         results_file = os.path.join(self.output_dir, f"{results_prefix}_spectral_density_detailed.csv")
 
-        self.json_folder = json_folder
         self.session_results = {
             'analysis_complete': True,
             'results_prefix': results_prefix,
