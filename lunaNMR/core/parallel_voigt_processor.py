@@ -23,7 +23,7 @@ import os
 
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 from lunaNMR.utils.cancellation import Cancelled, raise_if_stopped, result_unless_stopped
-from lunaNMR.utils.quality_categories import GOOD_FIT_MIN_R2, fit_quality_label
+from lunaNMR.utils.quality_categories import fit_quality_label
 
 # Adaptive optimization imports
 from lunaNMR.core.adaptive_optimizer import (
@@ -675,7 +675,7 @@ class ParallelVoigtProcessor:
 
                 # Quality threshold: only use fits with good R²
                 r_squared = peak_result.get('r_squared', 0)
-                if r_squared < GOOD_FIT_MIN_R2:
+                if r_squared < 0.85:
                     continue
 
                 successful_fits += 1
