@@ -1,17 +1,13 @@
 # ABOUTME: Standalone 1D integration module dialog, launched from the lunaNMR Modules menu.
 # ABOUTME: Hosts the OneDIntegrationPage - pick peaks on a 1D spectrum, integrate the whole series.
 
-import sys
-from pathlib import Path
-
 from PySide6.QtWidgets import QVBoxLayout
 
+from lunaNMR.analysis_modules import add_to_import_path
 from lunaNMR.gui.base.base_dialog import BaseDialog
 
 # The 1D module is self-contained; add it to the path for its bare-name imports.
-_integration_1d_path = Path(__file__).parent.parent.parent.parent / "modules" / "integration_1d_v1o0"
-if str(_integration_1d_path) not in sys.path:
-    sys.path.insert(0, str(_integration_1d_path))
+add_to_import_path("integration_1d_v1o0")
 
 from oned_page import OneDIntegrationPage
 

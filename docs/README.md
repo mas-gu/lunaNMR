@@ -8,7 +8,7 @@ New here? Start with [Getting Started](#getting-started) → then [ALGORITHMS.md
 
 Load spectrum → **Detect** → **Fit Spectrum** → inspect → export. PS2D handles overlaps automatically; defaults adapt to ¹⁵N and ¹³C.
 
-1. **Launch** — `cd lunaNMR && python launch_lunaNMR.py`; the main window opens directly.
+1. **Launch** — `cd lunaNMR && python launch_lunaNMR.py`; the main window opens directly. LunaNMR runs from its clone or from an editable install of it (`pip install -e .`); a regular `pip install .` leaves the analysis modules in `modules/` behind — see [INSTALLATION.md](INSTALLATION.md).
 2. **Load data** — click **Load Data** and pick a spectrum (`.2ii`/`.2rr` Bruker, `.ft`/`.pipe` NMRPipe, `.ucsf` SPARKY, `.fid`/`.ft` Varian). The same dialog optionally loads a peak list; reference peaks show as blue ×. Without a list, all peaks are detected.
 3. **Detect** — click **Detect**. Markers appear as red dots.
 4. **Fit** — click **Fit Spectrum**. Progress shows in a progress dialog whose **Cancel** stops the fit before its next cluster; fitted peaks populate the **Peak Navigator** (right panel).

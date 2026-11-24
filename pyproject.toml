@@ -28,6 +28,9 @@ mcp = ["mcp>=2,<3; python_version >= '3.10'"]
 lunanmr = "lunaNMR.cli:main"
 lunanmr-mcp = "lunaNMR.mcp.server:main"
 
+# The analysis modules in `modules/` (DynamiXs, Kd, 1D integration) sit beside the package
+# and are not packaged: lunaNMR is run from its clone or installed from it in editable mode
+# (`pip install -e .`). A regular `pip install .` leaves them behind; see docs/INSTALLATION.md.
 [tool.setuptools.packages.find]
 include = ["lunaNMR*"]
 

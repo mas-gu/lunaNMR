@@ -1,11 +1,14 @@
-# ABOUTME: Install self-test for the MCP server: required modules import and the CLI answers with JSON.
+# ABOUTME: MCP server install self-test: required modules import, analysis modules found, CLI answers with JSON.
 # ABOUTME: Failed installs are the likeliest support request, so each problem is named in one line.
 
 import importlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
+
+from lunaNMR.analysis_modules import ANALYSIS_MODULES, AnalysisModulesNotFound, module_folder
 
 REQUIRED_MODULES = ['numpy', 'scipy', 'pandas', 'matplotlib', 'nmrglue', 'numba', 'lmfit', 'mcp']
 
@@ -16,6 +19,15 @@ def _module_check(name):
     except Exception as error:
         return name, False, f'cannot import {name}: {error}'
     return name, True, getattr(module, '__version__', 'imported')
+
+
+def _analysis_modules_check():
+    """The DynamiXs, Kd and 1D tools run code kept beside the package, not in it."""
+    try:
+        folders = [module_folder(name) for name in ANALYSIS_MODULES]
+    except AnalysisModulesNotFound as error:
+        return 'modules', False, str(error)
+    return 'modules', True, os.path.dirname(folders[0])
 
 
 def _cli_check():
@@ -33,7 +45,7 @@ def _cli_check():
 
 
 def run_checks(modules=REQUIRED_MODULES):
-    return [_module_check(name) for name in modules] + [_cli_check()]
+    return [_module_check(name) for name in modules] + [_analysis_modules_check(), _cli_check()]
 
 
 def report(results):

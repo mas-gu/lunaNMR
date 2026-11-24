@@ -5,6 +5,8 @@
 
 Scannable condensation of `docs/CLI.md` + `cli.py` for an agent. Run from the repository root.
 
+**Install:** the clone itself, or an editable install of it (`pip install -e .`). A regular `pip install .` leaves `modules/` behind, and `dynamixs`, `kd`, `export kd`, `integrate-1d` (dry runs included; `project build` when the run holds a Kd fit) exit `1` with `error.type` `AnalysisModulesNotFound`. That is an install problem, not bad input: do not retry with other arguments — reinstall in editable mode.
+
 ## Invocation
 ```bash
 python -m lunaNMR <subcommand> [flags]   # `lunanmr` only after `pip install -e .`

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# ABOUTME: Verifies that lunaNMR's dependencies, package modules and GUI entry point
-# ABOUTME: all import, and reports what is missing when they do not.
+# ABOUTME: Verifies that lunaNMR's dependencies, package modules, analysis modules and GUI
+# ABOUTME: entry point are all there, and reports what is missing when they are not.
 """Installation verification for lunaNMR.
 
 Run from anywhere:  python3 lunaNMR/validation/verify_installation.py
@@ -108,6 +108,23 @@ def check_internal_modules():
 
     return missing, available
 
+def check_analysis_modules():
+    """Check the analysis modules sit beside the package; returns the failure, or None"""
+    print("\nChecking Analysis Modules...")
+    from lunaNMR.analysis_modules import (ANALYSIS_MODULES, AnalysisModulesNotFound,
+                                          module_folder)
+
+    failure = None
+    for folder, description in ANALYSIS_MODULES.items():
+        try:
+            module_folder(folder)
+            print(f"   [ok] modules/{folder} - {description}")
+        except AnalysisModulesNotFound as e:
+            print(f"   [FAIL] modules/{folder} - {description} (MISSING)")
+            failure = failure or e
+
+    return failure
+
 def check_main_application():
     """Check main application can be imported"""
     print("\nChecking Main Application...")
@@ -147,12 +164,14 @@ def check_fitting_pipeline():
         print(f"   [FAIL] Fitting pipeline check failed: {e}")
         return False
 
-def generate_installation_report(missing_external, missing_internal, app_ok, fix_ok, python_ok):
+def generate_installation_report(missing_external, missing_internal, app_ok, fix_ok, python_ok,
+                                 modules_failure):
     """Generate installation report"""
     print("\nINSTALLATION REPORT")
     print("=" * 50)
 
-    if python_ok and not missing_external and not missing_internal and app_ok and fix_ok:
+    if (python_ok and not missing_external and not missing_internal and app_ok and fix_ok
+            and modules_failure is None):
         print("INSTALLATION COMPLETE!")
         print("   [ok] All dependencies installed")
         print("   [ok] All modules available")
@@ -179,6 +198,10 @@ def generate_installation_report(missing_external, missing_internal, app_ok, fix
                 print(f"   - {mod}")
             print("   This indicates a problem with the installation")
 
+        if modules_failure is not None:
+            print("\nMissing Analysis Modules:")
+            print(f"   {modules_failure}")
+
         if not app_ok:
             print("\nMain application cannot be imported")
             print("   Check for import errors in lunaNMR.gui.main_window")
@@ -197,11 +220,12 @@ def main():
     python_ok = check_python_version()
     missing_external, _ = check_external_dependencies()
     missing_internal, _ = check_internal_modules()
+    modules_failure = check_analysis_modules()
     app_ok = check_main_application()
     fix_ok = check_fitting_pipeline()
 
     return generate_installation_report(
-        missing_external, missing_internal, app_ok, fix_ok, python_ok)
+        missing_external, missing_internal, app_ok, fix_ok, python_ok, modules_failure)
 
 if __name__ == "__main__":
     success = main()

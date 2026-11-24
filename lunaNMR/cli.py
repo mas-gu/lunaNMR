@@ -23,6 +23,8 @@ import re
 import sys
 import threading
 
+from lunaNMR.analysis_modules import AnalysisModulesNotFound, add_to_import_path
+
 
 def _float_list(text):
     """Parse a comma-separated list of floats, e.g. '0,10,25.5'."""
@@ -297,11 +299,11 @@ def _add_modules_path(*parts):
 
     The dynamiXs fitters live in modules/ (sibling of the lunaNMR package) and use
     bare sibling imports (e.g. `from kd_models import ...`), so their directory must
-    be importable directly. Mirrors modules/dynamiXs_v2o0/workers.py.
+    be importable directly. Mirrors modules/dynamiXs_v2o0/workers.py. Without that
+    directory - a copy of the package alone - AnalysisModulesNotFound names the editable
+    install.
     """
-    path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'modules', *parts))
-    if path not in sys.path:
-        sys.path.insert(0, path)
+    path = add_to_import_path(*parts)
     # Also expose on PYTHONPATH so multiprocessing-spawn children (macOS default) and
     # subprocesses can import these sibling modules — the density analyzers fan out to a
     # Pool whose workers re-import the module by name.
@@ -568,6 +570,7 @@ def _validate_kd(parser, args):
 
 def _run_kd(args):
     """Wrap dynamiXs_Kd.kd_fit.run_kd_analysis_with_params for the CLI."""
+    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
     if args.dry_run:
         # The survey writes its selection file beside the INPUT, not into --out, so a
         # plan naming only --out sends the caller to the wrong place for the one file
@@ -579,7 +582,6 @@ def _run_kd(args):
             planned['survey_file'] = os.path.join(args.out, 'data',
                                                   f"{args.prefix}_survey.csv")
         return _dry_run(args, [('input', args.input)], planned)
-    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
     if args.survey:
         return _run_kd_survey(args)
     import kd_fit
@@ -1193,7 +1195,7 @@ def _project_manager():
 
 def _run_project_build(args):
     """Assemble a .lunaNMR bundle from an automated run's output folders."""
-    from lunaNMR.utils.project_builder import build_project
+    from lunaNMR.utils.project_builder import build_project, find_kd_fits
     if not os.path.isdir(args.run_dir):
         _emit_error(args, FileNotFoundError(f"Not a run folder: {args.run_dir}"))
         return 1
@@ -1204,7 +1206,9 @@ def _run_project_build(args):
     if args.spectrum and not os.path.exists(args.spectrum):
         _emit_error(args, FileNotFoundError(f"--spectrum not found: {args.spectrum}"))
         return 1
-    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
+    # Only a Kd fit is bundled through its module (project_builder.kd_page_state).
+    if find_kd_fits(args.run_dir):
+        _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
     if args.dry_run:
         # The whole build, into a folder that is then thrown away: every input is read
         # and checked exactly as a real build would, and nothing is left behind.
@@ -1494,6 +1498,7 @@ def _run_export_kd(args):
     """Render CSP / intensity fit figures + a summary from a self-contained kd fit JSON."""
     import json
     import csv
+    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
     if args.dry_run:
         return _dry_run(args, [('json', args.json)], {'output_dir': args.out})
     if not os.path.isfile(args.json):
@@ -1504,7 +1509,6 @@ def _run_export_kd(args):
     matplotlib.rcParams['pdf.fonttype'] = 42  # TrueType, so text stays editable in Illustrator
     import matplotlib.pyplot as plt
     import numpy as np
-    _add_modules_path('dynamiXs_v2o0', 'dynamiXs_Kd')
     from kd_models import csp_model, intensity_decay, ref_point_values
 
     unknown_kind = [k for k in args.kind if k not in ('curves', 'ref-bars', 'kd-bars',
@@ -1755,9 +1759,9 @@ def _run_export_kd(args):
 
 def _run_dynamixs_hetnoe(args):
     """Compute heteronuclear NOE (I_sat / I_unsat) per residue, as the GUI pipeline does."""
+    _add_modules_path('dynamiXs_v2o0')
     if args.dry_run:
         return _dry_run(args, [('sat', args.sat), ('unsat', args.unsat)], {'output_dir': args.out})
-    _add_modules_path('dynamiXs_v2o0')
     from dynamiXs_integrated.data_converters import (parse_intensity_csv,
                                                      calculate_hetnoe_from_intensities,
                                                      plot_hetnoe_vs_residue,
@@ -1918,6 +1922,7 @@ def _analysis_defaults():
 
 def _run_dynamixs_density(args):
     """Reduced spectral density mapping (Farrow 1995) from an R1/R2/hetNOE table."""
+    _add_modules_path('dynamiXs_v2o0')
     if args.dual and not args.input2:
         raise ValueError("dual-field density needs a second table (--input2)")
     inputs = [('input', args.input)] + ([('input2', args.input2)] if args.dual else [])
@@ -2798,6 +2803,11 @@ def _main(argv):
             validate(parser, args)
     except UsageError as exc:
         return _report_usage_error(argv, args, exc)
+    except AnalysisModulesNotFound as exc:
+        # A validator that reads through an analysis module, in a copy of the package
+        # that has no modules beside it.
+        _emit_error(args, exc)
+        return 1
     except SystemExit as exc:
         # --help and --version: argparse has printed them and asks to exit.
         return exc.code or 0
@@ -2812,10 +2822,12 @@ def _main(argv):
         # which command ran before it.
         with matplotlib.rc_context():
             return args.func(args)
-    except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError,
+            AnalysisModulesNotFound) as exc:
         # Expected bad-input failures from the wrapped engines (missing or unwritable
         # path, bad concentrations, malformed CSV/JSON missing an expected column/key, an
-        # unparseable delay label): report cleanly instead of dumping a traceback.
+        # unparseable delay label), or an install without the analysis modules: report
+        # cleanly instead of dumping a traceback.
         _emit_error(args, exc)
         return 1
     except Exception as exc:

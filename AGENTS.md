@@ -8,6 +8,11 @@ cd lunaNMR
 python -m lunaNMR --help          # `lunanmr` also works after `pip install -e .`
 ```
 
+Run it from the clone or from an editable install of the clone (`pip install -e .`). A
+regular `pip install .` leaves `modules/` behind, and `dynamixs`, `kd`, `export kd` and
+`integrate-1d` then exit 1 with `error.type` `AnalysisModulesNotFound`: an install problem,
+fixed by the editable install, not by other arguments.
+
 ## Read these before running anything
 
 | Document | What it is |
@@ -41,7 +46,7 @@ later step depends on.
 ## Repository layout
 
 - `lunaNMR/` — the package (`cli.py` is the CLI entry point; `core/` holds the fitting engines).
-- `modules/` — optional analysis modules (dynamiXs relaxation, Kd titration, 1D integration).
+- `modules/` — the analysis modules (dynamiXs relaxation, Kd titration, 1D integration), kept beside the package and not inside it.
 - `docs/` — everything above.
 
 ## Tests

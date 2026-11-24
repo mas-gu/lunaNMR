@@ -16,17 +16,10 @@ a display or the full scientific stack for subcommands that don't need them.
 """
 
 import importlib
-import os
-import sys
 
 __version__ = "1.1.0"
 __author__ = "Guillaume Mas"
 __description__ = "Advanced NMR Peak Analysis and Integration"
-
-# Make the optional dynamiXs submodule importable (path side-effect only, no heavy import).
-_modules_path = os.path.join(os.path.dirname(__file__), '..', 'modules')
-if _modules_path not in sys.path:
-    sys.path.append(_modules_path)
 
 # Public name -> owning lunaNMR subpackage module (leading '.').
 _LAZY_EXPORTS = {

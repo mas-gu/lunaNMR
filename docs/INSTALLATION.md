@@ -2,6 +2,8 @@
 
 Runs on macOS, Linux, Windows. All commands run from the repository root (the `lunaNMR/` folder `git clone` creates).
 
+lunaNMR is used from its clone: run in place, or installed from it in **editable** mode (`pip install -e .`). A regular `pip install .` is not supported — see [section 5](#5-run-from-the-clone-or-install-it-in-editable-mode).
+
 ## 1. Prerequisites
 
 - **Python** ≥ 3.9 (64‑bit).
@@ -40,51 +42,66 @@ All runtime deps are in `requirements.txt`:
 pip install -r requirements.txt
 ```
 
-### The `lunanmr` command (optional)
-
-`python -m lunaNMR <subcommand>` works from the project directory with no extra step.
-The shorter `lunanmr <subcommand>` is a console script declared in `pyproject.toml`, and
-it exists only after an editable install:
-
-```bash
-pip install -e .        # from the repository root, adds `lunanmr` to PATH
-```
-
-Without it `which lunanmr` finds nothing, and every `lunanmr …` line in the docs must be
-read as `python -m lunaNMR …`.
-
 ### Troubleshooting
 
 - **`numba` wheel missing**: `pip install --upgrade pip`, retry. On Apple silicon use an arm64 Python.
 - **`tkinter` missing**: install the OS package above.
 - **Permission errors**: use a venv or `pip install --user`.
 
-## 5. Verify
+## 5. Run from the Clone, or Install It in Editable Mode
+
+These are the two supported ways to use lunaNMR, and both keep the clone as the code that runs.
+
+**From the clone, with no further step.** With the dependencies installed,
+`python3 launch_lunaNMR.py` and `python -m lunaNMR <subcommand>` work from the repository root.
+
+**Editable install**, to run it from any directory and to get the console scripts `lunanmr`
+and `lunanmr-mcp` declared in `pyproject.toml`:
+
+```bash
+pip install -e .        # from the repository root; the clone stays the installed code
+```
+
+Without it `which lunanmr` finds nothing, and every `lunanmr …` line in the docs must be
+read as `python -m lunaNMR …` run from the repository root. Keep the clone where it is
+afterwards: an editable install points at it.
+
+**A regular install is not supported.** `pip install .` (or a wheel built from the
+repository) copies the `lunaNMR` package alone. DynamiXs, Kd / titration analysis and 1D
+integration are not inside that package: they live in the `modules/` folder beside it and
+are left behind. From such a copy `series`, `diagnose`, `batch` and `project` still run,
+but the GUI does not open, and `dynamixs`, `kd`, `export kd`, `integrate-1d` (and
+`project build` on a run holding a Kd fit) stop with one message naming the missing folder
+and the editable install; under `--format json` it is the error envelope with `error.type`
+`AnalysisModulesNotFound`. If you see that message, reinstall with `pip install -e .`
+from the clone.
+
+## 6. Verify
 
 ```bash
 python3 lunaNMR/validation/verify_installation.py
 ```
 
-Reports the Python version, the required packages, the internal modules, whether the main GUI imports, and whether the fitting pipeline initialises.
+Reports the Python version, the required packages, the internal modules, the analysis modules beside the package, whether the main GUI imports, and whether the fitting pipeline initialises. It exits 1 on a regular install, naming the missing `modules/` folder.
 
-## 6. Launch
+## 7. Launch
 
 - **GUI**: `python3 launch_lunaNMR.py` — opens the LunaNMR main window. DynamiXs, Kd / Titration Analysis and 1D Integration are entries of its **Modules** menu.
 - **Headless CLI**: `python -m lunaNMR <subcommand>`. See [CLI.md](CLI.md) for the subcommand list and flags.
 
-## 7. Sample Data
+## 8. Sample Data
 
 Example spectra ship under `data_example/` (a 1D series in `1D/`, and an eight-point 2D T1 series split between `2DHSQC/`, which also holds the peak lists, and `more/`). Copy them into a separate workspace if you prefer not to modify the repo.
 
-## 8. Update
+## 9. Update
 
 ```bash
 git pull
 pip install --upgrade -r requirements.txt
 ```
 
-Re-run the verification script to confirm Numba still imports.
+An editable install follows the clone, so there is nothing to reinstall. Re-run the verification script to confirm Numba still imports.
 
-## 9. Cleanup
+## 10. Cleanup
 
 Deactivate and delete the venv, then remove the repo directory. No system-wide services.
