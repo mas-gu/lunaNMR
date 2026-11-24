@@ -23,11 +23,11 @@ T2_LOWER_BOUND_MS = 0.1
 try:
     from delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
     from delay_units import MS_TO_UNITS
-    from fit_Tx_NMRRE import measured_points, results_file_from_json
+    from fit_Tx_NMRRE import json_safe, measured_points, results_file_from_json
 except ImportError:  # imported as dynamiXs_T1_T2.fit_methyl_T2 (parent dir on path)
     from dynamiXs_T1_T2.delay_parser import parse_delay_column, parse_delay_columns, require_delay_start
     from dynamiXs_T1_T2.delay_units import MS_TO_UNITS
-    from dynamiXs_T1_T2.fit_Tx_NMRRE import measured_points, results_file_from_json
+    from dynamiXs_T1_T2.fit_Tx_NMRRE import json_safe, measured_points, results_file_from_json
 
 
 def biexp_decay(x, A, t2_a, t2_b):
@@ -482,7 +482,7 @@ def save_fit_data_json_methyl(results_list, output_file, time_units, signal_unit
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
     with open(output_file, "w") as f:
-        json.dump(output_data, f, indent=2)
+        json.dump(json_safe(output_data), f, indent=2, allow_nan=False)
 
 
 def run_methyl_t2_analysis_with_params(params, progress_callback=None):

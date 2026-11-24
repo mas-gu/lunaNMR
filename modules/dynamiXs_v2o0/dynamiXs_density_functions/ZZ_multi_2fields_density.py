@@ -29,6 +29,7 @@ from matplotlib.figure import Figure
 # Multiprocessing imports
 import multiprocessing
 from multiprocessing import cpu_count
+from dynamiXs_density_functions.analysis_defaults import CSA_N_PPM, OMEGA_H_FACTOR
 from dynamiXs_density_functions.model_free_search import (
     DUAL_FIELD_STARTS, S2_BOUNDS, TE_BOUNDS, REX_BOUNDS, TE_SCALE, best_least_squares)
 
@@ -47,8 +48,8 @@ class DualFieldSpectralDensityAnalysis:
     Class for performing dual-field reduced spectral density mapping analysis
     """
     
-    def __init__(self, field1_freq=600.0, field2_freq=800.0, rNH=1.015e-10, csaN=-160.0e-6,
-                 omega_h_factor=1.0):
+    def __init__(self, field1_freq=600.0, field2_freq=800.0, rNH=1.015e-10,
+                 csaN=CSA_N_PPM * 1e-6, omega_h_factor=OMEGA_H_FACTOR):
         """
         Initialize the analysis with experimental parameters for two fields
         
@@ -61,9 +62,10 @@ class DualFieldSpectralDensityAnalysis:
         rNH : float
             N-H bond length in meters (default: 1.015e-10)
         csaN : float
-            15N CSA in ppm converted to frequency units (default: -160.0e-6)
+            15N CSA in ppm converted to frequency units (default: analysis_defaults.CSA_N_PPM)
         omega_h_factor : float
             J(wH) is evaluated at omega_h_factor * wH: 1.0, or 0.87 for J(0.87wH)
+            (default: analysis_defaults.OMEGA_H_FACTOR)
         """
         if omega_h_factor not in JWH_COLUMN:
             raise ValueError(f"omega_h_factor must be one of {sorted(JWH_COLUMN)}, "

@@ -1,7 +1,6 @@
 # ABOUTME: Methyl bi-exp T2 fit viewer with outlier rejection (mirror of FitViewer for methyl_T2 data).
 # ABOUTME: Single panel per residue (bi-exp curve + data); toggleable per-residue eta = T2a/T2b bar chart.
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -38,7 +37,7 @@ from refit import (
     load_outliers, save_outliers,
     refit_residue_methyl, update_json_fit_entry, update_tsv_row_methyl,
 )
-from fit_Tx_NMRRE import recorded_results_file
+from fit_Tx_NMRRE import read_fit_json, recorded_results_file
 
 
 JSON_GLOB = "*_methylT2_fit_data.json"
@@ -316,7 +315,7 @@ class MethylT2FitViewer(QMainWindow):
                 if self.json_only and json_file.name != self.json_only:
                     continue
                 try:
-                    payload = json.loads(json_file.read_text())
+                    payload = read_fit_json(json_file)
                 except Exception as e:
                     print(f"Skipping {json_file}: {e}")
                     continue

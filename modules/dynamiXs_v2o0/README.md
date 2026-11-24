@@ -24,8 +24,10 @@ A comprehensive graphical user interface for NMR relaxation data analysis built 
 
 ### 3. hetNOE, Spectral Density and Model-Free
 - **hetNOE page**: I_sat / I_unsat per residue from a series intensity matrix or two intensity files
-- **Spectral density page**: single- or dual-field reduced spectral density mapping and model-free fit from data files, J(ωH) or J(0.87ωH)
+- **Spectral density page**: single- or dual-field reduced spectral density mapping and model-free fit from data files, J(ωH) or J(0.87ωH) (default: J(0.87ωH))
 - **Model Free Analysis page**: the same analysis run from relaxation series (T1/T2 fitted first), single- or dual-field, J(ωH) or J(0.87ωH) (default: dual-field J(0.87ωH))
+
+The two pages and the `dynamixs density` / `modelfree` commands start with the same ¹⁵N CSA (-172 ppm), J(0.87ωH) and Monte-Carlo sample counts (1000 for a spectral density analysis, 50 for model-free), each declared once in `dynamiXs_density_functions/analysis_defaults.py`.
 
 ### 4. Cross-Platform Compatibility
 - **macOS, Windows, and Linux** support through PySide6 (Qt)
@@ -106,7 +108,7 @@ C = c² = (1/3) × (ωN × Δσ)²              (CSA constant)
 - `γH = 2.675 × 10⁸ rad s⁻¹ T⁻¹` (¹H gyromagnetic ratio)
 - `γN = -2.713 × 10⁷ rad s⁻¹ T⁻¹` (¹⁵N gyromagnetic ratio)
 - `rNH = 1.015 × 10⁻¹⁰ m` (N-H bond length)
-- `Δσ = -160 ppm` (¹⁵N CSA)
+- `Δσ = -172 ppm` (¹⁵N CSA; the default, set per analysis)
 - `μ₀ = 1.257 × 10⁻⁶ H/m` (Permeability of vacuum)
 - `ℏ = 1.055 × 10⁻³⁴ J·s` (Reduced Planck constant)
 

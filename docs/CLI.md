@@ -394,8 +394,10 @@ when it raises an error.
 - `<prefix>_fit_results.txt`: one row per residue; a failed one is `NaN` in every value
   column with `Success` = `No`.
 - the fit JSON: one entry per residue with `success` true or false. Never read `t2` of an
-  entry whose `success` is false: it is the bare token `NaN` where no fit was made, and a
-  meaningless number where the fit found no decay.
+  entry whose `success` is false: it is `null` where no fit was made, and a meaningless
+  number where the fit found no decay. Every number with no value is `null` (an error the
+  fit could not estimate, an unmeasured intensity), in the `methyl-t2` fit JSON too: the
+  files hold no `NaN` token and parse as strict JSON.
 - the PDFs: every residue's data; a failed one carries "not fitted" and no curve.
 - the summary (`--format json`): `n_fitted`, `n_excluded` (the failed ones), `n_total`,
   `n_window_marginal` (fitted residues whose longest delay is under twice their time
@@ -461,6 +463,12 @@ J(0)/J(ωN)/J(ωH), S², τc, τe, Rex in `<prefix>_results.csv` (`--dual`: `_ba
 squares from a grid of starts, which carries no uncertainty of its own: their errors are
 NaN unless `--monte-carlo`.
 
+Left unstated, J at the proton frequency is J(0.87ωH) (`--no-087` for J(ωH)), the ¹⁵N CSA
+is -172 ppm and `--monte-carlo` draws 1000 samples per residue: what the DynamiXs
+Spectral Density page starts with, read from the same declaration
+(`dynamiXs_density_functions/analysis_defaults.py`). The run's `<prefix>_dynamixs.json`
+records the values it ran with, stated or not.
+
 `--dual` needs `--input2` and `--field2-freq`. `--field2-freq` has no default - there is no
 conventional second field - and its absence is a usage error (exit 2), as on `modelfree`.
 
@@ -512,6 +520,9 @@ python -m lunaNMR dynamixs modelfree [--dual] \
   while median χ² rises by an order of magnitude. Comparing the Rex>1 fraction and χ² between
   `--dual` and the two single-field runs is what tells you whether the dual fit is reporting
   chemistry or a τc mismatch.
+- `--method`, `--csa` and `--n-monte-carlo` left unstated are the J(0.87ωH) variant, -172 ppm
+  and 50 samples, as on the DynamiXs Model Free page (one declaration,
+  `dynamiXs_density_functions/analysis_defaults.py`); the run's record holds the values used.
 - Also accepts the density physical flags (`--rnh 1.015`, `--csa -172`) and fit-init overrides
   `--init-amp` (default: derived from the data), `--init-t1 800`, `--init-t2 100`, `--n-bootstrap 1000`,
   `--error-method {analytical,bootstrap}`, `--n-monte-carlo 50`.

@@ -54,6 +54,14 @@ except ImportError:
     )
     from fitting_wrapper import run_t1_fitting, run_t2_fitting
 
+# The density analyses and their defaults are imported by package name, from the
+# folder above this one.
+_DYNAMIXS_PATH = str(Path(__file__).parent.parent)
+if _DYNAMIXS_PATH not in sys.path:
+    sys.path.insert(0, _DYNAMIXS_PATH)
+from dynamiXs_density_functions.analysis_defaults import (
+    CSA_N_PPM, MODELFREE_MONTE_CARLO_SAMPLES)
+
 
 # Quantities that do not belong to a spectrometer field, so they are spelled the same
 # in single- and dual-field output. Everything else is per-field.
@@ -117,7 +125,7 @@ class IntegratedAnalysisParameters:
 
         # Physical parameters
         self.rNH_angstrom = 1.015  # N-H bond length in Angstroms
-        self.csaN_ppm = -160.0      # 15N CSA in ppm
+        self.csaN_ppm = CSA_N_PPM   # 15N CSA in ppm
 
         # Fitting parameters
         # None lets the fitter derive the amplitude from the data. A constant works
@@ -138,7 +146,7 @@ class IntegratedAnalysisParameters:
         self.error_method = 'analytical'
 
         # Monte Carlo parameters
-        self.monte_carlo_iterations = 50
+        self.monte_carlo_iterations = MODELFREE_MONTE_CARLO_SAMPLES
 
         # Output
         self.output_dir = None  # Output directory (if None, a fresh private temp folder)
@@ -466,9 +474,6 @@ class IntegratedAnalysisPipeline:
         # Import spectral density module by its package name, the one `density` and the
         # GUI use: the numba cache of its kernels rebuilds them by importing the module
         # under the name they were compiled in, so a second name breaks the other path.
-        dynamixs_path = str(Path(__file__).parent.parent)
-        if dynamixs_path not in sys.path:
-            sys.path.insert(0, dynamixs_path)
 
         # (module, class, proton-frequency factor J(wH) is evaluated at)
         method_map = {
