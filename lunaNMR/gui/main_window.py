@@ -56,8 +56,8 @@ from lunaNMR.gui.styles.design_system import (
 )
 
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
-from lunaNMR.core.ps2d_config import (SEARCH_WINDOW_PPM, set_ps2d_config, get_ps2d_config, mark_ps2d_config_as_base,
-                                      reset_ps2d_config, distance_in_linewidths)
+from lunaNMR.core.ps2d_config import (CENTROID_WINDOW_PPM, SEARCH_WINDOW_PPM, set_ps2d_config, get_ps2d_config,
+                                      mark_ps2d_config_as_base, reset_ps2d_config, distance_in_linewidths)
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.utils.parameter_manager import NMRParameterManager
 from lunaNMR.utils.cancellation import Cancelled
@@ -380,8 +380,8 @@ class LunaNMRMainWindow(BaseWindow):
         self.search_window_y = get_ps2d_config().search_window_f1  # 15N/13C dimension (ppm) - F1
 
         # Peak Centroid Detection parameters
-        self.centroid_window_x_ppm = 0.01  # X-window size in ppm (1H dimension)
-        self.centroid_window_y_ppm = 0.1   # Y-window size in ppm (15N dimension)
+        self.centroid_window_x_ppm = CENTROID_WINDOW_PPM[0]  # X-window size in ppm (1H dimension)
+        self.centroid_window_y_ppm = CENTROID_WINDOW_PPM[1]  # Y-window size in ppm (15N dimension)
 
         # Auto-add dummy peaks (for peak_list mode only)
         self.auto_add_dummy_peaks = True  # Auto-add nearby unmatched peaks

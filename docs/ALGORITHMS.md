@@ -28,7 +28,7 @@ Quality (R²): Excellent >0.9, Good >0.8, Fair >0.6; below that Poor above S/N 5
 3. Clip the shift to the GUI `max_shift_x/y`.
 4. An extremum on the edge of the spectrum keeps its point.
 
-GUI defaults (`main_window`): `centroid_window_x_ppm=0.01` (1H), `centroid_window_y_ppm=0.1` (15N).
+Defaults, GUI and CLI alike (`ps2d_config.CENTROID_WINDOW_PPM`): `centroid_window_x_ppm=0.01` (1H), `centroid_window_y_ppm=0.1` (indirect).
 
 ---
 

@@ -19,7 +19,8 @@ import numpy as np
 import pandas as pd
 from typing import List, Tuple
 from lunaNMR.core.ps2d_data_selector import select_data_2d_for_overlap_group
-from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM, distance_in_linewidths, get_ps2d_config
+from lunaNMR.core.ps2d_config import (CENTROID_WINDOW_PPM, SEARCH_WINDOW_PPM, distance_in_linewidths,
+                                      get_ps2d_config)
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 from lunaNMR.utils.cancellation import raise_if_stopped
 from lunaNMR.utils.quality_categories import fit_quality_label
@@ -2132,8 +2133,8 @@ class VoigtIntegrator(BaseIntegrator):
 
             gui_params = getattr(self, 'gui_params', {})
 
-            max_shift_x = gui_params.get('centroid_window_x_ppm', 0.01)
-            max_shift_y = gui_params.get('centroid_window_y_ppm', 0.06)
+            max_shift_x = gui_params.get('centroid_window_x_ppm', CENTROID_WINDOW_PPM[0])
+            max_shift_y = gui_params.get('centroid_window_y_ppm', CENTROID_WINDOW_PPM[1])
 
             centroid_x_ppm, centroid_y_ppm = self._calculate_top_contour_center(
                 y_idx, x_idx,

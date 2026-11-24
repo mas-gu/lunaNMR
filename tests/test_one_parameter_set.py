@@ -10,7 +10,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 GUI_PARAMS = {
-    'centroid_window_x_ppm': 0.02, 'centroid_window_y_ppm': 1.0,
+    'centroid_window_x_ppm': 0.01, 'centroid_window_y_ppm': 0.1,
     'fix_linewidths': False, 'fix_positions': False,
     'use_adaptive_optimization': False,
     'use_parallel_processing': False, 'use_ps2d_linewidth_reuse': False,
@@ -59,8 +59,7 @@ def test_the_main_window_sync_hands_the_integrator_that_set(app):
         window.integrator.gui_params = {}
         window.sync_parameters_to_integrator()
         assert window.integrator.gui_params == dict(
-            GUI_PARAMS, centroid_window_x_ppm=0.01, centroid_window_y_ppm=0.1,
-            use_parallel_processing=True)
+            GUI_PARAMS, use_parallel_processing=True)
         assert not hasattr(window.integrator, 'fitting_parameters')
         assert (window.integrator.search_window_x, window.integrator.search_window_y) == (0.07, 0.3)
     finally:

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QThread, QObject
 
+from lunaNMR.core.ps2d_config import CENTROID_WINDOW_PPM
 from lunaNMR.gui.base.base_dialog import BaseDialog
 from lunaNMR.gui.dialogs.spectrum_files import spectrum_extensions
 from lunaNMR.utils.cancellation import Cancelled
@@ -1367,8 +1368,8 @@ class SeriesIntegrationDialog(BaseDialog):
                 'fix_positions': getattr(self.main_window, 'fix_positions', False),
                 'fix_linewidths': getattr(self.main_window, 'fix_linewidths', False),
                 'use_parallel_processing': getattr(self.main_window, 'use_parallel_processing', False),
-                'centroid_window_x_ppm': getattr(self.main_window, 'centroid_window_x_ppm', 0.02),
-                'centroid_window_y_ppm': getattr(self.main_window, 'centroid_window_y_ppm', 1.0),
+                'centroid_window_x_ppm': getattr(self.main_window, 'centroid_window_x_ppm', CENTROID_WINDOW_PPM[0]),
+                'centroid_window_y_ppm': getattr(self.main_window, 'centroid_window_y_ppm', CENTROID_WINDOW_PPM[1]),
                 'use_ps2d_linewidth_reuse': getattr(self.main_window, 'use_ps2d_linewidth_reuse', False),
                 # The fitting-window grid search is never run on a series: on real
                 # titrations it chose a window that cuts the peak at half height

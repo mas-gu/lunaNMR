@@ -6,7 +6,7 @@ Handles all parameter validation, conversion, and synchronization
 """
 
 from typing import Dict, Any, List
-from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM, get_ps2d_config
+from lunaNMR.core.ps2d_config import CENTROID_WINDOW_PPM, SEARCH_WINDOW_PPM, get_ps2d_config
 
 class NMRParameterManager:
     """
@@ -29,8 +29,8 @@ class NMRParameterManager:
             'use_parallel_processing': {'default': False, 'type': bool},
 
             # Advanced Parameters
-            'centroid_window_x_ppm': {'default': 0.02, 'min': 0.005, 'max': 0.2, 'type': float},
-            'centroid_window_y_ppm': {'default': 1.0, 'min': 0.01, 'max': 5.0, 'type': float},
+            'centroid_window_x_ppm': {'default': CENTROID_WINDOW_PPM[0], 'min': 0.005, 'max': 0.2, 'type': float},
+            'centroid_window_y_ppm': {'default': CENTROID_WINDOW_PPM[1], 'min': 0.01, 'max': 5.0, 'type': float},
 
             # PS2D Multi-Peak Fitting Parameters
             'fix_linewidths': {'default': False, 'type': bool},

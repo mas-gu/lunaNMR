@@ -761,7 +761,7 @@ def _default_series_params(parallel=False):
     (gui/dialogs/series_integration_dialog.py::_get_voigt_params); a headless run
     just uses the defaults directly. `parallel` enables the two-pass parallel processor.
     """
-    from lunaNMR.core.ps2d_config import SEARCH_WINDOW_PPM
+    from lunaNMR.core.ps2d_config import CENTROID_WINDOW_PPM, SEARCH_WINDOW_PPM
     return {
         'detection_params': {
             'search_window_x': SEARCH_WINDOW_PPM,
@@ -772,8 +772,8 @@ def _default_series_params(parallel=False):
             'fix_positions': False,
             'fix_linewidths': False,
             'use_parallel_processing': parallel,
-            'centroid_window_x_ppm': 0.02,
-            'centroid_window_y_ppm': 1.0,
+            'centroid_window_x_ppm': CENTROID_WINDOW_PPM[0],
+            'centroid_window_y_ppm': CENTROID_WINDOW_PPM[1],
             'use_ps2d_linewidth_reuse': False,
             # The fitting-window grid search; off unless asked for (it chose the
             # smallest window on every real titration and broke CSP positions)
