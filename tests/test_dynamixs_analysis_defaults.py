@@ -189,3 +189,11 @@ def test_a_page_falls_back_to_the_defaults_for_what_a_run_did_not_record(pages):
     assert integrated_page.csa_spin.value() == CSA_PPM
     assert _checked_method(integrated_page).endswith("_087")
     assert integrated_page.mc_spin.value() == MODELFREE_SAMPLES
+
+
+def test_the_pipeline_starts_on_the_method_the_model_free_page_starts_on(workers):
+    """A pipeline given no method runs the dual-field J(0.87 wH) analysis, as the page's
+    selector and the worker parameters start on it."""
+    from dynamiXs_integrated.integrated_analysis import IntegratedAnalysisParameters
+    assert IntegratedAnalysisParameters().analysis_method == 'dual_087'
+    assert workers[1].analysis_method == 'dual_087'
