@@ -786,7 +786,7 @@ def _default_series_params(parallel=False):
             'use_parallel_processing': parallel,
             'enable_cascade_drift_limit': True,
             'rerun_adaptive_per_spectrum': False,
-            'lock_cluster_assignments': False,
+            'lock_cluster_assignments': True,
             'use_original_reference_for_detection': False,
         },
     }

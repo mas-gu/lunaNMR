@@ -1381,7 +1381,7 @@ class SeriesIntegrationDialog(BaseDialog):
                 'use_parallel_processing': getattr(self.main_window, 'use_parallel_processing', False),
                 'enable_cascade_drift_limit': getattr(self.main_window, 'enable_cascade_drift_limit', True),
                 'rerun_adaptive_per_spectrum': getattr(self.main_window, 'rerun_adaptive_per_spectrum', False),
-                'lock_cluster_assignments': getattr(self.main_window, 'lock_cluster_assignments', False),
+                'lock_cluster_assignments': getattr(self.main_window, 'lock_cluster_assignments', True),
                 'use_original_reference_for_detection': False,
             }
         }
