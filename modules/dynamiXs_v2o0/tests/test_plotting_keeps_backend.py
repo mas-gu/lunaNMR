@@ -81,12 +81,10 @@ def draw():
     assert len(list(tmp_path.glob("T1_fit_results_fig*.pdf"))) == 2
 
 
-def _density_frame(detailed_csv, jwh):
+def _density_frame(detailed_csv):
     """A model-free detailed results table, with the column names each script's plot reads."""
     return f"""
 d = pd.read_csv({str(detailed_csv)!r})
-if {jwh!r}:
-    d = d.rename(columns=lambda c: c.replace('JwH_087', 'JwH'))
 for f in ('1', '2'):
     for s in ('', '_err'):
         if f'Rex_f{{f}}{{s}}' in d:
@@ -103,7 +101,7 @@ def test_density_figures_draw_from_a_worker_thread(module, tmp_path):
     cls = "DualFieldSpectralDensityAnalysis" if dual else "ReducedSpectralDensityAnalysis"
     method = "plot_dual_field_results" if dual else "plot_results"
     code = (f"import pandas as pd\nimport {module} as script\n"
-            + _density_frame(source, not module.endswith("_087"))
+            + _density_frame(source)
             + f"def draw():\n    script.{cls}().{method}(d, save_plots=True)\n"
             + _IN_A_WORKER)
     run = _run(code, tmp_path)

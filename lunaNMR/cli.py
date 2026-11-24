@@ -1819,9 +1819,8 @@ def _run_dynamixs_t1rho(args):
             raise FileNotFoundError(f"--{label} file not found: {path}")
     import matplotlib
     matplotlib.use('Agg')
-    import json
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
-    from fit_Tx_NMRRE import run_analysis_with_params
+    from fit_Tx_NMRRE import read_fit_json, run_analysis_with_params
     from lunaNMR.utils.file_manager import NMRFileManager
     from lunaNMR.utils.t1rho_calculator import r2_table_from_fits
     import pandas as pd
@@ -1860,7 +1859,7 @@ def _run_dynamixs_t1rho(args):
         }
         with _engine_stdout(args):
             result = run_analysis_with_params(params)
-        data = json.load(open(result['json_file']))
+        data = read_fit_json(result['json_file'])
         # Keep only the residues the fitter itself judged reliable. It prints
         # "unreliable (no decay in window), excluded" for the rest and leaves them out
         # of n_fitted, but they were still in the JSON -- and the only downstream filter
@@ -1909,6 +1908,14 @@ def _run_dynamixs_t1rho(args):
     return 0 if len(table) else 1
 
 
+def _analysis_defaults():
+    """What a density or model-free analysis starts with when nothing is stated: the one
+    declaration the DynamiXs pages read too."""
+    _add_modules_path('dynamiXs_v2o0')
+    from dynamiXs_density_functions import analysis_defaults
+    return analysis_defaults
+
+
 def _run_dynamixs_density(args):
     """Reduced spectral density mapping (Farrow 1995) from an R1/R2/hetNOE table."""
     if args.dual and not args.input2:
@@ -1919,7 +1926,15 @@ def _run_dynamixs_density(args):
     import matplotlib
     matplotlib.use('Agg')
     from importlib import import_module
-    _add_modules_path('dynamiXs_v2o0')
+    # What was left unstated becomes the default here, so the run's record holds the
+    # values it ran with.
+    defaults = _analysis_defaults()
+    if args.csa is None:
+        args.csa = defaults.CSA_N_PPM
+    if args.use_087 is None:
+        args.use_087 = defaults.USE_087
+    if args.n_samples is None:
+        args.n_samples = defaults.DENSITY_MONTE_CARLO_SAMPLES
     if not os.path.isfile(args.input):
         raise FileNotFoundError(f"Input not found: {args.input}")
     os.makedirs(args.out, exist_ok=True)
@@ -2031,6 +2046,17 @@ def _run_dynamixs_modelfree(args):
     _add_modules_path('dynamiXs_v2o0', 'dynamiXs_T1_T2')
     from dynamiXs_integrated.integrated_analysis import (IntegratedAnalysisPipeline,
                                                          IntegratedAnalysisParameters)
+    # What was left unstated becomes the default here, so the run's record holds the
+    # values it ran with.
+    defaults = _analysis_defaults()
+    if args.csa is None:
+        args.csa = defaults.CSA_N_PPM
+    if args.n_monte_carlo is None:
+        args.n_monte_carlo = defaults.MODELFREE_MONTE_CARLO_SAMPLES
+    # Field count must match --dual (the density step branches on the method prefix);
+    # keep only the user's 087/jwh variant preference.
+    variant = args.method.rsplit('_', 1)[-1] if args.method else defaults.METHOD_VARIANT
+    args.method = ('dual_' if args.dual else 'single_') + variant
     # Each relaxation series carries its own units. `series` already recorded them, so
     # the flag is only needed for hand-built tables -- and a flag that contradicts the
     # sidecar is refused rather than believed: a T1 read as seconds against a T2 in
@@ -2070,10 +2096,7 @@ def _run_dynamixs_modelfree(args):
         p.field2_freq_mhz = args.field2_freq
         p.field2_t1_units = units['f2_t1_units']
         p.field2_t2_units = units['f2_t2_units']
-    # Field count must match --dual (the density step branches on the method prefix);
-    # keep only the user's 087/jwh variant preference.
-    variant = 'jwh' if (args.method or '').endswith('jwh') else '087'
-    p.analysis_method = ('dual_' if args.dual else 'single_') + variant
+    p.analysis_method = args.method
     p.rNH_angstrom = args.rnh
     p.csaN_ppm = args.csa
     p.t1_initial_amplitude = args.init_amp
@@ -2577,11 +2600,11 @@ def build_parser():
     density.add_argument('--out', required=True, help='Output directory')
     density.add_argument('--prefix', default='spectral_density', help='Output prefix')
     density.add_argument('--dual', action='store_true', help='Dual-field analysis (needs --input2)')
-    density.add_argument('--no-087', action='store_false', dest='use_087',
+    density.add_argument('--no-087', action='store_false', dest='use_087', default=None,
                          help='Evaluate J at full omega_H instead of 0.87*omega_H (default: 0.87)')
     density.add_argument('--monte-carlo', action='store_true', dest='monte_carlo',
                          help='Monte-Carlo error propagation (slower)')
-    density.add_argument('--n-samples', type=int, default=1000, dest='n_samples',
+    density.add_argument('--n-samples', type=int, default=None, dest='n_samples',
                          help='Monte-Carlo samples (default: 1000)')
     density.add_argument('--no-plot', action='store_true', dest='no_plot', help='Skip the PDF plots')
     density.add_argument('--no-parallel', action='store_true', dest='no_parallel',
@@ -2628,7 +2651,8 @@ def build_parser():
     mf.add_argument('--n-bootstrap', type=int, default=1000, dest='n_bootstrap')
     mf.add_argument('--error-method', choices=['analytical', 'bootstrap'], default='analytical',
                     dest='error_method')
-    mf.add_argument('--n-monte-carlo', type=int, default=50, dest='n_monte_carlo')
+    mf.add_argument('--n-monte-carlo', type=int, default=None, dest='n_monte_carlo',
+                    help='Monte-Carlo samples (default: 50)')
     _add_density_flags(mf)
     mf.set_defaults(func=_run_dynamixs_modelfree, _validate=_validate_modelfree)
 
@@ -2733,7 +2757,7 @@ def _add_density_flags(p):
                         'modelfree; no default, because guessing it reads as a tau_c mismatch')
     p.add_argument('--rnh', type=float, default=1.015,
                    help='N-H bond length in Angstrom (default: 1.015)')
-    p.add_argument('--csa', type=float, default=-172.0,
+    p.add_argument('--csa', type=float, default=None,
                    help='15N CSA in ppm (default: -172)')
 
 

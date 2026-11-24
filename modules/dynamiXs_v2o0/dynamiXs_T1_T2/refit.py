@@ -8,10 +8,11 @@ from typing import Iterable
 import numpy as np
 
 try:
-    from fit_Tx_NMRRE import fit_data_entry, fit_single_residue, results_row
+    from fit_Tx_NMRRE import fit_data_entry, fit_single_residue, json_safe, results_row
     from fit_methyl_T2 import fit_single_residue_methyl
 except ImportError:  # imported as dynamiXs_T1_T2.refit (parent dir on path)
-    from dynamiXs_T1_T2.fit_Tx_NMRRE import fit_data_entry, fit_single_residue, results_row
+    from dynamiXs_T1_T2.fit_Tx_NMRRE import (fit_data_entry, fit_single_residue, json_safe,
+                                             results_row)
     from dynamiXs_T1_T2.fit_methyl_T2 import fit_single_residue_methyl
 
 
@@ -112,7 +113,7 @@ def update_json_fit_entry(json_path, residue: str, new_fit_entry: dict) -> None:
         if str(entry.get("residue")) == str(residue):
             fits[i] = new_fit_entry
             payload["fits"] = fits
-            p.write_text(json.dumps(payload, indent=2))
+            p.write_text(json.dumps(json_safe(payload), indent=2, allow_nan=False))
             return
     raise KeyError(f"Residue {residue!r} not found in {p}")
 

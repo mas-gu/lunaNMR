@@ -58,6 +58,9 @@ from workers import (
     SpectralDensityWorker, SpectralDensityParams,
     IntegratedAnalysisWorker, IntegratedAnalysisParams
 )
+from dynamiXs_density_functions.analysis_defaults import (
+    CSA_N_PPM, DENSITY_MONTE_CARLO_SAMPLES, METHOD_VARIANT, MODELFREE_MONTE_CARLO_SAMPLES,
+    USE_087)
 from dynamiXs_T1_T2.delay_units import (
     MS_TO_UNITS, TIME_UNITS_DEFAULT, resolve_time_units, series_sidecar
 )
@@ -2235,8 +2238,8 @@ class SpectralDensityPage(BasePage):
         method_layout.addWidget(method_label)
 
         self.method_group = QButtonGroup(self)
-        self.jwh_radio = create_radio_button("J(ωH)", checked=True)
-        self.j087_radio = create_radio_button("J(0.87ωH)")
+        self.jwh_radio = create_radio_button("J(ωH)", checked=not USE_087)
+        self.j087_radio = create_radio_button("J(0.87ωH)", checked=USE_087)
         self.method_group.addButton(self.jwh_radio, 1)
         self.method_group.addButton(self.j087_radio, 2)
         method_layout.addWidget(self.jwh_radio)
@@ -2329,7 +2332,7 @@ class SpectralDensityPage(BasePage):
         csa_layout = create_h_layout(SPACING_SM)
         csa_row.setLayout(csa_layout)
         csa_layout.addWidget(create_label("15N CSA (ppm):"))
-        self.csa_spin = create_double_spin_box(-160.0, -200.0, -100.0, 1, width=100)
+        self.csa_spin = create_double_spin_box(CSA_N_PPM, -200.0, -100.0, 1, width=100)
         csa_layout.addWidget(self.csa_spin)
         csa_layout.addStretch()
         advanced_layout.addWidget(csa_row)
@@ -2347,7 +2350,7 @@ class SpectralDensityPage(BasePage):
         mc_samples_layout = create_h_layout(SPACING_SM)
         mc_samples_row.setLayout(mc_samples_layout)
         mc_samples_layout.addWidget(create_label("Monte Carlo Samples:"))
-        self.mc_spin = create_spin_box(25, 1, 1000, width=100)
+        self.mc_spin = create_spin_box(DENSITY_MONTE_CARLO_SAMPLES, 1, 1000, width=100)
         mc_samples_layout.addWidget(self.mc_spin)
         mc_samples_layout.addStretch()
         advanced_layout.addWidget(mc_samples_row)
@@ -2544,7 +2547,7 @@ class SpectralDensityPage(BasePage):
             self.single_field_radio.setChecked(True)
 
         # Restore J(ωH) vs J(0.87ωH) method
-        if state.get('use_087', False):
+        if state.get('use_087', USE_087):
             self.j087_radio.setChecked(True)
         else:
             self.jwh_radio.setChecked(True)
@@ -2553,10 +2556,10 @@ class SpectralDensityPage(BasePage):
         self.field2_spin.setValue(state.get('field2_freq', 700.0))
 
         self.rnh_spin.setValue(state.get('rnh_angstrom', 1.015))
-        self.csa_spin.setValue(state.get('csa_ppm', -160.0))
+        self.csa_spin.setValue(state.get('csa_ppm', CSA_N_PPM))
 
         self.mc_check.setChecked(state.get('monte_carlo', False))
-        self.mc_spin.setValue(state.get('n_samples', 50))
+        self.mc_spin.setValue(state.get('n_samples', DENSITY_MONTE_CARLO_SAMPLES))
 
         self.prefix_edit.setText(state.get('prefix', 'spectral_density_analysis'))
 
@@ -2730,7 +2733,7 @@ class IntegratedAnalysisPage(BasePage):
 
         self.method_radios = []
         for i, (label, value) in enumerate(methods):
-            radio = create_radio_button(label, checked=(value == "dual_087"))
+            radio = create_radio_button(label, checked=(value == f"dual_{METHOD_VARIANT}"))
             self.method_group.addButton(radio, i)
             params_content.addWidget(radio)
             self.method_radios.append((radio, value))
@@ -2749,7 +2752,7 @@ class IntegratedAnalysisPage(BasePage):
         phys_layout.addWidget(create_label("Å"), 0, 2)
 
         phys_layout.addWidget(create_label("15N CSA:"), 1, 0)
-        self.csa_spin = create_double_spin_box(-160.0, -200.0, -100.0, 1, width=80)
+        self.csa_spin = create_double_spin_box(CSA_N_PPM, -200.0, -100.0, 1, width=80)
         phys_layout.addWidget(self.csa_spin, 1, 1)
         phys_layout.addWidget(create_label("ppm"), 1, 2)
 
@@ -2804,7 +2807,7 @@ class IntegratedAnalysisPage(BasePage):
 
         # Monte Carlo iterations
         fit_layout.addWidget(create_label("Monte Carlo:"), 5, 0)
-        self.mc_spin = create_spin_box(25, 1, 1000, width=80)
+        self.mc_spin = create_spin_box(MODELFREE_MONTE_CARLO_SAMPLES, 1, 1000, width=80)
         fit_layout.addWidget(self.mc_spin, 5, 1)
         fit_layout.addWidget(create_label("iterations"), 5, 2)
 
@@ -3128,7 +3131,7 @@ class IntegratedAnalysisPage(BasePage):
                 # User cancelled - abort
                 return
 
-        method = "dual_087"
+        method = f"dual_{METHOD_VARIANT}"
         for radio, value in self.method_radios:
             if radio.isChecked():
                 method = value
@@ -3336,7 +3339,7 @@ class IntegratedAnalysisPage(BasePage):
 
         Returns serializable dict with all UI settings and session results.
         """
-        analysis_method = "dual_087"
+        analysis_method = f"dual_{METHOD_VARIANT}"
         for radio, value in self.method_radios:
             if radio.isChecked():
                 analysis_method = value
@@ -3434,14 +3437,14 @@ class IntegratedAnalysisPage(BasePage):
         self.field1_freq_spin.setValue(state.get('field1_freq', 600.0))
         self.field2_freq_spin.setValue(state.get('field2_freq', 700.0))
 
-        analysis_method = state.get('analysis_method', 'dual_087')
+        analysis_method = state.get('analysis_method', f"dual_{METHOD_VARIANT}")
         for radio, value in self.method_radios:
             if value == analysis_method:
                 radio.setChecked(True)
                 break
 
         self.rnh_spin.setValue(state.get('rnh_angstrom', 1.015))
-        self.csa_spin.setValue(state.get('csa_ppm', -160.0))
+        self.csa_spin.setValue(state.get('csa_ppm', CSA_N_PPM))
 
         self.init_amp_spin.setValue(state.get('initial_amplitude', 5.0))
         self.init_t1_spin.setValue(state.get('t1_initial_time', 800.0))
@@ -3453,7 +3456,7 @@ class IntegratedAnalysisPage(BasePage):
             self.mf_error_method_combo.setCurrentIndex(idx)
 
         self.t1_boot_spin.setValue(state.get('bootstrap_iterations', 1000))
-        self.mc_spin.setValue(state.get('monte_carlo_iterations', 50))
+        self.mc_spin.setValue(state.get('monte_carlo_iterations', MODELFREE_MONTE_CARLO_SAMPLES))
         self.units_combo.setCurrentText(state.get('delay_units', TIME_UNITS_DEFAULT))
         self.observable_combo.blockSignals(True)   # restoring, not choosing: no re-drop
         self._set_observable(state.get('fit_on'))

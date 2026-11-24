@@ -683,6 +683,38 @@ def fit_data_entry(result, fit_time_dense):
     }
 
 
+def json_safe(value):
+    """`value` with every non-finite number replaced by None, which JSON writes as null:
+    a bare NaN or Infinity token is not JSON, and a strict parser refuses the file."""
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    return value
+
+
+def _nan_for_null(value):
+    """`value` with every None replaced by NaN."""
+    if value is None:
+        return float('nan')
+    if isinstance(value, dict):
+        return {key: _nan_for_null(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_nan_for_null(item) for item in value]
+    return value
+
+
+def read_fit_json(json_file):
+    """A fit JSON as the fitter held it: in each fit's entry a number with no value,
+    null in the file, is NaN again."""
+    with open(json_file) as f:
+        payload = json.load(f)
+    payload['fits'] = [_nan_for_null(fit) for fit in payload.get('fits', [])]
+    return payload
+
+
 def save_fit_data_json(results_list, output_file, experiment_type, time_units,
                        signal_units, n_bootstrap, field_freq, results_file=None):
     """
@@ -737,7 +769,7 @@ def save_fit_data_json(results_list, output_file, experiment_type, time_units,
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
     with open(output_file, 'w') as f:
-        json.dump(output_data, f, indent=2)
+        json.dump(json_safe(output_data), f, indent=2, allow_nan=False)
 
     print(f"Saved JSON fit data to: {output_file}")
 

@@ -23,6 +23,10 @@ from dataclasses import dataclass, field
 import pandas as pd
 from PySide6.QtCore import QThread, Signal, QObject
 
+from dynamiXs_density_functions.analysis_defaults import (
+    CSA_N_PPM, DENSITY_MONTE_CARLO_SAMPLES, METHOD_VARIANT, MODELFREE_MONTE_CARLO_SAMPLES,
+    USE_087)
+
 
 # BASE WORKER CLASS
 
@@ -424,11 +428,11 @@ class SpectralDensityParams:
     field1_freq: float = 600.0
     field2_freq: float = 700.0
     dual_field: bool = True
-    use_087: bool = True
+    use_087: bool = USE_087
     r_nh: float = 1.015
-    csa: float = -172.0
+    csa: float = CSA_N_PPM
     monte_carlo: bool = False
-    n_samples: int = 1000
+    n_samples: int = DENSITY_MONTE_CARLO_SAMPLES
 
 
 class SpectralDensityWorker(AnalysisWorker):
@@ -565,9 +569,9 @@ class IntegratedAnalysisParams:
     dual_field: bool = True
 
     # Analysis settings
-    analysis_method: str = "dual_087"  # single, single_087, dual, dual_087
+    analysis_method: str = f"dual_{METHOD_VARIANT}"  # single_jwh, single_087, dual_jwh, dual_087
     r_nh: float = 1.015
-    csa: float = -172.0
+    csa: float = CSA_N_PPM
 
     # Fitting parameters
     initial_amplitude: float = 5.0
@@ -575,7 +579,7 @@ class IntegratedAnalysisParams:
     initial_t2: float = 100.0
     n_bootstrap: int = 1000
     error_method: str = "analytical"  # "analytical" or "bootstrap"
-    n_monte_carlo: int = 50
+    n_monte_carlo: int = MODELFREE_MONTE_CARLO_SAMPLES
 
     # Output settings
     output_dir: str = ""

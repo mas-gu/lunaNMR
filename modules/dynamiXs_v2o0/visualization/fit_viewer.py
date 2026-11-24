@@ -5,7 +5,6 @@ PySide6 Qt Implementation
 Displays exponential decay fits with measured data points and fitted curves
 """
 
-import json
 import os
 import re
 import numpy as np
@@ -44,7 +43,7 @@ from refit import (
     load_outliers, save_outliers,
     refit_residue, update_json_fit_entry, update_tsv_row,
 )
-from fit_Tx_NMRRE import recorded_results_file
+from fit_Tx_NMRRE import read_fit_json, recorded_results_file
 
 
 def _fit_failed(fit):
@@ -474,8 +473,7 @@ class FitViewer(QMainWindow):
                     if file_key in self.data:
                         not_shown.append(json_file.name)
                         continue
-                    with open(json_file, 'r') as f:
-                        data = json.load(f)
+                    data = read_fit_json(json_file)
 
                     self.data[file_key] = data
                     self.json_paths[file_key] = json_file
