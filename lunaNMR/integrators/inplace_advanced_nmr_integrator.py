@@ -11,13 +11,6 @@ attributes.
 
 # DEFAULTS OF THE INTEGRATOR'S ATTRIBUTES
 
-# Noise region configuration
-USE_CUSTOM_NOISE_REGIONS = False                   # Use user-defined noise regions
-NOISE_REGIONS_PPM = [                             # Noise regions in ppm [x_min, x_max, y_min, y_max]
-    [0.5, 1.5, 100, 110],                        # Example region 1
-    [11, 12, 130, 140]                           # Example region 2
-]
-
 # Threshold control parameters
 DEFAULT_THRESHOLD_MULTIPLIER = 3.0                # Default threshold multiplier
 
@@ -53,8 +46,6 @@ class InPlaceAdvancedNMRIntegrator:
 
         # Enhanced parameters
         self.threshold_multiplier = DEFAULT_THRESHOLD_MULTIPLIER
-        self.noise_regions_ppm = NOISE_REGIONS_PPM
-        self.use_custom_noise_regions = USE_CUSTOM_NOISE_REGIONS
 
         # Quality tracking
         self.detection_statistics = {
@@ -185,50 +176,9 @@ class InPlaceAdvancedNMRIntegrator:
             return None
 
     def _estimate_noise_level(self):
-        """Estimate noise level in the spectrum using custom or default regions"""
-        if self.use_custom_noise_regions and self.noise_regions_ppm:
-            noise_values = []
-
-            for region in self.noise_regions_ppm:
-                x_min_ppm, x_max_ppm, y_min_ppm, y_max_ppm = region
-
-                x_min_idx = np.argmin(np.abs(self.ppm_x_axis - x_max_ppm))  # Note: reversed for NMR
-                x_max_idx = np.argmin(np.abs(self.ppm_x_axis - x_min_ppm))
-                y_min_idx = np.argmin(np.abs(self.ppm_y_axis - y_max_ppm))  # Note: reversed for NMR
-                y_max_idx = np.argmin(np.abs(self.ppm_y_axis - y_min_ppm))
-
-                x_min_idx, x_max_idx = min(x_min_idx, x_max_idx), max(x_min_idx, x_max_idx)
-                y_min_idx, y_max_idx = min(y_min_idx, y_max_idx), max(y_min_idx, y_max_idx)
-
-                region_data = self.nmr_data[y_min_idx:y_max_idx, x_min_idx:x_max_idx]
-                noise_values.extend(region_data.flatten())
-
-                log_info(f"Added noise region: {x_min_ppm}-{x_max_ppm} ppm (1H), {y_min_ppm}-{y_max_ppm} ppm (15N/13C)")
-
-            if noise_values:
-                self.noise_level = np.std(noise_values)
-                log_info(f"Custom noise estimation from {len(self.noise_regions_ppm)} regions")
-            else:
-                log_warning("No valid custom noise regions found, falling back to corner method")
-                self._estimate_noise_level_corners()
-        else:
-            self._estimate_noise_level_corners()
+        """Set the spectrum's noise level and the threshold that follows from it"""
+        self.noise_level = self._estimate_noise_level_advanced()
 
         self.threshold = self.noise_level * self.threshold_multiplier
         log_info(f"Estimated noise level: {self.noise_level:.2f}")
         log_info(f"Detection threshold: {self.threshold:.2f} (multiplier: {self.threshold_multiplier})")
-
-    def _estimate_noise_level_corners(self):
-        """Estimate noise level using left corner regions (fallback method)"""
-        corner_size = min(50, self.nmr_data.shape[0]//10, self.nmr_data.shape[1]//10)
-
-        corners = [
-            self.nmr_data[:corner_size, :corner_size],  # Top-left
-            self.nmr_data[-corner_size:, :corner_size], # Bottom-left
-        ]
-
-        noise_values = []
-        for corner in corners:
-            noise_values.extend(corner.flatten())
-
-        self.noise_level = np.std(noise_values)

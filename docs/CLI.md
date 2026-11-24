@@ -125,6 +125,12 @@ there — judging it against some other list reads a wrong list as decay.
 `--quick` uses a coarser registration grid. `--sample` assesses only the first and last
 spectrum of each experiment instead of all of them.
 
+**A peak is captured** when a local extremum at least 10 × the spectrum's noise lies inside
+its search window: the noise level and the 10 σ `series` detects with, so the capture rate
+predicts the share of the list a series will match on that spectrum (here two listed peaks
+may share one extremum; a series gives it to the nearer). The median S/N is the maximum in
+a small box at each listed peak over the same noise.
+
 **Capture rate is only judged at the reference point** — the shortest delay, where nothing
 has decayed yet. A shortfall there means the list or the data is wrong. Further down a
 relaxation series the same number just means the experiment worked, so it is reported without
@@ -252,8 +258,8 @@ the grid, and applying it leaves the list off in both dimensions. So `--auto` re
 spectrum at the shifted positions and refuses (exit 1, `ok: false`, nothing written) when
 the median S/N there is below 10 or fewer than 85% of the peaks are captured — the
 thresholds `diagnose` uses. On the real reference spectrum with the list 0.15 ppm out in
-¹H, the "correction" left a median S/N of 3 and 6/68 peaks captured; a correct one gives
-~124 and 64/68. A written `--auto` summary carries `captured` and `median_snr`. Given
+¹H, the "correction" left a median S/N of 2 and 13/68 peaks captured; a correct one gives
+~79 and 64/68. A written `--auto` summary carries `captured` and `median_snr`. Given
 `--dx`/`--dy` are applied unchecked.
 
 **`--quick` is a resolution limit, not just a speed knob.** It quantises the ¹⁵N offset to

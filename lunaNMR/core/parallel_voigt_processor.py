@@ -23,12 +23,11 @@ import os
 
 from lunaNMR.utils.output_manager import log_progress, log_info, log_warning, log_error
 from lunaNMR.utils.cancellation import Cancelled, raise_if_stopped, result_unless_stopped
-from lunaNMR.utils.quality_categories import fit_quality_label
+from lunaNMR.utils.quality_categories import GOOD_FIT_MIN_R2, fit_quality_label
 
 # Adaptive optimization imports
 from lunaNMR.core.adaptive_optimizer import (
     AdaptiveOptimizer,
-    estimate_noise_level,
     create_series_params,
     check_lw_deviation
 )
@@ -268,7 +267,7 @@ class ParallelVoigtProcessor:
                 log_progress("ADAPTIVE OPTIMIZATION: Learning optimal parameters...")
                 adaptive_start = time.time()
 
-                noise_level = estimate_noise_level(self.original_fitter.parent.nmr_data)
+                noise_level = self.original_fitter.parent.noise_level
 
                 from lunaNMR.core.ps2d_config import get_ps2d_config
                 config = get_ps2d_config()
@@ -675,7 +674,7 @@ class ParallelVoigtProcessor:
 
                 # Quality threshold: only use fits with good R²
                 r_squared = peak_result.get('r_squared', 0)
-                if r_squared < 0.85:
+                if r_squared < GOOD_FIT_MIN_R2:
                     continue
 
                 successful_fits += 1

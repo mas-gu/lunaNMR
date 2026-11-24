@@ -809,49 +809,6 @@ class AdaptiveOptimizer:
             'fallback_reason': reason
         }
 
-def estimate_noise_level(spectrum: np.ndarray, method: str = 'corner') -> float:
-    """
-    Estimate noise level from 2D spectrum.
-
-    Parameters
-    ----------
-    spectrum : np.ndarray
-        2D spectrum data
-    method : str
-        'corner': Use corner regions (typically baseline)
-        'mad': Use MAD-based robust estimate
-
-    Returns
-    -------
-    float : Estimated noise level (standard deviation)
-    """
-    if method == 'corner':
-        ny, nx = spectrum.shape
-        size_y = max(1, ny // 10)
-        size_x = max(1, nx // 10)
-
-        corners = [
-            spectrum[:size_y, :size_x],           # Top-left
-            spectrum[:size_y, -size_x:],          # Top-right
-            spectrum[-size_y:, :size_x],          # Bottom-left
-            spectrum[-size_y:, -size_x:]          # Bottom-right
-        ]
-
-        # Use median of corner stds (robust to one corner having signal)
-        corner_stds = [np.std(c) for c in corners]
-        return np.median(corner_stds)
-
-    elif method == 'mad':
-        # Median Absolute Deviation (robust to outliers/signals)
-        # MAD * 1.4826 ≈ std for normal distribution
-        median_val = np.median(spectrum)
-        mad = np.median(np.abs(spectrum - median_val))
-        return 1.4826 * mad
-
-    else:
-        raise ValueError(f"Unknown noise estimation method: {method}")
-
-
 def create_series_params(optimization_result: Dict[str, Any],
                          cluster_assignments: Dict[str, Any],
                          reference_spectrum: str = None) -> Dict[str, Any]:

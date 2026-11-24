@@ -6,6 +6,8 @@ import math
 # The quality label of a fit
 # A fit this far above the noise is a measurement whatever its R-squared says.
 MEASURED_SNR = 5.0
+# The bound of the Good label. A fit at or above it also teaches a spectrum its linewidths.
+GOOD_FIT_MIN_R2 = 0.8
 
 
 def fit_quality_label(r_squared, success=True, near_noise=False, snr=None):
@@ -33,7 +35,7 @@ def fit_quality_label(r_squared, success=True, near_noise=False, snr=None):
         return 'Failed'
     if r_squared > 0.9:
         return 'Excellent'
-    if r_squared > 0.8:
+    if r_squared > GOOD_FIT_MIN_R2:
         return 'Good'
     if r_squared > 0.6:
         return 'Fair'

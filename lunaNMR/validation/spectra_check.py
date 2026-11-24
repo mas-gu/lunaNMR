@@ -49,10 +49,14 @@ def _read(path):
             ng.pipe.make_uc(dic, data, dim=1))
 
 
+def _nucleus_of(ux, uy) -> Optional[str]:
+    from lunaNMR.core.ps2d_config import nucleus_of_spectral_window
+    return nucleus_of_spectral_window(sum(ux.ppm_limits()) / 2.0, sum(uy.ppm_limits()) / 2.0)
+
+
 def _window_of(ux, uy) -> Tuple[float, float]:
-    from lunaNMR.core.ps2d_config import PS2DConfig, nucleus_of_spectral_window
-    nucleus = nucleus_of_spectral_window(sum(ux.ppm_limits()) / 2.0, sum(uy.ppm_limits()) / 2.0)
-    config = PS2DConfig(nucleus or '15N')
+    from lunaNMR.core.ps2d_config import PS2DConfig
+    config = PS2DConfig(_nucleus_of(ux, uy) or '15N')
     return config.search_window_f2, config.search_window_f1
 
 
@@ -63,17 +67,15 @@ def search_window(path) -> Tuple[float, float]:
     return _window_of(ux, uy)
 
 
-def estimate_noise(data: np.ndarray) -> float:
-    """Median-absolute-deviation noise from the quietest corner.
-
-    A whole-spectrum MAD reports the signal on a crowded spectrum, so the corners
-    are measured separately and the smallest is taken.
-    """
-    corners = [data[:80, :150], data[-80:, :150], data[:80, -150:], data[-80:, -150:]]
-    mad = float(min(np.median(np.abs(c - np.median(c))) * 1.4826 for c in corners))
-    if mad > 0:
-        return mad
-    # A corner with no noise at all turns every S/N into a division by zero. Floor it
+def estimate_noise(data: np.ndarray, uy, ux) -> float:
+    """The spectrum's noise level as the pipeline measures it
+    (core_integrator.spectrum_noise_level), so that a threshold in sigma here is the
+    threshold a series detects at."""
+    from lunaNMR.core.core_integrator import spectrum_noise_level
+    noise = float(spectrum_noise_level(data, ux.ppm_scale(), uy.ppm_scale(), _nucleus_of(ux, uy)))
+    if noise > 0:
+        return noise
+    # A spectrum with no noise at all turns every S/N into a division by zero. Floor it
     # far below any real signal so the ratios stay finite and read as "no noise".
     peak = float(np.max(np.abs(data)))
     return peak * 1e-9 if peak > 0 else 1.0
@@ -93,7 +95,7 @@ def peak_heights(path, peaks: Sequence[Tuple[str, float, float]]) -> Tuple[np.nd
     A peak outside the spectral window has no box and reads NaN."""
     _, data, uy, ux = _read(path)
     heights = np.array([_box_max(data, uy(y, 'ppm'), ux(x, 'ppm')) for _, x, y in peaks])
-    return heights, estimate_noise(data)
+    return heights, estimate_noise(data, uy, ux)
 
 
 def assess_registration(path, peaks: Sequence[Tuple[str, float, float]],
@@ -126,7 +128,7 @@ def _capture(path, peaks) -> Dict:
     maximum above the threshold, or a minimum below its negative, as the pipeline detects."""
     from scipy.ndimage import maximum_filter, minimum_filter
     _, data, uy, ux = _read(path)
-    noise = estimate_noise(data)
+    noise = estimate_noise(data, uy, ux)
     magnitude = np.abs(data)
     local = (((data == maximum_filter(data, size=5)) & (data > _DETECT_SNR * noise))
              | ((data == minimum_filter(data, size=5)) & (data < -_DETECT_SNR * noise)))

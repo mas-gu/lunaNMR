@@ -201,7 +201,7 @@ python -m lunaNMR <cmd> ... --format json --dry-run
   ```
 - **`processing_summary.csv`**: one row per spectrum file, in processing order. It names files, not columns — map columns with `series_metadata.json`.
 - **model-free `<prefix>_spectral_density_basic.csv`**: one row per residue; column names differ single vs dual (see gotchas).
-- **`diagnose --format json`** (and `series --dry-run --deep`'s `checks` key): `experiments[]` each with `spectra[]` (`dx`, `dy`, `capture`, `capture_rate`, `median_snr`, `weak`, `decayed`, `is_reference`), `delays` (`parsed`, `unparsed`, `repeats`), `peak_list`, `hetnoe`, `subseries`; plus a flat `findings[]` of `{severity, check, message}` with severity `FAIL`/`WARN`.
+- **`diagnose --format json`** (and `series --dry-run --deep`'s `checks` key): `experiments[]` each with `spectra[]` (`dx`, `dy`, `capture`, `capture_rate`, `median_snr`, `weak`, `decayed`, `is_reference`), `delays` (`parsed`, `unparsed`, `repeats`), `peak_list`, `hetnoe`, `subseries`; plus a flat `findings[]` of `{severity, check, message}` with severity `FAIL`/`WARN`. `capture` counts listed peaks with an extremum ≥ 10 × the spectrum's noise in their search window — the noise level and threshold `series` detects with — and `median_snr` is over the same noise.
 
 ## Gotchas (silent-corruption risks)
 - **`--time-units` does two different things.** Same spelling, different effect, so read
