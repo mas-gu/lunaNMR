@@ -386,12 +386,26 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
             self.plot_voigt_analysis_3d(self.current_result)
             self.canvas.draw()
 
+    def _rebuild_axes(self):
+        """Put the widget's grid of empty axes back in the figure.
+
+        Drawing a fit clears the figure and builds axes of its own, so the axes in
+        axes_list are no longer the figure's and nothing written on them is shown.
+        """
+        self.figure.clear()
+        self.axes_list = [self.figure.add_subplot(self.nrows, self.ncols, index + 1)
+                          for index in range(self.nrows * self.ncols)]
+        self.axes = self.axes_list[0]
+        # A drawn fit leaves its own margins on the figure
+        self.figure.tight_layout()
+
     def show_placeholder(self, message: str = "Select a peak to view Voigt analysis"):
         """Show placeholder message in all axes.
 
         Args:
             message: Text message to display
         """
+        self._rebuild_axes()
         for ax in self.axes_list:
             ax.clear()
             ax.text(0.5, 0.5, message,
@@ -945,7 +959,7 @@ class VoigtAnalysisPlotter(MatplotlibMultiAxesWidget):
 
     def _plot_no_data(self):
         """Plot message when no data is available"""
-        self.clear_all()
+        self._rebuild_axes()
 
         ax = self.axes_list[0]
         ax.text(0.5, 0.5, 'No Voigt analysis data\nFit a peak to view results',

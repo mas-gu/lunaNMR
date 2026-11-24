@@ -231,6 +231,9 @@ def test_reset_discards_what_detect_and_fit_produced(analysed, confirmed):
     assert (window.selected_peak_info, window.selected_peaks_multi) == (None, [])
     assert window.spectrum_plotter._selection_highlight is None
     assert _result_displays(window) == loaded.displays
+    assert [{text.get_text() for ax in plotter.figure.axes for text in ax.texts}
+            for plotter in (window.voigt_2d_plotter, window.voigt_3d_plotter)] == [
+        {"Select a peak to view Voigt analysis"}, {"Select a peak to view 3D Voigt analysis"}]
 
 
 @needs_data

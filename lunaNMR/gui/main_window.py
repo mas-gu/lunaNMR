@@ -3015,12 +3015,8 @@ class LunaNMRMainWindow(BaseWindow):
             self.peak_navigator.peak_type_combo.setCurrentText("Reference Peaks")
             self.reload_peak_navigator()
 
-            for plotter, message in (
-                    (self.voigt_2d_plotter, "Select a peak to view Voigt analysis"),
-                    (self.voigt_3d_plotter, "Select a peak to view 3D Voigt analysis")):
-                # A plotted fit replaced the axes the placeholder is written on
-                plotter.figure.clear()
-                plotter.show_placeholder(message)
+            self.voigt_2d_plotter.show_placeholder("Select a peak to view Voigt analysis")
+            self.voigt_3d_plotter.show_placeholder("Select a peak to view 3D Voigt analysis")
             self.peak_params_text.setPlainText(NO_PEAK_PARAMETERS_TEXT)
 
             self.update_spectrum_plot()
