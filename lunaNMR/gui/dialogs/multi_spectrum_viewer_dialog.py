@@ -2264,10 +2264,11 @@ class MultiSpectrumViewerDialog(BaseDialog):
     def _learned_linewidths(self, spec_idx):
         """Median linewidths over this spectrum's good fits, for fit-bound seeding."""
         import numpy as np
+        from lunaNMR.utils.quality_categories import GOOD_FIT_MIN_R2
         lwx, lwy = [], []
         for p in self._get_fitted_peaks(spec_idx):
             r2 = p.get('r_squared', p.get('R_Squared'))
-            if r2 is not None and r2 < 0.8:
+            if r2 is not None and r2 < GOOD_FIT_MIN_R2:
                 continue
             lx = p.get('lw_x', p.get('LW_X'))
             ly = p.get('lw_y', p.get('LW_Y'))
