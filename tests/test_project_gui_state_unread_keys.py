@@ -2,7 +2,7 @@
 # ABOUTME: Real LunaNMRMainWindow offscreen, saved and opened through the real ProjectManager.
 
 """The window holds no custom initial linewidths, no detection rectangle in pixels and none
-of the 1D peak-picking and fit-quality settings: no engine code reads any of them. A
+of the 1D peak-picking, fit-quality and marker-display settings: nothing reads any of them. A
 bundle can still name them in its gui_state.json. Opening it restores the parameters the
 window has, and neither the window nor a series started from it carries the others."""
 
@@ -22,6 +22,8 @@ WITHOUT_A_CONTROL = {
     'use_centroid_refinement': False, 'centroid_noise_multiplier': 4.5,
     'height_threshold': 0.5, 'distance_factor': 50.0, 'prominence_threshold': 0.3,
     'smoothing_sigma': 3.0, 'max_peaks_fit': 2, 'max_optimization_iterations': 2,
+    'min_r_squared': 0.9, 'max_iterations': 50, 'fitting_window_x': 0.5, 'fitting_window_y': 5.0,
+    'show_detected': False, 'show_assigned': False, 'show_fitted_curves': False,
 }
 
 

@@ -43,7 +43,6 @@ INTERNAL_MODULES = [
     ('lunaNMR.core.parallel_voigt_processor', 'Parallel processing'),
     ('lunaNMR.processors.multi_spectrum_processor', 'Series processing'),
     ('lunaNMR.utils.file_manager', 'File handling'),
-    ('lunaNMR.utils.config_manager', 'Configuration'),
     ('lunaNMR.utils.project_manager', 'Project save and load'),
     ('lunaNMR.gui.main_window', 'Main window'),
     ('lunaNMR.gui.components.spectrum_plotter', 'Spectrum plotting'),

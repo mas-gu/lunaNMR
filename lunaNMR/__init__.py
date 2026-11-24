@@ -36,7 +36,6 @@ _LAZY_EXPORTS = {
     'EnhancedVoigtFitter': '.core.enhanced_voigt_fitter',
     'MultiSpectrumProcessor': '.processors.multi_spectrum_processor',
     'SingleSpectrumProcessor': '.processors.single_spectrum_processor',
-    'ConfigurationManager': '.utils.config_manager',
     'NMRFileManager': '.utils.file_manager',
     'NMRParameterManager': '.utils.parameter_manager',
 }
@@ -77,7 +76,6 @@ __all__ = [
     'MultiSpectrumProcessor',
     'SingleSpectrumProcessor',
     # Utilities
-    'ConfigurationManager',
     'NMRFileManager',
     'NMRParameterManager',
 ]

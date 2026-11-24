@@ -18,7 +18,7 @@ lunaNMR/
 │   ├── core/               # Detection, Voigt/PS2D fitting, overlap clustering, parallel processor
 │   ├── batch_processing/   # CLI folder batch automation
 │   ├── integrators/        # In-place advanced/series integrators
-│   ├── utils/              # Config, params, file I/O, project bundles, output routing
+│   ├── utils/              # Params, file I/O, project bundles, output routing
 │   └── validation/         # Installation checks, `diagnose` pre-flight (spectra_check.py)
 └── modules/
     ├── dynamiXs_v2o0/      # DynamiXs (relaxation/dynamics) + dynamiXs_Kd/ (Kd/titration)
@@ -36,7 +36,7 @@ tkinter is used **only** for the launcher's startup error dialogs; the app is en
 | **GUI** | `gui/` | Qt6 UI, plots, Peak Navigator, Voigt Analysis tab, dialogs |
 | **Workflow** | `processors/` | Drive detection + fitting for single/series; batch in `batch_processing/` |
 | **Core** | `core/` | Peak detection, PS2D 2D fitting, overlap clustering, parallel dispatch |
-| **Utils** | `utils/` | Parameter manager, config, file formats, project bundles |
+| **Utils** | `utils/` | Parameter manager, file formats, project bundles |
 
 ---
 

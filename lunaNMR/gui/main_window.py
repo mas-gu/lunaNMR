@@ -19,7 +19,7 @@ Architecture:
     - Coordinates core processing engines (integrator, processors)
 
 State Management:
-    - Core components: integrator, file_manager, config_manager
+    - Core components: integrator, file_manager
     - File paths: current_nmr_file, current_peak_file
     - Selection state: selected_peak_info
     - Workflow mode: peak_list vs sn_threshold
@@ -59,7 +59,6 @@ from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
 from lunaNMR.core.ps2d_config import (SEARCH_WINDOW_PPM, set_ps2d_config, get_ps2d_config, mark_ps2d_config_as_base,
                                       reset_ps2d_config, distance_in_linewidths)
 from lunaNMR.utils.file_manager import NMRFileManager
-from lunaNMR.utils.config_manager import ConfigurationManager
 from lunaNMR.utils.parameter_manager import NMRParameterManager
 from lunaNMR.utils.cancellation import Cancelled
 from lunaNMR.utils.project_manager import ProjectManager
@@ -264,7 +263,7 @@ class LunaNMRMainWindow(BaseWindow):
         - Coordinates core processing engines (integrator, processors)
 
     State Management:
-        - Core components: integrator, file_manager, config_manager
+        - Core components: integrator, file_manager
         - File paths: current_nmr_file, current_peak_file
         - Selection state: selected_peak_info
         - Workflow mode: peak_list vs sn_threshold
@@ -298,10 +297,9 @@ class LunaNMRMainWindow(BaseWindow):
 
         This method sets up:
         1. Core processing components (integrator, file_manager, etc.)
-        2. Configuration management (config_manager)
-        3. File path tracking (current_nmr_file, current_peak_file, etc.)
-        4. Selection state (selected_peak_info)
-        5. Workflow configuration (workflow_mode, sn_threshold, etc.)
+        2. File path tracking (current_nmr_file, current_peak_file, etc.)
+        3. Selection state (selected_peak_info)
+        4. Workflow configuration (workflow_mode, sn_threshold, etc.)
 
         Note: This is called BEFORE setup_ui() to ensure all state is ready
         when GUI components are created.
@@ -312,9 +310,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.integrator = EnhancedVoigtIntegrator()
         self.file_manager = NMRFileManager()
         self.param_manager = NMRParameterManager()
-
-        # Configuration management
-        self.config_manager = ConfigurationManager("lunaNMR_v1")
 
         # ===== File Path Tracking =====
         self.current_nmr_file = None
@@ -360,9 +355,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.expected_peak_count = 50
 
         # ===== Display Options =====
-        self.show_detected = True
-        self.show_assigned = True
-        self.show_fitted_curves = True
         self.show_ellipses = False  # Debug tool for PS2D
 
         # ===== Contour Display Parameters =====
@@ -377,8 +369,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.saved_ylim = None  # Saved Y axis limits for zoom preservation
 
         # ===== Processing Parameters =====
-        # These will be populated from config_manager by load_parameters_from_config()
-        # For now, just initialize placeholders
         self.use_parallel_processing = True
         self.use_adaptive_optimization = False  # Grid search for optimal radF1/radF2
         self.fix_linewidths = False
@@ -403,12 +393,6 @@ class LunaNMRMainWindow(BaseWindow):
         self.manual_detection_x_max = 10.0  # ppm (1H)
         self.manual_detection_y_min = 105.0 # ppm (15N)
         self.manual_detection_y_max = 135.0 # ppm (15N)
-
-        # ===== Fitting Quality Parameters =====
-        self.min_r_squared = 0.5  # Minimum R² quality threshold
-        self.max_iterations = 1000  # Levenberg-Marquardt max iterations
-        self.fitting_window_x = 0.2  # 1H fitting window (ppm)
-        self.fitting_window_y = 2.0  # 15N fitting window (ppm)
 
         # ===== PS2D Algorithm Configuration (Expert Mode) =====
         self.nucleus_type = '15N'  # Default to 15N-HSQC

@@ -159,7 +159,7 @@ analysis modules (DynamiXs, Kd) consume.</p>
 │   │   └── adaptive_optimizer.py          # grid search for PS2D radii
 │   ├── gui/                     # PySide6/Qt6 UI (main_window, dialogs, components)
 │   ├── processors/              # single & multi-spectrum workflows
-│   ├── utils/                   # config, parameter, output, file, project managers
+│   ├── utils/                   # parameter, output, file, project managers
 │   └── validation/             # install verification + diagnose pre-flight
 └── modules/
     ├── dynamiXs_v2o0/           # relaxation analysis + dynamiXs_Kd/ (titration Kd)
@@ -169,7 +169,7 @@ analysis modules (DynamiXs, Kd) consume.</p>
 <tr><td><code>core/</code></td><td>The numerical engines: detection, Voigt fitting, 2D deconvolution, parallelism.</td></tr>
 <tr><td><code>processors/</code></td><td>Orchestrate single-spectrum and multi-spectrum (series) runs; produce outputs.</td></tr>
 <tr><td><code>gui/</code></td><td>Qt main window, dialogs (viewers, DynamiXs, Kd, 1D integration), reusable components.</td></tr>
-<tr><td><code>utils/</code></td><td>Cross-cutting: config, parameter sync, unified logging, project save/load.</td></tr>
+<tr><td><code>utils/</code></td><td>Cross-cutting: parameter sync, unified logging, project save/load.</td></tr>
 <tr><td><code>modules/</code></td><td>Optional analysis apps launched from the <strong>Modules</strong> menu.</td></tr>
 </table>
 </section>

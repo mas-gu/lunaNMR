@@ -4,8 +4,7 @@
 """
 Utility Classes and Managers for LunaNMR
 
-This module contains utility classes for configuration management,
-file handling and parameter management.
+This module contains utility classes for file handling and parameter management.
 
 A name is imported on first access. Importing ``lunaNMR.utils.output_manager`` loads that
 module alone; an eager import here would load the project manager and the Qt undo stack

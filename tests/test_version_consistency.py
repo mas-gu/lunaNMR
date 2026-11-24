@@ -26,7 +26,6 @@ def test_every_stated_version_is_the_same_number():
         "batch --version text": _first_match(
             "lunaNMR/batch_processing/cli_interface.py", r"LunaNMR Batch Processing v([\d.]+)"),
         "About dialog": _first_match("lunaNMR/gui/main_window.py", r"Version ([\d.]+) \(Qt Port\)"),
-        "config default": _first_match("lunaNMR/utils/config_manager.py", r'"version": "([\d.]+)"'),
     }
     assert {name: version for name, version in stated.items() if version != release} == {}
 
