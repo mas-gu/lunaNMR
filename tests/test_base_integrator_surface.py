@@ -17,10 +17,11 @@ GONE = ['set_search_window', 'set_threshold_multiplier', 'set_noise_regions', 'p
         '_create_failed_detection', '_consolidate_y_dimension_peaks',
         '_refine_peaks_with_centroids', '_find_all_peaks_in_window',
         'detect_peaks_professional', 'detect_peaks_traditional', '_match_traditional',
-        'integrate_peaks', 'get_detection_statistics', 'export_results', 'create_summary_plot']
+        'integrate_peaks', 'get_detection_statistics', 'export_results', 'create_summary_plot',
+        '_estimate_noise_level_corners']
 
 KEPT = ['load_data', '_detect_nmr_format', '_calculate_ppm_axes', '_detect_nucleus_type',
-        '_estimate_noise_level', '_estimate_noise_level_corners']
+        '_estimate_noise_level']
 
 
 @pytest.mark.parametrize("name", GONE)

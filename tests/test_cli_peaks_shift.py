@@ -146,7 +146,7 @@ class TestAMeasuredShiftThatDoesNotRegisterIsRefused:
     """The search grid spans +/-0.09 ppm in 1H. A list further out than that still has an
     arg-max somewhere -- a spurious one, inside the grid -- and applying it leaves the list
     off in both dimensions. Measured on the real reference spectrum with the list 0.15 ppm
-    out in 1H: median S/N ~3 and 6/68 peaks captured after the 'correction', against ~124
+    out in 1H: median S/N ~2 and 13/68 peaks captured after the 'correction', against ~79
     and 64/68 for a correct one. So the shifted list is judged on the spectrum it was
     measured against, not on the optimiser having returned a number.
     """
@@ -182,5 +182,5 @@ class TestAMeasuredShiftThatDoesNotRegisterIsRefused:
         assert payload["dx"] == pytest.approx(-0.05, abs=0.005)
         assert payload["dy"] == pytest.approx(-0.3, abs=0.02)
         assert payload["captured"] >= 60
-        assert payload["median_snr"] > 100
+        assert payload["median_snr"] > 70
         assert out.exists()

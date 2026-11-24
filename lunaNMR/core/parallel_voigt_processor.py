@@ -28,7 +28,6 @@ from lunaNMR.utils.quality_categories import GOOD_FIT_MIN_R2, fit_quality_label
 # Adaptive optimization imports
 from lunaNMR.core.adaptive_optimizer import (
     AdaptiveOptimizer,
-    estimate_noise_level,
     create_series_params,
     check_lw_deviation
 )
@@ -268,7 +267,7 @@ class ParallelVoigtProcessor:
                 log_progress("ADAPTIVE OPTIMIZATION: Learning optimal parameters...")
                 adaptive_start = time.time()
 
-                noise_level = estimate_noise_level(self.original_fitter.parent.nmr_data)
+                noise_level = self.original_fitter.parent.noise_level
 
                 from lunaNMR.core.ps2d_config import get_ps2d_config
                 config = get_ps2d_config()

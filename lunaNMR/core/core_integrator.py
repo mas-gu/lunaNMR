@@ -84,6 +84,37 @@ def peak_sign(intensity, y_idx, x_idx, detected_intensity=None, noise=None,
         return -1
     return 0
 
+
+def spectrum_noise_level(data, ppm_x_axis, ppm_y_axis, nucleus):
+    """The noise standard deviation of a 2D spectrum: MAD x 1.4826 over the automatic
+    detection region - 1H at or above 5.8 ppm for a 15N spectrum, at or below 2.75 ppm
+    for a 13C one, and 0.5 ppm off both edges of the indirect dimension.
+
+    The region is where the peaks are and leaves out the water line, where the noise
+    is not the noise under the peaks: measured, the water stripe reads anything from a
+    third of it to several times it. The median absolute deviation barely sees the few
+    percent of points that carry signal: against the standard deviation of signal-free
+    blocks beside the peaks it read 1.01-1.07x on twelve 15N spectra (titration, T1, T2,
+    hetNOE), highest on the most crowded. Under the methyls of a crowded 13C spectrum
+    the noise itself varies about threefold (t1 ridges), and no single number
+    describes it.
+
+    A manual detection region never enters: it says where to look for peaks, and the
+    noise of a spectrum does not depend on that.
+    """
+    if nucleus == '15N':
+        x_valid = ppm_x_axis >= 5.8
+    elif nucleus == '13C':
+        x_valid = ppm_x_axis <= 2.75
+    else:
+        x_valid = np.ones(len(ppm_x_axis), dtype=bool)
+    edge = 0.5
+    y_valid = ((ppm_y_axis >= ppm_y_axis.min() + edge)
+               & (ppm_y_axis <= ppm_y_axis.max() - edge))
+    region = data[np.ix_(y_valid, x_valid)]
+    return np.median(np.abs(region - np.median(region))) * 1.4826
+
+
 # How close to a bound counts as resting on it, as a fraction of the box's own width.
 # The optimiser reaches a bound by np.clip, so a pinned parameter lands exactly on it;
 # anything above floating-point noise would do.
@@ -156,7 +187,6 @@ class VoigtIntegrator(BaseIntegrator):
         self.expected_peak_count = 50
         self.sn_detection_params = {
             'min_snr': 2.0,          # Minimum signal-to-noise ratio
-            'noise_estimation': 'corners',  # 'corners' or 'median'
             'peak_separation': 0.01  # Minimum peak separation in ppm
         }
 
@@ -1886,64 +1916,9 @@ class VoigtIntegrator(BaseIntegrator):
         return self.detection_statistics.copy()
 
     def _estimate_noise_level_advanced(self):
-        """Advanced noise level estimation for S/N detection.
-
-        Uses only the valid detection region (manual or nucleus-adaptive).
-        """
-        if self.manual_detection_region is not None:
-            # Manual region: full override of automatic filtering
-            x_min, x_max, y_min, y_max = self.manual_detection_region
-            x_valid = (self.ppm_x_axis >= x_min) & (self.ppm_x_axis <= x_max)
-            y_valid = (self.ppm_y_axis >= y_min) & (self.ppm_y_axis <= y_max)
-        else:
-            # Automatic mode: nucleus-adaptive constraints
-            nucleus = self._detect_nucleus_type()
-
-            # Nucleus-adaptive 1H constraint
-            # 15N-HSQC: 1H >= 5.8 ppm (exclude water/aliphatic, keep amide region)
-            # 13C-HSQC: 1H <= 2.75 ppm (exclude downfield, keep aliphatic region)
-            if nucleus == '15N':
-                x_valid = self.ppm_x_axis >= 5.8
-            elif nucleus == '13C':
-                x_valid = self.ppm_x_axis <= 2.75
-            else:
-                x_valid = np.ones(len(self.ppm_x_axis), dtype=bool)
-
-            # Exclude Y-dimension edges (0.5 ppm margin)
-            Y_EDGE_MARGIN = 0.5
-            y_min_edge, y_max_edge = self.ppm_y_axis.min(), self.ppm_y_axis.max()
-            y_valid = (self.ppm_y_axis >= y_min_edge + Y_EDGE_MARGIN) & (self.ppm_y_axis <= y_max_edge - Y_EDGE_MARGIN)
-
-        valid_data = self.nmr_data[np.ix_(y_valid, x_valid)]
-
-        if self.sn_detection_params['noise_estimation'] == 'corners':
-            h, w = valid_data.shape
-            corner_size = min(20, h//20, w//20)
-
-            if corner_size < 5:
-                # Fallback to MAD if corners too small
-                flattened = valid_data.flatten()
-                median = np.median(flattened)
-                mad = np.median(np.abs(flattened - median))
-                noise_level = mad * 1.4826
-            else:
-                corners = [
-                    valid_data[:corner_size, :corner_size],
-                    valid_data[:corner_size, -corner_size:],
-                    valid_data[-corner_size:, :corner_size],
-                    valid_data[-corner_size:, -corner_size:]
-                ]
-                noise_data = np.concatenate([corner.flatten() for corner in corners])
-                noise_level = np.std(noise_data)
-
-        else:  # median-based estimation
-            # Use median absolute deviation (more robust to outliers)
-            flattened = valid_data.flatten()
-            median = np.median(flattened)
-            mad = np.median(np.abs(flattened - median))
-            noise_level = mad * 1.4826  # Convert MAD to std equivalent
-
-        return noise_level
+        """The spectrum's noise level (see spectrum_noise_level)."""
+        return spectrum_noise_level(self.nmr_data, self.ppm_x_axis, self.ppm_y_axis,
+                                    self._detect_nucleus_type())
 
     def _calculate_top_contour_center(self, y_idx, x_idx, intensity_band=0.05,
                                        max_shift_x=0.04, max_shift_y=0.14):

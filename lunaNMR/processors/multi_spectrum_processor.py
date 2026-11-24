@@ -663,9 +663,8 @@ class MultiSpectrumProcessor:
                     if detected_nucleus:
                         self.integrator.auto_detected_nucleus = detected_nucleus
 
-                # Only estimate noise if not already done
-                if not hasattr(self.integrator, 'noise_level'):
-                    self.integrator._estimate_noise_level()
+                # Each spectrum has its own noise
+                self.integrator._estimate_noise_level()
 
                 self.integrator.nmr_file_path = nmr_file
 
