@@ -57,7 +57,7 @@ from lunaNMR.gui.styles.design_system import (
 
 from lunaNMR.core.core_integrator import EnhancedVoigtIntegrator
 from lunaNMR.core.ps2d_config import (CENTROID_WINDOW_PPM, SEARCH_WINDOW_PPM, set_ps2d_config, get_ps2d_config,
-                                      mark_ps2d_config_as_base, reset_ps2d_config, distance_in_linewidths)
+                                      mark_ps2d_config_as_base, distance_in_linewidths)
 from lunaNMR.utils.file_manager import NMRFileManager
 from lunaNMR.utils.parameter_manager import NMRParameterManager
 from lunaNMR.utils.cancellation import Cancelled
@@ -69,6 +69,16 @@ logger = logging.getLogger(__name__)
 
 # What the Processing Statistics panel reads while no detection or fit has run on the data
 NO_STATISTICS_TEXT = "No processing performed yet"
+
+# What the Peak Parameters tab reads while no fitted peak has been opened in it
+NO_PEAK_PARAMETERS_TEXT = (
+    "Peak Parameters\n"
+    "===============\n\n"
+    "Peak parameters will appear here after fitting completes.\n\n"
+    "Expected output format:\n"
+    "Peak #    X (ppm)    Y (ppm)    Width_X    Width_Y    Intensity    R²\n"
+    "----  -----------  -----------  ---------  ---------  -----------  ------\n"
+)
 
 
 class PeakDetectionWorker(QThread):
@@ -353,6 +363,9 @@ class LunaNMRMainWindow(BaseWindow):
         self.workflow_mode = "peak_list"
         self.sn_threshold = 10.0
         self.expected_peak_count = 50
+        # Whether the peak list is the one a detection by S/N threshold made of the peaks
+        # it found, not one the user loaded
+        self.peak_list_from_detection = False
 
         # ===== Display Options =====
         self.show_ellipses = False  # Debug tool for PS2D
@@ -1955,7 +1968,7 @@ class LunaNMRMainWindow(BaseWindow):
         """Create the Voigt Fitting section with Reset Results button.
 
         This section contains operations related to Voigt profile fitting results,
-        including clearing results and resetting fitting parameters.
+        including clearing results.
 
         Returns:
             QGroupBox containing Voigt fitting controls
@@ -1985,7 +1998,8 @@ class LunaNMRMainWindow(BaseWindow):
         layout.setSpacing(SPACING_SM)
 
         reset_btn = QPushButton("Reset Results")
-        reset_btn.setToolTip("Clear all fitting results")
+        reset_btn.setToolTip("Discard what Detect and Fit Spectrum produced for this spectrum.\n"
+                             "The spectrum, the peak list and every parameter are kept.")
         reset_btn.setProperty("class", "destructive")
         reset_btn.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         reset_btn.setStyleSheet(f"""
@@ -2956,8 +2970,10 @@ class LunaNMRMainWindow(BaseWindow):
     def on_reset_results(self):
         """Handle Reset Results button click.
 
-        Full application reset - equivalent to closing and reopening the app.
-        Resets ALL state: parameters, results, loaded files, GUI widgets.
+        Discards what Detect and Fit Spectrum produced for the current spectrum: the
+        window is as it was once the spectrum and the peak list were loaded and the
+        parameters set. The session's series and analyses are not results of this
+        spectrum; they are deleted in their own dialogs and in the Project Browser.
         """
         logger.info("Reset Results button clicked")
         if self._refuse_while_running():
@@ -2966,137 +2982,52 @@ class LunaNMRMainWindow(BaseWindow):
         # Confirm destructive action
         reply = QMessageBox.question(
             self,
-            "Reset Application",
-            "This will completely reset the application:\n\n"
-            "• Clear all data (spectrum, peaks, results)\n"
-            "• Reset all parameters to defaults\n"
-            "• Clear project state\n\n"
-            "Equivalent to closing and reopening the app.\n"
+            "Reset Results",
+            "This discards what Detect and Fit Spectrum produced for the current spectrum:\n\n"
+            "• Detected peaks and fit results\n"
+            "• The Voigt analysis views and the statistics\n"
+            "• The undo history\n\n"
+            "The spectrum, the peak list, every parameter, and the project with its\n"
+            "series and analyses are kept.\n"
             "This action cannot be undone.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
 
         if reply == QMessageBox.Yes:
-            logger.info("Full application reset initiated")
+            # Its commands hold peaks that are about to be discarded
+            self.undo_manager.on_major_operation()
 
-            # A project save captures what these windows show
-            for dialog in (self.dynamixs_dialog, self.kd_titration_dialog):
-                if dialog is not None:
-                    try:
-                        dialog.close()
-                    except Exception:
-                        pass
+            self._forget_previous_results()
+            if self.peak_list_from_detection:
+                self.integrator.peak_list = None
+                self.peak_list_from_detection = False
+            self.current_voigt_result = None
 
-            # Save GUI component references (they already exist, don't null them)
-            gui_refs = {
-                'contour_params_widget': self.contour_params_widget,
-                'workflow_peak_list_radio': self.workflow_peak_list_radio,
-                'workflow_sn_threshold_radio': self.workflow_sn_threshold_radio,
-                'sn_params_widget': self.sn_params_widget,
-                'sn_threshold_spin': self.sn_threshold_spin,
-                'expected_peaks_spin': self.expected_peaks_spin,
-                'nmr_file_label': self.nmr_file_label,
-                'peak_file_label': self.peak_file_label,
-                'spectrum_plotter': self.spectrum_plotter,
-                'peak_navigator': self.peak_navigator,
-                'voigt_2d_plotter': self.voigt_2d_plotter,
-                'voigt_3d_plotter': getattr(self, 'voigt_3d_plotter', None),
-                'peak_params_text': self.peak_params_text,
-                'shift_1h_spin': self.shift_1h_spin,
-                'shift_15n_spin': self.shift_15n_spin,
-            }
+            self.selected_peak_info = None
+            self.spectrum_plotter.clear_selection_highlight()
+            self.clear_multi_selection()
 
-            # The PS2D config outlives the window state: put the startup 15N defaults
-            # back before init_variables reads them
-            reset_ps2d_config()
+            # A detection switched the navigator to its peaks, and a fit wrote its
+            # heights and qualities into the reference rows
+            self.peak_navigator.selected_peak_index = None
+            self.peak_navigator.current_navigation_index = None
+            self.peak_navigator.peak_type_combo.setCurrentText("Reference Peaks")
+            self.reload_peak_navigator()
 
-            # Reset ALL state variables to defaults (same as __init__)
-            self.init_variables()
+            for plotter, message in (
+                    (self.voigt_2d_plotter, "Select a peak to view Voigt analysis"),
+                    (self.voigt_3d_plotter, "Select a peak to view 3D Voigt analysis")):
+                # A plotted fit replaced the axes the placeholder is written on
+                plotter.figure.clear()
+                plotter.show_placeholder(message)
+            self.peak_params_text.setPlainText(NO_PEAK_PARAMETERS_TEXT)
 
-            for name, ref in gui_refs.items():
-                setattr(self, name, ref)
-
-            self._reset_gui_widgets_to_defaults()
-            if hasattr(self, 'expert_nucleus_combo'):
-                self.expert_nucleus_combo.blockSignals(True)
-                self.expert_nucleus_combo.setCurrentText(self.nucleus_type)
-                self.expert_nucleus_combo.blockSignals(False)
-            self._show_ps2d_config()
-
-            if hasattr(self, 'peak_navigator') and self.peak_navigator:
-                self.peak_navigator.load_reference_peaks([])
-                self.peak_navigator.load_detected_peaks([])
-
-            if hasattr(self, 'voigt_2d_plotter') and self.voigt_2d_plotter:
-                self.voigt_2d_plotter.show_placeholder("Select a peak to view Voigt analysis")
-
-            if hasattr(self, 'voigt_3d_plotter') and self.voigt_3d_plotter:
-                self.voigt_3d_plotter.show_placeholder("Select a peak to view 3D Voigt analysis")
-
-            if hasattr(self, 'spectrum_plotter') and self.spectrum_plotter:
-                self.spectrum_plotter.clear()
-
-            # Load synthetic test spectrum (as on startup)
-            self.create_test_spectrum()
-
-            self.sync_parameters_to_integrator()
-
+            self.update_spectrum_plot()
             self._reset_button_colors()
 
-            self.setWindowTitle("lunaNMR v1.0 - NMR Peak Analysis")
-
-            logger.info("Full application reset complete")
-            self.update_status("Application reset - ready")
-
-    def _reset_gui_widgets_to_defaults(self):
-        """Reset all GUI widgets to their default values."""
-        # Workflow Selection
-        if self.workflow_peak_list_radio:
-            self.workflow_peak_list_radio.setChecked(True)
-        if self.workflow_sn_threshold_radio:
-            self.workflow_sn_threshold_radio.setChecked(False)
-        if self.sn_params_widget:
-            self.sn_params_widget.setVisible(False)
-        if self.sn_threshold_spin:
-            self.sn_threshold_spin.setValue(10.0)
-        if self.expected_peaks_spin:
-            self.expected_peaks_spin.setValue(50)
-
-        # Data Loading labels
-        if self.nmr_file_label:
-            self.nmr_file_label.setText("No file loaded")
-        if self.peak_file_label:
-            self.peak_file_label.setText("No file loaded")
-
-        # Expert Mode parameters (if expanded)
-        if hasattr(self, 'expert_search_x_spin') and self.expert_search_x_spin:
-            self.expert_search_x_spin.setValue(SEARCH_WINDOW_PPM)
-        if hasattr(self, 'expert_search_y_spin') and self.expert_search_y_spin:
-            self.expert_search_y_spin.setValue(get_ps2d_config().search_window_f1)
-        if hasattr(self, 'expert_centroid_x_spin') and self.expert_centroid_x_spin:
-            self.expert_centroid_x_spin.setValue(0.01)
-        if hasattr(self, 'expert_centroid_y_spin') and self.expert_centroid_y_spin:
-            self.expert_centroid_y_spin.setValue(0.1)
-
-        # Contour parameters, from the defaults init_variables has just restored
-        if hasattr(self, 'contour_levels_spin') and self.contour_levels_spin:
-            self.contour_levels_spin.setValue(self.contour_levels)
-        if hasattr(self, 'contour_min_spin') and self.contour_min_spin:
-            self.contour_min_spin.setValue(self.contour_min)
-        if hasattr(self, 'contour_inc_spin') and self.contour_inc_spin:
-            self.contour_inc_spin.setValue(self.contour_increment)
-
-        # Shift Peak List
-        if hasattr(self, 'shift_1h_spin') and self.shift_1h_spin:
-            self.shift_1h_spin.setValue(0.0)
-        if hasattr(self, 'shift_15n_spin') and self.shift_15n_spin:
-            self.shift_15n_spin.setValue(0.0)
-
-        # Statistics display
-        self.stats_label.setText(NO_STATISTICS_TEXT)
-
-        logger.debug("GUI widgets reset to defaults")
+            logger.info("Results reset; spectrum, peak list and parameters kept")
+            self.update_status("Results reset - spectrum, peak list and parameters kept")
 
     def create_center_panel(self) -> QWidget:
         """Create the center panel with tabbed plot display.
@@ -3353,14 +3284,7 @@ class LunaNMRMainWindow(BaseWindow):
         self.peak_params_text = QTextEdit()
         self.peak_params_text.setReadOnly(True)
         self.peak_params_text.setFont(QFont("Courier", 9))
-        self.peak_params_text.setPlainText(
-            "Peak Parameters\n"
-            "===============\n\n"
-            "Peak parameters will appear here after fitting completes.\n\n"
-            "Expected output format:\n"
-            "Peak #    X (ppm)    Y (ppm)    Width_X    Width_Y    Intensity    R²\n"
-            "----  -----------  -----------  ---------  ---------  -----------  ------\n"
-        )
+        self.peak_params_text.setPlainText(NO_PEAK_PARAMETERS_TEXT)
         self.peak_params_text.setStyleSheet(f"""
             QTextEdit {{
                 background-color: {FRAME_BG_COLOR};
@@ -3886,8 +3810,8 @@ class LunaNMRMainWindow(BaseWindow):
             logger.error(f"Failed to load data: {e}")
 
     def _forget_previous_results(self):
-        """Drop the detected peaks, fit results and fitted clusters of the data loaded
-        before, and the statistics shown for them."""
+        """Drop the detected peaks, fit results and fitted clusters the window holds,
+        and the statistics shown for them."""
         self.integrator.fitted_peaks = []
         self.integrator.enhanced_fitter.series_params = None
         self.last_fitting_results = None
@@ -3964,6 +3888,7 @@ class LunaNMRMainWindow(BaseWindow):
                 raise RuntimeError("Integrator returned False - peak list loading failed")
 
             self.current_peak_file = file_path
+            self.peak_list_from_detection = False
 
             self.update_file_status_labels(nmr_file=self.current_nmr_file, peak_file=file_path)
 
@@ -5226,12 +5151,18 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
         self.detection_worker = PeakDetectionWorker(self.integrator, self.workflow_mode, stop=stop)
         # The detection replaces fitted_peaks itself; a cancelled one puts these back
         previous_peaks = self.integrator.fitted_peaks
+        # A detection by S/N threshold also replaces the peak list, with the peaks it finds
+        makes_peak_list = self.workflow_mode == 'sn_threshold'
+
+        def detection_complete(peaks):
+            if progress_dialog.is_cancelled:
+                self._discard_cancelled_detection(previous_peaks)
+                return
+            self.peak_list_from_detection = self.peak_list_from_detection or makes_peak_list
+            self.on_detection_complete(peaks, progress_dialog)
 
         self.detection_worker.progress_updated.connect(progress_dialog.update_progress)
-        self.detection_worker.detection_complete.connect(
-            lambda peaks: self._discard_cancelled_detection(previous_peaks)
-            if progress_dialog.is_cancelled else self.on_detection_complete(peaks, progress_dialog)
-        )
+        self.detection_worker.detection_complete.connect(detection_complete)
         self.detection_worker.detection_failed.connect(
             lambda error: self.on_detection_failed(error, progress_dialog)
         )
@@ -6818,6 +6749,9 @@ Developed using Python with PySide6, matplotlib, numpy, pandas, and scipy.
                 setattr(self, attr, None)
 
         self._show_loaded_parameters()
+
+        # The peak list is the project's now, whatever made the one before it
+        self.peak_list_from_detection = False
 
         self.update_file_status_labels(
             nmr_file=self.current_nmr_file,

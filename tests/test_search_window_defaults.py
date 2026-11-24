@@ -1,12 +1,13 @@
-# ABOUTME: Startup, Reset, a nucleus switch and the CLI all start detection at the same search window.
+# ABOUTME: Startup, a nucleus switch and the CLI all start detection at the same search window; Reset Results keeps the user's.
 # ABOUTME: Real LunaNMRMainWindow offscreen with its Expert panel open, and the CLI's series defaults.
 
 """
 The search window starts at 0.070 ppm in 1H and at the indirect window of the
 spectrum's nucleus: 0.3 ppm in 15N, which reaches a peak one 15N point (0.074 ppm at
 600 MHz) off its reference, and the same in 13C linewidths (radF1 0.15 against 0.4).
-Reset put the Expert panel back to 0.01/0.04, and a nucleus switch took 0.05/0.02 from
-the PS2D config, so the window was the default only until the user touched either.
+A nucleus switch took 0.05/0.02 from the PS2D config, so the window was the default only
+until the user switched. Reset Results discards results, not settings: the window the user
+set is the one the next detection uses.
 """
 
 import contextlib
@@ -79,7 +80,7 @@ def test_startup_uses_the_default(window):
     assert _windows(window) == _all_at(_default('15N'))
 
 
-def test_reset_puts_the_default_back(window, monkeypatch):
+def test_reset_results_keeps_the_window_the_user_set(window, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
     window._on_nucleus_type_change('13C')
     window.expert_search_x_spin.setValue(0.03)
@@ -87,8 +88,10 @@ def test_reset_puts_the_default_back(window, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
 
     window.on_reset_results()
+    window.sync_parameters_to_integrator()
 
-    assert _windows(window) == _all_at(_default('15N'))
+    assert window.nucleus_type == '13C'
+    assert _windows(window) == _all_at((0.03, 0.50))
 
 
 @pytest.mark.parametrize("nucleus", ['13C', '15N'])
