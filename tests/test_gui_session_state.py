@@ -1,12 +1,13 @@
-# ABOUTME: The main window's state across runs: what a new load, a Reset and a series leave behind.
+# ABOUTME: The main window's state across runs: what a new load, a Reset Results and a series leave behind.
 # ABOUTME: Real LunaNMRMainWindow offscreen on the DNAJA1 spectrum, a 10-peak list cut from its peak list.
 
 """
 Fit Spectrum fits the detected peaks in preference to the loaded list, and a series locks
 the clusters of the last fit. Loading new data kept both, so the next fit was of the
-previous list. The PS2D config is one object for the whole process: a Reset left it on
-the nucleus chosen before, and a series switches it to the nucleus it detected, behind
-the window, which kept showing and fitting with its own.
+previous list. The PS2D config is one object for the whole process: a series switches it
+to the nucleus it detected, behind the window, which kept showing and fitting with its
+own. Reset Results discards results and leaves the config with the nucleus and the values
+the window shows.
 """
 
 import os
@@ -160,7 +161,7 @@ class TestLoadingNewDataStartsAFreshAnalysis:
 
 class TestThePs2dConfigFollowsTheWindow:
 
-    def test_reset_puts_the_15n_defaults_back(self, window, monkeypatch):
+    def test_reset_results_keeps_the_nucleus_the_window_fits_with(self, window, monkeypatch):
         from PySide6.QtWidgets import QMessageBox
         from lunaNMR.core.ps2d_config import PS2DConfig, get_ps2d_config, restore_base_ps2d_config
         window._on_nucleus_type_change('13C')
@@ -170,8 +171,8 @@ class TestThePs2dConfigFollowsTheWindow:
         restore_base_ps2d_config()
 
         config = get_ps2d_config()
-        assert (config.nucleus_type, config.radF1) == ('15N', PS2DConfig('15N').radF1)
-        assert window.ps2d_radF1 == PS2DConfig('15N').radF1
+        assert (config.nucleus_type, config.radF1) == ('13C', PS2DConfig('13C').radF1)
+        assert (window.nucleus_type, window.ps2d_radF1) == ('13C', PS2DConfig('13C').radF1)
 
     def test_loading_a_spectrum_applies_its_nucleus_when_the_config_holds_another(self, window, data,
                                                                                   monkeypatch):
@@ -183,12 +184,13 @@ class TestThePs2dConfigFollowsTheWindow:
         config = get_ps2d_config()
         assert (config.nucleus_type, config.radF1) == ('15N', PS2DConfig('15N').radF1)
 
-    def test_reset_puts_the_15n_defaults_in_an_open_expert_panel(self, window, monkeypatch):
+    def test_reset_results_keeps_the_radius_typed_in_an_open_expert_panel(self, window, monkeypatch):
         from PySide6.QtWidgets import QDialog, QMessageBox
-        from lunaNMR.core.ps2d_config import PS2DConfig, get_ps2d_config, restore_base_ps2d_config
+        from lunaNMR.core.ps2d_config import get_ps2d_config, restore_base_ps2d_config
         monkeypatch.setattr(QDialog, "exec", lambda self: 0)
         window.on_expert_mode()
-        window._on_nucleus_type_change('13C')
+        window.expert_nucleus_combo.setCurrentText('13C')
+        window.expert_radF1_spin.setValue(0.25)
         monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
 
         window.on_reset_results()
@@ -196,8 +198,8 @@ class TestThePs2dConfigFollowsTheWindow:
         restore_base_ps2d_config()
 
         config = get_ps2d_config()
-        assert (config.nucleus_type, config.radF1) == ('15N', PS2DConfig('15N').radF1)
-        assert window.expert_nucleus_combo.currentText() == '15N'
+        assert (config.nucleus_type, config.radF1) == ('13C', 0.25)
+        assert (window.expert_nucleus_combo.currentText(), window.expert_radF1_spin.value()) == ('13C', 0.25)
 
     def test_a_series_on_another_nucleus_does_not_change_what_the_window_fits(self, window, data):
         from lunaNMR.core.ps2d_config import PS2DConfig, get_ps2d_config, restore_base_ps2d_config

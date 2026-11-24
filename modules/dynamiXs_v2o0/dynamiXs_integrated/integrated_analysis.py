@@ -60,7 +60,7 @@ _DYNAMIXS_PATH = str(Path(__file__).parent.parent)
 if _DYNAMIXS_PATH not in sys.path:
     sys.path.insert(0, _DYNAMIXS_PATH)
 from dynamiXs_density_functions.analysis_defaults import (
-    CSA_N_PPM, MODELFREE_MONTE_CARLO_SAMPLES)
+    CSA_N_PPM, METHOD_VARIANT, MODELFREE_MONTE_CARLO_SAMPLES)
 
 
 # Quantities that do not belong to a spectrometer field, so they are spelled the same
@@ -121,7 +121,7 @@ class IntegratedAnalysisParameters:
         self.field2_t2_units = 'ms'
 
         # Analysis method
-        self.analysis_method = 'dual_field_087'  # Options: 'single_jwh', 'single_087', 'dual_jwh', 'dual_087'
+        self.analysis_method = f'dual_{METHOD_VARIANT}'  # Options: 'single_jwh', 'single_087', 'dual_jwh', 'dual_087'
 
         # Physical parameters
         self.rNH_angstrom = 1.015  # N-H bond length in Angstroms

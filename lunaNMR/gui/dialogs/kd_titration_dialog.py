@@ -2,17 +2,14 @@
 # ABOUTME: Hosts the KdTitrationPage as an independent module (sibling to DynamiXs).
 
 import os
-import sys
-from pathlib import Path
 
 from PySide6.QtWidgets import QVBoxLayout
 
+from lunaNMR.analysis_modules import add_to_import_path
 from lunaNMR.gui.base.base_dialog import BaseDialog
 
 # Reuse the dynamiXs module's page/worker/fitter; add it to the path for imports.
-_dynamixs_path = Path(__file__).parent.parent.parent.parent / "modules" / "dynamiXs_v2o0"
-if str(_dynamixs_path) not in sys.path:
-    sys.path.insert(0, str(_dynamixs_path))
+add_to_import_path("dynamiXs_v2o0")
 
 from kd_titration_page import KdTitrationPage
 

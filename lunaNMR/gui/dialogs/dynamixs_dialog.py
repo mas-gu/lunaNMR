@@ -2,7 +2,6 @@
 # ABOUTME: Directly imports existing DynamiXs Qt pages - NO code duplication
 
 import os
-import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -12,11 +11,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
+from lunaNMR.analysis_modules import add_to_import_path
 from lunaNMR.gui.base.base_dialog import BaseDialog
 
-_dynamixs_path = Path(__file__).parent.parent.parent.parent / "modules" / "dynamiXs_v2o0"
-if str(_dynamixs_path) not in sys.path:
-    sys.path.insert(0, str(_dynamixs_path))
+_dynamixs_path = Path(add_to_import_path("dynamiXs_v2o0"))
 
 # Direct imports from existing DynamiXs
 from dynamiXs_gui import (

@@ -66,10 +66,13 @@ pip install -r requirements.txt                          # dependencies
 python3 lunaNMR/validation/verify_installation.py        # verify
 python3 launch_lunaNMR.py                                 # GUI (starts the LunaNMR main window)
 python -m lunaNMR --help                                  # headless CLI
+pip install -e .                                          # optional: run from any folder, adds the `lunanmr` command
 pip install -e ".[mcp]" && lunanmr-mcp --check            # optional: MCP server (Python 3.10+)
 ```
 
 Requires **numba** (2D multi-peak fitting) and **PySide6** (GUI).
+
+**Run LunaNMR from its clone, or install the clone in editable mode (`pip install -e .`).** A regular `pip install .` is not supported: it copies the `lunaNMR` package without the `modules/` folder beside it, where DynamiXs, Kd / titration and 1D integration live. Details: [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
 ---
 

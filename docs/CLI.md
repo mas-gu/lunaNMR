@@ -14,6 +14,14 @@ python -m lunaNMR --help
 
 The CLI imports no Qt: `lunaNMR/__init__.py` is lazy, and matplotlib is forced to `Agg`.
 
+Run it from the clone, or after an editable install of the clone (`pip install -e .`). The
+analysis modules behind `dynamixs`, `kd`, `export kd` and `integrate-1d` live in `modules/`,
+beside the `lunaNMR` package and not inside it, so a regular `pip install .` leaves them
+behind: those subcommands (their dry runs too, and `project build` on a run holding a Kd fit)
+then exit `1` with one line naming the missing folder and the editable install — `error.type`
+`AnalysisModulesNotFound` under `--format json`. `series`, `diagnose`, `batch`, `peaks` and
+the other `project` commands do not need them. See [INSTALLATION.md](INSTALLATION.md).
+
 ## Global conventions
 
 - `--format {text,json}` — machine-readable run summary on stdout (`json` stays clean even with
@@ -30,7 +38,7 @@ The CLI imports no Qt: `lunaNMR/__init__.py` is lazy, and matplotlib is forced t
 | code | meaning |
 |---|---|
 | `0` | ran to completion |
-| `1` | bad input (missing or unwritable path, malformed CSV/JSON, no parseable delay) — reported as `error: …` on stderr, no traceback; **or** a dry-run whose inputs are missing |
+| `1` | bad input (missing or unwritable path, malformed CSV/JSON, no parseable delay) — reported as `error: …` on stderr, no traceback; **or** a dry-run whose inputs are missing; **or** an install without the analysis modules (`AnalysisModulesNotFound`, above) |
 | `2` | no subcommand, or a command line the parser rejects: an unrecognised flag, a bad value, or a flag combination a subcommand refuses (argparse's usage report on stderr) |
 
 Under `--format json` both `1` and `2` also print an `{"ok": false, …}` object on stdout; a

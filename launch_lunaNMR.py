@@ -4,7 +4,7 @@
 """
 LunaNMR Suite - Launch Script
 
-Launches LunaNMR; the optional modules (DynamiXs, Kd, 1D integration) open from its
+Launches LunaNMR; the analysis modules (DynamiXs, Kd, 1D integration) open from its
 Modules menu. This script handles environment setup and graceful error handling.
 """
 

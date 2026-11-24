@@ -15,11 +15,16 @@ The server needs Python 3.10 or newer (the MCP SDK's requirement); the rest of l
 
 ```bash
 pip install -e ".[mcp]"          # from the repository root, inside your lunaNMR environment
-lunanmr-mcp --check              # verifies the modules and a real CLI call
+lunanmr-mcp --check              # verifies the libraries, the analysis modules and a real CLI call
 ```
 
-`--check` prints one line per problem (`FAIL numba: cannot import numba: ...`). Fix those
-first; the server needs the same environment as the CLI (numba, nmrglue, scipy).
+The install has to be editable (`-e`), from a clone. The DynamiXs, Kd and 1D tools run code
+kept in `modules/`, beside the `lunaNMR` package; a regular `pip install .` leaves that folder
+behind, and those tools then fail with `AnalysisModulesNotFound`.
+
+`--check` prints one line per problem (`FAIL numba: cannot import numba: ...`,
+`FAIL modules: ...` on a regular install). Fix those first; the server needs the same
+environment as the CLI (numba, nmrglue, scipy).
 
 ## Connect a client
 

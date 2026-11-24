@@ -92,6 +92,8 @@ Writes `series_results_*/`: `comprehensive_peak_tracking.csv` (wide), `series_an
 python -m lunaNMR <subcommand>          # `lunanmr` needs `pip install -e .`
 ```
 
+Run from the clone, or after an editable install of it (`pip install -e .`). A regular `pip install .` leaves `modules/` behind: `dynamixs`, `kd`, `export kd` and `integrate-1d` then stop, naming the editable install.
+
 | Command | Purpose |
 |---------|---------|
 | `diagnose` | Read-only pre-flight over a dataset before running anything |
