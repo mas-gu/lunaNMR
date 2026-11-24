@@ -358,7 +358,7 @@ class ProjectManager:
         'workflow_mode', 'sn_threshold', 'expected_peak_count',
 
         # Display options
-        'show_detected', 'show_assigned', 'show_fitted_curves', 'show_ellipses',
+        'show_ellipses',
 
         # Contour display
         'contour_levels', 'contour_min', 'contour_increment',
@@ -375,9 +375,6 @@ class ProjectManager:
         'search_window_x', 'search_window_y',
         'centroid_window_x_ppm', 'centroid_window_y_ppm',
         'auto_add_dummy_peaks',
-
-        # Fitting quality parameters
-        'min_r_squared', 'max_iterations', 'fitting_window_x', 'fitting_window_y',
 
         # PS2D algorithm configuration
         'nucleus_type', 'ps2d_radF1', 'ps2d_radF2', 'ps2d_max_iterations',

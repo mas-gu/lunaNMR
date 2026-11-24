@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QAbstractItemView
 )
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QBrush
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -44,6 +45,21 @@ from refit import (
     refit_residue, update_json_fit_entry, update_tsv_row,
 )
 from fit_Tx_NMRRE import recorded_results_file
+
+
+def _fit_failed(fit):
+    """Whether a fit JSON entry is a fit that failed. An entry with no `success` flag
+    counts as fitted."""
+    return not fit.get('success', True)
+
+
+def _failed_item_display():
+    """(symbol, row background) of a failed fit, as the peak navigators show one."""
+    lunaNMR_root = str(Path(__file__).resolve().parents[3])
+    if lunaNMR_root not in sys.path:
+        sys.path.insert(0, lunaNMR_root)
+    from lunaNMR.gui.styles.quality_colors import navigator_row_display
+    return navigator_row_display('Failed')
 
 
 class FitViewer(QMainWindow):
@@ -527,12 +543,44 @@ class FitViewer(QMainWindow):
             return
 
         for residue in self.available_residues:
-            item = QListWidgetItem(residue)
+            item = QListWidgetItem()
             item.setData(Qt.UserRole, residue)
+            self._mark_item(item)
             self.residue_list.addItem(item)
 
         if self.available_residues:
             self.residue_list.setCurrentRow(0)
+
+    def _failed_fits_of(self, residue):
+        """The loaded fits of `residue` that failed, as '<experiment> (<field> MHz)'."""
+        failed = []
+        for data_key, data in self.data.items():
+            for fit in data['fits']:
+                if fit['residue'] == residue and _fit_failed(fit):
+                    failed.append(f"{data_key.split('_')[-1]} "
+                                  f"({data['metadata']['field_freq']} MHz)")
+        return failed
+
+    def _mark_item(self, item):
+        """Show a residue-list item as fitted, or as failed when one of its fits is."""
+        residue = item.data(Qt.UserRole)
+        failed = self._failed_fits_of(residue)
+        if failed:
+            symbol, background = _failed_item_display()
+            item.setText(f"{symbol} {residue}")
+            item.setBackground(background)
+            item.setToolTip("\n".join(f"{fit}: not fitted" for fit in failed))
+        else:
+            item.setText(residue)
+            item.setBackground(QBrush())
+            item.setToolTip("")
+
+    def _mark_residue(self, residue):
+        """Refresh the list item of `residue` from its fits as they now are."""
+        for row in range(self.residue_list.count()):
+            item = self.residue_list.item(row)
+            if item.data(Qt.UserRole) == residue:
+                self._mark_item(item)
 
     def _on_residue_clicked(self, item: QListWidgetItem):
         """Handle residue selection via click - updates plot display"""
@@ -643,12 +691,14 @@ class FitViewer(QMainWindow):
         for fit_entry in fits:
             residue = fit_entry.get('residue')
             if residue:
+                # A failed fit has data to show and no curve or value.
+                failed = _fit_failed(fit_entry)
                 all_fit_data[str(residue)] = {
                     'time_points': metadata.get('time_points', []),
                     'intensities': fit_entry.get('intensities', []),
-                    'fit_curve': fit_entry.get('fit_curve', {}),
-                    't_value': fit_entry.get('t2', 0),
-                    't_error': fit_entry.get('t2_err', 0),
+                    'fit_curve': {} if failed else fit_entry.get('fit_curve', {}),
+                    't_value': None if failed else fit_entry.get('t2', 0),
+                    't_error': None if failed else fit_entry.get('t2_err', 0),
                     'time_units': metadata.get('time_units', 'ms'),
                     'experiment_type': experiment_type
                 }
@@ -798,25 +848,12 @@ class FitViewer(QMainWindow):
             ax.axis('off')
             return
 
-        metadata = self.data[data_key]['metadata']
-        time_points = metadata['time_points']
-        intensities = fit_data['intensities']
-        fit_time = fit_data['fit_curve']['time']
-        fit_intensity = fit_data['fit_curve']['intensity']
-        t_value = fit_data['t2']
-        t_error = fit_data['t2_err']
-
-        self._plot_residue_points(
-            ax, data_key, residue, color='#2196F3', label='Data',
-            time_points=time_points, intensities=intensities,
-        )
-        ax.plot(fit_time, fit_intensity, '-', color='#e63946', linewidth=2,
-               label='Fit', zorder=2)
+        textstr = self._draw_fit(ax, data_key, residue, fit_data, meas_type,
+                                 point_color='#2196F3', curve_color='#e63946',
+                                 point_label='Data', curve_label='Fit')
 
         # Annotation
-        field_freq = metadata['field_freq']
-        time_units = metadata['time_units']
-        textstr = f"{meas_type} ({field_freq} MHz) = {t_value:.2f} ± {t_error:.2f} {time_units}"
+        time_units = self.data[data_key]['metadata']['time_units']
         ax.text(0.05, 0.95, textstr, transform=ax.transAxes,
                fontsize=10, verticalalignment='top',
                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
@@ -877,41 +914,16 @@ class FitViewer(QMainWindow):
         annotations = []
         time_units = "ms"
 
-        if fit1:
-            metadata1 = self.data[field1_key]['metadata']
-            time_points1 = metadata1['time_points']
-            intensities1 = fit1['intensities']
-            fit_time1 = fit1['fit_curve']['time']
-            fit_intensity1 = fit1['fit_curve']['intensity']
-
-            self._plot_residue_points(
-                ax, field1_key, residue, color=color_field1,
-                label=f"{metadata1['field_freq']} MHz data",
-                time_points=time_points1, intensities=intensities1,
-            )
-            ax.plot(fit_time1, fit_intensity1, '-', color=color_field1, linewidth=2,
-                   label=f"{metadata1['field_freq']} MHz fit", zorder=2)
-
-            annotations.append(f"{meas_type} ({metadata1['field_freq']} MHz) = {fit1['t2']:.2f} ± {fit1['t2_err']:.2f} {metadata1['time_units']}")
-            time_units = metadata1['time_units']
-
-        if fit2:
-            metadata2 = self.data[field2_key]['metadata']
-            time_points2 = metadata2['time_points']
-            intensities2 = fit2['intensities']
-            fit_time2 = fit2['fit_curve']['time']
-            fit_intensity2 = fit2['fit_curve']['intensity']
-
-            self._plot_residue_points(
-                ax, field2_key, residue, color=color_field2,
-                label=f"{metadata2['field_freq']} MHz data",
-                time_points=time_points2, intensities=intensities2,
-            )
-            ax.plot(fit_time2, fit_intensity2, '-', color=color_field2, linewidth=2,
-                   label=f"{metadata2['field_freq']} MHz fit", zorder=2)
-
-            annotations.append(f"{meas_type} ({metadata2['field_freq']} MHz) = {fit2['t2']:.2f} ± {fit2['t2_err']:.2f} {metadata2['time_units']}")
-            time_units = metadata2['time_units']
+        for data_key, fit, color in ((field1_key, fit1, color_field1),
+                                     (field2_key, fit2, color_field2)):
+            if fit:
+                metadata = self.data[data_key]['metadata']
+                annotations.append(self._draw_fit(
+                    ax, data_key, residue, fit, meas_type,
+                    point_color=color, curve_color=color,
+                    point_label=f"{metadata['field_freq']} MHz data",
+                    curve_label=f"{metadata['field_freq']} MHz fit"))
+                time_units = metadata['time_units']
 
         # Annotation
         textstr = '\n'.join(annotations)
@@ -925,6 +937,22 @@ class FitViewer(QMainWindow):
         ax.set_title(f"Residue {residue} - {meas_type}", fontsize=12, fontweight='bold')
         ax.legend(loc='best', fontsize=9)
         ax.grid(True, alpha=0.3, linestyle='--', zorder=1)
+
+    def _draw_fit(self, ax, data_key, residue, fit, meas_type, point_color, curve_color,
+                  point_label, curve_label):
+        """Draw one fit's data points and, where the fit succeeded, its curve. Returns
+        the line of text that gives its fitted value, or says it was not fitted."""
+        metadata = self.data[data_key]['metadata']
+        self._plot_residue_points(
+            ax, data_key, residue, color=point_color, label=point_label,
+            time_points=metadata['time_points'], intensities=fit['intensities'],
+        )
+        measured = f"{meas_type} ({metadata['field_freq']} MHz)"
+        if _fit_failed(fit):
+            return f"{measured}: not fitted"
+        ax.plot(fit['fit_curve']['time'], fit['fit_curve']['intensity'], '-',
+                color=curve_color, linewidth=2, label=curve_label, zorder=2)
+        return f"{measured} = {fit['t2']:.2f} ± {fit['t2_err']:.2f} {metadata['time_units']}"
 
     # ========== Outlier editing: pick events, refit, reset ==========
 
@@ -1010,6 +1038,7 @@ class FitViewer(QMainWindow):
             if str(fit["residue"]) == str(residue):
                 new_entry = refit_residue(fit, metadata, excl)
                 fit.update(new_entry)
+                self._mark_residue(fit["residue"])
                 json_path = self.json_paths.get(data_key)
                 if json_path is not None:
                     update_json_fit_entry(json_path, str(residue), new_entry)

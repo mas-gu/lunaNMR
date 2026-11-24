@@ -20,6 +20,11 @@ import numpy as np
 # nucleus's search_window_f1
 SEARCH_WINDOW_PPM = 0.070
 
+# How far the sub-point position of a detected maximum may lie from its point (ppm):
+# 1H, indirect. The parabolic interpolation already stays within one point, so on the
+# reference series 0.1 and 1.0 in the indirect dimension detect the same positions.
+CENTROID_WINDOW_PPM = (0.01, 0.1)
+
 
 class PS2DConfig:
     """

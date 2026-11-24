@@ -1,6 +1,7 @@
-# ABOUTME: The multicore T1/T2 fit draws exactly its successful residues when some of the run fail.
-# ABOUTME: Real 700 MHz T1 matrix, one residue left with two delays, fitted over the real spawn pool.
+# ABOUTME: The T1/T2 fit PDFs draw every residue in order, by either fitter: a failed one with its
+# ABOUTME: data and the words that it was not fitted. Real 700 MHz T1 matrix, one residue left with two delays.
 
+import importlib
 import re
 import sys
 import zlib
@@ -20,10 +21,10 @@ REAL_T1 = (REPO_ROOT.parent / "data_test" / "data_JA1_relaxation" / "run_2026082
 pytestmark = pytest.mark.skipif(not REAL_T1.exists(), reason="data_test not present")
 
 
-def _pdf_titles(path):
-    """The 'Residue: ...' titles drawn in a matplotlib PDF, page order kept."""
+def _pdf_texts(path):
+    """The text strings drawn in a matplotlib PDF, page order kept."""
     raw = Path(path).read_bytes()
-    titles = []
+    texts = []
     for stream in re.finditer(rb'stream\r?\n(.*?)\r?\nendstream', raw, re.S):
         try:
             content = zlib.decompress(stream.group(1))
@@ -31,21 +32,21 @@ def _pdf_titles(path):
             continue
         for array, single in re.findall(rb'\[(.*?)\]\s*TJ|\((.*?)\)\s*Tj', content, re.S):
             text = b''.join(re.findall(rb'\(((?:[^()\\]|\\.)*)\)', array)) if array else single
-            text = text.decode('latin-1')
-            if text.startswith('Residue: '):
-                titles.append(text[len('Residue: '):])
-    return titles
+            texts.append(text.decode('latin-1'))
+    return texts
 
 
-@pytest.fixture(scope="module")
-def run(tmp_path_factory):
+@pytest.fixture(scope="module", params=["fit_Tx_NMRRE", "fitmulti__Tx_NMRRE"])
+def run(request, tmp_path_factory):
     """The real T1 matrix with its first residue measured at its two shortest delays only:
     two points cannot carry a fit of two parameters with one to spare, so it fails before
     fitting. Two residues of this matrix fit to a time constant beyond the window and fail
     after it, their data still attached to the result."""
-    from fitmulti__Tx_NMRRE import run_analysis_with_params
+    import matplotlib
+    matplotlib.use("Agg")
     from delay_parser import parse_delay_columns
-    folder = tmp_path_factory.mktemp("multicore_failed_residue")
+    fitter = importlib.import_module(request.param)
+    folder = tmp_path_factory.mktemp("failed_residues")
     matrix = pd.read_csv(REAL_T1)
     delays = list(matrix.columns[4:])
     x, keep, _ = parse_delay_columns(delays)
@@ -56,7 +57,7 @@ def run(tmp_path_factory):
             matrix.loc[0, column] = np.nan
     truncated = matrix.loc[0, 'Assignment']
     matrix.to_csv(folder / 'peak_intensity_matrix.csv', index=False)
-    summary = run_analysis_with_params({
+    summary = fitter.run_analysis_with_params({
         'input_csv_file': str(folder / 'peak_intensity_matrix.csv'),
         'output_prefix': str(folder / 'T1'),
         'results_txt_file': str(folder / 'T1_results.txt'),
@@ -70,11 +71,18 @@ def test_a_residue_fails_before_fitting_and_two_after(run):
     assert summary['n_fitted'] == summary['n_total'] - len(summary['failed_residues'])
 
 
-def test_the_pdfs_draw_exactly_the_successful_residues_in_order(run):
-    folder, summary, _, residues = run
+def test_the_pdfs_draw_every_residue_in_order(run):
+    folder, _, _, residues = run
     pdfs = sorted(folder.glob('T1_fit_results_fig*.pdf'), key=lambda p: int(p.stem.rsplit('fig', 1)[1]))
-    assert pdfs, "no PDF written"
-    drawn = [title for pdf in pdfs for title in _pdf_titles(pdf)]
-    successful = [r for r in residues if r not in summary['failed_residues']]
-    assert drawn == successful
-    assert len(pdfs) == int(np.ceil(len(successful) / 20))
+    assert len(pdfs) == int(np.ceil(len(residues) / 20))
+    texts = [text for pdf in pdfs for text in _pdf_texts(pdf)]
+    assert [text[len('Residue: '):] for text in texts if text.startswith('Residue: ')] == residues
+
+
+def test_a_failed_residue_is_drawn_as_not_fitted(run):
+    folder, summary, _, residues = run
+    texts = [text for pdf in sorted(folder.glob('T1_fit_results_fig*.pdf'))
+             for text in _pdf_texts(pdf)]
+    assert texts.count('T1: not fitted') == len(summary['failed_residues'])
+    assert texts.count('Fit') == len(residues) - len(summary['failed_residues'])
+    assert not [text for text in texts if 'nan' in text.lower()]

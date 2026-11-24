@@ -311,7 +311,7 @@ class BatchProcessor:
         auto-detects on load. A config's `processing_parameters` replace the search
         windows.
         """
-        from lunaNMR.core.ps2d_config import set_ps2d_config
+        from lunaNMR.core.ps2d_config import CENTROID_WINDOW_PPM, set_ps2d_config
         from lunaNMR.utils.parameter_manager import NMRParameterManager
 
         ps2d_config = set_ps2d_config(nucleus)
@@ -319,8 +319,8 @@ class BatchProcessor:
         param_manager.current_params.update({
             'search_window_x': ps2d_config.search_window_f2,
             'search_window_y': ps2d_config.search_window_f1,
-            'centroid_window_x_ppm': 0.01,
-            'centroid_window_y_ppm': 0.1,
+            'centroid_window_x_ppm': CENTROID_WINDOW_PPM[0],
+            'centroid_window_y_ppm': CENTROID_WINDOW_PPM[1],
             'fix_linewidths': False,
             'fix_positions': False,
             'use_parallel_processing': True,

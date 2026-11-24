@@ -59,13 +59,13 @@ def _differences(single, multi):
 @pytest.mark.parametrize("fit_baseline", [False, True], ids=["fixed", "free"])
 def test_both_fitters_return_the_same_fit_of_a_residue(fit_baseline):
     from fit_Tx_NMRRE import fit_single_residue
-    from fitmulti__Tx_NMRRE import fit_single_residue_parallel
+    from fit_Tx_NMRRE import fit_residue_task
     residues = _residues()
     disagreements = {}
     outcomes = set()
     for idx, (name, x, y) in enumerate(residues):
         single = fit_single_residue(x, y, name, fit_baseline=fit_baseline)
-        multi = fit_single_residue_parallel((x, y, name, None, None, None, 1000, 'analytical',
+        multi = fit_residue_task((x, y, name, None, None, None, 1000, 'analytical',
                                              idx, len(residues), fit_baseline))
         assert multi.pop('idx') == idx
         outcomes.add(single['success'])

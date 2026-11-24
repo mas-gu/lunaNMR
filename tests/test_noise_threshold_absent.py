@@ -1,5 +1,5 @@
 # ABOUTME: No parameter set carries a noise threshold: nothing on any detection or fit path reads one.
-# ABOUTME: The CLI defaults, the parameter manager, the configuration file and the parallel workers.
+# ABOUTME: The CLI defaults, the parameter manager, the settings a project saves and the parallel workers.
 
 
 def test_the_cli_series_defaults_carry_none():
@@ -15,11 +15,9 @@ def test_the_parameter_manager_carries_none():
     assert 'noise_threshold' not in manager.get_integrator_parameters()['detection_params']
 
 
-def test_the_configuration_file_defaults_carry_none():
-    from lunaNMR.utils.config_manager import ConfigurationManager, ProcessingParameters
-    config = ConfigurationManager("lunaNMR_v1")
-    assert 'noise_threshold' not in config.default_config['processing_parameters']
-    assert 'noise_threshold' not in ProcessingParameters(config).get_detection_params()
+def test_the_settings_a_project_saves_carry_none():
+    from lunaNMR.utils.project_manager import ProjectManager
+    assert 'noise_threshold' not in ProjectManager.GUI_PARAMS
 
 
 def test_the_parallel_workers_are_handed_none():

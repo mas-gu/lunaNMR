@@ -27,21 +27,21 @@ def test_single_core_converges_with_data_driven_initials():
 
 
 def test_multicore_worker_converges_with_correct_arg_order():
-    from fitmulti__Tx_NMRRE import fit_single_residue_parallel
+    from fit_Tx_NMRRE import fit_residue_task
     # 10-tuple: (x, y, name, initial_A, initial_t2, initial_C, n_bootstrap,
     #            error_method, idx, total)
-    r = fit_single_residue_parallel((X, Y, "3.0", None, None, None, 0, 'analytical', 0, 1))
+    r = fit_residue_task((X, Y, "3.0", None, None, None, 0, 'analytical', 0, 1))
     assert r['success']
     assert 0.3 < r['t2'] < 1.5
 
 
 def test_degenerate_residues_flagged_unreliable():
     from fit_Tx_NMRRE import fit_single_residue
-    from fitmulti__Tx_NMRRE import fit_single_residue_parallel
+    from fit_Tx_NMRRE import fit_residue_task
     zeros = np.zeros_like(Y)
     assert fit_single_residue(X, Y, "3.0")['success'] is True          # clean decay
     assert fit_single_residue(X, zeros, "zero")['success'] is False    # no signal
-    r = fit_single_residue_parallel((X, zeros, "zero", None, None, None, 0, 'analytical', 0, 1))
+    r = fit_residue_task((X, zeros, "zero", None, None, None, 0, 'analytical', 0, 1))
     assert r['success'] is False
 
 

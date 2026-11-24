@@ -116,7 +116,7 @@ lunaNMR/
 │   ├── processors/            # single/multi-spectrum workflows
 │   ├── batch_processing/      # CLI batch automation
 │   ├── integrators/           # specialized integrators
-│   ├── utils/                 # config, project bundles, output routing
+│   ├── utils/                 # parameters, project bundles, output routing
 │   └── validation/            # installation verification + `diagnose` pre-flight checks
 ├── modules/
 │   ├── dynamiXs_v2o0/         # DynamiXs (dynamics) + Kd / titration

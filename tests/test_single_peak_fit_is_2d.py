@@ -1,5 +1,5 @@
 # ABOUTME: Nothing carries consensus fitting or an overlap-resolution switch.
-# ABOUTME: Real 600 MHz T1 reference plane from data_example; the integrator, its fitter, the workers and the config file.
+# ABOUTME: Real 600 MHz T1 reference plane from data_example; the integrator, its fitter, the workers and the settings a project saves.
 
 import contextlib
 import io
@@ -58,9 +58,6 @@ def test_a_worker_is_handed_no_overlap_resolution_settings(integrator):
         assert not hasattr(worker.enhanced_fitter, name), name
 
 
-def test_the_configuration_file_has_no_overlap_resolution_section():
-    from lunaNMR.utils.config_manager import ConfigurationManager
-    config = ConfigurationManager("lunaNMR_v1")
-    assert 'overlap_resolution' not in config.default_config
-    assert not hasattr(config, 'load_overlap_config')
-    assert not hasattr(config, 'enable_overlap_resolution')
+def test_a_project_saves_no_overlap_resolution_setting():
+    from lunaNMR.utils.project_manager import ProjectManager
+    assert not [name for name in ProjectManager.GUI_PARAMS if 'overlap_resolution' in name]

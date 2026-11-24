@@ -1,5 +1,5 @@
 # ABOUTME: The 1D multi-peak detection settings went with the 1D fitting chain that read them.
-# ABOUTME: No parameter set, fitter or default configuration carries them.
+# ABOUTME: No parameter set or fitter carries them, and a project saves none of them.
 
 import pytest
 
@@ -24,9 +24,6 @@ def test_the_fitter_does_not_carry(key):
 
 
 @pytest.mark.parametrize('key', KEYS)
-def test_the_default_configuration_does_not_carry(key, tmp_path, monkeypatch):
-    from lunaNMR.utils.config_manager import ConfigurationManager, ProcessingParameters
-    monkeypatch.setattr(ConfigurationManager, '_get_config_folder', lambda self: str(tmp_path))
-    config = ConfigurationManager("lunaNMR_test")
-    assert key not in config.default_config['processing_parameters']
-    assert key not in ProcessingParameters(config).get_fitting_params()
+def test_a_project_does_not_save(key):
+    from lunaNMR.utils.project_manager import ProjectManager
+    assert key not in ProjectManager.GUI_PARAMS

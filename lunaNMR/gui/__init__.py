@@ -14,7 +14,6 @@ from .main_window import LunaNMRMainWindow, main
 # Qt Dialogs
 from .dialogs import (
     DataLoadingDialog,
-    ConfigurationDialog,
     SpectrumBrowserDialog,
     MultiSpectrumViewerDialog,
     SpectrumViewerDialog,
@@ -34,7 +33,6 @@ __all__ = [
     'main',
     # Dialogs
     'DataLoadingDialog',
-    'ConfigurationDialog',
     'SpectrumBrowserDialog',
     'MultiSpectrumViewerDialog',
     'SpectrumViewerDialog',
