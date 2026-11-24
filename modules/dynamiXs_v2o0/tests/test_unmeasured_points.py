@@ -41,8 +41,8 @@ class TestMonoExponential:
         assert r['t2'] == pytest.approx(T2, rel=1e-3)
 
     def test_multicore_fits_the_measured_points(self):
-        from fitmulti__Tx_NMRRE import fit_single_residue_parallel
-        r = fit_single_residue_parallel(
+        from fit_Tx_NMRRE import fit_residue_task
+        r = fit_residue_task(
             (X, _with_gap(Y, 3), "A1", None, None, None, 0, 'analytical', 0, 1))
         assert r['success']
         assert r['t2'] == pytest.approx(T2, rel=1e-3)
@@ -125,12 +125,12 @@ def test_t1t2_cli_survives_an_empty_first_delay(tmp_path):
 
 @needs_real_t1
 def test_multicore_plot_survives_an_empty_first_delay(tmp_path):
-    from fitmulti__Tx_NMRRE import fit_single_residue_parallel, create_plots
+    from fit_Tx_NMRRE import fit_residue_task, create_plots
     from delay_parser import parse_delay_columns
     _, matrix = _real_t1_with_first_delay_blank(tmp_path)
     x, keep, _ = parse_delay_columns(list(matrix.columns[4:]))
     y = matrix.iloc[1, 4:].astype(float).to_numpy()[keep]
-    r = fit_single_residue_parallel((x, y, matrix.loc[1, 'Assignment'], None, None, None,
+    r = fit_residue_task((x, y, matrix.loc[1, 'Assignment'], None, None, None,
                                      0, 'analytical', 0, 1))
     assert r['success']
     create_plots([r], str(tmp_path / 'p'))
@@ -167,8 +167,8 @@ def test_single_core_refuses_a_fit_with_no_spare_point():
 
 @needs_real_t1
 def test_multicore_refuses_a_fit_with_no_spare_point():
-    from fitmulti__Tx_NMRRE import fit_single_residue_parallel
+    from fit_Tx_NMRRE import fit_residue_task
     x, y = _real_t1_first_residue_on_two_delays()
-    r = fit_single_residue_parallel((x, y, "R1", None, None, None, 0, 'analytical', 0, 1))
+    r = fit_residue_task((x, y, "R1", None, None, None, 0, 'analytical', 0, 1))
     assert r['success'] is False
     assert not (r['t2_err'] == 0.0)

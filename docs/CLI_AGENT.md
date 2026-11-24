@@ -225,6 +225,7 @@ python -m lunaNMR <cmd> ... --format json --dry-run
 
   Dropping a decayed point from an intensity series invents a plateau; keeping a pinned one publishes the neighbours' seeds as data. What the pipeline does for you, point-wise (a residue keeps its other points):
   - `series` writes an intensity-pinned point as an **empty cell** in the intensity and volume matrices, and the relaxation fitters (`t1t2`, `methyl-t2`, `t1rho`, `modelfree`) skip empty cells. A residue left with fewer measured points than free parameters is reported as a failed fit.
+  - A failed T1/T2 fit (`t1t2`, `t1rho`, and the fits inside `modelfree`) keeps its residue in every output: a `NaN` row with `Success` = `No` in `*_fit_results.txt`, an entry with `"success": false` in `*_fit_data.json` (its `t2` is the bare token `NaN` or a meaningless number: filter on `success` before reading values), a "not fitted" panel in the PDFs. The `t1t2` summary counts them in `n_excluded`; `fit_errors` (`[{residue, error}]`, empty on a clean run) lists the fits that raised an error rather than merely finding no decay.
   - `kd` on the tidy CSV applies the whole table, including dropping undetected points from CSP. On a matrix it gets the blanked intensities but no positions.
   - `kd` on `comprehensive_peak_tracking.csv` applies both bound flags, but that file has no `detection_sigma`, so undetected points still enter CSP — use the tidy CSV.
   - A series written before this behaviour has no empty cells: re-run `series`.

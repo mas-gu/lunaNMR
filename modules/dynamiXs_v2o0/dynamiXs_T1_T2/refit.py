@@ -48,10 +48,12 @@ def save_outliers(json_path, exclusions: dict) -> None:
 
 
 def _fitted_value(fit_entry: dict, key: str):
-    """The value a previous fit left under `key`, or None where it left none (a failed
-    fit stores NaN): the refit then starts from the data."""
+    """The value a previous fit found for `key`, or None where it found none - the fit
+    failed, or stored no finite value: the refit then starts from the data."""
     value = fit_entry.get(key)
-    return float(value) if value is not None and np.isfinite(value) else None
+    if not fit_entry.get("success", True) or value is None or not np.isfinite(value):
+        return None
+    return float(value)
 
 
 def refit_residue(fit_entry: dict, metadata: dict,
@@ -63,7 +65,7 @@ def refit_residue(fit_entry: dict, metadata: dict,
     exclusions live in the sidecar, never in the data record. Every other field is the
     refit's own, `success` and the window ones included, over the points it kept.
 
-    Initial guesses are warm-started from the prior fit's A/t2, where it has them.
+    Initial guesses are warm-started from the prior fit's A/t2, where that fit succeeded.
     The dense `fit_curve` is regenerated over the original full time range so plots
     remain visually consistent after points are dropped.
     """

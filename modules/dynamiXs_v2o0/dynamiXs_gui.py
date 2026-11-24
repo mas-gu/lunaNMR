@@ -1874,6 +1874,10 @@ class T1T2FittingPage(BasePage):
         failed = results.get('failed_residues') or []
         if failed and n_fitted:
             lines.append(f"Not fitted ({len(failed)}): {', '.join(map(str, failed))}")
+        errors = results.get('fit_errors') or []
+        if errors:
+            lines.append(f"ERROR: {len(errors)} fit(s) raised an error:")
+            lines.extend(f"  {error['residue']}: {error['error']}" for error in errors)
         dropped = results.get('dropped_columns') or []
         if dropped:
             lines.append(f"WARNING: {len(dropped)} column(s) with no parseable delay were "

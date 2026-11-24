@@ -15,8 +15,10 @@ import numpy as np
 from matplotlib.figure import Figure
 from lmfit import Model
 import pandas as pd
+import multiprocessing
 import os
 import json
+import time
 from pathlib import Path
 
 try:
@@ -482,10 +484,50 @@ def fit_single_residue(x, y, residue_name, initial_A=None, initial_t2=None,
     }
 
 
+def fit_residue_task(args):
+    """
+    fit_single_residue as one task of an analysis run: its arguments in one tuple, the
+    residue's position added to its result, and an exception returned as a failed fit
+    that carries the exception's text under 'error'.
+
+    The baseline convention travels IN `args`. A module-level global cannot work here:
+    macOS spawns fresh workers that re-import this module, so each would read the value
+    as declared in the source and silently ignore whatever the caller chose.
+
+    Parameters
+    ----------
+    args : tuple
+        (x, y, residue_name, initial_A, initial_t2, initial_C,
+         n_bootstrap, error_method, idx, total[, fit_baseline])
+
+    Returns
+    -------
+    dict : Fitting results with success flag
+    """
+    (x, y, residue_name, initial_A, initial_t2, initial_C,
+     n_bootstrap, error_method, idx, total) = args[:10]
+    fit_baseline = bool(args[10]) if len(args) > 10 else FIT_BASELINE_BY_DEFAULT
+
+    try:
+        # Progress indicator
+        if idx % 10 == 0:
+            print(f"Processing residue {idx+1}/{total}: {residue_name}")
+
+        result = fit_single_residue(x, y, residue_name, initial_A, initial_t2, initial_C,
+                                    n_bootstrap, error_method, fit_baseline)
+
+    except Exception as e:
+        result = {**unfitted_residue(residue_name, x, y, fit_baseline), 'error': str(e)}
+
+    result['idx'] = idx
+    return result
+
+
 def create_plots(results_list, output_prefix, n_plots_per_figure=20, 
                  experiment_type="T1", time_units="ms", signal_units="Intensity"):
     """
-    Create multi-figure PDF plots of fitting results
+    Create multi-figure PDF plots of fitting results: every residue's data, with its
+    fitted curve and value, or the words that it was not fitted where the fit failed
     
     Parameters:
     -----------
@@ -524,15 +566,16 @@ def create_plots(results_list, output_prefix, n_plots_per_figure=20,
             t2 = result['t2']
             t2_err = result['t2_err']
             
-            c = result.get('C', 0.0)
-            x_fit = np.linspace(0, max(x)*1.2, 50)
-            y_fit = a * np.exp(-x_fit / t2) + c
-            
             ax = axes[idx]
             ax.plot(x, y, 'ko', lw=2, ms=8, label="Data")
-            ax.plot(x_fit, y_fit, 'r-', linewidth=2, label="Fit")
-            
-            textstr = f"{experiment_type} = {t2:.2f} ± {t2_err:.2f} {time_units}"
+            if result.get('success', True):
+                c = result.get('C', 0.0)
+                x_fit = np.linspace(0, max(x)*1.2, 50)
+                y_fit = a * np.exp(-x_fit / t2) + c
+                ax.plot(x_fit, y_fit, 'r-', linewidth=2, label="Fit")
+                textstr = f"{experiment_type} = {t2:.2f} ± {t2_err:.2f} {time_units}"
+            else:
+                textstr = f"{experiment_type}: not fitted"
             ax.text(0.05, 0.95, textstr, transform=ax.transAxes,
                     fontsize=10, verticalalignment='top', horizontalalignment='left',
                     bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
@@ -752,16 +795,20 @@ def read_relaxation_matrix(input_csv_file):
     return residue_names, x, y_data, dropped_columns
 
 
-def run_analysis_with_params(params, progress_callback=None):
+def run_analysis_with_params(params, progress_callback=None, n_processes=1):
     """
-    Run analysis with parameters provided by GUI
+    Fit every residue of a relaxation matrix; write the results file, the plots and the
+    fit JSON
 
     Parameters:
     -----------
     params : dict
         Dictionary containing all analysis parameters
     progress_callback : callable, optional
-        Function(completed, total, residue_name, message) called after each residue
+        Function(completed, total, residue_name, message): called once the data is
+        loaded, after each residue, and before the plots and the results are written
+    n_processes : int
+        Worker processes the residues are fitted over; 1 fits them in this process
 
     Returns:
     --------
@@ -794,44 +841,83 @@ def run_analysis_with_params(params, progress_callback=None):
     if not os.path.exists(input_csv_file):
         raise FileNotFoundError(f"Input file not found: {input_csv_file}")
 
-    print(f"Starting {experiment_type} relaxation fitting analysis...")
+    print(f"Starting {experiment_type} relaxation fitting analysis"
+          f"{' (multicore)' if n_processes > 1 else ''}...")
     print(f"Input file: {input_csv_file}")
     print(f"Output prefix: {output_prefix}")
     print(f"Error method: {error_method}")
     if error_method == 'bootstrap':
         print(f"Bootstrap iterations: {n_bootstrap}")
+    if n_processes > 1:
+        print(f"Number of processes: {n_processes}")
 
     residue_names, x, y_data, dropped_columns = read_relaxation_matrix(input_csv_file)
 
-    print(f"Loaded {len(residue_names)} residues with {len(x)} time points")
+    total_residues = len(residue_names)
+    print(f"Loaded {total_residues} residues with {len(x)} time points")
     print(f"Time range: {x.min():.3f} to {x.max():.3f} {time_units}")
 
-    print("Starting fitting process...")
+    if progress_callback:
+        progress_callback(0, total_residues, "", f"Loaded {total_residues} residues")
+
+    # The baseline convention is carried per task rather than read from the module
+    # global, so a caller can choose and spawned workers cannot silently disagree.
+    # initial_C=None lets fit_single_residue use min(y) per-residue.
+    tasks = [(x, y_data[idx, :], residue, initial_A, initial_t2, None,
+              n_bootstrap, error_method, idx, total_residues, fit_baseline)
+             for idx, residue in enumerate(residue_names)]
+
     results_list = []
-    total_residues = len(residue_names)
 
-    for col_idx in range(total_residues):
-        y = y_data[col_idx, :]
-        residue = residue_names[col_idx]
+    def collect(results):
+        for completed, result in enumerate(results, start=1):
+            results_list.append(result)
+            if progress_callback:
+                progress_callback(completed, total_residues, result['residue'],
+                                  f"Fitted {result['residue']} ({completed}/{total_residues})")
+            if completed % 10 == 0 or completed == total_residues:
+                print(f"Progress: {completed}/{total_residues} residues fitted")
 
-        result = fit_single_residue(x, y, residue, initial_A, initial_t2,
-                                    n_bootstrap=n_bootstrap, error_method=error_method,
-                                    fit_baseline=fit_baseline)
-        results_list.append(result)
+    print("Starting fitting process...")
+    start_time = time.time()
+    if n_processes > 1:
+        with multiprocessing.get_context('spawn').Pool(processes=n_processes) as pool:
+            # imap_unordered, for progress as each residue finishes
+            collect(pool.imap_unordered(fit_residue_task, tasks))
+    else:
+        collect(map(fit_residue_task, tasks))
+    elapsed_time = time.time() - start_time
 
-        # Report progress
-        completed = col_idx + 1
-        if progress_callback:
-            progress_callback(completed, total_residues, residue,
-                              f"Fitted {residue} ({completed}/{total_residues})")
+    # A pool returns the residues as they finish: back to the order of the matrix
+    results_list.sort(key=lambda result: result['idx'])
+    for result in results_list:
+        del result['idx']
 
-    print(f"Completed fitting for {len(results_list)} residues")
-    
+    print(f"Completed fitting for {len(results_list)} residues in {elapsed_time:.2f} seconds")
+
+    reliable = [r for r in results_list if r['success']]
+    failed = [r for r in results_list if not r['success']]
+    # A fit that raised is a failed residue; its text is reported, so that an error in
+    # the code does not pass for a residue that could not be fitted.
+    fit_errors = [{'residue': r['residue'], 'error': r['error']} for r in failed if 'error' in r]
+
+    print(f"Successful fits: {len(reliable)}/{len(results_list)}")
+    if failed:
+        print("Failed residues:", [r['residue'] for r in failed])
+    if fit_errors:
+        print(f"Fits that raised an error: {len(fit_errors)}")
+        for fit_error in fit_errors:
+            print(f"  {fit_error['residue']}: {fit_error['error']}")
+
     print("Generating plots...")
+    if progress_callback:
+        progress_callback(total_residues, total_residues, "", "Generating plots...")
     create_plots(results_list, output_prefix, n_plots_per_figure, 
                  experiment_type, time_units, signal_units)
     
     print(f"Saving results to {results_txt_file}...")
+    if progress_callback:
+        progress_callback(total_residues, total_residues, "", "Saving results...")
     save_results(results_list, results_txt_file, experiment_type)
 
     json_folder = params.get('json_folder')
@@ -857,15 +943,11 @@ def run_analysis_with_params(params, progress_callback=None):
         )
 
     # Summary statistics over reliable residues only (degenerate/no-decay excluded)
-    reliable = [r for r in results_list if r.get('success', True)]
-    n_excluded = len(results_list) - len(reliable)
     t2_values = [r['t2'] for r in reliable]
     t2_errors = [r['t2_err'] for r in reliable]
 
     print(f"\n{experiment_type} Analysis Summary:")
-    print(f"  Number of residues fitted: {len(reliable)}")
-    if n_excluded:
-        print(f"  Excluded (no measurable decay): {n_excluded}")
+    print(f"  Number of residues fitted: {len(reliable)}/{len(results_list)}")
     if t2_values:
         print(f"  {experiment_type} range: {min(t2_values):.2f} to {max(t2_values):.2f} {time_units}")
         print(f"  Mean {experiment_type}: {np.mean(t2_values):.2f} ± {np.std(t2_values):.2f} {time_units}")
@@ -882,9 +964,10 @@ def run_analysis_with_params(params, progress_callback=None):
     return {
         'n_fitted': len(reliable),
         'dropped_columns': dropped_columns,
-        'n_excluded': n_excluded,
+        'n_excluded': len(failed),
         'n_total': len(results_list),
-        'failed_residues': [r['residue'] for r in results_list if not r.get('success', True)],
+        'failed_residues': [r['residue'] for r in failed],
+        'fit_errors': fit_errors,
         'results_file': results_txt_file,
         'plots_prefix': output_prefix,
         'json_file': json_file,
@@ -892,6 +975,8 @@ def run_analysis_with_params(params, progress_callback=None):
         'mean_t2': np.mean(t2_values) if t2_values else np.nan,
         'std_t2': np.std(t2_values) if t2_values else np.nan,
         'mean_error': np.nanmean(t2_errors) if t2_errors else np.nan,
+        'n_cores_used': n_processes,
+        'processing_time': elapsed_time,
         # Fit provenance, so a caller sees the convention and the sampling quality
         # without opening the per-residue files.
         'baseline_fixed': not fit_baseline,

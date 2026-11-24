@@ -46,6 +46,7 @@ def test_a_failed_residue_is_a_nan_row(cli_run):
         assert rows[residue] == ['NaN'] * 6 + ['No', 'NaN']
     assert summary['n_excluded'] == len(NO_DECAY)
     assert summary['n_fitted'] == len(rows) - len(NO_DECAY)
+    assert summary['fit_errors'] == []
 
 
 def test_the_marginal_windows_counted_are_those_the_file_reports(cli_run):

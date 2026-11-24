@@ -665,6 +665,9 @@ def _run_dynamixs_t1t2(args):
            # count; dropping it here left 40 survivors of 200 reading as 40.
            'n_excluded': result.get('n_excluded', 0),
            'n_total': result['n_fitted'] + result.get('n_excluded', 0),
+           # A fit that raised is among the excluded; its text says whether the data
+           # or the code is at fault.
+           'fit_errors': result['fit_errors'],
            'mean_t2': result['mean_t2'], 'results_file': result['results_file'],
            'json_file': result.get('json_file'),
            'baseline_fixed': result.get('baseline_fixed', True),
@@ -1893,6 +1896,7 @@ def _run_dynamixs_t1rho(args):
            'time_units': time_units,
            'series_metadata': {k: _sidecar_summary(v) for k, v in sidecars.items()},
            'n_t1_fitted': len(t1_fits), 'n_t1rho_fitted': len(rho_fits),
+           'fit_errors': {'T1': t1_res['fit_errors'], 'T1rho': rho_res['fit_errors']},
            'theta_nominal_deg': args.theta, 'omega1_hz': args.omega1,
            'r2_table': out_csv,
            't1_results': t1_res['results_file'], 't1rho_results': rho_res['results_file'],

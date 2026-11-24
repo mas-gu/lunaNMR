@@ -60,11 +60,10 @@ print("pyplot figures:", len(plt.get_fignums()))
 
 
 @pytest.mark.skipif(not RUN.exists(), reason="data_test not present")
-@pytest.mark.parametrize("module", FITTERS)
-def test_fit_figures_draw_from_a_worker_thread(module, tmp_path):
+def test_fit_figures_draw_from_a_worker_thread(tmp_path):
     code = f"""
 import numpy as np, pandas as pd
-import {module} as fitter
+import fit_Tx_NMRRE as fitter
 m = pd.read_csv({str(RUN / 'series/600_T1/peak_intensity_matrix.csv')!r})
 fit = pd.read_csv({str(RUN / 'fits/600_T1/600_T1_fit_results.txt')!r}, sep='\\t').set_index('Residue')
 cols = [c for c in m.columns[4:] if '_' not in c]

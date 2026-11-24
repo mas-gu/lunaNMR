@@ -387,6 +387,24 @@ and the `<prefix>_dynamixs.json` record every `dynamixs` subcommand leaves for `
 A series sidecar with `n_value_unparsed > 0` is refused, naming the spectra, unless
 `--allow-unparsed-delays` (also on `t1rho` and `modelfree`).
 
+**A residue whose fit failed stays in every `t1t2` output, marked.** A fit fails when
+too few points are measured, when it does not converge, when the fitted time constant is
+not measurable in the delay window (beyond 100 x the longest delay, or no amplitude), or
+when it raises an error.
+- `<prefix>_fit_results.txt`: one row per residue; a failed one is `NaN` in every value
+  column with `Success` = `No`.
+- the fit JSON: one entry per residue with `success` true or false. Never read `t2` of an
+  entry whose `success` is false: it is the bare token `NaN` where no fit was made, and a
+  meaningless number where the fit found no decay.
+- the PDFs: every residue's data; a failed one carries "not fitted" and no curve.
+- the summary (`--format json`): `n_fitted`, `n_excluded` (the failed ones), `n_total`,
+  `n_window_marginal` (fitted residues whose longest delay is under twice their time
+  constant), and `fit_errors`, a list of `{residue, error}` for the fits that raised. A
+  non-empty `fit_errors` points at the input or the code, not at a peak without signal.
+
+The T1/T2 fits `modelfree` and the DynamiXs T1/T2 page run write the same three files by
+the same rules.
+
 `--time-units` labels the output (summary, fit JSON, plot axes); it does not rescale. Left
 out, it is taken from `series_metadata.json` beside the input, else `ms` — the unit the
 parser returns and `series` writes. On headers that state a unit, any value but `ms` is
@@ -424,6 +442,9 @@ Writes `<prefix>_T1_fit_results.txt`, `<prefix>_T1rho_fit_results.txt` and
 `<prefix>_r2_from_t1rho.csv` (`residue, R1, R1_err, R1rho, R1rho_err, theta, R2, R2_err,
 T2, T2_err`). Feed that table to `modelfree` with `--f{1,2}-r2-table` in place of
 `--f{1,2}-t2`; the two are alternatives and giving both is an error.
+Only residues whose T1 and T1ρ fits both succeeded are converted; the two results files
+and fit JSONs keep every residue, as `t1t2` writes them, and the summary's `fit_errors`
+holds the fits that raised, as `{"T1": [...], "T1rho": [...]}`.
 
 When a dataset has both a T2 and a T1ρ series, run both and compare R2. Agreement validates
 each independently; disagreement localises exchange, since R1ρ and R2 weight it differently.
